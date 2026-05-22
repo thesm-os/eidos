@@ -3,14 +3,14 @@ module go.thesmos.sh/eidos/cmd/eidos-reference
 go 1.26.2
 
 require (
-	go.thesmos.sh/eidos v1.2.0
-	go.thesmos.sh/eidos/backend/golang v1.2.0
-	go.thesmos.sh/eidos/bridge/protogo v1.2.0
-	go.thesmos.sh/eidos/cli v1.2.0
-	go.thesmos.sh/eidos/frontend/golang v1.2.0
-	go.thesmos.sh/eidos/frontend/protobuf v1.2.0
-	go.thesmos.sh/eidos/plugins v1.2.0
-	go.thesmos.sh/eidos/reference v1.2.0
+	go.thesmos.sh/eidos v1.3.0
+	go.thesmos.sh/eidos/backend/golang v1.3.0
+	go.thesmos.sh/eidos/bridge/protogo v1.3.0
+	go.thesmos.sh/eidos/cli v1.3.0
+	go.thesmos.sh/eidos/frontend/golang v1.3.0
+	go.thesmos.sh/eidos/frontend/protobuf v1.3.0
+	go.thesmos.sh/eidos/plugins v1.3.0
+	go.thesmos.sh/eidos/reference v1.3.0
 )
 
 require (
