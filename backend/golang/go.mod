@@ -3,8 +3,8 @@ module go.thesmos.sh/eidos/backend/golang
 go 1.26.2
 
 require (
-	go.thesmos.sh/eidos v1.2.0
-	go.thesmos.sh/eidos/eidostest v1.2.0
+	go.thesmos.sh/eidos v1.3.0
+	go.thesmos.sh/eidos/eidostest v1.3.0
 	golang.org/x/tools v0.45.0
 )
 
