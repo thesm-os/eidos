@@ -1,0 +1,96 @@
+// Copyright Thesmos B.V. 2026
+// SPDX-License-Identifier: MIT
+
+// Package mixins is the convenience aggregator for every
+// [shape.Mixin] shipped under
+// `plugins/annotator/shape/mixins/...`.
+//
+// Consumers that want the full built-in catalog import this
+// package and call [All]:
+//
+//	pipe.Use(shape.New().Mixins(mixins.All()...))
+//
+// Consumers wanting a curated subset import the per-mixin
+// sub-packages directly and pick what they need.
+package mixins
+
+import (
+	"slices"
+
+	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/atomic"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/bounded"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/cacheable"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/concurrent"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/concurrentreaders"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/crdtmerge"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/deleteremoves"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/deprecated"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/errors"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/eventually"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/hooks"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/idempotent"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/integrationonly"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/lifecycleafterclose"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonic"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/nilsafe"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/orderafter"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/partition"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/pure"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/readafterwrite"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/retrysucceeds"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sample"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scope"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sideeffect"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/streamreflectsmutations"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/timeout"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/validates"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/wrappedvia"
+)
+
+// All returns every [shape.Mixin] shipped in this repository,
+// alphabetised by [shape.Mixin.Name]. The returned slice is
+// freshly allocated on each call; callers may mutate it without
+// affecting future invocations.
+func All() []shape.Mixin {
+	out := []shape.Mixin{
+		atomic.Mixin(),
+		bounded.Mixin(),
+		cacheable.Mixin(),
+		concurrent.Mixin(),
+		concurrentreaders.Mixin(),
+		crdtmerge.Mixin(),
+		deleteremoves.Mixin(),
+		deprecated.Mixin(),
+		errors.Mixin(),
+		eventually.Mixin(),
+		hooks.Mixin(),
+		idempotent.Mixin(),
+		integrationonly.Mixin(),
+		lifecycleafterclose.Mixin(),
+		monotonic.Mixin(),
+		nilsafe.Mixin(),
+		orderafter.Mixin(),
+		partition.Mixin(),
+		pure.Mixin(),
+		readafterwrite.Mixin(),
+		retrysucceeds.Mixin(),
+		sample.Mixin(),
+		scope.Mixin(),
+		sideeffect.Mixin(),
+		streamreflectsmutations.Mixin(),
+		timeout.Mixin(),
+		validates.Mixin(),
+		wrappedvia.Mixin(),
+	}
+	slices.SortFunc(out, func(a, b shape.Mixin) int {
+		if a.Name < b.Name {
+			return -1
+		}
+		if a.Name > b.Name {
+			return 1
+		}
+		return 0
+	})
+	return out
+}
