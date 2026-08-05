@@ -80,6 +80,38 @@ func TestShapeClassification_StreamTypeNotKeyType(t *testing.T) {
 	t.Fatalf("fixture has no method Load")
 }
 
+// TestShapeClassification_ReceiptWriteIsAKnownGap records the case
+// no shape expresses: a write that returns a receipt.
+//
+// `writer` requires error as its only return, so this falls to
+// `reader`, which labels the written document a key and the receipt
+// a value — both types recorded, both under the wrong role. That is
+// wrong, and deliberately left wrong: inventing the shape belongs
+// with the catalog addition, not with the fix that exposed it.
+//
+// It is asserted rather than commented so the limitation cannot
+// drift silently. When the shape lands, this test is what says so.
+func TestShapeClassification_ReceiptWriteIsAKnownGap(t *testing.T) {
+	t.Parallel()
+
+	for _, m := range loadShapeFixture(t) {
+		if m.Name != "Insert" {
+			continue
+		}
+		if got := shape.Get(m.Meta()); got != "reader" {
+			t.Fatalf("Insert(ctx, Doc) (ID, error) now classifies as %q; if a receipt-write "+
+				"shape has landed, retire this test and assert the new stamp instead", got)
+		}
+		key, _ := shape.MetaKeyType.Get(m.Meta())
+		val, _ := shape.MetaValueType.Get(m.Meta())
+		if key != "example.com/streamsrc.Document" || val != "example.com/streamsrc.ID" {
+			t.Fatalf("known-gap stamp moved: key_type=%q value_type=%q", key, val)
+		}
+		return
+	}
+	t.Fatalf("fixture has no method Insert")
+}
+
 // classifyFixture returns the stamped shape per fixture method.
 func classifyFixture(t *testing.T) map[string]string {
 	t.Helper()

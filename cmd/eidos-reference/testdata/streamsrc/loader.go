@@ -23,3 +23,12 @@ type Loader interface {
 	Get(ctx context.Context, id string) (Document, error)
 	Put(ctx context.Context, d Document) error
 }
+
+// ID is a write receipt.
+type ID string
+
+// Registry exercises the receipt-returning write, which no shape
+// expresses.
+type Registry interface {
+	Insert(ctx context.Context, d Document) (ID, error)
+}

@@ -9,6 +9,11 @@
 bin/
 dist/
 
+# `go build ./...` inside a command directory writes the binary
+# beside its source. Ignored by path because the name carries no
+# extension to match on; it was committed twice before this.
+cmd/eidos-reference/eidos-reference
+
 # ----------------------------------------------------------------------
 # Test and coverage outputs
 # ----------------------------------------------------------------------
