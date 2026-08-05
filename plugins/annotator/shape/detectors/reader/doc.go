@@ -22,10 +22,16 @@
 //
 //	pipe.Use(shape.New().Detectors(reader.Detector()))
 //
-// Detector ordering matters when multiple shapes share a
-// signature ([shape.New] honours registration order); reader is
-// the canonical fallback for the "one key in, one value + error
-// out" pattern and typically registers after more specific
-// detectors (e.g. Deleter, Paginator) that would otherwise be
-// shadowed.
+// Reader is the canonical shape for the "one key in, one value +
+// error out" pattern. Dispatch is by [shape.Detector.Priority]
+// rather than registration order, and reader sits low in the
+// ladder (420) so that more specific shapes sharing its signature —
+// `lookup`, `readerwithbool`, `batchreader` — claim their cases
+// first.
+//
+// Ordering is not what keeps reader distinct from `writer`. The two
+// predicates are disjoint: writer takes `error` as its only return,
+// reader requires exactly one value alongside it. That was not
+// always so, and the overlap made reader unreachable; see
+// `detectors.TestAll_Reachability` for the guard that pins it.
 package reader

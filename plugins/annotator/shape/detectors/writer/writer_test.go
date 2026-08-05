@@ -31,7 +31,8 @@ func TestDetector_Identity(t *testing.T) {
 }
 
 // TestDetector_MatchesWriterSignatures covers every signature
-// variant the docstring promises detects as a writer.
+// variant the docstring promises detects as a writer: exactly one
+// non-context parameter and error as the only return.
 func TestDetector_MatchesWriterSignatures(t *testing.T) {
 	t.Parallel()
 
@@ -45,13 +46,6 @@ func TestDetector_MatchesWriterSignatures(t *testing.T) {
 	t.Run("error-only return without context", func(t *testing.T) {
 		t.Parallel()
 		fn := writerFunc("Save", false, false)
-		runDetectFunc(t, fn)
-		assertShape(t, fn.Meta(), writer.Name, "x.Article")
-	})
-
-	t.Run("with-result variant: (R, error) return", func(t *testing.T) {
-		t.Parallel()
-		fn := writerFunc("Save", true, true)
 		runDetectFunc(t, fn)
 		assertShape(t, fn.Meta(), writer.Name, "x.Article")
 	})
@@ -88,6 +82,19 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 				},
 				Returns: []*node.TypeRef{{Name: "Article", Package: "x"}},
 			},
+		},
+		{
+			// This variant used to detect as a writer, which made
+			// every signature `reader` recognises a strict subset of
+			// this detector's. Running first at the higher priority,
+			// writer claimed them all and reader never won a
+			// dispatch — while stamping the callable's parameter as
+			// the written value. A write returning a receipt is
+			// genuinely neither shape and wants a detector of its
+			// own; until then it falls through to reader, which at
+			// least records both types.
+			name: "a value alongside the error (receipt-returning write)",
+			fn:   writerFunc("Save", true, true),
 		},
 		{
 			name: "two non-ctx params (CompositeWriter territory)",
