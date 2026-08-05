@@ -11,11 +11,17 @@ import (
 )
 
 // Disk is a filesystem-backed [Cache] rooted at a configurable
-// directory. Entries are stored under "<root>/<key-prefix>/<key>"
-// with a deterministic ".eidos.tmp" suffix used during writes for
-// atomic temp+rename. The prefix split (first two hex characters of
-// the key) keeps the per-directory entry count manageable for keys
-// that share a common hash prefix.
+// directory. Entries are stored under "<root>/<bucket>/<name>",
+// where both segments derive from the hex SHA-256 of the key
+// ("<h[:2]>/<h>"), with a deterministic ".eidos.tmp" suffix used
+// during writes for atomic temp+rename. Bucketing on the digest
+// rather than on the key spreads entries across 256 directories
+// whatever shape the caller's keys take, and keeps every path
+// segment hex so the layout stays portable across filesystems.
+// See [Disk.keyPath] for why the key is not used verbatim.
+//
+// Keys are opaque to Disk: it imposes no structure on them and
+// reads none.
 //
 // Concurrent writers to the same key are serialised through a
 // per-instance mutex; entries are content-addressed so concurrent
@@ -101,12 +107,25 @@ func (d *Disk) Has(key string) bool {
 }
 
 // keyPath returns the filesystem path entries for key are stored
-// under. Keys of length >= 2 split into "<root>/<key[:2]>/<key>";
-// shorter keys go directly under root. Empty keys are rejected by
-// the caller before reaching this function.
+// under: "<root>/<h[:2]>/<h>", where h is the hex SHA-256 of the
+// key. The key itself never reaches the filesystem.
+//
+// Hashing rather than using the key verbatim is what makes the
+// layout correct for the keys [NewKey] actually produces. Those
+// begin with a literal "plugin" segment, so bucketing on the key's
+// own first two bytes put every entry in a single "pl" directory —
+// the split existed but sharded nothing. The digest distributes
+// across 256 buckets regardless of what the caller composed.
+//
+// It also keeps the path portable. Keys carry ":" separators and
+// run past 200 characters; ":" is not a legal filename character
+// on NTFS, and long keys push a project-rooted path toward
+// Windows' default MAX_PATH. Both path segments here are hex, and
+// the filename is a fixed 64 characters.
+//
+// The digest is a filesystem-layout detail, not a content hash:
+// callers never see it, and no cache semantics depend on it.
 func (d *Disk) keyPath(key string) string {
-	if len(key) >= 2 {
-		return filepath.Join(d.root, key[:2], key)
-	}
-	return filepath.Join(d.root, key)
+	h := HashBytes([]byte(key))
+	return filepath.Join(d.root, h[:2], h)
 }
