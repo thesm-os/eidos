@@ -51,6 +51,7 @@ type warrants it. Refs reach these keys via `typeRef.Meta()`.
 | `go.isError` | `bool` | The ref is the predeclared `error` interface. |
 | `go.isStringer` | `bool` | The underlying type implements `fmt.Stringer` (on either value or pointer form). |
 | `go.isComparable` | `bool` | The underlying type satisfies Go's `comparable` constraint. |
+| `go.isInterface` | `bool` | The underlying type is an interface, type parameters excluded. Lets a plugin tell a collaborator or stream from a plain value without resolving names, which it cannot do for types outside the loaded packages. |
 
 ### Struct-level
 

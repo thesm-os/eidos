@@ -87,6 +87,26 @@ var (
 		meta.BoolParser,
 	) //nolint:gochecknoglobals // typed registry-singleton key
 
+	// MetaIsInterface reports that the carrying ref's underlying
+	// type is an interface, type parameters excluded.
+	//
+	// The node IR deliberately keeps no Go-specific type-kind
+	// variants, so a named ref carries a package and an identifier
+	// and nothing about what they resolve to: `io.Reader` and
+	// `time.Duration` are indistinguishable to a plugin. Plugins
+	// that must tell a collaborator or a stream from a plain value
+	// read this key rather than resolving names themselves, which
+	// they cannot do for types outside the loaded packages.
+	//
+	// A type parameter is not reported, even though its constraint
+	// is an interface — `K comparable` is a key, not a
+	// collaborator, and treating it as one misroutes every generic
+	// signature.
+	MetaIsInterface = meta.NewKey(
+		"go.isInterface",
+		meta.BoolParser,
+	) //nolint:gochecknoglobals // typed registry-singleton key
+
 	// MetaEmbedsInterface reports that a [node.Struct] embeds at
 	// least one interface (Go's promotion-by-embedding case).
 	MetaEmbedsInterface = meta.NewKey(

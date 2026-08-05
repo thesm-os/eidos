@@ -58,6 +58,12 @@
                 "name": "go.isError",
                 "set_by": "golang",
                 "value": true
+              },
+              {
+                "authority": 0,
+                "name": "go.isInterface",
+                "set_by": "golang",
+                "value": true
               }
             ]
           },

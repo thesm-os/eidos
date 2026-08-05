@@ -34,6 +34,7 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/reader"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/readernoerror"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/readerwithbool"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/streamconsumer"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/streamreader"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/voidlifecycle"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/writer"
@@ -66,6 +67,7 @@ func All() []shape.Detector {
 		reader.Detector(),
 		readernoerror.Detector(),
 		readerwithbool.Detector(),
+		streamconsumer.Detector(),
 		streamreader.Detector(),
 		voidlifecycle.Detector(),
 		writer.Detector(),

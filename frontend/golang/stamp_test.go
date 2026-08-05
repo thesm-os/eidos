@@ -11,7 +11,7 @@ import (
 )
 
 // TestStampTypeRefMeta covers the type-ref-level facts the converter
-// records: context, error, stringer, and comparable.
+// records: context, error, stringer, comparable, and interface-ness.
 func TestStampTypeRefMeta(t *testing.T) {
 	t.Parallel()
 	t.Run("context.Context ref carries MetaIsContext", func(t *testing.T) {
@@ -48,6 +48,60 @@ func TestStampTypeRefMeta(t *testing.T) {
 		f := pkg.StructByName("S").FieldByName("N")
 		if got, _ := golang.MetaIsComparable.Get(f.Type.Meta()); !got {
 			t.Fatalf("expected MetaIsComparable=true on int field")
+		}
+	})
+
+	t.Run("named interface param carries MetaIsInterface", func(t *testing.T) {
+		t.Parallel()
+		// The motivating case: a plugin sees only a package and an
+		// identifier for io.Reader and cannot resolve it, least of
+		// all for a type outside the loaded packages.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\nimport \"io\"\n\ntype Loader interface { Load(r io.Reader) (int, error) }\n",
+		})
+		ref := pkg.InterfaceByName("Loader").Methods[0].Params[0].Type
+		if got, _ := golang.MetaIsInterface.Get(ref.Meta()); !got {
+			t.Fatalf("expected MetaIsInterface=true on io.Reader param")
+		}
+	})
+
+	t.Run("inline interface param carries MetaIsInterface", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Loader interface { Load(r interface{ Read(p []byte) (int, error) }) error }\n",
+		})
+		ref := pkg.InterfaceByName("Loader").Methods[0].Params[0].Type
+		if got, _ := golang.MetaIsInterface.Get(ref.Meta()); !got {
+			t.Fatalf("expected MetaIsInterface=true on inline interface param")
+		}
+	})
+
+	t.Run("non-interface param does not carry MetaIsInterface", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Store interface { Get(id string) (int, error) }\n",
+		})
+		ref := pkg.InterfaceByName("Store").Methods[0].Params[0].Type
+		if got, _ := golang.MetaIsInterface.Get(ref.Meta()); got {
+			t.Fatalf("expected no MetaIsInterface on a string param")
+		}
+	})
+
+	t.Run("type parameter does not carry MetaIsInterface", func(t *testing.T) {
+		t.Parallel()
+		// A type parameter reports its constraint as its underlying
+		// type, so `K comparable` underlies to an interface. Without
+		// the carve-out in isInterfaceType every generic key would
+		// advertise itself as a collaborator.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Cache[K comparable, V any] interface { Get(k K) (V, error) }\n",
+		})
+		ref := pkg.InterfaceByName("Cache").Methods[0].Params[0].Type
+		if !ref.IsTypeParam() {
+			t.Fatalf("fixture did not produce a type-param ref; got kind %v", ref.TypeKind)
+		}
+		if got, _ := golang.MetaIsInterface.Get(ref.Meta()); got {
+			t.Fatalf("expected no MetaIsInterface on type parameter K comparable")
 		}
 	})
 

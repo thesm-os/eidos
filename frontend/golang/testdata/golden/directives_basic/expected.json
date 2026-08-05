@@ -399,6 +399,18 @@
                       },
                       "set_by": "golang",
                       "value": true
+                    },
+                    {
+                      "authority": 0,
+                      "name": "go.isInterface",
+                      "pos": {
+                        "column": 6,
+                        "file": "source.go",
+                        "line": 45,
+                        "offset": 1436
+                      },
+                      "set_by": "golang",
+                      "value": true
                     }
                   ]
                 },
@@ -474,6 +486,12 @@
                   {
                     "authority": 0,
                     "name": "go.isError",
+                    "set_by": "golang",
+                    "value": true
+                  },
+                  {
+                    "authority": 0,
+                    "name": "go.isInterface",
                     "set_by": "golang",
                     "value": true
                   }

@@ -60,6 +60,12 @@
                     "name": "go.isError",
                     "set_by": "golang",
                     "value": true
+                  },
+                  {
+                    "authority": 0,
+                    "name": "go.isInterface",
+                    "set_by": "golang",
+                    "value": true
                   }
                 ]
               },
@@ -103,6 +109,18 @@
                 {
                   "authority": 0,
                   "name": "go.isComparable",
+                  "pos": {
+                    "column": 6,
+                    "file": "source.go",
+                    "line": 9,
+                    "offset": 272
+                  },
+                  "set_by": "golang",
+                  "value": true
+                },
+                {
+                  "authority": 0,
+                  "name": "go.isInterface",
                   "pos": {
                     "column": 6,
                     "file": "source.go",
@@ -215,6 +233,12 @@
                   {
                     "authority": 0,
                     "name": "go.isError",
+                    "set_by": "golang",
+                    "value": true
+                  },
+                  {
+                    "authority": 0,
+                    "name": "go.isInterface",
                     "set_by": "golang",
                     "value": true
                   }

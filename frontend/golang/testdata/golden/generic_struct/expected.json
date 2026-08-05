@@ -165,6 +165,18 @@
                     },
                     {
                       "authority": 0,
+                      "name": "go.isInterface",
+                      "pos": {
+                        "column": 6,
+                        "file": "source.go",
+                        "line": 9,
+                        "offset": 234
+                      },
+                      "set_by": "golang",
+                      "value": true
+                    },
+                    {
+                      "authority": 0,
                       "name": "go.isStringer",
                       "pos": {
                         "column": 6,

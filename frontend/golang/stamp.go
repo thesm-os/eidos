@@ -57,6 +57,26 @@ func (c *converter) stampTypeRefMeta(ref *node.TypeRef, t types.Type) {
 	if types.Comparable(t) {
 		MetaIsComparable.SetAt(bag, true, meta.AuthorityPlugin, FrontendName, pos)
 	}
+	if isInterfaceType(t) {
+		MetaIsInterface.SetAt(bag, true, meta.AuthorityPlugin, FrontendName, pos)
+	}
+}
+
+// isInterfaceType reports whether t's underlying type is an
+// interface, excluding type parameters.
+//
+// The exclusion is load-bearing rather than defensive. A type
+// parameter reports its *constraint* as its underlying type, so
+// `K comparable` and `K any` both underlie to an interface. Without
+// the carve-out every generic callable would advertise its key as
+// an interface, and consumers keying on [MetaIsInterface] to spot a
+// collaborator would misroute the entire generic surface.
+func isInterfaceType(t types.Type) bool {
+	if _, isParam := t.(*types.TypeParam); isParam {
+		return false
+	}
+	_, isInterface := t.Underlying().(*types.Interface)
+	return isInterface
 }
 
 // declPosOf returns the source position where t was declared. Used
