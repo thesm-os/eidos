@@ -103,17 +103,6 @@ checks:
       reason: |
         Sample Go types loaded as fixture input by tests in
         downstream modules. No logic to test; 0% is correct.
-    - path: "bridge/protogo/**"
-      reason: |
-        Bridge annotator's exhaustive coverage lives in a
-        downstream conformance suite that has not yet been
-        rebuilt against eidostest/plugintest. Excluded until
-        that suite lands.
-    - path: "reference/**"
-      reason: |
-        Reference plugin coverage lives in conformance suites
-        that have not yet been rebuilt against
-        eidostest/plugintest. Excluded until those land.
     - path: "sdk/**"
       reason: |
         Plugin-author façade. The package is re-export
@@ -251,6 +240,27 @@ checks:
       # every plugin emitting Go. Small surface, well covered.
       - path: "./lang/..."
         line: 70
+
+      # bridge/protogo and reference/ were both excluded outright
+      # until their conformance suites were "rebuilt against
+      # eidostest/plugintest". The suites had in fact landed; the
+      # exclusions outlived their reason and hid the real numbers
+      # (bridge 64.2%, reference 56.1%) along with a live bug —
+      # protogo declared Priority and Provides but not Requires, so
+      # it missed plugin.CapabilityProvider entirely and the
+      # pipeline ignored both.
+      #
+      # Floors are pinned just under measured. A residual sits in
+      # the per-plugin option accessors (pkg / funcName / format /
+      # registerPackage / registerFunc): each falls back to a
+      # Default* constant that opt.Bind has already applied from
+      # the struct tag, so the fallback return is unreachable
+      # through New(). It is left in place as a guard for a
+      # hand-constructed zero value rather than deleted.
+      - path: "./bridge/..."
+        line: 85
+      - path: "./reference/..."
+        line: 90
 
       # plugins/ — the production plugin module. Previously
       # ungated entirely: no floor, no exclusion, and therefore no

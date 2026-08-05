@@ -4,8 +4,10 @@
 package plugintest
 
 import (
+	"maps"
 	"slices"
 	"testing"
+	"text/template"
 
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/plugin"
@@ -61,6 +63,84 @@ func RunSuite(t *testing.T, p plugin.Plugin) {
 	t.Run("FilenameProvider returns a well-formed Outputs slice", func(t *testing.T) {
 		assertOutputsShape(t, p)
 	})
+	t.Run("TemplateProvider returns stable, well-formed template contributions", func(t *testing.T) {
+		assertTemplateProviderStability(t, p)
+	})
+}
+
+// probeLanguages are the language identifiers the framework suite
+// drives capability lookups with. "golang" is the only backend
+// language in tree; the second entry is deliberately a language no
+// backend claims, so a plugin's negative path ("I contribute
+// nothing here") is exercised rather than assumed.
+var probeLanguages = []string{"golang", "no-such-language"}
+
+// assertTemplateProviderStability pins the [plugin.TemplateProvider]
+// contract the backend relies on when it merges plugin templates
+// into its own funcmap.
+//
+// Two properties matter at merge time. Repeated lookups must agree,
+// because the backend queries a plugin once per render pass and a
+// shifting answer would make output depend on render order. And a
+// name must not appear in both TemplateFuncs and TemplateOverrides
+// for one language: the backend treats the first as "must not
+// collide" and the second as "intentionally replaces", so a name in
+// both is a contradiction it cannot resolve deterministically.
+//
+// Plugins that do not implement the interface return early; this is
+// an optional capability.
+func assertTemplateProviderStability(tb testing.TB, p plugin.Plugin) {
+	tb.Helper()
+	provider, ok := any(p).(plugin.TemplateProvider)
+	if !ok {
+		return
+	}
+	for _, lang := range probeLanguages {
+		firstFS, firstOK := provider.Templates(lang)
+		secondFS, secondOK := provider.Templates(lang)
+		if firstOK != secondOK {
+			tb.Errorf("TemplateProvider.Templates(%q) not stable: first ok=%v second ok=%v", lang, firstOK, secondOK)
+		}
+		if firstOK && firstFS == nil {
+			tb.Errorf("TemplateProvider.Templates(%q) reported ok but returned a nil fs.FS", lang)
+		}
+		if !firstOK && secondFS != nil && firstFS != nil {
+			tb.Errorf("TemplateProvider.Templates(%q) returned a filesystem while reporting ok=false", lang)
+		}
+
+		funcs := assertStableFuncMap(tb, lang, "TemplateFuncs", provider.TemplateFuncs)
+		overrides := assertStableFuncMap(tb, lang, "TemplateOverrides", provider.TemplateOverrides)
+		for name := range overrides {
+			if _, dup := funcs[name]; dup {
+				tb.Errorf("TemplateProvider declares %q in both TemplateFuncs and TemplateOverrides for %q; "+
+					"a name is either a new registration or an intentional override, not both", name, lang)
+			}
+		}
+	}
+}
+
+// assertStableFuncMap checks that two consecutive lookups agree on
+// the registered names and that no name is empty, returning the
+// first result so callers can cross-check it against another map.
+// Only key sets are compared: func values are not comparable in Go,
+// and the backend keys its merge on name alone.
+func assertStableFuncMap(
+	tb testing.TB, lang, label string, lookup func(string) template.FuncMap,
+) template.FuncMap {
+	tb.Helper()
+	first, second := lookup(lang), lookup(lang)
+
+	firstNames := slices.Sorted(maps.Keys(first))
+	secondNames := slices.Sorted(maps.Keys(second))
+	if !slices.Equal(firstNames, secondNames) {
+		tb.Errorf("TemplateProvider.%s(%q) not stable: first=%v second=%v", label, lang, firstNames, secondNames)
+	}
+	for _, name := range firstNames {
+		if name == "" {
+			tb.Errorf("TemplateProvider.%s(%q) registers the empty name; funcmap keys must be non-empty", label, lang)
+		}
+	}
+	return first
 }
 
 // assertStableName pins Name's empty-string and stability
@@ -115,6 +195,16 @@ func assertCapabilityProviderStability(tb testing.TB, p plugin.Plugin) {
 	if !ok {
 		return
 	}
+	// Priority participates in bucket ordering on every pipeline
+	// build, so an unstable value reorders plugins between runs and
+	// breaks the determinism guarantee. The value itself is not
+	// constrained — [priority.Priority] is a plain int and custom
+	// buckets are explicitly supported — so stability is the whole
+	// contract here.
+	if firstPri, secondPri := provider.Priority(), provider.Priority(); firstPri != secondPri {
+		tb.Errorf("CapabilityProvider.Priority not stable: first=%d second=%d", firstPri, secondPri)
+	}
+
 	first := provider.Provides()
 	second := provider.Provides()
 	if !slices.Equal(first, second) {

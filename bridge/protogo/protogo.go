@@ -53,6 +53,18 @@ func (*Plugin) Priority() sdk.Priority { return sdk.AnnotatorRefinement }
 // Provides returns the bridge's capability label.
 func (*Plugin) Provides() []string { return []string{Capability} }
 
+// Requires returns nil: the bridge reads only frontend-produced
+// meta and depends on no other plugin's contribution.
+//
+// The method exists because [plugin.CapabilityProvider] is
+// satisfied as a whole or not at all. Without it the type missed
+// the interface, and the pipeline silently fell back to
+// [sdk.DefaultPriority] and registered no capability label — so
+// neither the bucket documented on [Plugin.Priority] nor the
+// [Capability] label other plugins declare a dependency on took
+// effect.
+func (*Plugin) Requires() []string { return nil }
+
 // Directives declares an empty schema. The bridge has no
 // user-facing directive; it operates by reading and stamping
 // meta on proto-derived nodes filtered by the cross-frontend
