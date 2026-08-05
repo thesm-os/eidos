@@ -114,6 +114,19 @@ checks:
         Reference plugin coverage lives in conformance suites
         that have not yet been rebuilt against
         eidostest/plugintest. Excluded until those land.
+    - path: "sdk/**"
+      reason: |
+        Plugin-author façade. The package is re-export
+        declarations (type aliases, var bindings) over plugin /
+        priority / core — 684 lines carrying a single executable
+        statement. Coverage is not a meaningful signal here; the
+        re-exported symbols are covered in their owning packages.
+    - path: "cmd/eidos-reference/**"
+      reason: |
+        Demonstration binary: main() plus plugin-slice wiring, no
+        branching logic of its own. Its behaviour is covered
+        black-box by eidostest/acceptancetest, which drives the
+        built binary end to end.
     - path: "**/*.gen.go"
       reason: generated code; the generator's own tests cover it.
     - path: "**/*.gen_test.go"
@@ -153,6 +166,15 @@ checks:
   # surface immediately.
   coverage:
     packages:
+      # Catch-all backstop. Anything not matched by a longer prefix
+      # below lands here, so a newly added package or module is
+      # gated from its first commit rather than silently ungated.
+      # Deliberately low: it is a floor for code nobody has chosen
+      # a floor for yet, not a target. Give real surfaces their own
+      # entry.
+      - path: "./..."
+        line: 60
+
       # Framework primitives — at or near 100% today; a 95% floor
       # leaves room for one or two unreachable error paths without
       # masking real regressions.
@@ -223,6 +245,40 @@ checks:
       # cmd/eidos/main_test.go (now moved out). Tighten as the
       # internal-API unit tests grow.
       - path: "./cli/..."
+        line: 60
+
+      # lang/golang holds the Go-language conventions shared by
+      # every plugin emitting Go. Small surface, well covered.
+      - path: "./lang/..."
+        line: 70
+
+      # plugins/ — the production plugin module. Previously
+      # ungated entirely: no floor, no exclusion, and therefore no
+      # verdict, despite carrying 162 source files across 77
+      # packages.
+      #
+      # Note when re-measuring: a module-local `go test ./...`
+      # inside plugins/ substantially UNDER-reports these numbers,
+      # because much of the shape surface is exercised by
+      # conformance suites living in eidostest/ and reference/.
+      # Trust `ergon check coverage`, which aggregates across the
+      # workspace, over a per-module run.
+      #
+      # Measured via the gate at the time of writing: contracts
+      # 83.5%, detectors 92.1%, mixins 84.1%, generator 64.5%,
+      # module aggregate 92.8%.
+      - path: "./plugins/..."
+        line: 90
+      - path: "./plugins/annotator/shape/contracts/..."
+        line: 80
+      - path: "./plugins/annotator/shape/detectors/..."
+        line: 90
+      - path: "./plugins/annotator/shape/mixins/..."
+        line: 80
+      # generator/ is the weakest subtree — enum's multi-file
+      # output paths carry the untested remainder. Raise as those
+      # fill in.
+      - path: "./plugins/generator/..."
         line: 60
     top_n: 10
 
