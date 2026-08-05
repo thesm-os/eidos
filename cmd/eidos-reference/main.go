@@ -52,6 +52,7 @@ import (
 	"go.thesmos.sh/eidos/reference/registrygen"
 	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/reference/shapewriter"
+	"go.thesmos.sh/eidos/reference/stubgen"
 )
 
 // brand is the hardcoded identifier this binary advertises to
@@ -166,6 +167,7 @@ func defaultPlugins() []plugin.Plugin {
 		// Generators (composition bucket) — depend on
 		// foundation output.
 		mockgen.New(),
+		stubgen.New(),
 
 		// Generators (cross-cutting bucket) — contribute into
 		// existing emit decls' slots, or scan post-generation

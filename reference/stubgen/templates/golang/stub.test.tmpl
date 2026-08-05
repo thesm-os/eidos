@@ -1,0 +1,37 @@
+{{- define "stubgen.tests" -}}
+// Compile-time proof that {{ .TypeName }} satisfies the interface it
+// doubles. A drifted signature fails here rather than at the first
+// test that assigns the stub.
+var _ {{ renderExpr .IfaceRef }} = (*{{ renderExpr .StubRef }})(nil)
+{{ range .Methods }}
+// Test{{ $.TypeName }}Records{{ .Name }} pins that {{ .Name }} appends
+// exactly one record per call.
+func Test{{ $.TypeName }}Records{{ .Name }}(t *{{ renderExpr (external "testing" "T") }}) {
+	t.Parallel()
+
+	var called int
+	s := &{{ renderExpr $.StubRef }}{
+		{{ .FuncField }}: func({{ template "stubgen.paramdecls" . }}) {{ template "stubgen.results" . }} {
+			called++
+{{- if .Returns }}
+{{- range $i, $r := .Returns }}
+			var z{{ $i }} {{ renderType $r.Type }}
+{{- end }}
+			return {{ range $i, $r := .Returns }}{{ if $i }}, {{ end }}z{{ $i }}{{ end }}
+{{- end }}
+		},
+	}
+{{ range $i, $p := .Params }}
+	var a{{ $i }} {{ renderType $p.Type }}
+{{- end }}
+	{{ range $i, $r := .Returns }}{{ if $i }}, {{ end }}_{{ end }}{{ if .Returns }} = {{ end }}s.{{ .Name }}({{ range $i, $p := .Params }}{{ if $i }}, {{ end }}a{{ $i }}{{ end }})
+
+	if called != 1 {
+		t.Fatalf("{{ .FuncField }} called %d times, want 1", called)
+	}
+	if got := len(s.{{ .CallsField }}); got != 1 {
+		t.Fatalf("{{ .CallsField }} has %d records, want 1", got)
+	}
+}
+{{ end }}
+{{- end -}}

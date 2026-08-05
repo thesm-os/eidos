@@ -1,0 +1,78 @@
+{{- define "stubgen.stub" -}}
+{{- $stub := .TypeName -}}
+{{- range .Methods }}
+// {{ .CallType }} records one invocation of {{ $.IfaceName }}.{{ .Name }}.
+type {{ .CallType }} struct {
+{{- range .Params }}
+	{{ .Field }} {{ renderType .Type }}
+{{- end }}
+{{- range .Returns }}
+	{{ .Field }} {{ renderType .Type }}
+{{- end }}
+}
+{{ end }}
+// {{ $stub }} is a recording test double for {{ .IfaceName }}.
+//
+// Assign the Func field for each method under test. A method whose
+// field is nil panics rather than inventing a return value. Every
+// call appends to the matching Calls slice before returning.
+type {{ $stub }} struct {
+{{- range .Methods }}
+	{{ .FuncField }} func({{ template "stubgen.paramtypes" . }}) {{ template "stubgen.results" . }}
+{{- end }}
+{{ range .Methods }}
+	{{ .CallsField }} []{{ .CallType }}
+{{- end }}
+}
+{{ range .Methods }}
+// {{ .Name }} records the call and delegates to {{ .FuncField }}.
+func (s *{{ $stub }}) {{ .Name }}({{ template "stubgen.paramdecls" . }}) {{ template "stubgen.namedresults" . }} {
+{{- if .Returns }}
+	{{ template "stubgen.locals" . }} {{ if .NamedReturns }}={{ else }}:={{ end }} s.{{ .FuncField }}({{ template "stubgen.args" . }})
+{{- else }}
+	s.{{ .FuncField }}({{ template "stubgen.args" . }})
+{{- end }}
+	s.{{ .CallsField }} = append(s.{{ .CallsField }}, {{ .CallType }}{
+{{- range .Params }}
+		{{ .Field }}: {{ .Name }},
+{{- end }}
+{{- range .Returns }}
+		{{ .Field }}: {{ .Local }},
+{{- end }}
+	})
+{{- if .Returns }}
+	return {{ template "stubgen.locals" . }}
+{{- end }}
+}
+{{ end }}
+{{- end -}}
+
+{{- define "stubgen.paramtypes" -}}
+{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ renderType $p.Type }}{{ end }}
+{{- end -}}
+
+{{- define "stubgen.paramdecls" -}}
+{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ $p.Name }} {{ renderType $p.Type }}{{ end }}
+{{- end -}}
+
+{{- define "stubgen.args" -}}
+{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ $p.Name }}{{ end }}
+{{- end -}}
+
+{{- define "stubgen.locals" -}}
+{{ range $i, $r := .Returns }}{{ if $i }}, {{ end }}{{ $r.Local }}{{ end }}
+{{- end -}}
+
+{{- define "stubgen.results" -}}
+{{- if eq (len .Returns) 0 }}
+{{- else if eq (len .Returns) 1 }}{{ renderType (index .Returns 0).Type }}
+{{- else }}({{ range $i, $r := .Returns }}{{ if $i }}, {{ end }}{{ renderType $r.Type }}{{ end }})
+{{- end -}}
+{{- end -}}
+
+{{- define "stubgen.namedresults" -}}
+{{- if eq (len .Returns) 0 }}
+{{- else if not .NamedReturns }}{{ template "stubgen.results" . }}
+{{- else }}({{ range $i, $r := .Returns }}{{ if $i }}, {{ end }}{{ $r.Name }} {{ renderType $r.Type }}{{ end }})
+{{- end -}}
+{{- end -}}

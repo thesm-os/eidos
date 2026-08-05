@@ -74,6 +74,140 @@ func RunGeneratorSuite(t *testing.T, g plugin.Generator, fixtures []GeneratorFix
 			s2 := buildGeneratorStore(t, fx)
 			assertGenerateIsDeterministic(t, g, s1, s2)
 		})
+		t.Run("fixture="+fx.Name+"/emitted output tags are declared", func(t *testing.T) {
+			s := buildGeneratorStore(t, fx)
+			assertEmittedTagsAreDeclared(t, g, s)
+		})
+		t.Run("fixture="+fx.Name+"/output-package dispatch tolerates partial routing", func(t *testing.T) {
+			s := buildGeneratorStore(t, fx)
+			assertOutputPackagesTolerateMissingTags(t, g, s)
+		})
+	}
+}
+
+// assertOutputPackagesTolerateMissingTags exercises the awkward half
+// of the [emit.OutputPackageSetter] contract: the map a value
+// receives carries only the tags that actually routed, so a plugin
+// declaring three outputs may be handed one, or one it did not
+// expect, or none of them.
+//
+// That is not a hypothetical. A run where one output fails to route
+// — a missing suffix for the active language, a directive naming an
+// unknown tag, a one-file-one-package conflict — reaches dispatch
+// with a partial map. An implementor that indexes the map and uses
+// the result without checking produces a reference to the empty
+// package, which renders as a bare name and binds to whatever else
+// is in scope. That failure is silent in the emit graph and only
+// surfaces as a miscompile in the generated output, which is why it
+// belongs in the conformance suite rather than in each plugin's own
+// tests.
+//
+// The check probes each implementing value with an empty map, a map
+// of tags the plugin never declared, and a map holding only the
+// primary tag with no derivable path — the three shapes a partly
+// failed run produces. Only panics fail the check; what an
+// implementor does with a missing tag is its own decision, but doing
+// it without crashing is not.
+func assertOutputPackagesTolerateMissingTags(tb testing.TB, g plugin.Generator, s *store.Store) {
+	tb.Helper()
+
+	if err := runGenerateRecovering(g, s); err != nil {
+		tb.Fatalf("Generate panicked: %v", err)
+	}
+
+	probes := []struct {
+		name  string
+		byTag map[string]string
+	}{
+		{"no tag routed", map[string]string{}},
+		{"only foreign tags routed", map[string]string{"nonesuch": "example.com/x"}},
+		{"primary routed without a derivable path", map[string]string{"": ""}},
+	}
+
+	for _, pending := range s.Emit().PendingOriginSlots() {
+		setter, ok := pending.Item.(emit.OutputPackageSetter)
+		if !ok {
+			continue
+		}
+		for _, probe := range probes {
+			if err := callSetOutputPackagesRecovering(setter, probe.byTag); err != nil {
+				tb.Errorf("generator %q: SetOutputPackages panicked on a %s contribution "+
+					"when %s: %v; the map carries only tags that routed, so an "+
+					"implementor must not assume its own are present",
+					g.Name(), pending.Item.Kind(), probe.name, err)
+			}
+		}
+	}
+}
+
+// callSetOutputPackagesRecovering invokes SetOutputPackages and
+// converts a panic into an error, so one misbehaving implementor
+// reports as a failure rather than taking down the whole suite run.
+func callSetOutputPackagesRecovering(setter emit.OutputPackageSetter, byTag map[string]string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	setter.SetOutputPackages(byTag)
+	return nil
+}
+
+// assertEmittedTagsAreDeclared pins that every OutputTag a generator
+// stamps on an emit value corresponds to an [plugin.Output] the same
+// generator declares.
+//
+// The two halves of multi-output generation are wired by a bare
+// string and nothing checked they agree. A value carrying a tag the
+// plugin never declared does not fail loudly: the Layout phase finds
+// no matching Output, and the decl routes somewhere other than the
+// file the tag names. That is the same shape as a detector that is
+// registered but never reachable — a declaration that looks
+// load-bearing and is inert.
+//
+// Per-plugin tests cannot catch it, because they assert on the emit
+// graph without running routing. This check needs only the
+// generator, so it belongs with the other contract assertions.
+func assertEmittedTagsAreDeclared(tb testing.TB, g plugin.Generator, s *store.Store) {
+	tb.Helper()
+
+	provider, isProvider := any(g).(plugin.FilenameProvider)
+	if !isProvider {
+		// A generator owning no routable decl declares no outputs;
+		// pure slot weavers are the documented case.
+		return
+	}
+	if err := runGenerateRecovering(g, s); err != nil {
+		tb.Fatalf("Generate panicked: %v", err)
+	}
+
+	// The active language is not observable from the generator alone,
+	// so the declared set is the union across the probe languages. An
+	// empty union means the plugin declares nothing routable and the
+	// check has nothing to say.
+	declared := map[string]struct{}{"": {}}
+	var declaresAny bool
+	for _, lang := range probeLanguages {
+		for _, o := range provider.Outputs(lang) {
+			declared[o.Tag] = struct{}{}
+			declaresAny = true
+		}
+	}
+	if !declaresAny {
+		return
+	}
+
+	for _, pending := range s.Emit().PendingOriginSlots() {
+		tagged, ok := pending.Item.(interface{ OutputTag() string })
+		if !ok {
+			continue
+		}
+		tag := tagged.OutputTag()
+		if _, ok := declared[tag]; !ok {
+			tb.Errorf("generator %q stamped OutputTag %q on a %s contribution but declares no "+
+				"Output with that tag; the decl cannot route to the file the tag names",
+				g.Name(), tag, pending.Item.Kind())
+		}
 	}
 }
 
