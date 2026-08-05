@@ -44,10 +44,19 @@ func (c *converter) convertConstSpec(vs *ast.ValueSpec, owner *ast.GenDecl) {
 			// block don't collide on qualified-name registration.
 			continue
 		}
-		// go/types always records *types.Const for a const-decl name,
-		// even when the value or type annotation fails to resolve;
-		// the assertion is total.
-		obj := c.pkg.TypesInfo.Defs[name].(*types.Const) //nolint:forcetypeassert // go/types invariant
+		// go/types records a *types.Const for a const-decl name even
+		// when the value or type annotation fails to resolve — but
+		// records nil for the losing side of a redeclaration, so the
+		// lookup is only total for a package that type-checks. A
+		// frontend meets whatever the author last saved, so it must
+		// not be. The redeclaration is already reported as a
+		// diagnostic by the loader; skipping the name keeps the rest
+		// of the block convertible instead of aborting the walk on a
+		// nil-interface conversion.
+		obj, ok := c.pkg.TypesInfo.Defs[name].(*types.Const)
+		if !ok {
+			continue
+		}
 		cst := &node.Constant{
 			BaseNode: node.BaseNode{
 				SourcePos:     posOf(c.fset, name.Pos()),

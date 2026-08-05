@@ -211,3 +211,34 @@ func TestConvertMethod(t *testing.T) {
 		}
 	})
 }
+
+// TestConvertFuncDecl_RedeclaredNameDoesNotPanic pins that a func
+// the type-checker rejects degrades to a diagnostic rather than
+// taking the converter down. See
+// [TestConvertConstSpec_RedeclaredNameDoesNotPanic] for the shared
+// mechanism — go/types leaves a nil Defs entry on the losing side of
+// a redeclaration, which an unconditional type assertion converts
+// into a panic mid-walk.
+func TestConvertFuncDecl_RedeclaredNameDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	// The func sits in the later-sorting file so it is the losing
+	// declaration.
+	cases := map[string]map[string]string{
+		"func losing to a func": {
+			"a.go": "package p\n\nfunc Dup() {}\n",
+			"b.go": "package p\n\nfunc Dup() {}\n",
+		},
+		"func losing to a type": {
+			"a.go": "package p\n\ntype Dup struct{}\n",
+			"b.go": "package p\n\nfunc Dup() {}\n",
+		},
+	}
+
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assertRedeclarationReported(t, src)
+		})
+	}
+}

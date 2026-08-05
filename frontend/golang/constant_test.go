@@ -135,3 +135,46 @@ func TestConvertConstant(t *testing.T) {
 		}
 	})
 }
+
+// TestConvertConstSpec_RedeclaredNameDoesNotPanic pins that a const
+// the type-checker rejects degrades to a diagnostic rather than
+// taking the converter down.
+//
+// go/types records a nil Defs entry for the losing side of a
+// redeclaration. The conversion asserted that entry's concrete type
+// unconditionally, on the documented-but-wrong premise that go/types
+// "always" records a *types.Const — true for a package that
+// type-checks, false the moment one does not. A frontend is the one
+// component guaranteed to meet broken input: it runs against
+// whatever the author last saved, so reporting and continuing is the
+// contract.
+func TestConvertConstSpec_RedeclaredNameDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	// Each case puts the const in the later-sorting file so it is
+	// the losing declaration; reversing the files would exercise the
+	// winning side and pass regardless.
+	cases := map[string]map[string]string{
+		"const losing to a type": {
+			"a.go": "package p\n\ntype Draft struct{}\n",
+			"b.go": "package p\n\nconst Draft = 1\n",
+		},
+		"const losing to a const": {
+			"a.go": "package p\n\nconst Dup = 1\n",
+			"b.go": "package p\n\nconst Dup = 2\n",
+		},
+		// The shape found in the wild: an iota block whose member
+		// collides with a type declared elsewhere in the package.
+		"const losing inside an iota block": {
+			"a.go": "package p\n\ntype Status int\n\ntype Draft struct{}\n",
+			"b.go": "package p\n\nconst (\n\tActive Status = iota\n\tDraft\n)\n",
+		},
+	}
+
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assertRedeclarationReported(t, src)
+		})
+	}
+}

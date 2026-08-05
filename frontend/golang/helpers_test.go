@@ -182,3 +182,38 @@ func loadDirWithOptions(t *testing.T, dir string, c cache.Cache, values map[stri
 	}
 	return s, d
 }
+
+// assertNoPanicDiagnostic fails when any diagnostic in d carries the
+// recovered-panic marker the pipeline's plugin guard stamps.
+//
+// The pipeline recovers a panicking plugin into a diagnostic, so a
+// test that merely reached its end proves nothing — the panic was
+// swallowed on the way. Asserting on the diagnostics is the only way
+// to tell "reported the problem" from "fell over while reporting
+// it".
+func assertNoPanicDiagnostic(t *testing.T, d *diag.Sink) {
+	t.Helper()
+	for _, got := range d.Diagnostics() {
+		if strings.Contains(got.Message, "panicked") {
+			t.Fatalf("frontend panicked instead of reporting: %s", got.Message)
+		}
+	}
+}
+
+// assertRedeclarationReported drives the frontend over src — which
+// must contain a duplicate declaration — and asserts the frontend
+// reports it rather than panicking.
+//
+// go/types records a nil Defs entry for the *losing* side of a
+// redeclaration, and go/types keeps the declaration it sees first.
+// Callers therefore put the kind under test in the later-sorting
+// file, or the case silently exercises the winning side and proves
+// nothing.
+func assertRedeclarationReported(t *testing.T, src map[string]string) {
+	t.Helper()
+	_, d := loadFromSource(t, src)
+	if !d.HasErrors() {
+		t.Fatalf("a redeclaration must be reported; got no errors")
+	}
+	assertNoPanicDiagnostic(t, d)
+}

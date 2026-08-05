@@ -20,11 +20,21 @@ import (
 // declared.
 func (c *converter) convertFuncDecl(fd *ast.FuncDecl) {
 	docs, dirs := c.docsAndDirectives(fd.Doc, nil)
-	// go/types records a *types.Func for every func-decl name; the
-	// assertion is total. The signature assertion that follows is
-	// also total — every *types.Func.Type() is *types.Signature.
-	obj := c.pkg.TypesInfo.Defs[fd.Name].(*types.Func) //nolint:forcetypeassert // go/types invariant
-	sig := obj.Type().(*types.Signature)               //nolint:forcetypeassert // go/types invariant
+	// go/types records a *types.Func for every func-decl name it
+	// accepts — but records nil for the losing side of a
+	// redeclaration, so the lookup is only total for a package that
+	// type-checks. A frontend meets whatever the author last saved,
+	// so it must not be. The redeclaration is already reported as a
+	// diagnostic by the loader; skipping the decl keeps the rest of
+	// the package convertible instead of aborting the walk on a
+	// nil-interface conversion.
+	obj, ok := c.pkg.TypesInfo.Defs[fd.Name].(*types.Func)
+	if !ok {
+		return
+	}
+	// Every *types.Func.Type() is a *types.Signature; that assertion
+	// really is total once obj itself is non-nil.
+	sig := obj.Type().(*types.Signature) //nolint:forcetypeassert // go/types invariant
 
 	if fd.Recv == nil {
 		c.appendFunction(fd, obj, sig, docs, dirs)
