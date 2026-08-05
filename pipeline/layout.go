@@ -494,7 +494,7 @@ func composeTarget(
 	// Target.Package + Target.ImportPath through the directive
 	// precedence layer; the value-with-directory form stacks a
 	// relative path onto Target.Dir.
-	if spec, ok := selectOutDirective(outDirectivesFor(p, origin), pluginName, outputTag); ok {
+	if spec, ok := selectOutDirective(outDirectivesFor(p, origin), pluginName, outputTag, ps, origin); ok {
 		dir, filename := splitOutDirectivePath(spec.Path)
 		// Unscoped filename-pinning overrides against a multi-output
 		// plugin would force every output to share one filename —
@@ -1108,16 +1108,24 @@ func outDirectivesFor(p *Pipeline, n node.Node) []outDirectiveSpec {
 		}
 		// Per-directive routing keys: honoured when the directive
 		// is owned by a registered plugin and carries at least one
-		// routing key. `out=` and `pkg=` are recorded UNSCOPED —
-		// applying to every plugin emitting against this origin —
-		// so a companion plugin (e.g. mocktest discovering mock
-		// structs via meta) inherits the same routing without
-		// restating it. `tag=` is implicitly plugin-scoped to the
-		// directive's owner: tag values are plugin-scoped, so
-		// propagating one would route a sibling plugin to a tag
-		// it doesn't declare. Users who need strict per-plugin
-		// scope on `out=` / `pkg=` use the standalone
-		// `+gen:out plugin=<name>` form.
+		// routing key. Every key is scoped to the directive's owner
+		// — `//+gen:stub out=testkit/` routes stubgen's output and
+		// nothing else.
+		//
+		// Scoping is what lets two generators on one node travel to
+		// different places, which is the ordinary case the moment a
+		// type carries more than one directive:
+		//
+		//	//+gen:mock out=mocks/ pkg=demomocks
+		//	//+gen:stub out=testkit/ pkg=demotest
+		//
+		// These keys were once recorded unscoped, so a companion
+		// plugin discovering another's emit could inherit its
+		// routing without restating it. The trade was bad: the pair
+		// above silently routed the stub into `mocks/` because the
+		// mock directive happened to be written first. A companion
+		// that genuinely needs to follow another plugin uses the
+		// standalone `+gen:out plugin=<name>` form, which says so.
 		owner, owned := p.directiveOwners[d.Name]
 		if !owned {
 			continue
@@ -1133,9 +1141,7 @@ func outDirectivesFor(p *Pipeline, n node.Node) []outDirectiveSpec {
 			Tag:     tag,
 			Package: pkg,
 		}
-		if tag != "" {
-			spec.PluginName = owner
-		}
+		spec.PluginName = owner
 		specs = append(specs, spec)
 	}
 	return specs
@@ -1148,14 +1154,26 @@ func outDirectivesFor(p *Pipeline, n node.Node) []outDirectiveSpec {
 // matching specs: more filters set wins (both PluginName + Tag >
 // PluginName only > Tag only > unscoped). Returns (zero, false)
 // when no directive applies.
+//
+// Two matching specs at the same specificity are ambiguous: the
+// source says twice, differently, where one output goes, and
+// nothing in the precedence rules breaks the tie. Rather than let
+// declaration order decide silently, the ambiguity is reported
+// through ps and the first spec is used, so the run still produces
+// the output the diagnostic refers to. Identical duplicates are not
+// ambiguous — they resolve to the same place, so there is nothing
+// to report.
 func selectOutDirective(
 	specs []outDirectiveSpec,
 	pluginName, outputTag string,
+	ps *diag.PluginSink,
+	origin node.Node,
 ) (outDirectiveSpec, bool) {
 	var (
 		best      outDirectiveSpec
 		bestScore int
 		haveBest  bool
+		conflict  bool
 	)
 	for _, s := range specs {
 		if s.PluginName != "" && s.PluginName != pluginName {
@@ -1171,16 +1189,37 @@ func selectOutDirective(
 		if s.Tag != "" {
 			score++
 		}
-		if !haveBest || score > bestScore {
+		switch {
+		case !haveBest || score > bestScore:
 			best = s
 			bestScore = score
 			haveBest = true
+			conflict = false
+		case score == bestScore && s != best:
+			conflict = true
 		}
+	}
+	if conflict && ps != nil {
+		ps.Errorf(originPos(origin),
+			"conflicting routing for %q: two directives of equal scope both "+
+				"apply and neither takes precedence; scope one with "+
+				"`+gen:out plugin=<name>` or remove it",
+			pluginName)
 	}
 	if haveBest {
 		return best, true
 	}
 	return outDirectiveSpec{}, false
+}
+
+// originPos returns origin's source position, or the zero position
+// for a nil origin — a synthetic entity carries no source location
+// to anchor a diagnostic to.
+func originPos(origin node.Node) position.Pos {
+	if origin == nil {
+		return position.Pos{}
+	}
+	return origin.Pos()
 }
 
 // splitOutDirectivePath splits a directive's positional value into

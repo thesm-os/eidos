@@ -3268,15 +3268,17 @@ func TestLayout_PerDirectiveRoutingKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("per-directive keys propagate to every plugin on the origin", func(t *testing.T) {
+	t.Run("per-directive keys are scoped to the directive's owner", func(t *testing.T) {
 		t.Parallel()
-		// Companion-aware semantics: a routing override on one
-		// plugin's directive applies to every plugin emitting
-		// against the same origin (a sibling generator that
-		// discovered the first plugin's output via meta inherits
-		// the override automatically). Users who need strict
-		// per-plugin scope use the standalone
-		// `+gen:out plugin=<name>` form.
+		// A routing override written on one plugin's directive
+		// moves that plugin's output and nothing else. Scoping is
+		// what lets two generators on one node travel to different
+		// places, which is the ordinary case the moment a type
+		// carries more than one directive — propagating instead
+		// meant the first directive written silently decided where
+		// every other plugin's output went. A companion that
+		// genuinely needs to follow another plugin uses the
+		// standalone `+gen:out plugin=<name>` form, which says so.
 		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
 		origin := &node.Interface{
 			BaseNode: node.BaseNode{
@@ -3320,8 +3322,11 @@ func TestLayout_PerDirectiveRoutingKeys(t *testing.T) {
 		if got := mocked.Target.Dir; got != want {
 			t.Fatalf("mg Target.Dir = %q, want %q (directive owner)", got, want)
 		}
-		if got := companion.Target.Dir; got != want {
-			t.Fatalf("companion Target.Dir = %q, want %q (propagates)", got, want)
+		// The companion owns no routing directive, so it falls back
+		// to alongside-source rather than inheriting the override.
+		notWant := filepath.Join("internal", "users")
+		if got := companion.Target.Dir; got != notWant {
+			t.Fatalf("companion Target.Dir = %q, want %q (not the owner's override)", got, notWant)
 		}
 	})
 }
@@ -3647,6 +3652,93 @@ func TestLayout_DispatchesOutputPackages(t *testing.T) {
 		// source node.
 		if got := len(run(t, false).got); got != 2 {
 			t.Fatalf("byTag has %d entries, want 2", got)
+		}
+	})
+}
+
+// TestLayout_ConflictingRoutingIsReported pins that two routing
+// directives of equal scope, both applying to the same output, are
+// reported rather than silently resolved by declaration order.
+//
+// Nothing in the precedence rules breaks that tie, so whichever the
+// author happened to write first would win — and the loser would
+// vanish without trace, which is exactly how an explicit `out=` came
+// to be ignored before per-directive keys were scoped to their
+// owner.
+func TestLayout_ConflictingRoutingIsReported(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T, dirs []*directive.Directive) *diag.Sink {
+		t.Helper()
+		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos:     position.Pos{File: "internal/users/user.go"},
+				DirectiveList: dirs,
+			},
+			Name: "User", Package: "example.com/users",
+		}
+		s := &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin},
+			Name:     "UserMock", Package: "example.com/users",
+		}
+		d := diag.New()
+		p, err := pipeline.New().
+			WithDiag(d).
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&layoutGen{name: "mg", suffix: "_mock.go", pkg: &emit.Package{
+				Name: "", Path: "example.com/users",
+				Structs: []*emit.Struct{s},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		// Run reports a non-nil error when the run produced error
+		// diagnostics, which is the outcome under test here — so the
+		// sink, not the error, is what each case asserts on.
+		_ = p.Run(t.Context(), "x")
+		return d
+	}
+
+	out := func(path, pkg string) *directive.Directive {
+		return &directive.Directive{
+			Name: pipeline.OutDirective,
+			Args: []string{path},
+			KV:   map[string]string{"pkg": pkg},
+		}
+	}
+
+	t.Run("two unscoped +gen:out directives conflict", func(t *testing.T) {
+		t.Parallel()
+		d := run(t, []*directive.Directive{
+			out("mocks/", "usermocks"),
+			out("testkit/", "usertest"),
+		})
+		if !d.HasErrors() {
+			t.Fatalf("two equally-scoped routing directives must be reported")
+		}
+	})
+
+	t.Run("an identical duplicate is not a conflict", func(t *testing.T) {
+		t.Parallel()
+		// Both resolve to the same place, so declaration order
+		// decides nothing and there is no ambiguity to report.
+		// Warning here would punish a harmless copy-paste.
+		d := run(t, []*directive.Directive{
+			out("mocks/", "usermocks"),
+			out("mocks/", "usermocks"),
+		})
+		if d.HasErrors() {
+			t.Fatalf("identical duplicates must not be reported: %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("a single directive is not a conflict", func(t *testing.T) {
+		t.Parallel()
+		d := run(t, []*directive.Directive{out("mocks/", "usermocks")})
+		if d.HasErrors() {
+			t.Fatalf("one directive must not be reported: %+v", d.Diagnostics())
 		}
 	})
 }
