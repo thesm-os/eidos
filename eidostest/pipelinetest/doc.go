@@ -16,8 +16,8 @@
 //     [storefixture.Builder]-produced [store.Store]. No pipeline.
 //   - Synthetic pipeline: drive multiple phases with a fully wired
 //     pipeline whose frontend is [FromNodes]. This package.
-//   - Full pipeline: drive the production frontend against testdata
-//     fixtures. Lands with the Go frontend (M6).
+//   - Full pipeline: drive a production frontend against testdata
+//     fixtures. Provided by [frontendtest].
 //
 // # Synthetic pipeline shape
 //

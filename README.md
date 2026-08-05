@@ -90,7 +90,7 @@ import (
 
     bgolang "go.thesmos.sh/eidos/backend/golang"
     "go.thesmos.sh/eidos/core/position"
-    "go.thesmos.sh/eidos/testpipe"
+    "go.thesmos.sh/eidos/eidostest/pipelinetest"
     "go.thesmos.sh/eidos/emit"
     "go.thesmos.sh/eidos/emit/builder"
     "go.thesmos.sh/eidos/node"
@@ -147,7 +147,7 @@ func main() {
         BaseNode: node.BaseNode{SourcePos: position.Pos{File: "user.go", Line: 1}},
     }}
     p, err := pipeline.New().
-        WithFrontend(testpipe.FromNodes(src)).
+        WithFrontend(pipelinetest.FromNodes(src)).
         WithGenerator(helloGenerator{}).
         WithBackend(bgolang.New()).
         WithSink(sink.NewDisk("./out")).
@@ -167,7 +167,7 @@ composes the filename from the source basename (`user`) and the
 plugin's declared suffix (`_hello.go`); package and directory come
 from the source struct's package.
 
-For real Go-source input, swap `testpipe.FromNodes(...)` for
+For real Go-source input, swap `pipelinetest.FromNodes(...)` for
 `frontend/golang.New()` and pass package patterns to `p.Run`:
 
 ```go
@@ -452,19 +452,20 @@ funcmap entries.
 
 ## Test harnesses
 
-The framework ships four focused test packages downstream
+The framework ships five focused test packages downstream
 authors import to verify their plugins / frontends / backends /
-pipelines against the framework's contracts.
+pipelines against the framework's contracts. All live under
+`eidostest/`.
 
-`testpipe` (root) — generic pipeline harness. Drives a pipeline
-from caller-supplied plugins over an in-memory sink with
-golden-file diffing. Pairs with `storefixture` for synthetic
-source-graph construction:
+`eidostest/pipelinetest` — generic pipeline harness. Drives a
+pipeline from caller-supplied plugins over an in-memory sink
+with golden-file diffing. Pairs with `eidostest/storefixture`
+for synthetic source-graph construction:
 
 ```go
 import (
-    "go.thesmos.sh/eidos/storefixture"
-    "go.thesmos.sh/eidos/testpipe"
+    "go.thesmos.sh/eidos/eidostest/pipelinetest"
+    "go.thesmos.sh/eidos/eidostest/storefixture"
 )
 
 pkg := storefixture.New().
@@ -472,8 +473,8 @@ pkg := storefixture.New().
         b.Field("ID", storefixture.Named("string"), nil)
     }).PackageNode()
 
-p := testpipe.New(t).
-    WithFrontend(testpipe.FromNodes(pkg)).
+p := pipelinetest.New(t).
+    WithFrontend(pipelinetest.FromNodes(pkg)).
     WithGenerator(myGen).
     WithBackend(backend_golang.New()).
     Build()
@@ -495,11 +496,21 @@ func TestMyPlugin_Conformance(t *testing.T) {
 }
 ```
 
-`eidostest/demopipe` / `eidostest/protopipe` — frontend-author
-harnesses. Each drives the named frontend against a fixture
-directory and surfaces the produced node graph + diagnostics
-for assertions. Build on top of the framework's pipeline
-without re-wiring frontend options each time.
+`eidostest/frontendtest` — frontend-author harness. Language-
+neutral: the caller supplies any `plugin.Frontend` plus a
+source-fixture directory, and the harness surfaces the produced
+node graph, sink, and diagnostics for assertions. `Run` drives a
+full pipeline; `LoadDirect` invokes only the frontend's `Load`
+surface, for tests asserting on source-mapping in isolation:
+
+```go
+import "go.thesmos.sh/eidos/eidostest/frontendtest"
+
+result := frontendtest.Run(t, frontendtest.RunOptions{
+    Frontend:  frontend_golang.New(),
+    SourceDir: frontendtest.DemoFixture(t),
+})
+```
 
 `eidostest/backendtest` — backend-author emit-injection harness.
 Skips the frontend / annotator / generator phases and drives a
@@ -515,11 +526,17 @@ result := backendtest.Run(t, backendtest.RunOptions{
 })
 ```
 
-`testpipe` registers a `-update-golden` flag; run the test
-binary with `-update-golden` to rewrite golden fixtures
+`eidostest/pipelinetest` registers a `-update-golden` flag; run
+the test binary with `-update-golden` to rewrite golden fixtures
 atomically. `core/diag.Capture()` / `core/diag.Discard()`
 produce diagnostic sinks for tests that respectively assert on
 or ignore emitted diagnostics.
+
+The repository additionally carries `eidostest/acceptancetest`,
+which drives the `cmd/eidos-reference` binary as a black box for
+end-to-end scenario coverage. It exercises the in-tree plugin
+ensemble rather than a downstream author's plugins, so it is an
+in-tree harness rather than part of the published surface.
 
 ## Project layout
 
@@ -538,31 +555,58 @@ plugin/               role interfaces (Frontend, Annotator, Generator, Backend)
                       CapabilityProvider, TemplateProvider, …)
 pipeline/             Builder + Pipeline orchestration
 
+sdk/                  plugin-author façade; re-exports the contract-shaped
+                      surface of plugin / priority / core so a plugin's
+                      import block stays compact
+
 core/                 language-agnostic foundation primitives:
+  core/contract/        interfaces both node.* and emit.* graphs implement
   core/diag/            diagnostics (Info / Warn / Error) with positions
   core/directive/       +gen: / -gen: parsing, schemas, registry
+  core/kind/            Kind discriminator shared by node / emit / directives
   core/meta/            typed metadata keys, authority levels, provenance
   core/naming/          case conversion (Pascal / Camel / Snake / Screaming / Title)
   core/opt/             typed plugin-options primitives
   core/position/        Pos / Range
+  core/srcfile/         <src-basename>_<suffix> output-filename convention
+
+lang/golang/          Go-language conventions shared by any plugin that
+                      emits Go, keeping plugin cores language-agnostic
 
 frontend/golang/      Go AST → node graph + go.* metadata
+frontend/protobuf/    proto3 descriptors → node graph
 backend/golang/       Go renderer: templates, funcmap, ImportSet, gofmt
+bridge/protogo/       proto→Go bridge annotator: stamps Go-namespaced
+                      translation meta so the Go backend stays proto-agnostic
 
-storefixture/         typed source-graph builders (used by testpipe)
-testpipe/             generic pipeline harness, golden-file diffing
+plugins/              production plugin set (own module):
+  plugins/annotator/shape/  callable-signature classification — detectors,
+                            contracts, and mixins over the +gen:shape contract
+  plugins/generator/        builder / enum / sentinel generators
+
+reference/            reference plugins kept runnable as worked examples:
+                      repogen, mockgen, registrygen, auditweaver,
+                      debugweaver, shapewriter
+cli/                  command kernels (run / plan / explain / check / prune /
+                      version); no flag parsing, no CLI framework
+cmd/eidos-reference/  demonstration binary wiring the in-tree plugin ensemble
+
 docaudit/             package-doc vs implemented meta-key audit
 
-eidostest/
-  eidostest/demopipe/      Go-frontend harness for plugin authors
-  eidostest/protopipe/     proto-frontend harness for plugin authors
+eidostest/            test harnesses for downstream authors:
+  eidostest/pipelinetest/  generic pipeline harness, golden-file diffing
+  eidostest/storefixture/  typed source-graph builders
   eidostest/plugintest/    plugin-author conformance suite
+  eidostest/frontendtest/  frontend-author harness (language-neutral)
   eidostest/backendtest/   backend-author emit-injection harness
+  eidostest/acceptancetest/ in-tree black-box harness over the reference binary
 
 docs/
   docs/backend/golang.md    Go-backend contract reference (template set,
                             funcmap, envelope, sentinels)
   docs/frontend/golang.md   Go-frontend contract reference
+  docs/plugin/              plugin-authoring guide (quickstart, recipes,
+                            composition, routing, templates, conformance)
 ```
 
 Layering is enforced by `depguard` in `.golangci.yml`.
