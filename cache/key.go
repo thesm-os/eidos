@@ -6,6 +6,7 @@ package cache
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -20,13 +21,33 @@ import (
 // Typical shape: NewKey("plugin", pluginName, "version", pluginVersion, "input", inputHash).
 // The format is convention, not policy — every cache implementation
 // treats the result as an opaque string.
+//
+// # Allocation
+//
+// The common path — every part non-empty — joins parts directly and
+// allocates only the result string. Filtering allocates one
+// additional slice, and only when an empty part is actually present.
+//
+// NewKey never writes through parts. Callers expanding a slice
+// (NewKey(parts...)) keep their backing array intact; an earlier
+// implementation filtered in place via parts[:0] and corrupted it.
 func NewKey(parts ...string) string {
-	nonEmpty := parts[:0]
+	if slices.Contains(parts, "") {
+		return joinNonEmpty(parts)
+	}
+	return strings.Join(parts, ":")
+}
+
+// joinNonEmpty is the filtering slow path of [NewKey], split out so
+// the common all-non-empty case carries no filtering cost. It copies
+// rather than filtering in place because parts may alias a caller's
+// slice.
+func joinNonEmpty(parts []string) string {
+	nonEmpty := make([]string, 0, len(parts))
 	for _, p := range parts {
-		if p == "" {
-			continue
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
 		}
-		nonEmpty = append(nonEmpty, p)
 	}
 	return strings.Join(nonEmpty, ":")
 }

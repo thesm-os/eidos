@@ -34,6 +34,27 @@ func TestNewKey(t *testing.T) {
 	}
 }
 
+func TestNewKeyDoesNotMutateCallerSlice(t *testing.T) {
+	t.Parallel()
+
+	// Regression: NewKey previously filtered in place via parts[:0],
+	// which wrote through to the caller's backing array whenever the
+	// call site expanded a slice. Only the empty-part path filtered,
+	// so the corruption was invisible until a caller reused the slice.
+	parts := []string{"plugin", "", "v1"}
+	original := append([]string(nil), parts...)
+
+	if got, want := cache.NewKey(parts...), "plugin:v1"; got != want {
+		t.Fatalf("NewKey(%v) = %q, want %q", original, got, want)
+	}
+
+	for i := range original {
+		if parts[i] != original[i] {
+			t.Fatalf("NewKey mutated caller slice: got %q, want %q", parts, original)
+		}
+	}
+}
+
 func TestHashBytes(t *testing.T) {
 	t.Parallel()
 
