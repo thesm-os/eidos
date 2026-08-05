@@ -1,6 +1,6 @@
 module go.thesmos.sh/eidos/eidostest
 
-go 1.26.2
+go 1.26.5
 
 require go.thesmos.sh/eidos v1.3.0
 

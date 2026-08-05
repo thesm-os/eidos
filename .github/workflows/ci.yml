@@ -16,7 +16,7 @@ concurrency:
 # ergon drives every Makefile target (`make check`, `make test-race`,
 # …). Pin the version so the gate is reproducible; bump intentionally.
 env:
-  ERGON_VERSION: v1.6.1
+  ERGON_VERSION: v1.8.1
 
 jobs:
   check:
