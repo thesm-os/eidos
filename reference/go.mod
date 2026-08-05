@@ -3,8 +3,8 @@ module go.thesmos.sh/eidos/reference
 go 1.26.5
 
 require (
-	go.thesmos.sh/eidos v1.3.3
-	go.thesmos.sh/eidos/eidostest v1.3.2
+	go.thesmos.sh/eidos v1.4.0
+	go.thesmos.sh/eidos/eidostest v1.4.0
 )
 
 replace (
