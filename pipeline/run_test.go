@@ -4,6 +4,7 @@
 package pipeline_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -1082,4 +1083,231 @@ func TestPipeline_Run_LibraryCommandLine(t *testing.T) {
 			t.Fatalf("BackendContext.Command = %q, want %q", captured, "(library)")
 		}
 	})
+}
+
+// TestRun_HonoursCancellation pins that a cancelled context stops
+// the run at a phase boundary instead of executing every phase to
+// completion.
+//
+// Run took a context and discarded it, so a caller wiring
+// signal.NotifyContext or a per-request timeout got a pipeline that
+// ran through the frontend load, every annotator and generator,
+// layout, render and the manifest write regardless. The signature
+// promised something the body did not do.
+func TestRun_HonoursCancellation(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T) (*sink.Memory, error) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		mem := sink.NewMemory()
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(mem).
+			Build()
+		assertNoError(t, err)
+		return mem, p.Run(ctx, "x")
+	}
+
+	t.Run("the error wraps the context's own cause", func(t *testing.T) {
+		t.Parallel()
+		// Callers classify with errors.Is; returning a bare
+		// ErrRunHadErrors would make a cancellation indistinguishable
+		// from a plugin failure.
+		if _, err := run(t); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, want it to wrap context.Canceled", err)
+		}
+	})
+
+	t.Run("no phase executes", func(t *testing.T) {
+		t.Parallel()
+		// Returning the right error while still rendering every file
+		// would satisfy the assertion above and miss the point.
+		mem, _ := run(t)
+		if got := mem.Len(); got != 0 {
+			t.Fatalf("sink received %d writes on a cancelled run, want 0", got)
+		}
+	})
+}
+
+// TestRun_TwiceOnOnePipelineIsClean pins that per-run derived state
+// does not leak between invocations of the same [pipeline.Pipeline].
+//
+// resolvedLayouts was allocated lazily and never cleared, so a
+// second Run compared its routing against the first run's entries
+// and reported ordinary cross-run variation as an Internal
+// diagnostic — which counts toward HasErrors, so the second run
+// failed. Most callers build a fresh Pipeline per run and never saw
+// it; library embedders and long-lived processes did.
+func TestRun_TwiceOnOnePipelineIsClean(t *testing.T) {
+	t.Parallel()
+
+	runTwice := func(t *testing.T) (*diag.Sink, error) {
+		t.Helper()
+		d := diag.New()
+		p, err := pipeline.New().
+			WithDiag(d).
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		return d, p.Run(t.Context(), "x")
+	}
+
+	t.Run("the second run succeeds", func(t *testing.T) {
+		t.Parallel()
+		if d, err := runTwice(t); err != nil {
+			t.Fatalf("second Run failed: %v; diags=%+v", err, d.Diagnostics())
+		}
+	})
+
+	t.Run("the second run reports no Internal diagnostic", func(t *testing.T) {
+		t.Parallel()
+		// Internal severity means "framework bug". Leaked per-run
+		// state reported ordinary cross-run variation at that level,
+		// which is both wrong and unactionable for the user.
+		d, _ := runTwice(t)
+		for _, g := range d.Diagnostics() {
+			if g.Severity == diag.Internal {
+				t.Errorf("second run reported an Internal diagnostic: %s", g.Message)
+			}
+		}
+	})
+}
+
+// TestRun_ResetsResolvedLayoutsBetweenRuns pins the reset directly.
+//
+// The end-to-end assertion above cannot reach it: two runs over
+// identical input resolve identical routing, so the divergence
+// comparison agrees and nothing fires. Reproducing the failure
+// end-to-end needs two runs that resolve the *same* emit.Target from
+// *different* precedence layers, which no fixture in this package
+// constructs. Asserting the reset itself is the honest substitute —
+// it pins the mechanism the leak depended on, and says plainly that
+// it is not an end-to-end reproduction.
+func TestRun_ResetsResolvedLayoutsBetweenRuns(t *testing.T) {
+	t.Parallel()
+
+	seeded := func(t *testing.T) *pipeline.Pipeline {
+		t.Helper()
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		p.RecordResolvedLayoutForTest(
+			emit.Target{Dir: "d", Filename: "f.go"},
+			manifest.ResolvedLayout{Package: "one"},
+		)
+		return p
+	}
+
+	t.Run("a recorded layout is observable", func(t *testing.T) {
+		t.Parallel()
+		// Without this the clearing assertion below would pass
+		// against a fixture that never recorded anything.
+		if !seeded(t).HasLayoutActivityForTest() {
+			t.Fatalf("fixture recorded no layout; the reset assertion would be vacuous")
+		}
+	})
+
+	t.Run("a subsequent run clears it", func(t *testing.T) {
+		t.Parallel()
+		p := seeded(t)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		if p.HasLayoutActivityForTest() {
+			t.Fatalf("resolvedLayouts survived a Run; a later run inherits the previous run's routing")
+		}
+	})
+}
+
+// versionedGen is a generator whose declared version is settable, so
+// a test can observe the cache key move when it changes.
+type versionedGen struct {
+	name    string
+	version string
+}
+
+// Name returns the configured plugin identifier.
+func (g *versionedGen) Name() string { return g.name }
+
+// Version reports the configured version via [plugin.Versioned].
+func (g *versionedGen) Version() string { return g.version }
+
+// Generate emits nothing; the cache key is what this fixture is for.
+func (*versionedGen) Generate(*plugin.GeneratorContext) error { return nil }
+
+// TestRun_PluginVersionEntersCacheKey pins that a plugin's declared
+// version composes into its cache key.
+//
+// plugin.Versioned, its sdk alias, the cache package doc and the
+// README all state that a version bump invalidates that plugin's
+// cached entries and no other's. Nothing read the value, so a bump
+// produced an identical key — the documented invalidation never
+// happened.
+func TestRun_PluginVersionEntersCacheKey(t *testing.T) {
+	t.Parallel()
+
+	keysFor := func(t *testing.T, version string) []string {
+		t.Helper()
+		c := &keyRecordingCache{}
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithGenerator(&versionedGen{name: "vg", version: version}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			WithCache(c).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		return c.keys
+	}
+
+	t.Run("the run records at least one key", func(t *testing.T) {
+		t.Parallel()
+		// Guards every comparison below against passing vacuously on
+		// an empty slice.
+		if got := keysFor(t, "v1"); len(got) == 0 {
+			t.Fatalf("no cache entries recorded")
+		}
+	})
+
+	t.Run("a version bump changes the key", func(t *testing.T) {
+		t.Parallel()
+		if before, after := keysFor(t, "v1"), keysFor(t, "v2"); slices.Equal(before, after) {
+			t.Fatalf("cache keys unchanged across a version bump: %v", before)
+		}
+	})
+
+	t.Run("an unchanged version keeps the key stable", func(t *testing.T) {
+		t.Parallel()
+		// A key that moved on every run would also satisfy the bump
+		// assertion while making the cache useless.
+		if first, second := keysFor(t, "v1"), keysFor(t, "v1"); !slices.Equal(first, second) {
+			t.Fatalf("cache keys differ across identical runs: %v vs %v", first, second)
+		}
+	})
+}
+
+// keyRecordingCache is a [cache.Cache] that records every key
+// written, so a test can compare the composed key across runs
+// without reaching into the pipeline.
+type keyRecordingCache struct {
+	keys []string
+}
+
+// Get always misses; the pipeline's marker is write-only and this
+// fixture only observes what it writes.
+func (*keyRecordingCache) Get(string) ([]byte, bool) { return nil, false }
+
+// Put records the key and discards the body.
+func (c *keyRecordingCache) Put(key string, _ []byte) error {
+	c.keys = append(c.keys, key)
+	return nil
 }

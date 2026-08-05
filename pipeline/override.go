@@ -37,6 +37,10 @@ const MetaDirectiveName directive.Name = "meta"
 func (p *Pipeline) runDirectiveOverride(s *store.Store) {
 	p.logPhaseStart("directive-override", "applying +%s/-%s directives", MetaDirectiveName, MetaDirectiveName)
 	ps := p.diag.For("pipeline")
+	// The walk invokes plugin-registered meta parsers through
+	// SetDirectiveFromString, so plugin-authored code runs here and
+	// needs the same containment every other plugin boundary has.
+	defer diag.RecoverAs(ps, position.Pos{})
 	v := s.Nodes()
 	visit := func(n node.Node) {
 		for _, d := range n.Directives() {

@@ -48,7 +48,13 @@ func (c *PlanCommand) RegisterFlags(fs *flag.FlagSet) {
 
 // Execute resolves the plan and prints it. Returns [ExitUserError]
 // on configuration faults; otherwise [ExitOK].
-func (c *PlanCommand) Execute(_ context.Context, env *Env) int {
+func (c *PlanCommand) Execute(_ context.Context, env *Env) (exit int) {
+	// plan calls buildPipeline, so a plugin panicking in Outputs(),
+	// Directives() or OptionsSchema() during Build unwinds through
+	// here. Without the guard that escapes the "commands never panic
+	// out" contract and reaches the user as a raw stack trace
+	// instead of ExitInternalError.
+	defer recoverInto(env, &exit)
 	cfg := c.Config.File
 	if cfg == nil {
 		cfg = DefaultConfig()

@@ -110,16 +110,17 @@ type helloGenerator struct{}
 
 func (helloGenerator) Name() string { return "hellogen" }
 
-// FilenameSuffix returns the per-source suffix the routing layer
-// appends to the source basename. The plugin ships Go output today;
-// other backends receive the empty signal until matching templates
-// land. The suffix is the only output-naming hook plugins surface —
-// directory, package, and import-path are framework concerns.
-func (helloGenerator) FilenameSuffix(lang string) string {
+// Outputs declares the routable outputs this plugin emits for a
+// language, each carrying the suffix the routing layer appends to
+// the source basename. The plugin ships Go output today; other
+// backends receive nil until matching templates land. Suffix and
+// tag are the only output-naming hooks plugins surface — directory,
+// package, and import-path are framework concerns.
+func (helloGenerator) Outputs(lang string) []plugin.Output {
     if lang == "golang" {
-        return "_hello.go"
+        return []plugin.Output{{Suffix: "_hello.go"}}
     }
-    return ""
+    return nil
 }
 
 func (g helloGenerator) Generate(ctx *plugin.GeneratorContext) error {
@@ -281,7 +282,7 @@ Optional capabilities a plugin may also implement:
 - `DirectiveProvider` — declares directive schemas (`AppliesTo`,
   `RequiredKeys`, `AllowedKeys`, `MutuallyExclusiveWith`,
   `PositionalArgs`).
-- `FilenameProvider` — declares the per-source filename suffix the
+- `FilenameProvider` — declares the routable outputs a plugin emits per language the
   routing layer appends to each origin's source basename. **Required**
   for any generator that emits routable decls or file-level slot
   contributions; pure cross-cutting plugins that only attach to other

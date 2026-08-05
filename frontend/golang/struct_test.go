@@ -108,7 +108,7 @@ func TestConvertStruct(t *testing.T) {
 		})
 		alias := pkg.StructByName("Alias")
 		if alias == nil {
-			t.Skipf("alias of struct did not surface — type-only path unreachable")
+			t.Fatalf("alias of struct did not surface; the type-only path is what this test exists to exercise")
 		}
 		if len(alias.Fields) == 0 {
 			t.Fatalf("Alias must carry fields populated by the type-only path")

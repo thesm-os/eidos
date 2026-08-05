@@ -47,7 +47,7 @@ order:
    `OutputTag` tagging via `pkg.File(tag)`, per-output routing
    overrides (`+gen:out tag=...`, `-o <plugin>:<tag>=...`),
    project-config schema, and the migration from
-   `FilenameSuffix`.
+   `Outputs`.
 
 ## Reference plugins
 

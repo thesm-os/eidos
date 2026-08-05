@@ -47,7 +47,12 @@ func (c *VersionCommand) RegisterFlags(fs *flag.FlagSet) {
 // Execute prints the version block. Always returns [ExitOK]; the
 // command has no failure modes beyond a misuse of [Env] (empty
 // brand), which surfaces as [ExitUserError].
-func (c *VersionCommand) Execute(_ context.Context, env *Env) int {
+func (c *VersionCommand) Execute(_ context.Context, env *Env) (exit int) {
+	// version builds no pipeline and calls no plugin, so nothing
+	// here is expected to panic. The guard is uniformity: every
+	// command kernel installs it, so none becomes the exception
+	// someone has to notice when adding a call that can.
+	defer recoverInto(env, &exit)
 	if env.Brand == "" {
 		writeErr(env, "Env.Brand is required")
 		return ExitUserError

@@ -5,6 +5,8 @@ package golang_test
 
 import (
 	"testing"
+
+	"go.thesmos.sh/eidos/node"
 )
 
 // TestConvertInterface covers the per-interface conversion path:
@@ -97,7 +99,7 @@ func TestConvertInterface(t *testing.T) {
 		})
 		alias := pkg.InterfaceByName("Alias")
 		if alias == nil {
-			t.Skipf("alias of interface did not surface — type-only path unreachable")
+			t.Fatalf("alias of interface did not surface; the type-only path is what this test exists to exercise")
 		}
 		if len(alias.Methods) == 0 {
 			t.Fatalf("Alias must carry methods populated by the type-only path")
@@ -113,7 +115,7 @@ func TestConvertInterface(t *testing.T) {
 		})
 		alias := pkg.InterfaceByName("Alias")
 		if alias == nil {
-			t.Skipf("alias of interface did not surface — type-only path unreachable")
+			t.Fatalf("alias of interface did not surface; the type-only path is what this test exists to exercise")
 		}
 		if len(alias.Methods) != 1 {
 			t.Fatalf("expected 1 method, got %d", len(alias.Methods))
@@ -134,7 +136,7 @@ func TestConvertInterface(t *testing.T) {
 		})
 		alias := pkg.InterfaceByName("Alias")
 		if alias == nil {
-			t.Skipf("alias of interface did not surface — type-only path unreachable")
+			t.Fatalf("alias of interface did not surface; the type-only path is what this test exists to exercise")
 		}
 		if len(alias.Embeds) == 0 {
 			t.Fatalf("expected at least one embed on the aliased interface")
@@ -222,32 +224,44 @@ func TestAppendInterfaceMethod_BlankNameDoesNotPanic(t *testing.T) {
 func TestAppendInterfaceMethod_BlankNameKeepsSiblings(t *testing.T) {
 	t.Parallel()
 
-	st, _ := loadFromSource(t, map[string]string{
-		"a.go": "package p\n\ntype I interface {\n\t_()\n\tOK() error\n}\n\ntype Fine struct{ N int }\n",
+	load := func(t *testing.T) *node.Package {
+		t.Helper()
+		st, _ := loadFromSource(t, map[string]string{
+			"a.go": "package p\n\ntype I interface {\n\t_()\n\tOK() error\n}\n\ntype Fine struct{ N int }\n",
+		})
+		pkg := firstPackageIn(st, "")
+		if pkg == nil {
+			t.Fatalf("a package with one malformed interface must still convert")
+		}
+		return pkg
+	}
+
+	t.Run("an unrelated declaration in the same file survives", func(t *testing.T) {
+		t.Parallel()
+		// The panic unwound out of converter.run, so the whole
+		// package was discarded. This is the assertion that fails
+		// against a fix which bails out of the file or package walk.
+		for _, s := range load(t).Structs {
+			if s.Name == "Fine" {
+				return
+			}
+		}
+		t.Fatalf("struct Fine was discarded; only the malformed method should be skipped")
 	})
-	pkg := firstPackageIn(st, "")
-	if pkg == nil {
-		t.Fatalf("a package with one malformed interface must still convert")
-	}
-	var foundStruct bool
-	for _, s := range pkg.Structs {
-		if s.Name == "Fine" {
-			foundStruct = true
+
+	t.Run("the interface keeps its valid method and drops only the blank one", func(t *testing.T) {
+		t.Parallel()
+		for _, i := range load(t).Interfaces {
+			if i.Name != "I" {
+				continue
+			}
+			names := make([]string, 0, len(i.Methods))
+			for _, m := range i.Methods {
+				names = append(names, m.Name)
+			}
+			if len(names) != 1 || names[0] != "OK" {
+				t.Fatalf("interface I methods = %v, want just [OK]", names)
+			}
 		}
-	}
-	if !foundStruct {
-		t.Errorf("struct Fine was discarded; only the malformed method should be skipped")
-	}
-	for _, i := range pkg.Interfaces {
-		if i.Name != "I" {
-			continue
-		}
-		names := make([]string, 0, len(i.Methods))
-		for _, m := range i.Methods {
-			names = append(names, m.Name)
-		}
-		if len(names) != 1 || names[0] != "OK" {
-			t.Errorf("interface I methods = %v, want just [OK] — the blank one skipped, the valid one kept", names)
-		}
-	}
+	})
 }

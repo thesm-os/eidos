@@ -159,7 +159,7 @@ func (p ConfigPlugin) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
 // ConfigSink configures the output sink.
 type ConfigSink struct {
 	// Kind selects the sink implementation. One of: "disk",
-	// "memory", "multi", "stdout". Defaults to "disk".
+	// "memory", "stdout". Defaults to "disk".
 	Kind string `yaml:"kind,omitempty"`
 
 	// Options is a kind-specific configuration map. Currently
@@ -235,7 +235,6 @@ func DefaultConfig() *Config {
 const (
 	SinkKindDisk   = "disk"
 	SinkKindMemory = "memory"
-	SinkKindMulti  = "multi"
 	SinkKindStdout = "stdout"
 )
 
@@ -384,14 +383,14 @@ func ValidateConfig(c *Config, path string) ([]string, error) {
 		}
 	}
 	switch c.Sink.Kind {
-	case SinkKindDisk, SinkKindMemory, SinkKindMulti, SinkKindStdout:
+	case SinkKindDisk, SinkKindMemory, SinkKindStdout:
 		// known kinds.
 	default:
 		return nil, &ConfigError{
 			Path: path,
 			Reason: fmt.Sprintf(
-				"sink.kind %q is not recognised (one of: %s, %s, %s, %s)",
-				c.Sink.Kind, SinkKindDisk, SinkKindMemory, SinkKindMulti, SinkKindStdout,
+				"sink.kind %q is not recognised (one of: %s, %s, %s)",
+				c.Sink.Kind, SinkKindDisk, SinkKindMemory, SinkKindStdout,
 			),
 		}
 	}

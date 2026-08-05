@@ -9,9 +9,10 @@
 name: eidos
 
 # Module set discovered via go.work — ergon's auto-detection
-# covers the eight-module split (root + backend/golang +
-# bridge/protogo + cli + eidostest + frontend/{golang,protobuf} +
-# reference) without hand-listing.
+# covers the ten-module split (root + backend/golang +
+# bridge/protogo + cli + cmd/eidos-reference + eidostest +
+# frontend/{golang,protobuf} + plugins + reference) without
+# hand-listing.
 modules: []
 
 # bootstrap — `ergon bootstrap`

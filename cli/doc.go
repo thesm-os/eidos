@@ -54,7 +54,7 @@
 //   - [ExitPipelineError] (2): pipeline ran but produced Error
 //     diagnostics.
 //   - [ExitInternalError] (3): recovered from an unexpected panic.
-//   - [ExitCacheVerifyFailed] (4): `run --verify-cache` mismatch.
+//   - [ExitCacheVerifyFailed] (4): reserved; no command returns it.
 //   - [ExitCheckDrift] (5): `check` detected drift against on-disk
 //     state.
 //

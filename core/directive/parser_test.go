@@ -5,6 +5,8 @@ package directive_test
 
 import (
 	"errors"
+	"maps"
+	"slices"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
@@ -416,6 +418,112 @@ func TestParser_ParseComment(t *testing.T) {
 		}
 		if !d.Negated {
 			t.Fatalf("Negated should be true for the -gen: comment form")
+		}
+	})
+}
+
+// FuzzParser_Parse drives the hand-rolled directive lexer over
+// arbitrary input.
+//
+// Parse is the user-facing syntax and is written by hand — quoting,
+// escapes, a name grammar, and a greedy scan that keeps consuming
+// after each directive ends. Its dangerous failure is a silent
+// misparse rather than a crash, so the properties asserted here are
+// about the shape of what comes back, not merely that nothing
+// exploded.
+//
+// The seeds cover the forms the grammar branches on: bare names,
+// negation, positionals, key/value pairs, quoting, escapes, several
+// directives in one comment, and the degenerate inputs around each.
+func FuzzParser_Parse(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		"+gen:stub",
+		"-gen:stub",
+		"+gen:stub out=testkit/ pkg=storetest",
+		`+gen:value "quoted arg"`,
+		`+gen:value "escaped \" quote"`,
+		"+gen:mixin idempotent concurrent atomic",
+		"+gen:a +gen:b +gen:c",
+		"+gen:",
+		"+gen:x=",
+		"+gen:x=y=z",
+		`+gen:x="unterminated`,
+		"+gen:x \t \n +gen:y",
+		"not a directive at all",
+	} {
+		f.Add(seed)
+	}
+
+	p, err := directive.NewParser("gen")
+	if err != nil {
+		f.Fatalf("NewParser: %v", err)
+	}
+
+	f.Fuzz(func(t *testing.T, text string) {
+		got, err := p.Parse(text, position.Pos{})
+		if err != nil {
+			// A rejected input must yield nothing. Returning both a
+			// partial parse and an error invites callers to use the
+			// half-built result.
+			if got != nil {
+				t.Fatalf("Parse returned %d directives alongside error %v", len(got), err)
+			}
+			return
+		}
+		for i, d := range got {
+			// An accepted directive with no name cannot be matched
+			// against any schema, so it can only ever be a silent
+			// no-op for the consumer.
+			if d.Name == "" {
+				t.Fatalf("directive %d parsed with an empty name from %q", i, text)
+			}
+			for k := range d.KV {
+				// An empty key is unreadable by any consumer and
+				// unmatchable by Schema.AllowedKeys, so accepting one
+				// silently discards the value at exactly the point
+				// the author expected it to take effect.
+				if k == "" {
+					t.Fatalf("directive %d parsed an empty KV key from %q", i, text)
+				}
+				// The map and the accessor must agree, or a consumer
+				// reading through Value sees a different directive
+				// than the one that parsed.
+				if got := d.Value(k); got != d.KV[k] {
+					t.Fatalf("Value(%q) = %q, KV[%q] = %q", k, got, k, d.KV[k])
+				}
+			}
+
+			// Round-trip: Raw is the directive's own body, so
+			// re-parsing it under the same prefix must reproduce the
+			// directive. This is the property that catches a silent
+			// misparse — the failure mode a crash-only target misses
+			// entirely, since a lexer that drops an argument still
+			// returns cleanly.
+			// The sign is part of the prefix, not of Raw, so it has
+			// to be restored to reconstruct the original text.
+			sign := "+"
+			if d.Negated {
+				sign = "-"
+			}
+			again, err := p.Parse(sign+"gen:"+d.Raw, position.Pos{})
+			if err != nil {
+				t.Fatalf("re-parsing Raw %q of %q failed: %v", d.Raw, text, err)
+			}
+			if len(again) != 1 {
+				t.Fatalf("re-parsing Raw %q yielded %d directives, want 1", d.Raw, len(again))
+			}
+			r := again[0]
+			if r.Name != d.Name || r.Negated != d.Negated {
+				t.Fatalf("round-trip changed identity: %q/%v became %q/%v",
+					d.Name, d.Negated, r.Name, r.Negated)
+			}
+			if !slices.Equal(r.Args, d.Args) {
+				t.Fatalf("round-trip changed args: %q became %q", d.Args, r.Args)
+			}
+			if !maps.Equal(r.KV, d.KV) {
+				t.Fatalf("round-trip changed kv: %v became %v", d.KV, r.KV)
+			}
 		}
 	})
 }

@@ -96,7 +96,7 @@ func (d *Disk) Put(key string, value []byte) error {
 }
 
 // Has reports whether key is present without reading the value.
-// Useful for tooling (eidos explain, --verify-cache) that needs to
+// Useful for tooling (eidos explain) that needs to
 // enumerate the cache state without paying the read cost.
 func (d *Disk) Has(key string) bool {
 	if key == "" {

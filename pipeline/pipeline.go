@@ -158,6 +158,81 @@ type Pipeline struct {
 	// parallel test invocations that share a Pipeline.
 	resolvedLayoutsMu sync.Mutex
 	resolvedLayouts   map[emit.Target]manifest.ResolvedLayout
+
+	// layoutErrs holds the sentinel-wrapped errors the Layout phase
+	// reported this run, so [Pipeline.Run] can join them into its
+	// return value and callers can classify with errors.Is. Guarded
+	// by resolvedLayoutsMu, which already serialises the phase's
+	// other per-run writes.
+	layoutErrs []error
+}
+
+// resetRunState clears the per-run derived state a [Pipeline]
+// accumulates, so a second [Pipeline.Run] on the same instance
+// starts from the same footing as the first.
+//
+// Run is documented as executing against a fresh [store.Store], and
+// it replaces lastStore and lastRecorder to match — but
+// resolvedLayouts was allocated lazily and never cleared, which made
+// two ordinary cross-run differences look like framework bugs:
+//
+//   - recordResolvedLayout compares an incoming decision against the
+//     retained entry for the same Target and reports divergence as
+//     an Internal diagnostic. Routing that legitimately differs
+//     between runs — an edited directive, a different pattern set —
+//     tripped it.
+//   - hasLayoutActivity is a length check, so once any run routed
+//     anything it answered true forever, arming the "backend wrote
+//     without Layout-composed attribution" check on a later run that
+//     routed nothing.
+//
+// Both surface at Internal severity, which counts toward
+// HasErrors, so the second run failed. Most callers build a fresh
+// Pipeline per run and never saw it; the exposure is library
+// embedders and long-lived processes, which the Builder/Pipeline
+// split otherwise encourages.
+func (p *Pipeline) resetRunState() {
+	p.resolvedLayoutsMu.Lock()
+	defer p.resolvedLayoutsMu.Unlock()
+	p.resolvedLayouts = nil
+	p.layoutErrs = nil
+}
+
+// recordLayoutErr retains a sentinel-wrapped Layout-phase error so
+// [Pipeline.Run] can join it into its return value.
+//
+// Layout reports through the diagnostic sink, which takes a format
+// string — so a sentinel reaching it via Error() is flattened to
+// text and the chain is gone. Every Build-time sentinel is returned
+// as a value and matches under errors.Is; without this the four
+// Layout-phase sentinels did not, despite sitting in the same file,
+// in the same var-block style, with docblocks in the same voice
+// telling consumers to use errors.Is. A host wanting to special-case
+// "a plugin forgot FilenameProvider" was left substring-matching a
+// diagnostic, which CONTRIBUTING.md forbids outright.
+//
+// The diagnostic is still emitted; this is additive. Errors
+// accumulate per run and are cleared by [Pipeline.resetRunState].
+func (p *Pipeline) recordLayoutErr(err error) {
+	if err == nil {
+		return
+	}
+	p.resolvedLayoutsMu.Lock()
+	defer p.resolvedLayoutsMu.Unlock()
+	p.layoutErrs = append(p.layoutErrs, err)
+}
+
+// layoutErrors returns a copy of the Layout-phase errors recorded
+// during the current run, in the order they were reported.
+func (p *Pipeline) layoutErrors() []error {
+	p.resolvedLayoutsMu.Lock()
+	defer p.resolvedLayoutsMu.Unlock()
+	if len(p.layoutErrs) == 0 {
+		return nil
+	}
+	out := make([]error, len(p.layoutErrs))
+	copy(out, p.layoutErrs)
+	return out
 }
 
 // Store returns the [store.Store] used by the most recent

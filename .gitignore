@@ -13,6 +13,7 @@ dist/
 # beside its source. Ignored by path because the name carries no
 # extension to match on; it was committed twice before this.
 cmd/eidos-reference/eidos-reference
+bench/
 
 # ----------------------------------------------------------------------
 # Test and coverage outputs

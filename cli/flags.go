@@ -12,7 +12,7 @@ package cli
 // Per-command flag-name sets:
 //
 //   - Every command: FlagConfig, FlagDiagFormat, FlagVerbose, FlagQuiet
-//   - Run: + FlagNoCache, FlagVerifyCache, FlagTarget, FlagOutput
+//   - Run: + FlagNoCache, FlagTarget, FlagOutput
 //   - Plan, Version: (none beyond the common set)
 //   - Check, Prune: (none beyond the common set; Prune adds FlagDryRun)
 //   - Explain: (none beyond the common set; selector is positional)
@@ -34,10 +34,6 @@ const (
 	// FlagNoCache disables the build cache for a single invocation
 	// (overrides the file's cache.enabled).
 	FlagNoCache = "no-cache"
-
-	// FlagVerifyCache recomputes output and asserts byte-identity
-	// against the cached value.
-	FlagVerifyCache = "verify-cache"
 
 	// FlagTarget restricts the pipeline to a single source-decl
 	// scope: a bare unqualified name (`-target Article`) or a
@@ -78,16 +74,15 @@ const (
 // across the reference binary and any downstream binary that
 // re-declares flags with another CLI framework.
 const (
-	UsageConfig      = "Path to the config file. Defaults to .<brand>.yaml discovered upward from the working directory."
-	UsageDiagFormat  = "Diagnostic output format. One of: text, json."
-	UsageVerbose     = "Surface Info diagnostics."
-	UsageQuiet       = "Suppress Warn diagnostics."
-	UsageNoCache     = "Disable the build cache for this invocation."
-	UsageVerifyCache = "Recompute output and assert byte-identity against the cached value."
-	UsageTarget      = "Restrict the run to source decls whose unqualified name equals VALUE, or whose qualified name ends with .VALUE (pkg.Name disambiguates across packages)."
-	UsageOutput      = "Pin the rendered filename for every emitted decl in scope. Requires -target (or GOFILE inference)."
-	UsagePackage     = "Pin the rendered file's package name for every emitted decl in scope. Required when -layout=centralised has no config-side output.package."
-	UsageLayout      = "Override the project-default layout policy (alongside-source or centralised)."
-	UsageOutputDir   = "Output directory under -layout=centralised. Ignored under alongside-source."
-	UsageDryRun      = "Report planned actions without performing them."
+	UsageConfig     = "Path to the config file. Defaults to .<brand>.yaml discovered upward from the working directory."
+	UsageDiagFormat = "Diagnostic output format. One of: text, json."
+	UsageVerbose    = "Surface Info diagnostics."
+	UsageQuiet      = "Suppress Warn diagnostics."
+	UsageNoCache    = "Disable the build cache for this invocation."
+	UsageTarget     = "Restrict the run to source decls whose unqualified name equals VALUE, or whose qualified name ends with .VALUE (pkg.Name disambiguates across packages)."
+	UsageOutput     = "Pin the rendered filename for every emitted decl in scope. Requires -target (or GOFILE inference)."
+	UsagePackage    = "Pin the rendered file's package name for every emitted decl in scope. Required when -layout=centralised has no config-side output.package."
+	UsageLayout     = "Override the project-default layout policy (alongside-source or centralised)."
+	UsageOutputDir  = "Output directory under -layout=centralised. Ignored under alongside-source."
+	UsageDryRun     = "Report planned actions without performing them."
 )

@@ -19,7 +19,7 @@
 //     run), [ExternalRef] for third-party / stdlib types
 //     (imports needed at render time), [BuiltinRef] for true language
 //     built-ins, and [CompositeRef] for compound shapes
-//     (Pointer / Slice / Array / Map / Func / Chan) over inner refs.
+//     (Pointer / Slice / Array / Map / Func / Union) over inner refs.
 //   - Composable [Slot] regions on each kind allow cross-cutting
 //     generators to inject contributions without owning the top-level
 //     entity, with [Provenance] recording who appended what at which

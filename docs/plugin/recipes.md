@@ -114,11 +114,11 @@ func (*Plugin) Name() string           { return Name }
 func (*Plugin) Priority() sdk.Priority   { return sdk.GeneratorFoundation }
 func (*Plugin) Provides() []string     { return []string{Capability} }
 func (*Plugin) Requires() []string     { return nil }
-func (*Plugin) FilenameSuffix(lang string) string {
+func (*Plugin) Outputs(lang string) []sdk.Output {
     if lang == Language {
-        return "_repo.go"
+        return []sdk.Output{{Suffix: "_repo.go"}}
     }
-    return ""
+    return nil
 }
 
 // Directives declares the +gen:repo schema with the pipeline.

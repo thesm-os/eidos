@@ -243,8 +243,8 @@ plugins/annotator/shape/
   meta.go             — universal MetaShape / MetaKeyType / MetaValueType
   helpers_go.go       — Go-flavoured signature primitives detectors compose
 
-  detectors/<name>/   — per-shape signature detectors (19 today)
-  contracts/<name>/   — per-contract protocol declarations (20 today)
+  detectors/<name>/   — per-shape signature detectors (20 today)
+  contracts/<name>/   — per-contract protocol declarations (24 today)
   mixins/<name>/      — per-mixin behavioural decorations (28 today)
 ```
 

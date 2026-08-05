@@ -18,6 +18,17 @@ import (
 // quoted string, unknown escape, and so on).
 var ErrMalformedDirective = errors.New("directive: malformed")
 
+// ErrEmptyKey is wrapped into [ErrMalformedDirective] when a
+// directive carries a `=` with nothing before it — `+gen:x=`,
+// `+gen:stub =v`, `+gen:x=y=z`.
+//
+// Such an entry parsed cleanly into a KV map keyed by the empty
+// string, which no consumer can read and no [Schema.AllowedKeys] can
+// admit, so the value was silently discarded at the point the author
+// most expected it to take effect. Rejecting at parse time puts the
+// diagnostic on the line that wrote it.
+var ErrEmptyKey = errors.New("directive: key/value pair has an empty key")
+
 // ErrInvalidPrefix is returned by [NewParser] when the supplied prefix
 // is empty or contains characters reserved by the directive grammar
 // (whitespace, `:`, `+`, `-`). Prefixes must be valid identifier-like
@@ -165,6 +176,9 @@ func (p *Parser) parseOne(l *lexer, pos position.Pos) (*Directive, error) {
 			return nil, fmt.Errorf("%w: %w", ErrMalformedDirective, err)
 		}
 		if isKV {
+			if key == "" {
+				return nil, fmt.Errorf("%w: %w (value %q)", ErrMalformedDirective, ErrEmptyKey, value)
+			}
 			d.KV[key] = value
 		} else {
 			d.Args = append(d.Args, key)

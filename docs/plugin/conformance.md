@@ -28,7 +28,7 @@ Every plugin runs this. It pins:
 - `EmitVersioned.EmitVersions()` (when implemented) is stable
   and contains no empty entries
 - `NodesOnly()` (when implemented) is stable across calls
-- `FilenameProvider.FilenameSuffix(lang)` (when implemented) is
+- `FilenameProvider.Outputs(lang)` (when implemented) is
   stable across calls for each language
 
 Pass any plugin instance — the suite probes for each capability

@@ -56,7 +56,8 @@ contract; `make lint` runs both.
 ## Commit conventions
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
-`.commitlintrc.yml` enforces them; the commit-msg pre-commit hook checks each
+`ergon check commit-msg` enforces them against the `commit:` block in
+`.ergon.yaml`; the commit-msg pre-commit hook checks each
 commit locally.
 
 Allowed types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`,
@@ -64,7 +65,7 @@ Allowed types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`,
 
 Subject line:
 
-- ≤ 72 characters
+- ≤ 80 characters
 - No trailing period
 - Case-insensitive (proper nouns and acronyms welcome)
 

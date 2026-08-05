@@ -5,6 +5,7 @@ package golang_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/sink"
+	"go.thesmos.sh/eidos/store"
 )
 
 // TestBackend_Name covers the stable plugin identifier.
@@ -875,4 +877,70 @@ func TestConformance(t *testing.T) {
 			},
 		)
 	})
+}
+
+// BenchmarkBackend_Render measures one full render pass over a
+// multi-target emit graph — template execution, gofmt, the goimports
+// pass, and the sink write for every target.
+//
+// The scope is deliberately the whole pass rather than a single
+// stage: Render's cost is dominated by per-target work that only
+// exists in composition, and the open question the number answers is
+// whether the per-target loop is worth parallelising. A benchmark
+// over one target in isolation could not answer that.
+//
+// Setup builds the store once, outside the timed region. The sink is
+// reused across iterations rather than reallocated per pass, so the
+// measurement is Render's own allocation rather than the fixture's;
+// the in-memory sink overwrites by target, so it does not grow.
+func BenchmarkBackend_Render(b *testing.B) {
+	b.ReportAllocs()
+
+	ctx, _, _ := newBenchmarkContext(b, 24)
+
+	for b.Loop() {
+		if err := golang.New().Render(ctx); err != nil {
+			b.Fatalf("Render: %v", err)
+		}
+	}
+}
+
+// newBenchmarkContext builds a [plugin.BackendContext] whose store
+// holds targets structs, each routed to its own file so the render
+// loop iterates a realistic number of targets.
+func newBenchmarkContext(b *testing.B, targets int) (*plugin.BackendContext, *sink.Memory, *diag.Sink) {
+	b.Helper()
+	s := store.New()
+	mem := sink.NewMemory()
+	ctx := &plugin.BackendContext{
+		Store:  s,
+		Reader: store.NewReader(s),
+		Diag:   diag.New(),
+		Sink:   mem,
+		Lang:   "golang",
+	}
+	pkg := &emit.Package{Name: "bench", Path: "example.com/bench"}
+	for i := range targets {
+		name := fmt.Sprintf("Entity%d", i)
+		pkg.Structs = append(pkg.Structs, &emit.Struct{
+			Name:    name,
+			Package: "example.com/bench",
+			Target: emit.Target{
+				Dir:        "bench",
+				Filename:   fmt.Sprintf("entity%d.go", i),
+				Package:    "bench",
+				ImportPath: "example.com/bench",
+			},
+			Fields: []*emit.Field{
+				{Name: "ID", Type: emit.Builtin("string")},
+				{Name: "Count", Type: emit.Builtin("int")},
+				{Name: "Ctx", Type: emit.External("context", "Context")},
+			},
+		})
+	}
+	if err := s.Emit().AddPackage(pkg); err != nil {
+		b.Fatalf("AddPackage: %v", err)
+	}
+	s.Emit().RebuildByTarget()
+	return ctx, mem, diag.New()
 }

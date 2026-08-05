@@ -7,6 +7,7 @@ import (
 	"errors"
 	"maps"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
@@ -3739,6 +3740,188 @@ func TestLayout_ConflictingRoutingIsReported(t *testing.T) {
 		d := run(t, []*directive.Directive{out("mocks/", "usermocks")})
 		if d.HasErrors() {
 			t.Fatalf("one directive must not be reported: %+v", d.Diagnostics())
+		}
+	})
+}
+
+// panickingSetter is a plugin-defined emit kind whose
+// SetOutputPackages panics — the shape the Layout phase invokes
+// directly via dispatchOutputPackages.
+type panickingSetter struct {
+	emit.BaseEmit
+}
+
+// Kind returns the fixture's plugin-defined kind.
+func (*panickingSetter) Kind() kind.Kind { return "test.panicsetter" }
+
+// SetOutputPackages panics, standing in for any plugin-authored
+// code the Layout phase runs.
+func (*panickingSetter) SetOutputPackages(map[string]string) {
+	panic("plugin exploded during output-package dispatch")
+}
+
+// panickingSetterGen queues the panicking value against its origin.
+type panickingSetterGen struct{ origin node.Node }
+
+// Name returns the fixture plugin identifier.
+func (*panickingSetterGen) Name() string { return "boom" }
+
+// Outputs declares a primary and a tagged companion so dispatch has
+// something to report.
+func (*panickingSetterGen) Outputs(_ string) []plugin.Output {
+	return []plugin.Output{{Suffix: "_boom.go"}, {Tag: "test", Suffix: "_boom_test.go"}}
+}
+
+// Generate queues a well-formed contribution plus the panicking one.
+func (g *panickingSetterGen) Generate(ctx *plugin.GeneratorContext) error {
+	prov := emit.Provenance{SetBy: "boom"}
+	ok := &emit.Struct{
+		BaseEmit: emit.BaseEmit{SetByName: "boom", OriginNode: g.origin},
+		Name:     "Thing", Package: "users",
+	}
+	if err := ctx.Store.Emit().AppendOriginSlot(g.origin, "top", ok, prov); err != nil {
+		return err
+	}
+	bad := &panickingSetter{BaseEmit: emit.BaseEmit{
+		SetByName: "boom", OriginNode: g.origin, OutputTagName: "test",
+	}}
+	return ctx.Store.Emit().AppendOriginSlot(g.origin, "top", bad, prov)
+}
+
+// TestLayout_PanicIsContained pins that plugin code panicking inside
+// the Layout phase becomes a diagnostic rather than killing the
+// process.
+//
+// Run's docblock states the containment contract without
+// qualification, but the RecoverAs guard was installed only at the
+// frontend, annotator, generator and backend boundaries. Layout
+// calls SetOutputPackages on every implementing emit value and walks
+// plugin-defined kinds to find them, so it runs plugin-authored code
+// with no guard at all.
+func TestLayout_PanicIsContained(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T) (*diag.Sink, error) {
+		t.Helper()
+		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{SourcePos: position.Pos{File: "internal/users/user.go"}},
+			Name:     "User", Package: "example.com/users",
+		}
+		d := diag.New()
+		p, err := pipeline.New().
+			WithDiag(d).
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&panickingSetterGen{origin: origin}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		return d, p.Run(t.Context(), "x")
+	}
+
+	t.Run("Run returns instead of taking the process down", func(t *testing.T) {
+		t.Parallel()
+		// Reaching the assertion at all is the proof: an unguarded
+		// panic ends the test binary rather than failing this case.
+		if _, err := run(t); err == nil {
+			t.Fatalf("a contained panic must still fail the run")
+		}
+	})
+
+	t.Run("the panic surfaces as a diagnostic naming it", func(t *testing.T) {
+		t.Parallel()
+		// Containment alone is not enough — swallowing the panic
+		// silently would pass the case above while hiding the cause.
+		d, _ := run(t)
+		for _, g := range d.Diagnostics() {
+			if strings.Contains(g.Message, "plugin exploded during output-package dispatch") {
+				return
+			}
+		}
+		t.Fatalf("panic was not reported as a diagnostic; diags=%+v", d.Diagnostics())
+	})
+}
+
+// noOutputsGen is a generator that emits a routable decl while
+// declaring no outputs for the active language — the shape that
+// trips ErrMissingFilenameProvider.
+type noOutputsGen struct {
+	origin node.Node
+	decl   *emit.Struct
+}
+
+// Name returns the fixture plugin identifier.
+func (*noOutputsGen) Name() string { return "noout" }
+
+// Outputs declares nothing, so the decl cannot be routed.
+func (*noOutputsGen) Outputs(_ string) []plugin.Output { return nil }
+
+// Generate registers a package holding the routable decl.
+func (g *noOutputsGen) Generate(ctx *plugin.GeneratorContext) error {
+	return ctx.Store.Emit().AddPackage(&emit.Package{
+		Name: "users", Path: "example.com/users",
+		Structs: []*emit.Struct{g.decl},
+	})
+}
+
+// TestLayout_SentinelsAreMatchable pins that a Layout-phase failure
+// is classifiable with errors.Is.
+//
+// The four Layout sentinels are declared beside twelve Build-time
+// ones, in the same file and the same voice, with docblocks telling
+// consumers to compare with errors.Is. Build-time sentinels are
+// returned as values and matched; Layout-time ones reached the
+// diagnostic sink through Error(), which flattened them to text and
+// severed the chain. A host wanting to special-case "a plugin forgot
+// FilenameProvider" had to substring-match a message, which
+// CONTRIBUTING.md forbids.
+func TestLayout_SentinelsAreMatchable(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T) error {
+		t.Helper()
+		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{SourcePos: position.Pos{File: "internal/users/user.go"}},
+			Name:     "User", Package: "example.com/users",
+		}
+		decl := &emit.Struct{
+			BaseEmit: emit.BaseEmit{SetByName: "noout", OriginNode: origin},
+			Name:     "UserThing", Package: "example.com/users",
+		}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&noOutputsGen{origin: origin, decl: decl}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		return p.Run(t.Context(), "x")
+	}
+
+	t.Run("the specific sentinel matches", func(t *testing.T) {
+		t.Parallel()
+		if err := run(t); !errors.Is(err, pipeline.ErrMissingFilenameProvider) {
+			t.Fatalf("Run error = %v, want it to match ErrMissingFilenameProvider", err)
+		}
+	})
+
+	t.Run("ErrRunHadErrors still matches", func(t *testing.T) {
+		t.Parallel()
+		// Callers matching only the general failure predate this and
+		// must keep working.
+		if err := run(t); !errors.Is(err, pipeline.ErrRunHadErrors) {
+			t.Fatalf("Run error = %v, want it to match ErrRunHadErrors", err)
+		}
+	})
+
+	t.Run("an unrelated sentinel does not match", func(t *testing.T) {
+		t.Parallel()
+		// Joining every sentinel unconditionally would satisfy the
+		// first case while making the classification meaningless.
+		if err := run(t); errors.Is(err, pipeline.ErrUnknownOutputTag) {
+			t.Fatalf("Run error = %v matched a sentinel that did not fire", err)
 		}
 	})
 }

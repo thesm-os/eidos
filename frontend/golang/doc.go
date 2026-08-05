@@ -35,7 +35,7 @@
 // `go.constraintTerms` metadata to the [node.TypeParam]'s
 // constraint rather than inflating [node.Constraint] with
 // Go-specific fields. The full set of `go.*` metadata keys is
-// documented on the constants in [keys.go].
+// documented on the constants in meta.go.
 //
 // # Cache integration
 //

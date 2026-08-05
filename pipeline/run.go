@@ -57,7 +57,7 @@ func (p *Pipeline) Run(ctx context.Context, patterns ...string) error {
 	if p.sink == nil {
 		return ErrNoSink
 	}
-	_ = ctx // reserved for cancellation in a later milestone
+	p.resetRunState()
 
 	// Wrap the configured sink with a recording wrapper so the
 	// pipeline can compose a manifest from every captured write at
@@ -68,19 +68,46 @@ func (p *Pipeline) Run(ctx context.Context, patterns ...string) error {
 
 	s := store.New()
 	p.lastStore.Store(s)
-	p.runFrontends(s, patterns)
-	s.Nodes().Freeze() // post-frontend: node structure is frozen
-	p.runAnnotators(s)
-	p.runDirectiveOverride(s)
-	p.runGenerators(s)
-	p.runLayout(s)    // compose Target on every emit entity before structure freeze
-	s.Emit().Freeze() // post-generator + post-layout: emit structure is frozen
-	p.runBackend(s, recorder)
-	p.writeManifest(recorder, s)
+
+	// Cancellation is checked between phases, not inside them. A
+	// phase boundary is the smallest point the run can be abandoned
+	// without leaving the store half-built: the node graph freezes
+	// after the frontends, the emit graph after layout, and every
+	// later phase assumes those invariants hold.
+	//
+	// This does not bound a single long phase — a frontend loading a
+	// large module graph still runs to completion — but it stops the
+	// run proceeding through every remaining phase after the caller
+	// has given up. Bounding work inside a phase means threading the
+	// context into the plugin contexts so plugins can unwind their
+	// own I/O, which changes four public struct shapes and is a
+	// separate change.
+	phases := []struct {
+		name string
+		run  func()
+	}{
+		{"frontend", func() { p.runFrontends(s, patterns); s.Nodes().Freeze() }},
+		{"annotator", func() { p.runAnnotators(s); p.runDirectiveOverride(s) }},
+		{"generator", func() { p.runGenerators(s) }},
+		{"layout", func() { p.runLayout(s); s.Emit().Freeze() }},
+		{"backend", func() { p.runBackend(s, recorder) }},
+		{"manifest", func() { p.writeManifest(recorder, s) }},
+	}
+	for _, phase := range phases {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%w: cancelled before the %s phase", err, phase.name)
+		}
+		phase.run()
+	}
 	p.logRunSummary()
 
 	if p.diag.HasErrors() {
-		return ErrRunHadErrors
+		// Layout-phase sentinels are joined in so a caller can
+		// classify the failure with errors.Is rather than
+		// substring-matching a diagnostic message. ErrRunHadErrors
+		// stays first so existing callers matching only on it are
+		// unaffected.
+		return errors.Join(append([]error{ErrRunHadErrors}, p.layoutErrors()...)...)
 	}
 	return nil
 }
@@ -109,6 +136,11 @@ func (p *Pipeline) writeManifest(rec *recordingSink, s *store.Store) {
 	if p.manifestPath == "" {
 		return
 	}
+	// Manifest assembly walks plugin-defined emit kinds to attribute
+	// each output to its contributors, so plugin-authored code runs
+	// here too. A panic while composing observability must not lose
+	// a run whose output is already written.
+	defer diag.RecoverAs(p.diag.For("pipeline"), position.Pos{})
 	current := rec.asManifest(time.Now().UTC().Format(time.RFC3339), s, p.pluginNames(), p)
 	prev, _ := manifest.Read(p.manifestPath)
 	merged := mergeManifestPreservingOutOfScope(prev, current)
@@ -298,10 +330,13 @@ func (p *Pipeline) pluginNames() []string {
 // DryRun returns the resolved [Plan] without executing any phase.
 // Tooling such as "eidos explain plan" calls DryRun to display the
 // resolved order and any Build-time diagnostics without writing
-// files. The supplied context is reserved for cancellation in a
-// later milestone.
-func (p *Pipeline) DryRun(ctx context.Context) *Plan {
-	_ = ctx
+// files.
+//
+// The context is accepted for signature symmetry with
+// [Pipeline.Run] and is not consulted: the plan is resolved during
+// Build, so DryRun performs no I/O and executes no phase. There is
+// nothing to cancel.
+func (p *Pipeline) DryRun(_ context.Context) *Plan {
 	return p.plan
 }
 
@@ -504,11 +539,44 @@ func (p *Pipeline) recordCacheKey(name string, r *store.Reader) {
 	scope := cache.HashStrings([]string{p.targetSym, p.outFilename})
 	key := cache.NewKey(
 		"plugin", name,
+		"version", p.pluginVersion(name),
 		"reads", r.ReadSet().Hash(),
 		"routing", routing,
 		"scope", scope,
 	)
 	_ = p.cache.Put(key, []byte(r.ReadSet().Hash())) //nolint:errcheck // best-effort cache marker
+}
+
+// pluginVersion returns the version the named plugin declares via
+// [plugin.Versioned], or the empty string when it declares none.
+//
+// [plugin.Versioned]'s own docblock states that the version composes
+// into the plugin's cache key so a bump invalidates that plugin's
+// entries and no other's — a claim the sdk alias, the cache package
+// doc and the README all repeat. Nothing read it, so a version bump
+// changed no key. This closes that gap: the value is a key
+// component, so a bump produces a different key for the bumping
+// plugin alone.
+//
+// Plugins that declare no version contribute the empty string, which
+// is stable across runs and therefore harmless — they simply have no
+// version dimension in their key.
+func (p *Pipeline) pluginVersion(name string) string {
+	for _, pl := range allPlugins(p.frontends, p.annotators, p.generators, nil) {
+		if pl.Name() != name {
+			continue
+		}
+		if v, ok := any(pl).(plugin.Versioned); ok {
+			return v.Version()
+		}
+		return ""
+	}
+	if p.backend != nil && p.backend.Name() == name {
+		if v, ok := any(p.backend).(plugin.Versioned); ok {
+			return v.Version()
+		}
+	}
+	return ""
 }
 
 // cacheRoutingComponents returns the resolved-policy fields that

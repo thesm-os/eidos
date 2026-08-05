@@ -64,6 +64,19 @@ import (
 // tools can still resolve them.
 func (p *Pipeline) runLayout(s *store.Store) {
 	ps := p.diag.For("pipeline.layout")
+	// Layout runs plugin-authored code: dispatchOutputPackages calls
+	// SetOutputPackages on every implementing emit value, and
+	// emit.Walk traverses plugin-defined kinds to find them. Without
+	// the guard a panic in either escapes the "plugin code that
+	// panics is contained" contract and kills the process.
+	//
+	// The guard is phase-scoped rather than per-plugin: unlike the
+	// frontend and generator loops, Layout has no boundary at which
+	// the next plugin can independently resume — a half-routed emit
+	// graph is not a state later phases can consume. Containing the
+	// panic as a diagnostic and abandoning the phase is the useful
+	// behaviour; continuing would be worse than stopping.
+	defer diag.RecoverAs(ps, position.Pos{})
 	v := s.Emit()
 	outputs := p.collectPluginOutputs()
 
@@ -266,7 +279,7 @@ func composeOrZero(
 			"synthetic %s %q has no Origin; cannot route", kind, qname)
 		return emit.Target{}
 	}
-	suffix, ok := resolveSuffix(ps, outputs, setBy, outputTag, kind, qname)
+	suffix, ok := resolveSuffix(p, ps, outputs, setBy, outputTag, kind, qname)
 	if !ok {
 		return emit.Target{}
 	}
@@ -312,15 +325,15 @@ func composeOrZero(
 // Each failure surfaces an Error diagnostic via ps; the caller
 // drops the decl on a false return.
 func resolveSuffix(
+	p *Pipeline,
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
 	setBy, outputTag, kind, qname string,
 ) (string, bool) {
 	slice, ok := outputs[setBy]
 	if !ok || len(slice) == 0 {
-		ps.Errorf(position.Pos{},
-			"%s: %s %q emitted by %q",
-			ErrMissingFilenameProvider.Error(), kind, qname, setBy)
+		p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q",
+			ErrMissingFilenameProvider, kind, qname, setBy))
 		return "", false
 	}
 	for _, o := range slice {
@@ -329,14 +342,12 @@ func resolveSuffix(
 		}
 	}
 	if outputTag == "" {
-		ps.Errorf(position.Pos{},
-			"%s: %s %q emitted by %q; declared tags: %v",
-			ErrNoDefaultOutput.Error(), kind, qname, setBy, declaredTags(slice))
+		p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q; declared tags: %v",
+			ErrNoDefaultOutput, kind, qname, setBy, declaredTags(slice)))
 		return "", false
 	}
-	ps.Errorf(position.Pos{},
-		"%s: %s %q emitted by %q has OutputTag %q; declared tags: %v",
-		ErrUnknownOutputTag.Error(), kind, qname, setBy, outputTag, declaredTags(slice))
+	p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q has OutputTag %q; declared tags: %v",
+		ErrUnknownOutputTag, kind, qname, setBy, outputTag, declaredTags(slice)))
 	return "", false
 }
 
@@ -502,9 +513,8 @@ func composeTarget(
 		// fires once per offending decl; authors scope the override
 		// with `tag=<tag>` or relax to a directory-only path.
 		if multiOutput && filename != "" && spec.Tag == "" {
-			ps.Errorf(position.Pos{},
-				"%s: %s %q emitted by %q with directive path %q",
-				ErrUnscopedMultiOutputOverride.Error(), kind, qname, pluginName, spec.Path)
+			p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q with directive path %q",
+				ErrUnscopedMultiOutputOverride, kind, qname, pluginName, spec.Path))
 			return emit.Target{}, manifest.ResolvedLayout{}, false
 		}
 		if filename != "" {
@@ -643,7 +653,7 @@ func materialiseOriginSlots(
 		// per-output dispatch the same way decl-level OutputTag
 		// values do.
 		outputTag := tup.Item.OutputTag()
-		suffix, ok := resolveSuffix(ps, outputs, setBy, outputTag, "slot "+tup.SlotName, "")
+		suffix, ok := resolveSuffix(p, ps, outputs, setBy, outputTag, "slot "+tup.SlotName, "")
 		if !ok {
 			continue
 		}
@@ -762,6 +772,18 @@ func dispatchOutputPackages(v *store.EmitView, loc map[originOutputs]map[string]
 		emit.Walk(f, walker)
 		return true
 	})
+}
+
+// reportLayoutErr emits err as an Error diagnostic and retains it
+// for [Pipeline.Run] to join into its return value.
+//
+// Both halves matter and neither replaces the other: the diagnostic
+// is what a human reads, and the retained value is what
+// errors.Is matches. Reporting through the sink alone flattens the
+// sentinel to text, which is the defect this exists to close.
+func (p *Pipeline) reportLayoutErr(ps *diag.PluginSink, err error) {
+	ps.Errorf(position.Pos{}, "%s", err.Error())
+	p.recordLayoutErr(err)
 }
 
 // enforceOneFileOnePackage walks every routable emit entity, groups

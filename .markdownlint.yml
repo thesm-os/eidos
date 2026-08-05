@@ -1,4 +1,4 @@
-# testkit markdownlint configuration.
+# eidos markdownlint configuration.
 # Rules: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
 
 # Line length — disabled. README and docs have tables,

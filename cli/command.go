@@ -46,10 +46,16 @@ const (
 	// trip in production. The diagnostic includes a stack trace.
 	ExitInternalError = 3
 
-	// ExitCacheVerifyFailed reports that `run --verify-cache`
-	// recomputed an output that disagreed byte-for-byte with the
-	// cached value. Cache corruption or non-deterministic plugin
-	// output.
+	// ExitCacheVerifyFailed is reserved for a cache-verification
+	// command that does not exist yet: recomputing an output and
+	// finding it disagrees byte-for-byte with a cached value.
+	//
+	// Nothing returns it. The value is held rather than reused so
+	// exit-code numbering stays stable if verification lands, and
+	// so a script matching on 4 never sees it mean something else.
+	// Implementing it needs a cache that stores recoverable output;
+	// the pipeline's entry is a fingerprint over reads, routing and
+	// scope, so there is nothing to compare against.
 	ExitCacheVerifyFailed = 4
 
 	// ExitCheckDrift reports that the `check` command found the

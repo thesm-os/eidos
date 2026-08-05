@@ -43,7 +43,7 @@ The mock plugin emits a struct anchored on `Store`. The Layout
 phase reads the anchor and resolves placement:
 
 - **Dir** — source dir (where `store.go` lives).
-- **Filename** — `<source-basename><plugin.FilenameSuffix>` →
+- **Filename** — `<source-basename><plugin.Output.Suffix>` →
   `store_mock.go` for the mock plugin (`_mock.go` suffix) and
   `store_mock_test.go` for the mocktest companion.
 - **Package** — source package, `store`, unless the filename ends
@@ -197,7 +197,7 @@ anchor's source package and stamps the anchor as the default
 `Origin` on every decl built through `b` — no per-decl
 `s.Origin(srcNode)` needed. The plugin separately declares its
 filename suffix via the `FilenameProvider` capability
-(`FilenameSuffix(lang) string`).
+(`Outputs(lang) []Output`).
 
 Plugins **never** call `Package(name, path)` with non-empty
 arguments (that signals "no opinion"; the framework fills both
