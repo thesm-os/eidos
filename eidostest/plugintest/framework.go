@@ -11,6 +11,7 @@ import (
 
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/plugin"
+	"go.thesmos.sh/eidos/priority"
 )
 
 // RunSuite runs every framework-conformance check applicable to
@@ -41,6 +42,9 @@ func RunSuite(t *testing.T, p plugin.Plugin) {
 	})
 	t.Run("implements at least one of the documented role interfaces", func(t *testing.T) {
 		assertImplementsARole(t, p)
+	})
+	t.Run("CapabilityProvider is implemented in full or not at all", func(t *testing.T) {
+		assertCapabilityProviderIsComplete(t, p)
 	})
 	t.Run("CapabilityProvider returns deterministic Provides + Requires", func(t *testing.T) {
 		assertCapabilityProviderStability(t, p)
@@ -183,6 +187,62 @@ func assertImplementsARole(tb testing.TB, p plugin.Plugin) {
 			"(Frontend / Annotator / Generator / Backend); pipeline would never invoke it",
 		p,
 	)
+}
+
+// assertCapabilityProviderIsComplete fails a plugin that declares
+// [plugin.CapabilityProvider.Priority] without the rest of the
+// interface.
+//
+// CapabilityProvider is all-or-nothing: Priority, Provides and
+// Requires together. A plugin declaring only some of them does not
+// satisfy the interface, so the pipeline's type assertion fails and
+// the plugin collapses into the default priority bucket — executing
+// in registration order, with the ordering its author wrote down
+// silently discarded. Nothing else reports it: the pipeline sees a
+// plugin that opted out, which is legal.
+//
+// This check exists because [assertCapabilityProviderStability]
+// structurally cannot catch it. That check opens with a
+// CapabilityProvider assertion and returns when it fails, so it is
+// unreachable in exactly the case that is broken. The partial
+// implementation has now shipped twice — once in the protobuf-to-Go
+// bridge, once across all three shape plugins — which is what a
+// silent failure mode looks like from the outside.
+//
+// Declaring none of the three is fine and common: ordering is then
+// the caller's registration order by design.
+func assertCapabilityProviderIsComplete(tb testing.TB, p plugin.Plugin) {
+	tb.Helper()
+	if _, ok := any(p).(plugin.CapabilityProvider); ok {
+		return
+	}
+	// Probing for Priority alone is what separates "opted out" from
+	// "tried to opt in and missed". Its presence is an author
+	// declaring an ordering intent the pipeline is not reading.
+	if _, declared := any(p).(interface {
+		Priority() priority.Priority
+	}); !declared {
+		return
+	}
+	_, hasProvides := any(p).(interface{ Provides() []string })
+	_, hasRequires := any(p).(interface{ Requires() []string })
+	tb.Errorf("plugin %q declares Priority() but not %s, so it does not satisfy "+
+		"plugin.CapabilityProvider: the pipeline ignores the declared priority "+
+		"and runs the plugin in the default bucket, in registration order",
+		p.Name(), missingCapabilityMethods(hasProvides, hasRequires))
+}
+
+// missingCapabilityMethods renders the absent half of the
+// [plugin.CapabilityProvider] method set for the diagnostic above.
+func missingCapabilityMethods(hasProvides, hasRequires bool) string {
+	switch {
+	case !hasProvides && !hasRequires:
+		return "Provides() or Requires()"
+	case !hasProvides:
+		return "Provides()"
+	default:
+		return "Requires()"
+	}
 }
 
 // assertCapabilityProviderStability pins the deterministic-

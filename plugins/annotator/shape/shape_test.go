@@ -10,6 +10,7 @@ import (
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/meta"
+	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
@@ -552,4 +553,19 @@ func assertMeta(t *testing.T, bag *meta.Bag, k meta.Key[string], want string) {
 	if got != want {
 		t.Fatalf("%s = %q, want %q", k.Name(), got, want)
 	}
+}
+
+// TestShapeConformance runs the framework conformance suite over
+// the shape annotator.
+//
+// The three shape plugins previously ran no conformance suite at
+// all, which is how each came to declare Priority() without the rest
+// of plugin.CapabilityProvider — satisfying nothing, so the pipeline
+// ignored the declared ordering and ran all three in the default
+// bucket, in registration order. The suite's completeness check
+// catches that shape directly; wiring the plugins into the suite is
+// what makes the check reach them.
+func TestShapeConformance(t *testing.T) {
+	t.Parallel()
+	plugintest.RunSuite(t, shape.New())
 }

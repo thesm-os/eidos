@@ -10,6 +10,7 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
@@ -422,4 +423,19 @@ func assertContainsDiag(t *testing.T, diags []diag.Diag, sev diag.Severity, subs
 	}
 	t.Fatalf("no %v diagnostic containing %q; got %d diags: %+v",
 		sev, substr, len(diags), diags)
+}
+
+// TestResolverConformance runs the framework conformance suite over
+// the partner resolver.
+//
+// The three shape plugins previously ran no conformance suite at
+// all, which is how each came to declare Priority() without the rest
+// of plugin.CapabilityProvider — satisfying nothing, so the pipeline
+// ignored the declared ordering and ran all three in the default
+// bucket, in registration order. The suite's completeness check
+// catches that shape directly; wiring the plugins into the suite is
+// what makes the check reach them.
+func TestResolverConformance(t *testing.T) {
+	t.Parallel()
+	plugintest.RunSuite(t, shape.New().Resolver())
 }

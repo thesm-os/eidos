@@ -71,6 +71,24 @@ func (*Validator) Name() string { return ValidatorName }
 // bucket so it runs strictly after the resolver.
 func (*Validator) Priority() sdk.Priority { return sdk.AnnotatorValidation }
 
+// Provides returns nil: the contract validator publishes its results as metadata
+// keys rather than as a named capability, so nothing can usefully
+// declare a dependency on the label.
+//
+// The method exists because [plugin.CapabilityProvider] is an
+// all-or-nothing interface — Priority, Provides and Requires
+// together. Declaring Priority alone does not satisfy it, so the
+// pipeline's type assertion fails and the plugin silently collapses
+// into the default bucket, discarding the ordering Priority was
+// declared to express.
+func (*Validator) Provides() []string { return nil }
+
+// Requires returns nil. Ordering within the annotator phase comes
+// from [Validator.Priority]; expressing it as a capability
+// dependency instead would make registering the plugins
+// individually a hard error rather than a caller's choice.
+func (*Validator) Requires() []string { return nil }
+
 // Annotate delegates to the framework's annotator walk via
 // [sdk.Walk]; per-callable required-partner checks live in
 // [Validator.OnMethod] and [Validator.OnFunction]; per-contract

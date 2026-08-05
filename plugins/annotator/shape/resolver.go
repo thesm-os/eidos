@@ -76,6 +76,24 @@ func (*Resolver) Name() string { return ResolverName }
 // so it runs strictly after the umbrella plugin's stamping pass.
 func (*Resolver) Priority() sdk.Priority { return sdk.AnnotatorRefinement }
 
+// Provides returns nil: the partner resolver publishes its results as metadata
+// keys rather than as a named capability, so nothing can usefully
+// declare a dependency on the label.
+//
+// The method exists because [plugin.CapabilityProvider] is an
+// all-or-nothing interface — Priority, Provides and Requires
+// together. Declaring Priority alone does not satisfy it, so the
+// pipeline's type assertion fails and the plugin silently collapses
+// into the default bucket, discarding the ordering Priority was
+// declared to express.
+func (*Resolver) Provides() []string { return nil }
+
+// Requires returns nil. Ordering within the annotator phase comes
+// from [Resolver.Priority]; expressing it as a capability
+// dependency instead would make registering the plugins
+// individually a hard error rather than a caller's choice.
+func (*Resolver) Requires() []string { return nil }
+
 // Annotate delegates to the framework's annotator walk via
 // [sdk.Walk]; per-callable resolution lives in [Resolver.OnMethod]
 // and [Resolver.OnFunction].

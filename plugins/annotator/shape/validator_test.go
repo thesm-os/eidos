@@ -8,6 +8,7 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
@@ -345,4 +346,19 @@ func runFullPipeline(t *testing.T, c shape.Contract, pkg *node.Package) []diag.D
 		t.Fatalf("validator.Annotate: %v", err)
 	}
 	return sink.Diagnostics()
+}
+
+// TestValidatorConformance runs the framework conformance suite over
+// the contract validator.
+//
+// The three shape plugins previously ran no conformance suite at
+// all, which is how each came to declare Priority() without the rest
+// of plugin.CapabilityProvider — satisfying nothing, so the pipeline
+// ignored the declared ordering and ran all three in the default
+// bucket, in registration order. The suite's completeness check
+// catches that shape directly; wiring the plugins into the suite is
+// what makes the check reach them.
+func TestValidatorConformance(t *testing.T) {
+	t.Parallel()
+	plugintest.RunSuite(t, shape.New().Validator())
 }

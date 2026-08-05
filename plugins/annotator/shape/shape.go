@@ -250,6 +250,24 @@ func (*Plugin) Name() string { return PluginName }
 // single priority band.
 func (*Plugin) Priority() sdk.Priority { return sdk.AnnotatorShape }
 
+// Provides returns nil: the shape annotator publishes its results as metadata
+// keys rather than as a named capability, so nothing can usefully
+// declare a dependency on the label.
+//
+// The method exists because [plugin.CapabilityProvider] is an
+// all-or-nothing interface — Priority, Provides and Requires
+// together. Declaring Priority alone does not satisfy it, so the
+// pipeline's type assertion fails and the plugin silently collapses
+// into the default bucket, discarding the ordering Priority was
+// declared to express.
+func (*Plugin) Provides() []string { return nil }
+
+// Requires returns nil. Ordering within the annotator phase comes
+// from [Plugin.Priority]; expressing it as a capability
+// dependency instead would make registering the plugins
+// individually a hard error rather than a caller's choice.
+func (*Plugin) Requires() []string { return nil }
+
 // Directives declares the `+gen:shape` and `+gen:contract`
 // schemas. The framework's directive registry holds exactly one
 // owner per directive name; registering this plugin twice in one
