@@ -55,9 +55,11 @@ These are guarantees the library provides, tested in CI:
   concurrently; backend per-file rendering is concurrency-safe; the
   Store and emit graph are race-detector clean and enforce mutability
   windows per phase.
-- **Caching.** Per-plugin, per-input cache keys; bumping a plugin's
-  version (via the optional `Versioned` capability) invalidates only
-  that plugin's outputs.
+- **Caching.** Frontends cache their parsed source graph and skip
+  re-conversion on a hit. The pipeline additionally records a
+  per-plugin, per-input fingerprint (reads + routing + scope) that
+  tooling can consult to answer "did this plugin run against these
+  inputs"; it is not consulted to skip work.
 - **Panic isolation.** A plugin that panics produces an `Error`
   diagnostic with a stack trace; subsequent plugins still run; the
   pipeline returns a structured error rather than a raw panic.

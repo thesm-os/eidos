@@ -76,21 +76,25 @@ func loadPattern(ctx *plugin.FrontendContext, opts Options) error {
 		return nil
 	}
 	// Cache consultation: the frontend composes a content-addressed
-	// key from the resolved descriptor set + its declared options
-	// and version, consults the configured cache, and stores an
-	// entry for the next run. The stored payload is the serialized
-	// node-graph form once the converter populates it; consumers
-	// reading the cache treat an empty body as the no-payload
-	// sentinel and fall through to a fresh parse.
+	// key from the resolved descriptor set plus its declared options
+	// and version. On a hit the stored node graph is deserialised
+	// and registered directly, skipping conversion; on a miss the
+	// freshly-converted graph is stored for the next run.
+	//
+	// Both routes go through addPackages so a cached run and a fresh
+	// one register the same thing.
 	descriptors := make([]protoreflect.FileDescriptor, 0, len(resolved))
 	for _, f := range resolved {
 		descriptors = append(descriptors, f)
 	}
 	key := composeCacheKey(ps, opts, descriptors)
-	if _, hit := consultCache(ctx.Cache, key); !hit {
-		storeCache(ctx.Cache, ps, key, nil)
+	if pkgs, hit := loadPackagesFromCache(ctx.Cache, key); hit {
+		addPackages(ctx, ps, pkgs)
+		return nil
 	}
-	convertFiles(ctx, ps, descriptors)
+	pkgs := convertFiles(ctx, ps, descriptors)
+	storePackagesInCache(ctx.Cache, ps, key, pkgs)
+	addPackages(ctx, ps, pkgs)
 	return nil
 }
 

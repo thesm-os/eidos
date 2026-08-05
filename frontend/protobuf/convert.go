@@ -32,7 +32,7 @@ import (
 func convertFiles(
 	ctx *plugin.FrontendContext, ps *diag.PluginSink,
 	descriptors []protoreflect.FileDescriptor,
-) {
+) []*node.Package {
 	sorted := sortDescriptors(descriptors)
 	pkgs := map[string]*node.Package{}
 	order := []string{}
@@ -54,13 +54,27 @@ func convertFiles(
 		convertMessages(ctx, pkg, fd)
 		convertServices(ctx, pkg, fd)
 	}
+	out := make([]*node.Package, 0, len(order))
 	for _, qualifier := range order {
 		pkg := pkgs[qualifier]
 		dedupeImports(pkg)
+		out = append(out, pkg)
+	}
+	return out
+}
+
+// addPackages registers each converted package with the store.
+//
+// Split from [convertFiles] so a cache hit, which produces packages
+// by deserialisation rather than conversion, joins the same
+// registration path. Both routes must agree on what lands in the
+// store, or a cached run and a fresh one diverge.
+func addPackages(ctx *plugin.FrontendContext, ps *diag.PluginSink, pkgs []*node.Package) {
+	for _, pkg := range pkgs {
 		if err := ctx.Store.Nodes().AddPackage(pkg); err != nil {
 			ps.Errorf(
 				position.Pos{File: firstFilePath(pkg)},
-				"protobuf: add package %s: %v", qualifier, err,
+				"protobuf: add package %s: %v", pkg.Path, err,
 			)
 		}
 	}

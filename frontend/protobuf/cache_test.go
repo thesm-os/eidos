@@ -198,3 +198,64 @@ func (r *recordingCache) lastKeyValue() string {
 // Compile-time assertion that recordingCache satisfies the
 // framework's cache surface.
 var _ cache.Cache = (*recordingCache)(nil)
+
+// TestLoadPattern_CacheHitSkipsConversion pins that the protobuf
+// frontend's cache actually avoids work.
+//
+// The read path previously computed a key, discarded the hit body,
+// stored a nil payload, and re-converted unconditionally — a no-op
+// that wrote one empty file per pattern and changed nothing. The
+// assertion that matters is not "a second run succeeds" but "a
+// second run produces the same graph without the descriptors", which
+// only a real payload can satisfy.
+func TestLoadPattern_CacheHitSkipsConversion(t *testing.T) {
+	t.Parallel()
+
+	root := cacheFixtureRoot(t, "simple")
+	rec := newRecordingCache()
+
+	first := loadCountingPackages(t, root, rec)
+	if first == 0 {
+		t.Fatalf("fixture produced no packages; the test cannot tell a hit from a miss")
+	}
+	// A non-empty stored body is what separates a working cache from
+	// the no-op this replaced: the old path stored nil, so both runs
+	// re-converted and any count-based assertion passed regardless.
+	body, ok := rec.store[rec.lastKey]
+	if !ok || len(body) == 0 {
+		t.Fatalf("cache holds no payload under %q; a hit cannot skip conversion", rec.lastKey)
+	}
+
+	// The key is content-addressed over the descriptors, so a second
+	// run must use the same root to hit at all. The payload check
+	// above is what proves the hit was served from storage rather
+	// than re-converted.
+	second := loadCountingPackages(t, root, rec)
+	if second != first {
+		t.Fatalf("cached run registered %d packages, want %d — a hit must reproduce the graph",
+			second, first)
+	}
+}
+
+// loadCountingPackages runs the frontend against root with rec as
+// its cache and returns how many packages landed in the store.
+func loadCountingPackages(t *testing.T, root string, rec *recordingCache) int {
+	t.Helper()
+	f := protobuf.New()
+	if err := f.SetOptions(opt.New(f.OptionsSchema(), map[string]string{"dir": root})); err != nil {
+		t.Fatalf("SetOptions: %v", err)
+	}
+	s := store.New()
+	ctx := &plugin.FrontendContext{
+		Store:    s,
+		Diag:     diag.New(),
+		Registry: directive.NewRegistry(),
+		Parser:   directive.DefaultParser(),
+		Cache:    rec,
+		Pattern:  "./...",
+	}
+	if err := f.Load(ctx); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return s.Nodes().Packages().Len()
+}

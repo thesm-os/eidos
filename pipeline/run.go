@@ -484,9 +484,17 @@ func (p *Pipeline) invokeGenerator(gen plugin.Generator, s *store.Store) {
 //     filename override). Either flip invalidates every plugin's
 //     cache key for the run.
 //
-// Cache layers that consume the marker can later detect "this
-// plugin ran with these inputs (reads + routing + scope)" for
-// skip-on-hit optimisations.
+// The entry is a fingerprint, not a memo. Nothing reads it to skip
+// a phase, and the stored body is the same read-set hash already
+// embedded in the key, so it carries no recoverable output. Its
+// value is answering "did this plugin run against these inputs" —
+// which `eidos explain` is the natural consumer of.
+//
+// Making it skip-on-hit is not a small change: a generator's output
+// is emit contributions, and the emit graph is a live object graph
+// with owner and slot back-pointers, not a byte payload. Frontends
+// cache their node graph and do skip on a hit; see
+// [frontend/golang] for the working shape.
 //
 // Errors from the cache are silently dropped because the cache is
 // best-effort: a failed write is no worse than running without a

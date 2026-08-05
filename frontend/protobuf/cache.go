@@ -6,6 +6,7 @@ package protobuf
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -16,6 +17,7 @@ import (
 	"go.thesmos.sh/eidos/cache"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/position"
+	"go.thesmos.sh/eidos/node"
 )
 
 // composeCacheKey returns the per-plugin cache key for one
@@ -186,19 +188,6 @@ func protoFileToDescriptorProto(
 	}, true
 }
 
-// consultCache reads the prior cached entry under key from c.
-// Returns (body, true) on hit; (nil, false) on miss or any cache
-// error. The body is opaque to this helper — callers interpret
-// it (a serialized node-graph form once the converter populates
-// the store; an empty marker until then) and decide whether to
-// short-circuit a fresh parse.
-func consultCache(c cache.Cache, key string) ([]byte, bool) {
-	if c == nil {
-		return nil, false
-	}
-	return c.Get(key)
-}
-
 // storeCache writes body to c under key. Cache-write failures
 // surface as Warn diagnostics through ps; the cache is
 // observability for the frontend, not correctness, so a
@@ -210,4 +199,54 @@ func storeCache(c cache.Cache, ps *diag.PluginSink, key string, body []byte) {
 	if err := c.Put(key, body); err != nil {
 		ps.Warnf(position.Pos{}, "protobuf: cache put failed: %v", err)
 	}
+}
+
+// loadPackagesFromCache attempts to read a previously-converted node
+// graph for key from c. On hit it deserialises the payload and
+// reconstructs each package's back-pointers via [node.RewireOwners];
+// on miss, an empty payload, or any decode error it returns
+// (nil, false) so the caller falls back to a fresh conversion.
+//
+// An empty body is treated as a miss rather than as "zero packages".
+// Earlier revisions of this frontend stored a nil payload as a
+// presence marker, so an empty entry means "a previous run recorded
+// the key but never wrote a graph" — honouring it as a hit would
+// silently convert nothing.
+//
+// Cache errors are swallowed deliberately: a corrupt entry is
+// equivalent to a miss, and stale cache state must never block a
+// run.
+func loadPackagesFromCache(c cache.Cache, key string) ([]*node.Package, bool) {
+	if c == nil {
+		return nil, false
+	}
+	body, ok := c.Get(key)
+	if !ok || len(body) == 0 {
+		return nil, false
+	}
+	var pkgs []*node.Package
+	if err := json.Unmarshal(body, &pkgs); err != nil { //nolint:musttag // node types carry JSON tags transitively
+		return nil, false
+	}
+	for _, pkg := range pkgs {
+		node.RewireOwners(pkg)
+	}
+	return pkgs, true
+}
+
+// storePackagesInCache serialises pkgs and writes them to c under
+// key. Write failures surface as Warn diagnostics through
+// [storeCache] — the cache is an optimisation, not correctness, so a
+// full disk must not fail the run.
+//
+// Marshalling a node graph cannot fail in practice: every reachable
+// field is JSON-encodable and back-pointer cycles are broken by
+// `json:"-"` on Owner fields. The error is dropped as an unreachable
+// contract violation.
+func storePackagesInCache(c cache.Cache, ps *diag.PluginSink, key string, pkgs []*node.Package) {
+	if c == nil || len(pkgs) == 0 {
+		return
+	}
+	body, _ := json.Marshal(pkgs) //nolint:errcheck,musttag // node graphs are JSON-safe by construction
+	storeCache(c, ps, key, body)
 }

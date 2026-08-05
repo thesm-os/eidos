@@ -1,11 +1,22 @@
 // Copyright Thesmos B.V. 2026
 // SPDX-License-Identifier: MIT
 
-// Package cache is the content-addressed store the pipeline uses to
-// memoise plugin outputs between runs. A cache key is the hash of
-// every input that determined the cached value — the plugin's
-// version plus the [store.ReadSet] it observed — so a fresh hit is
-// equivalent to a fresh recompute.
+// Package cache is the content-addressed store used to memoise work
+// between runs. A cache key is the hash of every input that
+// determined the cached value, so a hit is equivalent to a fresh
+// recompute.
+//
+// Two consumers exist today, and they differ in what a hit buys:
+//
+//   - Frontends store their converted node graph under a key derived
+//     from the source inputs, and skip conversion entirely on a hit.
+//     This is the only place a hit avoids work.
+//   - The pipeline records a per-plugin fingerprint over the reads,
+//     routing and scope a plugin observed. Nothing consults it to
+//     skip a phase; skipping a generator would mean reconstructing
+//     its emit contributions, and the emit graph is a live object
+//     graph with owner and slot back-pointers rather than a byte
+//     payload. Treat the entry as observability.
 //
 // The package exposes the [Cache] interface and two implementations:
 //
