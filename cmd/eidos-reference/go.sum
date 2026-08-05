@@ -10,8 +10,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-go.thesmos.sh/eidos/eidostest v1.4.0 h1:hPVyvCuyJpCr8L8FZ0cbhGBL+czs2ogvfpPpFjscz8c=
-go.thesmos.sh/eidos/eidostest v1.4.0/go.mod h1:9atQcoQ2sIAVEfGj90xCYAhNn17JUaxiRGAv1Mt2ocs=
+go.thesmos.sh/eidos/eidostest v1.5.0 h1:bWRJkJoKCZe1mVEcGKjdiDCa+tawcDoFwccd508ojJA=
+go.thesmos.sh/eidos/eidostest v1.5.0/go.mod h1:e3kc2q8Ttkiwy17QKKojpz/nwN59eI7ou1N8OW0e63k=
 golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=
 golang.org/x/mod v0.38.0/go.mod h1:V6Xz0pq8TQ3dGqVQ1FVHuelZpAL0uNhSkk9ogYP3c40=
 golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
