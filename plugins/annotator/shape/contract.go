@@ -170,6 +170,8 @@ const contractStampedBy = PluginName + ".contract"
 // already passed parse-time validation.
 func (p *Plugin) applyContracts(bag *meta.Bag, dirs []*directive.Directive) {
 	for _, d := range dirs {
+		// The negated guard is defence-in-depth: the schema denies
+		// that form, so it cannot arrive from parsed source.
 		if d == nil || d.Name != ContractDirectiveName || d.Negated {
 			continue
 		}

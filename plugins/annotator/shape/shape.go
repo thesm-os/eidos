@@ -31,6 +31,11 @@ const PluginName = "shape"
 // shape name; optional `key=` and `value=` modifiers populate the
 // matching `shape.key_type` / `shape.value_type` meta keys
 // verbatim.
+//
+// `-gen:shape` is rejected. Suppressing an inferred shape is a
+// coherent thing to want and is not implemented; the form is denied
+// so it fails at the source line rather than parsing and leaving
+// detection to stamp a shape regardless.
 const DirectiveName sdk.DirectiveName = "shape"
 
 // ContractDirectiveName is the `+gen:` directive consumers write
@@ -54,6 +59,9 @@ const DirectiveName sdk.DirectiveName = "shape"
 // `role=` is mandatory; every other KV pair (besides reserved
 // keys) is interpreted as a partner reference keyed by the
 // partner's role within the same contract.
+//
+// `-gen:contract` is rejected. A membership exists only where one
+// is declared, so removing the directive is the suppression.
 const ContractDirectiveName sdk.DirectiveName = "contract"
 
 // DetectFunc is the per-language detection signature. The umbrella
@@ -254,11 +262,22 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 					"Positional `name` (or `kind=<name>`) carries the canonical shape; "+
 					"optional `key=<type>` and `value=<type>` populate the matching "+
 					"shape.key_type / shape.value_type meta keys. User-supplied stamps "+
-					"win over per-shape detector inference.",
+					"win over per-shape detector inference. The negated form is "+
+					"rejected: shapes are inferred whether or not you ask, so "+
+					"suppressing one is meaningful and is not implemented yet — "+
+					"until it is, `-gen:shape` would parse and do nothing.",
 			).
 			Positional("name").
 			AllowedKeys("kind", "key", "value").
 			AllowExtraPositional().
+			// Placeholder, not policy. Unlike contract and mixin, a
+			// shape exists without anyone asking for it, so "do not
+			// classify this" is a real thing to want and there is no
+			// way to say it today — `+gen:shape` stamps whatever name
+			// it is given. Denying is the reversible half: the form
+			// errors loudly now, and lifting the denial later is
+			// additive to every consumer.
+			DenyNegation().
 			Build(),
 		sdk.NewDirective(ContractDirectiveName).
 			Describe(
@@ -267,10 +286,17 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 					"mandatory `role=<role>` names this callable's role within "+
 					"the contract; every other KV pair names a partner role and "+
 					"the sibling callable filling it (resolved by the refinement "+
-					"resolver into a qualified name).",
+					"resolver into a qualified name). The negated form is "+
+					"rejected: a membership exists only where one is declared, "+
+					"so deleting the line is the suppression.",
 			).
 			Positional("name", sdk.Required()).
 			RequiredKeys("role").
+			// Permanent, unlike the shape schema's denial. Contract
+			// membership comes only from reading these directives —
+			// nothing is inferred — so there is never anything for a
+			// negated form to suppress. Same reasoning as mixin.
+			DenyNegation().
 			Build(),
 		sdk.NewDirective(MixinDirectiveName).
 			Describe(
@@ -384,11 +410,19 @@ func (p *Plugin) handle(
 }
 
 // matchFromDirective extracts a structural-shape stamp from the
-// first non-negated `+gen:shape` directive on the callable.
-// Returns `(Match{}, false)` when no usable directive is present.
+// first `+gen:shape` directive on the callable. Returns
+// `(Match{}, false)` when no usable directive is present.
 // Validation of malformed directives surfaces as a positioned
 // diagnostic from the framework's directive validator at Build
 // time, not from this plugin at runtime.
+//
+// The negated guard is defence-in-depth for callers that build
+// [directive.Directive] values directly; the schema denies the form,
+// so it cannot arrive from parsed source. Skipping is deliberately
+// not suppression — a negated directive that reached here would
+// fall through to detection and be stamped anyway, which is why the
+// schema rejects it rather than letting it read as a suppression
+// that silently does nothing.
 func matchFromDirective(dirs []*directive.Directive) (Match, bool) {
 	for _, d := range dirs {
 		if d == nil || d.Name != DirectiveName || d.Negated {
