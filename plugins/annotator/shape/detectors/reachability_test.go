@@ -69,7 +69,13 @@ func refIterSeq(elem *node.TypeRef) *node.TypeRef {
 // whose predicate is fine.
 func paramSpace() [][]*node.Param {
 	doc := refNamed("example.com/x", "Doc")
-	pool := []*node.TypeRef{refBuiltin("string"), refPointer(doc), refNamed("io", "Reader")}
+	pool := []*node.TypeRef{
+		refBuiltin("string"), refPointer(doc), refNamed("io", "Reader"),
+		// Parameters with no equality, which `reader` refuses as
+		// keys. Present so that rule is measured rather than assumed.
+		refSlice(refBuiltin("string")),
+		{TypeKind: node.TypeRefAnonInterface},
+	}
 
 	var positional [][]*node.Param
 	var grow func(cur []*node.Param, depth int)

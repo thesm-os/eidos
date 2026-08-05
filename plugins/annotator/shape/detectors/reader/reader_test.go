@@ -165,6 +165,73 @@ func TestDetector_RejectsNonReader(t *testing.T) {
 	}
 }
 
+// TestDetector_RejectsUnkeyableParams pins the key contract: the
+// stamp asserts the parameter *is* a key, so a parameter Go gives
+// no equality — slice, map, func — cannot carry it, and neither can
+// an inline interface whose value may not be re-readable.
+//
+// A named interface (io.Reader) is deliberately absent: it is
+// opaque in the node IR and still detects, pending a frontend
+// interface-ness stamp.
+func TestDetector_RejectsUnkeyableParams(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		param *node.TypeRef
+	}{
+		{"slice key has no equality", &node.TypeRef{
+			TypeKind: node.TypeRefSlice, Elem: &node.TypeRef{Name: "string"},
+		}},
+		{"map key has no equality", &node.TypeRef{
+			TypeKind: node.TypeRefMap,
+			MapKey:   &node.TypeRef{Name: "string"},
+			MapValue: &node.TypeRef{Name: "string"},
+		}},
+		{"func key has no equality", &node.TypeRef{TypeKind: node.TypeRefFunc}},
+		{"inline interface may not re-read", &node.TypeRef{
+			TypeKind: node.TypeRefAnonInterface,
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fn := readerFunc("Get", true)
+			fn.Params[len(fn.Params)-1].Type = tc.param
+			runDetectFunc(t, fn)
+			if shape.IsStamped(fn.Meta()) {
+				t.Fatalf("expected no stamp for %s; got shape=%q with key_type=%q",
+					tc.name, shape.Get(fn.Meta()), keyTypeOf(t, fn))
+			}
+		})
+	}
+}
+
+// TestDetector_NamedInterfaceKeyIsAKnownGap documents the case the
+// keyable check cannot yet reach, so the limit is asserted rather
+// than assumed. When the frontend stamps interface-ness on refs and
+// [reader] consumes it, this test is the one that must flip.
+func TestDetector_NamedInterfaceKeyIsAKnownGap(t *testing.T) {
+	t.Parallel()
+
+	fn := readerFunc("Load", true)
+	fn.Params[len(fn.Params)-1].Type = &node.TypeRef{Name: "Reader", Package: "io"}
+	runDetectFunc(t, fn)
+
+	if !shape.IsStamped(fn.Meta()) {
+		t.Fatalf("io.Reader key no longer detects as a reader; if the frontend now " +
+			"stamps interface-ness, fold the named case into keyable and delete this test")
+	}
+	assertShape(t, fn.Meta(), reader.Name, "io.Reader", "x.Article")
+}
+
+// keyTypeOf reports the stamped key type, for failure messages.
+func keyTypeOf(t *testing.T, fn *node.Function) string {
+	t.Helper()
+	got, _ := shape.MetaKeyType.Get(fn.Meta())
+	return got
+}
+
 // readerFunc builds a free [node.Function] matching the
 // canonical reader signature, optionally including a leading
 // context parameter.
