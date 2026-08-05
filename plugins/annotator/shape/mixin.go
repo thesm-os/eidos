@@ -152,10 +152,7 @@ const mixinStampedBy = PluginName + ".mixin"
 // conditional on the arg count, which [directive.Schema] cannot
 // express, and it has to be checked while the directive is intact,
 // so it lives here. See [Plugin.reportAmbiguousMixinParams].
-//
-// sink may be nil when a caller drives the stamping pass without a
-// context; the parameter diagnostic is then dropped rather than
-// panicking.
+
 func (p *Plugin) applyMixins(
 	host node.Node, bag *meta.Bag, dirs []*directive.Directive, sink *diag.PluginSink,
 ) {
@@ -212,9 +209,6 @@ func (p *Plugin) applyMixins(
 // The name is not stamped, so downstream consumers never observe a
 // mixin the pipeline cannot describe.
 func reportUnregisteredMixin(host node.Node, name string, sink *diag.PluginSink) {
-	if sink == nil {
-		return
-	}
 	sink.Errorf(host.Pos(),
 		"shape.mixin: %q is not registered with this pipeline. Check the spelling, "+
 			"register the mixin, or — if it was meant as a parameter — note that mixin "+
@@ -231,9 +225,6 @@ func reportUnregisteredMixin(host node.Node, name string, sink *diag.PluginSink)
 func (*Plugin) reportAmbiguousMixinParams(
 	host node.Node, d *directive.Directive, sink *diag.PluginSink,
 ) {
-	if sink == nil {
-		return
-	}
 	keys := slices.Sorted(maps.Keys(d.KV))
 	sink.Errorf(host.Pos(),
 		"shape.mixin: %d parameter(s) %v supplied with %d mixin names %v; "+

@@ -215,8 +215,9 @@ func paramSet(params []string) map[string]struct{} {
 
 // contractNameFromDirective returns the contract name declared by
 // d — the first positional argument. Returns empty when no
-// positional was supplied (the framework validator rejects this
-// at parse time; the runtime guard is defence-in-depth).
+// positional was supplied; the schema marks the slot Required, so
+// that cannot arrive from parsed source, and the guard covers
+// callers that build [directive.Directive] values directly.
 func contractNameFromDirective(d *directive.Directive) string {
 	if len(d.Args) > 0 {
 		return d.Args[0]

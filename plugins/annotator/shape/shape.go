@@ -6,7 +6,6 @@ package shape
 import (
 	"sort"
 
-	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/node"
@@ -263,14 +262,14 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 			Build(),
 		sdk.NewDirective(ContractDirectiveName).
 			Describe(
-				"Declares the annotated callable's membership in a named " +
-					"contract. Positional `name` carries the contract name; " +
-					"mandatory `role=<role>` names this callable's role within " +
-					"the contract; every other KV pair names a partner role and " +
-					"the sibling callable filling it (resolved by the refinement " +
+				"Declares the annotated callable's membership in a named "+
+					"contract. Positional `name` carries the contract name; "+
+					"mandatory `role=<role>` names this callable's role within "+
+					"the contract; every other KV pair names a partner role and "+
+					"the sibling callable filling it (resolved by the refinement "+
 					"resolver into a qualified name).",
 			).
-			Positional("name").
+			Positional("name", sdk.Required()).
 			RequiredKeys("role").
 			Build(),
 		sdk.NewDirective(MixinDirectiveName).
@@ -356,12 +355,7 @@ func (p *Plugin) handle(
 	dirs []*directive.Directive,
 	front string,
 ) {
-	// ctx is nil in unit tests that drive handle directly; mixin
-	// parameter diagnostics degrade to silence rather than panic.
-	var sink *diag.PluginSink
-	if ctx != nil {
-		sink = ctx.Diag.For(PluginName)
-	}
+	sink := ctx.Diag.For(PluginName)
 	p.applyContracts(bag, dirs)
 	p.applyMixins(n, bag, dirs, sink)
 

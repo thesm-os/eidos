@@ -605,3 +605,21 @@ func TestMixin_UnregisteredNameIsReported(t *testing.T) {
 		}
 	})
 }
+
+func TestMixin_NamelessDirectiveIsIgnoredByStamping(t *testing.T) {
+	t.Parallel()
+
+	// The schema marks the name Required, so this cannot arrive from
+	// parsed source. It can arrive from a caller that builds
+	// Directive values directly — which is how plugins are unit
+	// tested — so the stamping pass guards rather than indexing
+	// Args[0] blindly.
+	t.Run("a directive with no name stamps nothing and does not panic", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn("Put", &directive.Directive{Name: shape.MixinDirectiveName})
+		sink := annotateCapturing(t, shape.New().Mixins(atomicMixin()), fn)
+
+		assertMixins(t, fn.Meta(), nil)
+		assertNoErrors(t, sink)
+	})
+}
