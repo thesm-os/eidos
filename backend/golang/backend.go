@@ -102,10 +102,12 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 	}
 	pluginOrder := pluginOrderFrom(ctx)
 	bridgeImports := collectBridgeImports(ctx.Store)
+	selfPackages := collectSelfPackages(ctx.Store)
 	for _, target := range ctx.Store.Emit().ByTarget().Keys() {
 		entities := ctx.Store.Emit().ByTarget().Get(target)
 		state := newRenderState(merged.tmpl, pluginOrder, merged.extensions, merged.overrides)
 		state.bridgeImports = bridgeImports
+		state.selfPackages = selfPackages
 		// Forward the target's own import path + short name to the
 		// per-file import set. The path enables same-package
 		// elision ([emit.ExternalRef] / [emit.ExprExternal]
@@ -122,7 +124,12 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 		// reference under a bridge-stamped source package still
 		// elides correctly against the rendered file's Go-canonical
 		// import path.
-		state.imports.SetSelf(state.resolveImportPath(target.ImportPath), target.Package)
+		selfPath := state.resolveImportPath(target.ImportPath)
+		state.imports.SetSelf(selfPath, target.Package)
+		// Then pin the alias for every *other* output package whose
+		// declared name diverges from its directory, so a cross-package
+		// reference into a `pkg=`-renamed output resolves.
+		state.applySelfAliases(selfPath)
 		body, tracked, err := renderFile(state, target, entities, packageDocsFor(ctx, target))
 		if err != nil {
 			if errors.Is(err, ErrEmptyTarget) {
@@ -138,6 +145,27 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 		}
 	}
 	return nil
+}
+
+// collectSelfPackages maps each import path the run writes into to
+// the package name that output declares, for every resolved Target.
+//
+// The pair is only interesting where the two disagree — see
+// [renderState.selfPackages] — but collecting all of them keeps the
+// filter in one place, at the point of use.
+//
+// Targets sharing an import path agree on their package name in any
+// run that passes the layout phase's one-file-one-package check, so
+// last-write-wins is not observable.
+func collectSelfPackages(s *store.Store) map[string]string {
+	out := map[string]string{}
+	for _, t := range s.Emit().ByTarget().Keys() {
+		if t.ImportPath == "" || t.Package == "" {
+			continue
+		}
+		out[t.ImportPath] = t.Package
+	}
+	return out
 }
 
 // composeFile wraps the finalised body bytes in the canonical

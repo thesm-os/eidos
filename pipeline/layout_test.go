@@ -5,11 +5,13 @@ package pipeline_test
 
 import (
 	"errors"
+	"maps"
 	"path/filepath"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/core/kind"
 	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/manifest"
@@ -219,6 +221,92 @@ func TestLayout_OutDirective_PathAware(t *testing.T) {
 		}
 		if got, want := s.Target.Filename, "user_mock_test.go"; got != want {
 			t.Fatalf("Target.Filename = %q, want %q (basename of directive path)", got, want)
+		}
+	})
+}
+
+// TestLayout_OutDirectivePkg_ImportPathIsAPath pins that a `pkg=`
+// override resolves Target.ImportPath to an import path rather than
+// to the package clause name.
+//
+// The two are not interchangeable. ImportPath feeds the renderer's
+// same-package elision, which compares it against each ExternalRef's
+// package path; a clause name like "storetest" can never match one,
+// so every self-reference rendered qualified against a package the
+// decl no longer lived in.
+func TestLayout_OutDirectivePkg_ImportPathIsAPath(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pkg= with a directory joins the path onto the source package", func(t *testing.T) {
+		t.Parallel()
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos: position.Pos{File: "internal/users/user.go"},
+				DirectiveList: []*directive.Directive{
+					{
+						Name: pipeline.OutDirective,
+						Args: []string{"testkit/"},
+						KV:   map[string]string{"pkg": "userstest"},
+					},
+				},
+			},
+			Name: "User", Package: "example.com/users",
+		}
+		s := &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin},
+			Name:     "UserMock", Package: "example.com/users",
+		}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: &node.Package{Name: "users", Path: "example.com/users"}}).
+			WithGenerator(&layoutGen{name: "mg", suffix: "_mock.go", pkg: &emit.Package{
+				Name: "users", Path: "example.com/users",
+				Structs: []*emit.Struct{s},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		if got, want := s.Target.Package, "userstest"; got != want {
+			t.Fatalf("Target.Package = %q, want %q", got, want)
+		}
+		if got, want := s.Target.ImportPath, "example.com/users/testkit"; got != want {
+			t.Fatalf("Target.ImportPath = %q, want %q; the clause name is not an import path", got, want)
+		}
+	})
+
+	t.Run("pkg= without a directory keeps the source package path", func(t *testing.T) {
+		t.Parallel()
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos: position.Pos{File: "internal/users/user.go"},
+				DirectiveList: []*directive.Directive{
+					{
+						Name: pipeline.OutDirective,
+						Args: []string{"user_mock_gen.go"},
+						KV:   map[string]string{"pkg": "userstest"},
+					},
+				},
+			},
+			Name: "User", Package: "example.com/users",
+		}
+		s := &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin},
+			Name:     "UserMock", Package: "example.com/users",
+		}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: &node.Package{Name: "users", Path: "example.com/users"}}).
+			WithGenerator(&layoutGen{name: "mg", suffix: "_mock.go", pkg: &emit.Package{
+				Name: "users", Path: "example.com/users",
+				Structs: []*emit.Struct{s},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		if got, want := s.Target.ImportPath, "example.com/users"; got != want {
+			t.Fatalf("Target.ImportPath = %q, want %q", got, want)
 		}
 	})
 }
@@ -1875,7 +1963,11 @@ func TestLayout_OutDirective_TagScope(t *testing.T) {
 		if got, want := primary.Target.Package, "users"; got != want {
 			t.Errorf("primary Target.Package = %q, want %q (override should not apply)", got, want)
 		}
-		if got, want := tagged.Target.Package, "storetest"; got != want {
+		// pkg= names the package the generator's output belongs to;
+		// the _test.go suffix independently says the file is an
+		// external test of it. Both apply, so the tagged output lands
+		// in storetest_test rather than storetest.
+		if got, want := tagged.Target.Package, "storetest_test"; got != want {
 			t.Errorf("tagged Target.Package = %q, want %q", got, want)
 		}
 	})
@@ -2900,7 +2992,12 @@ func TestLayout_TestFilenameShiftsPackage(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit pkg= via +gen:out suppresses the _test shift", func(t *testing.T) {
+	// An explicit pkg= answers "which package does this output
+	// belong to", not "this file is not a test". Honouring it
+	// literally on a _test.go file would put the test inside the
+	// package it exists to exercise from outside, silently converting
+	// an external test into an internal one.
+	t.Run("explicit pkg= via +gen:out still takes the _test shift", func(t *testing.T) {
 		t.Parallel()
 		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
 		origin := &node.Struct{
@@ -2931,8 +3028,50 @@ func TestLayout_TestFilenameShiftsPackage(t *testing.T) {
 			Build()
 		assertNoError(t, err)
 		assertNoError(t, p.Run(t.Context(), "x"))
-		if got, want := s.Target.Package, "userstest"; got != want {
-			t.Fatalf("Target.Package = %q, want %q (explicit pkg=, no shift)", got, want)
+		if got, want := s.Target.Package, "userstest_test"; got != want {
+			t.Fatalf("Target.Package = %q, want %q (explicit pkg= plus shift)", got, want)
+		}
+		if got, want := s.Target.ImportPath, "example.com/users_test"; got != want {
+			t.Fatalf("Target.ImportPath = %q, want %q", got, want)
+		}
+	})
+
+	// The escape hatch: a caller who genuinely wants the internal
+	// form writes the suffix themselves, and the shift leaves it
+	// alone rather than producing userstest_test_test.
+	t.Run("a pkg= already suffixed _test is not shifted again", func(t *testing.T) {
+		t.Parallel()
+		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos: position.Pos{File: "internal/users/user.go"},
+				DirectiveList: []*directive.Directive{
+					{
+						Name: pipeline.OutDirective,
+						Args: []string{""},
+						KV:   map[string]string{"pkg": "userstest_test"},
+					},
+				},
+			},
+			Name: "User", Package: "example.com/users",
+		}
+		s := &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin},
+			Name:     "UserMock", Package: "example.com/users",
+		}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&layoutGen{name: "mt", suffix: "_mock_test.go", pkg: &emit.Package{
+				Name: "", Path: "example.com/users",
+				Structs: []*emit.Struct{s},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		if got, want := s.Target.Package, "userstest_test"; got != want {
+			t.Fatalf("Target.Package = %q, want %q (no double shift)", got, want)
 		}
 	})
 
@@ -3347,6 +3486,167 @@ func TestLayout_TestShift_NoDoubleShift(t *testing.T) {
 		assertNoError(t, p.Run(t.Context(), "x"))
 		if got, want := s.Target.Package, "users_test"; got != want {
 			t.Fatalf("Target.Package = %q, want %q (no double-shift)", got, want)
+		}
+	})
+}
+
+// outputPackageSetterItem is a plugin-defined emit kind implementing
+// [emit.OutputPackageSetter]. It records what the Layout phase hands it so
+// the dispatch contract — right paths, exactly once — is observable
+// from a test rather than inferred from rendered output.
+type outputPackageSetterItem struct {
+	emit.BaseEmit
+
+	// got is a copy of the most recent map received. Copied rather
+	// than retained because the contract forbids holding the
+	// caller's map, and a test that broke that rule would not notice
+	// if the caller later reused the allocation.
+	got map[string]string
+
+	// calls counts dispatches. The contract says at most one; a
+	// second would mean the walk reached the same value from both
+	// the package root and the file root without the seen-set
+	// catching it.
+	calls int
+}
+
+// Kind returns the fixture's plugin-defined kind.
+func (*outputPackageSetterItem) Kind() kind.Kind { return "test.outputaware" }
+
+// SetOutputPackages records the dispatch.
+func (i *outputPackageSetterItem) SetOutputPackages(byTag map[string]string) {
+	i.calls++
+	i.got = maps.Clone(byTag)
+}
+
+// outputPackageSetterGen queues one plain slot contribution against its
+// plugin's primary output and one [outputPackageSetterItem] against its
+// tagged output — the shape of a generator emitting a type plus a
+// companion that references it.
+type outputPackageSetterGen struct {
+	origin node.Node
+	item   *outputPackageSetterItem
+
+	// dual additionally parks the same item pointer in a slot on a
+	// plugin-created [emit.File] registered on an [emit.Package].
+	// The dispatch walks packages and files as separate roots, so
+	// this is the shape that reaches one value twice — the case the
+	// seen-set exists for.
+	dual bool
+}
+
+// Name returns the fixture plugin identifier.
+func (*outputPackageSetterGen) Name() string { return "aware" }
+
+// Outputs declares a primary and a `_test.go`-suffixed companion,
+// so the companion's resolved package takes the external-test shift
+// and the two outputs land on genuinely different import paths.
+func (*outputPackageSetterGen) Outputs(_ string) []plugin.Output {
+	return []plugin.Output{
+		{Suffix: "_aware.go"},
+		{Tag: "test", Suffix: "_aware_test.go"},
+	}
+}
+
+// Generate queues both contributions against the same origin.
+func (g *outputPackageSetterGen) Generate(ctx *plugin.GeneratorContext) error {
+	prov := emit.Provenance{SetBy: "aware"}
+	primary := &emit.Struct{
+		BaseEmit: emit.BaseEmit{SetByName: "aware", OriginNode: g.origin},
+		Name:     "Thing", Package: "users",
+	}
+	if err := ctx.Store.Emit().AppendOriginSlot(g.origin, "top", primary, prov); err != nil {
+		return err
+	}
+	g.item = &outputPackageSetterItem{BaseEmit: emit.BaseEmit{
+		SetByName:     "aware",
+		OriginNode:    g.origin,
+		OutputTagName: "test",
+	}}
+	if err := ctx.Store.Emit().AppendOriginSlot(g.origin, "top", g.item, prov); err != nil {
+		return err
+	}
+	if !g.dual {
+		return nil
+	}
+	f := &emit.File{
+		BaseEmit: emit.BaseEmit{SetByName: "aware", OriginNode: g.origin},
+		Name:     "extra.go",
+		Package:  "example.com/users",
+	}
+	if err := f.Slot("top").Append(g.item, prov); err != nil {
+		return err
+	}
+	return ctx.Store.Emit().AddPackage(&emit.Package{
+		Name: "users", Path: "example.com/users",
+		Files: []*emit.File{f},
+	})
+}
+
+// TestLayout_DispatchesOutputPackages pins the [emit.OutputPackageSetter]
+// contract: a generator that emits two outputs can learn where the
+// Layout phase routed each of them, which is the one fact it cannot
+// derive during Generate.
+func TestLayout_DispatchesOutputPackages(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T, dual bool) *outputPackageSetterItem {
+		t.Helper()
+		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{SourcePos: position.Pos{File: "internal/users/user.go"}},
+			Name:     "User", Package: "example.com/users",
+		}
+		gen := &outputPackageSetterGen{origin: origin, dual: dual}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(gen).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		return gen.item
+	}
+
+	t.Run("the primary output's import path arrives under the empty tag", func(t *testing.T) {
+		t.Parallel()
+		// The empty tag is the framework's name for a plugin's
+		// primary output, so this is the lookup a companion uses to
+		// qualify a reference back to the type it exercises.
+		if got, want := run(t, false).got[""], "example.com/users"; got != want {
+			t.Fatalf("byTag[\"\"] = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("each declared tag arrives under its own key", func(t *testing.T) {
+		t.Parallel()
+		// The companion's own path carries the external-test shift,
+		// which is what makes the two outputs distinguishable at all
+		// — equal paths would hide a dispatch that ignored the tag.
+		if got, want := run(t, false).got["test"], "example.com/users_test"; got != want {
+			t.Fatalf("byTag[\"test\"] = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("dispatch happens exactly once per value", func(t *testing.T) {
+		t.Parallel()
+		// The fixture parks one item pointer in both roots the
+		// dispatch walks — a package-attached File and the File
+		// Layout created for the pending slot — so a missing
+		// seen-set shows up here as two calls.
+		if got := run(t, true).calls; got != 1 {
+			t.Fatalf("SetOutputPackages called %d times, want 1", got)
+		}
+	})
+
+	t.Run("no tag beyond the plugin's own outputs is reported", func(t *testing.T) {
+		t.Parallel()
+		// Scoping is per (origin, plugin): a plugin must not observe
+		// where some other plugin routed its output for the same
+		// source node.
+		if got := len(run(t, false).got); got != 2 {
+			t.Fatalf("byTag has %d entries, want 2", got)
 		}
 	})
 }

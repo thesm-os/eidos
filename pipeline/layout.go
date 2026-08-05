@@ -67,8 +67,15 @@ func (p *Pipeline) runLayout(s *store.Store) {
 	v := s.Emit()
 	outputs := p.collectPluginOutputs()
 
-	routeDecls(s, v, ps, outputs, p)
-	materialiseOriginSlots(s, v, ps, outputs, p)
+	loc := map[originOutputs]map[string]string{}
+	routeDecls(s, v, ps, outputs, p, loc)
+	materialiseOriginSlots(s, v, ps, outputs, p, loc)
+	// Dispatch before the conflict pass: a plugin's reference to its
+	// own output describes where that output was routed, and the
+	// conflict pass clears Targets rather than re-routing them.
+	// Running after would hand implementors paths for entities the
+	// run is in the middle of dropping.
+	dispatchOutputPackages(v, loc)
 	enforceOneFileOnePackage(v, ps)
 	v.RebuildByTarget()
 }
@@ -92,6 +99,7 @@ func routeDecls(
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
 	p *Pipeline,
+	loc map[originOutputs]map[string]string,
 ) {
 	v.Structs().Range(func(e *emit.Struct) bool {
 		e.Target = composeOrZero(
@@ -105,6 +113,7 @@ func routeDecls(
 			e.Package,
 			"struct",
 			e.QName(),
+			loc,
 		)
 		return true
 	})
@@ -120,6 +129,7 @@ func routeDecls(
 			e.Package,
 			"interface",
 			e.QName(),
+			loc,
 		)
 		return true
 	})
@@ -135,6 +145,7 @@ func routeDecls(
 			e.Package,
 			"function",
 			e.QName(),
+			loc,
 		)
 		return true
 	})
@@ -150,6 +161,7 @@ func routeDecls(
 			e.Package,
 			"variable",
 			e.QName(),
+			loc,
 		)
 		return true
 	})
@@ -165,6 +177,7 @@ func routeDecls(
 			e.Package,
 			"constant",
 			e.QName(),
+			loc,
 		)
 		return true
 	})
@@ -180,6 +193,7 @@ func routeDecls(
 			e.Package,
 			"enum",
 			e.QName(),
+			loc,
 		)
 		return true
 	})
@@ -201,6 +215,7 @@ func routeDecls(
 				pkg.Path,
 				"method",
 				m.QName(),
+				loc,
 			)
 		}
 		return true
@@ -217,6 +232,7 @@ func routeDecls(
 			e.Package,
 			"alias",
 			e.QName(),
+			loc,
 		)
 		return true
 	})
@@ -243,6 +259,7 @@ func composeOrZero(
 	origin node.Node,
 	emitPkgPath string,
 	kind, qname string,
+	loc map[originOutputs]map[string]string,
 ) emit.Target {
 	if origin == nil {
 		ps.Errorf(position.Pos{},
@@ -271,6 +288,7 @@ func composeOrZero(
 		return emit.Target{}
 	}
 	p.recordResolvedLayout(t, rl)
+	recordOutputPath(loc, origin, setBy, outputTag, t.ImportPath)
 	return t
 }
 
@@ -512,8 +530,26 @@ func composeTarget(
 		}
 		if spec.Package != "" {
 			t.Package = spec.Package
-			t.ImportPath = spec.Package
 			rl.ResolvedFrom["package"] = manifest.LayerDirective
+			// ImportPath is a path, not a package name. Assigning
+			// spec.Package here put the clause name (`storetest`) where
+			// an import path (`example.com/x/testkit`) belongs, so the
+			// renderer's same-package elision compared against a value
+			// that could never match and every self-reference rendered
+			// qualified against a package it no longer lived in.
+			//
+			// The path follows the resolved Dir, matching the
+			// dir-derived branch above; without a source package to
+			// anchor against there is nothing to join, and an empty
+			// ImportPath correctly leaves elision inert.
+			switch {
+			case srcPkg == nil:
+				t.ImportPath = ""
+			case dir != "":
+				t.ImportPath = path.Join(srcPkg.Path, filepath.ToSlash(dir))
+			default:
+				t.ImportPath = srcPkg.Path
+			}
 		}
 	}
 
@@ -543,16 +579,24 @@ func composeTarget(
 	}
 
 	// _test.go shift: when the resolved filename ends in `_test.go`
-	// and Package came from the framework-default layer (no
-	// explicit `pkg=` from directive, policy, or CLI) and isn't
-	// already suffixed `_test` (a plugin emitting into a `<pkg>_test`
-	// emit.Package has already opted into the external-test-package
-	// convention), append `_test` to Package and ImportPath. Applies
-	// Go's external test-package convention to every `_test.go`
-	// file the framework routes — overridable end-to-end at any
-	// higher precedence layer.
+	// and the resolved package isn't already suffixed `_test`,
+	// append `_test` to Package and ImportPath. Applies Go's
+	// external test-package convention to every `_test.go` file the
+	// framework routes.
+	//
+	// The shift deliberately ignores which precedence layer supplied
+	// Package. `pkg=storetest` on a source directive answers "which
+	// package does this generator's output belong to", not "suppress
+	// Go's test-package convention" — honouring it literally on a
+	// `_test.go` file lands the test *inside* the package it is
+	// meant to exercise from outside, and silently converts an
+	// external test into an internal one. A caller who genuinely
+	// wants the internal form writes `pkg=storetest_test`, which the
+	// suffix guard below leaves untouched.
+	//
+	// The same guard covers a plugin emitting into a `<pkg>_test`
+	// emit.Package, which has already opted into the convention.
 	if strings.HasSuffix(t.Filename, "_test.go") &&
-		rl.ResolvedFrom["package"] == manifest.LayerFramework &&
 		t.Package != "" &&
 		!strings.HasSuffix(t.Package, "_test") {
 
@@ -586,6 +630,7 @@ func materialiseOriginSlots(
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
 	p *Pipeline,
+	loc map[originOutputs]map[string]string,
 ) {
 	pending := v.PendingOriginSlots()
 	for _, tup := range pending {
@@ -623,6 +668,7 @@ func materialiseOriginSlots(
 			continue
 		}
 		p.recordResolvedLayout(target, rl)
+		recordOutputPath(loc, tup.Origin, setBy, outputTag, target.ImportPath)
 		// FileFor only errors when the view is frozen; Layout runs
 		// pre-freeze so the lookup-or-create cannot fail here.
 		file, _ := v.FileFor(target)
@@ -632,6 +678,90 @@ func materialiseOriginSlots(
 				tup.SlotName, target.JoinPath(), err)
 		}
 	}
+}
+
+// originOutputs identifies the set of outputs one plugin produced
+// for one source node — the tuple Layout already routes on, since
+// every Target in a run is composed from an origin, a contributing
+// plugin, and an output tag. Keying on it makes [emit.OutputPackageSetter]
+// dispatch a lookup rather than an inference.
+//
+// node.Node values are interfaces over pointers and so comparable,
+// which is what lets the tuple be a map key.
+type originOutputs struct {
+	origin node.Node
+	plugin string
+}
+
+// recordOutputPath notes that the output identified by (origin,
+// plugin, tag) resolved to importPath.
+//
+// A nil origin is ignored — synthetic entities carry no origin, so
+// nothing can key a lookup against them. An empty importPath is
+// recorded deliberately: centralised routing resolves a Target
+// without a derivable import path, and "routed, path unknown" is a
+// state [emit.OutputPackageSetter] implementors are documented to observe
+// separately from "not routed at all".
+func recordOutputPath(
+	loc map[originOutputs]map[string]string,
+	origin node.Node,
+	plugin, tag, importPath string,
+) {
+	if loc == nil || origin == nil {
+		return
+	}
+	key := originOutputs{origin: origin, plugin: plugin}
+	byTag, ok := loc[key]
+	if !ok {
+		byTag = map[string]string{}
+		loc[key] = byTag
+	}
+	byTag[tag] = importPath
+}
+
+// dispatchOutputPackages hands every [emit.OutputPackageSetter] value in the
+// store the import paths its own plugin's outputs resolved to.
+//
+// Discovery walks from both roots: packages, which reach decls and
+// their nested slots, and files, which Layout itself creates during
+// slot materialisation and which need not be attached to a package.
+// [emit.Walk] visits every slot item, so a plugin-defined emit kind
+// sitting in a file slot is reached even though the walk does not
+// descend into it — being visited suffices, because OutputAware is
+// implemented on the value itself.
+//
+// Each value is called at most once. Reaching one from both roots is
+// ordinary, and the seen-set is what keeps the "at most once" half
+// of the OutputAware contract true.
+//
+// A value whose (origin, plugin) pair routed nothing is skipped
+// rather than called with an empty map, so an implementor can treat
+// any call as carrying at least one usable answer.
+func dispatchOutputPackages(v *store.EmitView, loc map[originOutputs]map[string]string) {
+	seen := map[emit.Node]struct{}{}
+	var walker emit.Visitor
+	walker = emit.VisitorFunc(func(n emit.Node) emit.Visitor {
+		aware, ok := n.(emit.OutputPackageSetter)
+		if !ok {
+			return walker
+		}
+		if _, done := seen[n]; done {
+			return walker
+		}
+		seen[n] = struct{}{}
+		if byTag := loc[originOutputs{origin: aware.Origin(), plugin: aware.SetBy()}]; len(byTag) > 0 {
+			aware.SetOutputPackages(byTag)
+		}
+		return walker
+	})
+	v.Packages().Range(func(p *emit.Package) bool {
+		emit.Walk(p, walker)
+		return true
+	})
+	v.Files().Range(func(f *emit.File) bool {
+		emit.Walk(f, walker)
+		return true
+	})
 }
 
 // enforceOneFileOnePackage walks every routable emit entity, groups

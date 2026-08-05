@@ -72,6 +72,59 @@ type renderState struct {
 	// store; Go-source pipelines see an empty map and the per-ref
 	// translation collapses to a no-op.
 	bridgeImports map[string]string
+
+	// selfPackages maps each import path this run writes output into
+	// to the package name that output declares. Populated once at
+	// [Backend.Render] entry from the run's resolved Targets.
+	//
+	// Go binds an unaliased import to the *declared package name*,
+	// not to the last segment of the path, but
+	// [writer.DefaultAlias] can only guess from the path. The two
+	// agree for the overwhelming majority of packages and diverge
+	// exactly when a `pkg=` override renames an output away from its
+	// directory — `out=testkit/ pkg=storetest` produces a directory
+	// `testkit` holding `package storetest`. Without this map a
+	// reference into that package renders `testkit.Thing` against an
+	// import that actually bound `storetest`, and the generated file
+	// does not compile.
+	//
+	// Only the run's own outputs are covered. Third-party packages
+	// whose name diverges from their directory stay on the derived
+	// alias, because nothing in the emit graph knows their package
+	// clause; goimports corrects those in the finalise pass.
+	selfPackages map[string]string
+}
+
+// applySelfAliases pre-registers an explicit import alias for every
+// output package in the run whose declared name differs from the
+// alias [writer.DefaultAlias] would derive from its path.
+//
+// Registration has to happen before any template runs:
+// [writer.ImportSet.Alias] rejects an override for a path already
+// imported ([writer.ErrAliasAfterImp]), so a lazy fix at the first
+// reference would arrive too late for the file that needed it.
+//
+// selfPath is the rendering file's own import path, which is skipped
+// — it is handled by [writer.ImportSet.SetSelf], which both elides
+// self-references and reserves the file's own package identifier
+// against collision.
+func (s *renderState) applySelfAliases(selfPath string) {
+	for path, pkg := range s.selfPackages {
+		if path == "" || pkg == "" || path == selfPath {
+			continue
+		}
+		// Skipping the agreeing case is not required for correct
+		// output — the writer omits an alias that matches the
+		// derived one. It keeps the intervention to the packages
+		// that need it, so an explicit registration never perturbs
+		// collision resolution for an import that was already fine.
+		if writer.DefaultAlias(path) == pkg {
+			continue
+		}
+		// The only error is ErrAliasAfterImp, unreachable here: this
+		// runs before template execution, so nothing has imported yet.
+		_ = s.imports.Alias(path, pkg)
+	}
 }
 
 // resolveImportPath returns the Go-canonical import path for a
