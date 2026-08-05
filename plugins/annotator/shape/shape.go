@@ -6,6 +6,7 @@ package shape
 import (
 	"sort"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/node"
@@ -274,14 +275,22 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 			Build(),
 		sdk.NewDirective(MixinDirectiveName).
 			Describe(
-				"Attaches a mixin to the annotated callable. Mixins are " +
-					"orthogonal invariant assertions that decorate a callable " +
-					"on top of its structural shape (atomic, idempotent, " +
-					"monotonic, ...). Positional `name` carries the mixin name; " +
-					"every KV pair is stamped under the mixin's parameter " +
-					"namespace.",
+				"Attaches one or more mixins to the annotated callable. "+
+					"Mixins are orthogonal invariant assertions that decorate "+
+					"a callable on top of its structural shape (atomic, "+
+					"idempotent, monotonic, ...), so a callable commonly "+
+					"carries several. Every positional arg is a mixin name, "+
+					"stamped in the order written — mixin parameters are "+
+					"`key=value` only, so a bare token is read as another "+
+					"name, never as a parameter. KV pairs are stamped under "+
+					"the mixin's parameter namespace and are permitted only "+
+					"when exactly one name is given — with several names the "+
+					"owning mixin would be ambiguous, so split the "+
+					"parameterised mixin onto its own line.",
 			).
-			Positional("name").
+			Positional("name", sdk.Required()).
+			AllowExtraPositional().
+			DenyNegation().
 			Build(),
 	}
 }
@@ -325,14 +334,14 @@ func (p *Plugin) BeforeNodes(ctx *sdk.AnnotatorContext) {
 // (struct- and interface-declared alike). Interface methods carry
 // a nil [node.Method.Receiver]; detectors that care about the
 // receiver shape must handle the absence explicitly.
-func (p *Plugin) OnMethod(_ *sdk.AnnotatorContext, m *node.Method) {
-	p.handle(m, m.Meta(), m.Directives(), p.frontByMethod[m])
+func (p *Plugin) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
+	p.handle(ctx, m, m.Meta(), m.Directives(), p.frontByMethod[m])
 }
 
 // OnFunction dispatches detection over every free function in the
 // store.
-func (p *Plugin) OnFunction(_ *sdk.AnnotatorContext, fn *node.Function) {
-	p.handle(fn, fn.Meta(), fn.Directives(), p.frontByFunc[fn])
+func (p *Plugin) OnFunction(ctx *sdk.AnnotatorContext, fn *node.Function) {
+	p.handle(ctx, fn, fn.Meta(), fn.Directives(), p.frontByFunc[fn])
 }
 
 // handle is the per-callable pipeline. Contract and mixin
@@ -340,9 +349,21 @@ func (p *Plugin) OnFunction(_ *sdk.AnnotatorContext, fn *node.Function) {
 // to structural shape and never collide with it. Structural-shape
 // detection then follows the override-then-detect cascade with
 // the already-stamped guard.
-func (p *Plugin) handle(n node.Node, bag *meta.Bag, dirs []*directive.Directive, front string) {
+func (p *Plugin) handle(
+	ctx *sdk.AnnotatorContext,
+	n node.Node,
+	bag *meta.Bag,
+	dirs []*directive.Directive,
+	front string,
+) {
+	// ctx is nil in unit tests that drive handle directly; mixin
+	// parameter diagnostics degrade to silence rather than panic.
+	var sink *diag.PluginSink
+	if ctx != nil {
+		sink = ctx.Diag.For(PluginName)
+	}
 	p.applyContracts(bag, dirs)
-	p.applyMixins(bag, dirs)
+	p.applyMixins(n, bag, dirs, sink)
 
 	if IsStamped(bag) {
 		return

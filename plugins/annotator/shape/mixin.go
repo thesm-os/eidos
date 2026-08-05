@@ -4,8 +4,10 @@
 package shape
 
 import (
+	"maps"
 	"slices"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/node"
@@ -136,48 +138,109 @@ func MixinParamKey(name, param string) meta.Key[string] {
 // stamps from mixin-attachment stamps.
 const mixinStampedBy = PluginName + ".mixin"
 
-// applyMixins stamps every non-negated `+gen:mixin` directive on
-// bag. Unknown mixin names are silently skipped (the resolver
-// pass surfaces them as positioned diagnostics). Unknown
-// parameter keys are still stamped verbatim so a resolver has
-// the raw data needed to diagnose them.
+// applyMixins stamps every `+gen:mixin` directive on bag. A
+// directive may name several mixins; each is stamped in the order
+// written. A name with no registered [Mixin] is reported and
+// skipped without affecting the other names on the same line.
+// Unknown parameter keys are still stamped verbatim so a resolver
+// has the raw data needed to diagnose them.
 //
-// The function is permissive: the framework's directive
-// validator handles schema-level enforcement (positional
-// missing, malformed KV) at Build time; this pass concerns
-// itself only with meta stamping for directives that already
-// passed parse-time validation.
-func (p *Plugin) applyMixins(bag *meta.Bag, dirs []*directive.Directive) {
+// The function is otherwise permissive — the framework's directive
+// validator enforces the schema (mandatory name, negation, KV
+// shape) at Build time — with one exception it owns outright:
+// parameters paired with several names. That constraint is
+// conditional on the arg count, which [directive.Schema] cannot
+// express, and it has to be checked while the directive is intact,
+// so it lives here. See [Plugin.reportAmbiguousMixinParams].
+//
+// sink may be nil when a caller drives the stamping pass without a
+// context; the parameter diagnostic is then dropped rather than
+// panicking.
+func (p *Plugin) applyMixins(
+	host node.Node, bag *meta.Bag, dirs []*directive.Directive, sink *diag.PluginSink,
+) {
 	for _, d := range dirs {
+		// Negation is denied by the schema and a missing name is
+		// rejected as a mandatory positional, so both guards are
+		// defence-in-depth for callers that bypass validation.
 		if d == nil || d.Name != MixinDirectiveName || d.Negated {
 			continue
 		}
-		name := mixinNameFromDirective(d)
-		if name == "" {
+		if len(d.Args) == 0 {
 			continue
 		}
-		if _, registered := p.mixins[name]; !registered {
-			continue
+		// KV ownership is only well-defined for a single name. The
+		// schema cannot express "keys allowed only when exactly one
+		// positional", so the rule is enforced here, where the
+		// directive is still intact — by the time the validator pass
+		// runs, names have been flattened into [MetaMixins] and the
+		// key-to-name association is gone.
+		params := d.KV
+		if len(params) > 0 && len(d.Args) > 1 {
+			p.reportAmbiguousMixinParams(host, d, sink)
+			params = nil
 		}
-		for k, v := range d.KV {
-			if v == "" {
+		for _, name := range d.Args {
+			if _, registered := p.mixins[name]; !registered {
+				// Report and skip this name only — an unregistered
+				// name must not discard the rest of the line.
+				//
+				// This is the only signal a mistyped name or a stray
+				// token gets. Mixin parameters are KV-only, so a
+				// positional written as a parameter
+				// (`+gen:mixin bounded 100`) parses as a second name
+				// and surfaces here rather than as an arity error.
+				reportUnregisteredMixin(host, name, sink)
 				continue
 			}
-			MixinParamKey(name, k).Set(bag, v, mixinStampedBy)
+			for k, v := range params {
+				if v == "" {
+					continue
+				}
+				MixinParamKey(name, k).Set(bag, v, mixinStampedBy)
+			}
+			appendMixin(bag, name)
 		}
-		appendMixin(bag, name)
 	}
 }
 
-// mixinNameFromDirective returns the mixin name declared by d —
-// the first positional argument. Returns empty when no
-// positional was supplied (the framework validator rejects this
-// at parse time; the runtime guard is defence-in-depth).
-func mixinNameFromDirective(d *directive.Directive) string {
-	if len(d.Args) > 0 {
-		return d.Args[0]
+// reportUnregisteredMixin emits the diagnostic for a mixin name
+// this pipeline has no [Mixin] registered for. Mirrors the
+// resolver's treatment of an unregistered contract: a name nobody
+// can interpret is an authoring mistake, not a silent no-op.
+//
+// The name is not stamped, so downstream consumers never observe a
+// mixin the pipeline cannot describe.
+func reportUnregisteredMixin(host node.Node, name string, sink *diag.PluginSink) {
+	if sink == nil {
+		return
 	}
-	return ""
+	sink.Errorf(host.Pos(),
+		"shape.mixin: %q is not registered with this pipeline. Check the spelling, "+
+			"register the mixin, or — if it was meant as a parameter — note that mixin "+
+			"parameters are `key=value` only; a bare token is read as another mixin name",
+		name)
+}
+
+// reportAmbiguousMixinParams emits the diagnostic for a directive
+// that pairs KV parameters with several mixin names. The names are
+// still attached — dropping them would lose information the author
+// clearly intended — but the parameters are discarded, because
+// guessing an owner would fabricate meta under a namespace the
+// other mixins never declared.
+func (*Plugin) reportAmbiguousMixinParams(
+	host node.Node, d *directive.Directive, sink *diag.PluginSink,
+) {
+	if sink == nil {
+		return
+	}
+	keys := slices.Sorted(maps.Keys(d.KV))
+	sink.Errorf(host.Pos(),
+		"shape.mixin: %d parameter(s) %v supplied with %d mixin names %v; "+
+			"parameters belong to exactly one mixin — put %q on its own line. "+
+			"The names were attached; the parameters were dropped",
+		len(keys), keys, len(d.Args), d.Args, d.Args[0],
+	)
 }
 
 // appendMixin adds name to the [MetaMixins] list on bag,

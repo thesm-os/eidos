@@ -12,6 +12,36 @@
 //
 // Consumers wanting a curated subset import the per-mixin
 // sub-packages directly and pick what they need.
+//
+// # Attaching several mixins
+//
+// Mixins are orthogonal, so a callable commonly carries several.
+// One `+gen:mixin` names as many as apply, stamped in the order
+// written:
+//
+//	//+gen:mixin idempotent concurrent atomic bounded
+//	func (s *Store) Put(ctx context.Context, k string, v []byte) error
+//
+// Parameters are the exception, and they are always `key=value`.
+// Every bare token on the line is a mixin name, so a parameter
+// written positionally is read as another name:
+//
+//	//+gen:mixin bounded 100      // WRONG — "100" is read as a mixin
+//	//+gen:mixin bounded limit=100
+//
+// A name with no registered mixin is reported as an error, which is
+// what surfaces that mistake.
+//
+// A `key=value` pair belongs to exactly one mixin, so it is only
+// accepted when the directive names exactly one — otherwise the
+// owner would be a guess. Give a parameterised mixin its own line
+// and batch the rest:
+//
+//	//+gen:mixin idempotent concurrent
+//	//+gen:mixin bounded limit=100
+//
+// Pairing parameters with several names is an error; the names are
+// still attached and the parameters are dropped.
 package mixins
 
 import (

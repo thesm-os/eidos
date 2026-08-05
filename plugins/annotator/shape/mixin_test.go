@@ -5,6 +5,7 @@ package shape_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
@@ -313,4 +314,294 @@ func contracttestCtxForMixin(t *testing.T, pkg *node.Package) *sdk.AnnotatorCont
 		Reader: store.NewReader(s),
 		Diag:   diag.New(),
 	}
+}
+
+// annotateCapturing runs p over a package holding fn and returns
+// the diagnostic sink, so tests can assert on what the mixin
+// stamping pass reported as well as what it stamped.
+func annotateCapturing(t *testing.T, p *shape.Plugin, fn *node.Function) *diag.Sink {
+	t.Helper()
+	pkg := pkgWithFunction(fn)
+	s := store.New()
+	if err := s.Nodes().AddPackage(pkg); err != nil {
+		t.Fatalf("AddPackage: %v", err)
+	}
+	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	ctx := newAnnotatorContext(t, s)
+	if err := p.Annotate(ctx); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	return ctx.Diag
+}
+
+func TestMixin_MultipleNamesPerDirective(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all names on one directive are stamped in written order", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn("Put", &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"rate-limited", "atomic"},
+		})
+		sink := annotateCapturing(t, shape.New().Mixins(atomicMixin(), rateLimitedMixin()), fn)
+
+		assertMixins(t, fn.Meta(), []string{"rate-limited", "atomic"})
+		assertNoErrors(t, sink)
+	})
+
+	t.Run("an unregistered name does not discard the names after it", func(t *testing.T) {
+		t.Parallel()
+		// Regression: the pre-variadic handler skipped the whole
+		// directive on an unregistered name. Nested under a per-name
+		// loop that would silently drop every later name on the line.
+		fn := mixinFn("Put", &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"atomic", "no-such-mixin", "rate-limited"},
+		})
+		annotateCapturing(t, shape.New().Mixins(atomicMixin(), rateLimitedMixin()), fn)
+
+		assertMixins(t, fn.Meta(), []string{"atomic", "rate-limited"})
+	})
+
+	t.Run("repeated names collapse to one entry", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn(
+			"Put",
+			&directive.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"atomic", "atomic"},
+			},
+			&directive.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"atomic", "rate-limited"},
+			},
+		)
+		annotateCapturing(t, shape.New().Mixins(atomicMixin(), rateLimitedMixin()), fn)
+
+		assertMixins(t, fn.Meta(), []string{"atomic", "rate-limited"})
+	})
+
+	t.Run("a single name still carries its parameters", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn("Charge", &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"rate-limited"},
+			KV:   map[string]string{"limit": "100"},
+		})
+		sink := annotateCapturing(t, shape.New().Mixins(rateLimitedMixin()), fn)
+
+		assertMixins(t, fn.Meta(), []string{"rate-limited"})
+		assertMeta(t, fn.Meta(), shape.MixinParamKey("rate-limited", "limit"), "100")
+		assertNoErrors(t, sink)
+	})
+}
+
+func TestMixin_ParametersWithSeveralNamesAreRejected(t *testing.T) {
+	t.Parallel()
+
+	// KV ownership is undefined once several names share a line, so
+	// the names attach and the parameters are dropped with an error
+	// rather than being guessed onto an arbitrary owner.
+	newFn := func() *node.Function {
+		return mixinFn("Put", &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"rate-limited", "atomic"},
+			KV:   map[string]string{"limit": "100"},
+		})
+	}
+
+	t.Run("reports an error naming the offending keys and mixins", func(t *testing.T) {
+		t.Parallel()
+		fn := newFn()
+		sink := annotateCapturing(t, shape.New().Mixins(atomicMixin(), rateLimitedMixin()), fn)
+
+		if !sink.HasErrors() {
+			t.Fatalf("parameters with several mixin names should be an error")
+		}
+		msg := sink.Diagnostics()[0].Message
+		for _, want := range []string{"limit", "rate-limited", "atomic"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("diagnostic should mention %q so the author can act on it; got %q", want, msg)
+			}
+		}
+	})
+
+	t.Run("the names are still attached", func(t *testing.T) {
+		t.Parallel()
+		fn := newFn()
+		annotateCapturing(t, shape.New().Mixins(atomicMixin(), rateLimitedMixin()), fn)
+
+		assertMixins(t, fn.Meta(), []string{"rate-limited", "atomic"})
+	})
+
+	t.Run("no parameter is stamped under any of the named mixins", func(t *testing.T) {
+		t.Parallel()
+		fn := newFn()
+		annotateCapturing(t, shape.New().Mixins(atomicMixin(), rateLimitedMixin()), fn)
+
+		for _, name := range []string{"rate-limited", "atomic"} {
+			if got, ok := shape.MixinParamKey(name, "limit").Get(fn.Meta()); ok {
+				t.Errorf("parameter was stamped under %q as %q; ambiguous parameters must be dropped", name, got)
+			}
+		}
+	})
+}
+
+// assertNoErrors fails when sink recorded any Error diagnostic.
+func assertNoErrors(t *testing.T, sink *diag.Sink) {
+	t.Helper()
+	if sink.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %+v", sink.Diagnostics())
+	}
+}
+
+// validateAgainstSchema runs d through the framework validator with
+// the plugin's own declared schemas registered, which is the gate a
+// real source directive passes before any stamping happens. The
+// stamping tests above build Directive values directly and so never
+// exercise it.
+func validateAgainstSchema(t *testing.T, d *directive.Directive) *diag.Sink {
+	t.Helper()
+	reg := directive.NewRegistry()
+	for _, s := range shape.New().Directives() {
+		if err := reg.Register(s); err != nil {
+			t.Fatalf("Register %q: %v", s.Name, err)
+		}
+	}
+	sink := diag.New()
+	directive.Validate([]*directive.Directive{d}, node.KindFunction, reg, sink.For("test"))
+	return sink
+}
+
+func TestMixin_SchemaAcceptsSeveralPositionals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("several mixin names pass validation", func(t *testing.T) {
+		t.Parallel()
+		sink := validateAgainstSchema(t, &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"idempotent", "concurrent", "atomic", "bounded"},
+		})
+		if sink.HasErrors() {
+			t.Fatalf("multi-name +gen:mixin should validate; got %+v", sink.Diagnostics())
+		}
+	})
+
+	t.Run("a single mixin name still passes validation", func(t *testing.T) {
+		t.Parallel()
+		sink := validateAgainstSchema(t, &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"idempotent"},
+		})
+		if sink.HasErrors() {
+			t.Fatalf("single-name +gen:mixin should validate; got %+v", sink.Diagnostics())
+		}
+	})
+
+	t.Run("a mixin directive with no name is rejected", func(t *testing.T) {
+		t.Parallel()
+		// AllowExtraPositional widens the upper bound only. The name
+		// slot is now marked Required: previously a bare +gen:mixin
+		// passed validation and was then silently dropped by the
+		// stamping pass, so the mistake had no surface at all.
+		sink := validateAgainstSchema(t, &directive.Directive{
+			Name: shape.MixinDirectiveName,
+		})
+		if !sink.HasErrors() {
+			t.Fatalf("+gen:mixin with no name should be rejected")
+		}
+	})
+
+	t.Run("the negated form is rejected", func(t *testing.T) {
+		t.Parallel()
+		// Mixins attach only through an explicit +gen:mixin, so there
+		// is nothing for -gen:mixin to remove. It previously parsed
+		// and did nothing, which reads as a working suppression.
+		sink := validateAgainstSchema(t, &directive.Directive{
+			Name:    shape.MixinDirectiveName,
+			Args:    []string{"atomic"},
+			Negated: true,
+		})
+		if !sink.HasErrors() {
+			t.Fatalf("-gen:mixin should be rejected rather than silently ignored")
+		}
+	})
+
+	t.Run("contract is deliberately left single-name", func(t *testing.T) {
+		t.Parallel()
+		// A role binds to exactly one contract, so batching contract
+		// names would be ambiguous in a way mixin names are not.
+		sink := validateAgainstSchema(t, &directive.Directive{
+			Name: shape.ContractDirectiveName,
+			Args: []string{"outbox", "saga"},
+			KV:   map[string]string{"role": "writer"},
+		})
+		if !sink.HasErrors() {
+			t.Fatalf("+gen:contract should still reject several names")
+		}
+	})
+}
+
+func TestMixin_UnregisteredNameIsReported(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a name with no registered mixin is an error", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn("Put", &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"idempotant"}, // typo
+		})
+		sink := annotateCapturing(t, shape.New().Mixins(atomicMixin()), fn)
+
+		if !sink.HasErrors() {
+			t.Fatalf("an unregistered mixin name should be reported, not silently dropped")
+		}
+		if got := sink.Diagnostics()[0].Message; !strings.Contains(got, "idempotant") {
+			t.Errorf("diagnostic should name the offending mixin; got %q", got)
+		}
+		assertMixins(t, fn.Meta(), nil)
+	})
+
+	t.Run("a positional written as a parameter surfaces as an unknown name", func(t *testing.T) {
+		t.Parallel()
+		// Mixin parameters are KV-only. Batching means every bare
+		// token is a name, so `bounded 100` reads as two mixins.
+		// Before batching this failed as an arity error; the
+		// unregistered-name report is what keeps it loud.
+		fn := mixinFn("Put", &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"rate-limited", "100"},
+		})
+		sink := annotateCapturing(t, shape.New().Mixins(rateLimitedMixin()), fn)
+
+		if !sink.HasErrors() {
+			t.Fatalf("a stray positional should be reported rather than silently ignored")
+		}
+		msg := sink.Diagnostics()[0].Message
+		if !strings.Contains(msg, `"100"`) {
+			t.Errorf("diagnostic should quote the stray token; got %q", msg)
+		}
+		// The hint has to mention the KV form, since the author's
+		// actual mistake is not "unknown mixin" but "wrong syntax".
+		if !strings.Contains(msg, "key=value") {
+			t.Errorf("diagnostic should point at the key=value form; got %q", msg)
+		}
+		// The legitimate name on the line still attaches.
+		assertMixins(t, fn.Meta(), []string{"rate-limited"})
+	})
+
+	t.Run("the stray positional is not stamped as a mixin", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn("Put", &directive.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"rate-limited", "100"},
+		})
+		annotateCapturing(t, shape.New().Mixins(rateLimitedMixin()), fn)
+
+		for _, m := range shape.Mixins(fn.Meta()) {
+			if m == "100" {
+				t.Fatalf("an unregistered name must not reach MetaMixins")
+			}
+		}
+	})
 }
