@@ -170,3 +170,84 @@ func TestConvertInterface(t *testing.T) {
 		}
 	})
 }
+
+// TestAppendInterfaceMethod_BlankNameDoesNotPanic pins that an
+// interface method the type-checker refused to record degrades to
+// the loader's own diagnostic rather than taking the converter down.
+//
+// go/types rejects a blank method name and omits it from
+// ExplicitMethods, while the AST field survives — so the name scan
+// in appendInterfaceMethod completes with no match. Dereferencing
+// that nil unwound out of converter.run, discarding every
+// declaration in the package, not just the malformed interface: the
+// user saw a valid syntax error with a framework panic stapled to
+// it, and no output for a package that was otherwise convertible.
+// Direct Load callers took an uncontained crash.
+func TestAppendInterfaceMethod_BlankNameDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]map[string]string{
+		"blank method name": {
+			"a.go": "package p\n\ntype I interface {\n\t_()\n}\n",
+		},
+		// The blank name sits beside a valid method and a valid
+		// type, so a fix that skipped the whole interface — or the
+		// whole file — still fails this case.
+		"blank name beside valid declarations": {
+			"a.go": "package p\n\ntype I interface {\n\t_()\n\tOK() error\n}\n\ntype Fine struct{ N int }\n",
+		},
+	}
+
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			// The type error itself must still surface; the panic
+			// must not. Asserting only on completion would pass
+			// against a converter that panicked, since the pipeline
+			// recovers a panicking plugin into a diagnostic.
+			_, d := loadFromSource(t, src)
+			if !d.HasErrors() {
+				t.Fatalf("a blank interface method name must be reported; got no errors")
+			}
+			assertNoPanicDiagnostic(t, d)
+		})
+	}
+}
+
+// TestAppendInterfaceMethod_BlankNameKeepsSiblings pins the point of
+// the fix rather than merely its absence of a crash: the rest of the
+// package converts. A guard that returned early from the enclosing
+// file or package walk would satisfy the no-panic assertion above
+// while still discarding everything.
+func TestAppendInterfaceMethod_BlankNameKeepsSiblings(t *testing.T) {
+	t.Parallel()
+
+	st, _ := loadFromSource(t, map[string]string{
+		"a.go": "package p\n\ntype I interface {\n\t_()\n\tOK() error\n}\n\ntype Fine struct{ N int }\n",
+	})
+	pkg := firstPackageIn(st, "")
+	if pkg == nil {
+		t.Fatalf("a package with one malformed interface must still convert")
+	}
+	var foundStruct bool
+	for _, s := range pkg.Structs {
+		if s.Name == "Fine" {
+			foundStruct = true
+		}
+	}
+	if !foundStruct {
+		t.Errorf("struct Fine was discarded; only the malformed method should be skipped")
+	}
+	for _, i := range pkg.Interfaces {
+		if i.Name != "I" {
+			continue
+		}
+		names := make([]string, 0, len(i.Methods))
+		for _, m := range i.Methods {
+			names = append(names, m.Name)
+		}
+		if len(names) != 1 || names[0] != "OK" {
+			t.Errorf("interface I methods = %v, want just [OK] — the blank one skipped, the valid one kept", names)
+		}
+	}
+}

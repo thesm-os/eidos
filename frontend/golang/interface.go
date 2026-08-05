@@ -137,8 +137,8 @@ func (c *converter) appendInterfaceMethod(
 	// populateInterfaceBody only calls this when len(field.Names) > 0,
 	// which guarantees field.Type is a *ast.FuncType per the Go
 	// grammar; embeds (no Names) go through appendInterfaceEmbed.
-	// name.Name is guaranteed to be an explicit method of it by
-	// the same source.
+	// name.Name is an explicit method of it for any interface the
+	// type-checker accepted — but only for those.
 	tFunc := field.Type.(*ast.FuncType) //nolint:forcetypeassert // grammar invariant
 	var obj *types.Func
 	for m := range it.ExplicitMethods() {
@@ -146,6 +146,24 @@ func (c *converter) appendInterfaceMethod(
 			obj = m
 			break
 		}
+	}
+	if obj == nil {
+		// The AST carries a method the type-checker refused to
+		// record. `_()` is the reachable case: go/types rejects the
+		// blank method name and omits it from ExplicitMethods, while
+		// the AST field survives — so the scan above completes with
+		// no match.
+		//
+		// Skip the method and keep converting. The loader already
+		// surfaced the type error that caused this ("methods must
+		// have a unique non-blank name"), so a second diagnostic
+		// here would only restate it; what matters is that the rest
+		// of the interface, and every other declaration in the
+		// package, still converts. Dereferencing obj instead
+		// unwound out of converter.run and discarded all of it,
+		// leaving the user a framework panic stapled to a valid
+		// syntax error.
+		return
 	}
 	sig, _ := obj.Type().(*types.Signature)
 	m := &node.Method{
