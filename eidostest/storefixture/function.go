@@ -58,9 +58,17 @@ func (b *FunctionBuilder) Variadic(name string, elemT *node.TypeRef) *FunctionBu
 	return b
 }
 
-// Return appends a return type.
+// Return appends an unnamed return slot.
 func (b *FunctionBuilder) Return(t *node.TypeRef) *FunctionBuilder {
-	b.f.Returns = append(b.f.Returns, t)
+	b.f.Returns = append(b.f.Returns, &node.Return{Type: t})
+	return b
+}
+
+// NamedReturn appends a return slot carrying a declared name, as a
+// signature written `(item string, err error)` produces. Pass an
+// empty name for the anonymous form, or use [Return].
+func (b *FunctionBuilder) NamedReturn(name string, t *node.TypeRef) *FunctionBuilder {
+	b.f.Returns = append(b.f.Returns, &node.Return{Name: name, Type: t})
 	return b
 }
 

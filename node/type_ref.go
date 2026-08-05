@@ -293,7 +293,7 @@ func (r *TypeRef) equalAnonInterface(other *TypeRef) bool {
 		if m.Name != o.Name {
 			return false
 		}
-		if !paramsEqual(m.Params, o.Params) || !equalRefSlice(m.Returns, o.Returns) {
+		if !paramsEqual(m.Params, o.Params) || !equalRefSlice(ReturnTypes(m.Returns), ReturnTypes(o.Returns)) {
 			return false
 		}
 	}

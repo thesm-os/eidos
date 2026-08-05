@@ -134,11 +134,14 @@ func TestWalk_MethodDescent(t *testing.T) {
 		m := &node.Method{
 			TypeParams: []*node.TypeParam{{Name: "T"}},
 			Params:     []*node.Param{{Type: namedRef("", "int")}},
-			Returns:    []*node.TypeRef{namedRef("", "error")},
+			Returns:    node.AnonReturns(namedRef("", "error")),
 		}
 		got := recordWalk(m)
 		want := []kind.Kind{
-			node.KindMethod, node.KindTypeParam, node.KindParam, node.KindTypeRef, node.KindTypeRef,
+			// A return is a node in its own right, visited before its
+			// type — symmetric with how a param is visited.
+			node.KindMethod, node.KindTypeParam, node.KindParam, node.KindTypeRef,
+			node.KindReturn, node.KindTypeRef,
 		}
 		if !slices.Equal(got, want) {
 			t.Fatalf("visit order = %v, want %v", got, want)
@@ -154,11 +157,12 @@ func TestWalk_FunctionDescent(t *testing.T) {
 		f := &node.Function{
 			TypeParams: []*node.TypeParam{{Name: "T"}},
 			Params:     []*node.Param{{Type: namedRef("", "int")}},
-			Returns:    []*node.TypeRef{namedRef("", "error")},
+			Returns:    node.AnonReturns(namedRef("", "error")),
 		}
 		got := recordWalk(f)
 		want := []kind.Kind{
-			node.KindFunction, node.KindTypeParam, node.KindParam, node.KindTypeRef, node.KindTypeRef,
+			node.KindFunction, node.KindTypeParam, node.KindParam, node.KindTypeRef,
+			node.KindReturn, node.KindTypeRef,
 		}
 		if !slices.Equal(got, want) {
 			t.Fatalf("visit order = %v, want %v", got, want)

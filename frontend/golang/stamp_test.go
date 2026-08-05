@@ -29,12 +29,53 @@ func TestStampTypeRefMeta(t *testing.T) {
 		}
 	})
 
+	t.Run("declared return names are preserved", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Op interface { Do() (item string, err error) }\n",
+		})
+		rets := pkg.InterfaceByName("Op").Methods[0].Returns
+		if len(rets) != 2 || rets[0].Name != "item" || rets[1].Name != "err" {
+			t.Fatalf("return names = %q/%q, want item/err", rets[0].Name, rets[1].Name)
+		}
+	})
+
+	t.Run("the blank identifier normalises to an unnamed return", func(t *testing.T) {
+		t.Parallel()
+		// `_` cannot be used as a derived identifier, so it is
+		// reported as unnamed rather than as the literal "_" —
+		// otherwise every consumer deriving a field name from a
+		// return would have to special-case it.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Op interface { Do() (_ string, err error) }\n",
+		})
+		rets := pkg.InterfaceByName("Op").Methods[0].Returns
+		if len(rets) != 2 || rets[0].Name != "" {
+			t.Fatalf("blank return name = %q, want empty", rets[0].Name)
+		}
+		if rets[1].Name != "err" {
+			t.Fatalf("sibling return name = %q, want err", rets[1].Name)
+		}
+	})
+
+	t.Run("anonymous returns carry no name", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Op interface { Do() (string, error) }\n",
+		})
+		for i, r := range pkg.InterfaceByName("Op").Methods[0].Returns {
+			if r.Name != "" {
+				t.Fatalf("return %d name = %q, want empty", i, r.Name)
+			}
+		}
+	})
+
 	t.Run("error return carries MetaIsError", func(t *testing.T) {
 		t.Parallel()
 		pkg := requirePackage(t, map[string]string{
 			"a.go": "package a\n\ntype Op interface { Do() error }\n",
 		})
-		ret := pkg.InterfaceByName("Op").Methods[0].Returns[0]
+		ret := pkg.InterfaceByName("Op").Methods[0].Returns[0].Type
 		if got, _ := golang.MetaIsError.Get(ret.Meta()); !got {
 			t.Fatalf("expected MetaIsError=true on error return")
 		}

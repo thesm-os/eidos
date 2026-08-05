@@ -127,7 +127,7 @@ func TestFunctionBuilder_Return(t *testing.T) {
 		got := captureFirstFunction(t, func(b *storefixture.FunctionBuilder) {
 			b.Return(storefixture.Named("error"))
 		})
-		if len(got.Returns) != 1 || got.Returns[0].Name != "error" {
+		if len(got.Returns) != 1 || got.Returns[0].Type.Name != "error" {
 			t.Fatalf("Return wiring wrong: %+v", got.Returns)
 		}
 	})

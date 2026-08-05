@@ -29,7 +29,7 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 	if len(params) != 0 || len(returns) != 1 {
 		return shape.Match{}, false
 	}
-	if !shape.GoIsBool(returns[0]) {
+	if !shape.GoIsBool(returns[0].Type) {
 		return shape.Match{}, false
 	}
 	return shape.Match{}, true

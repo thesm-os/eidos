@@ -371,9 +371,14 @@ func (p *Plugin) emitForSourceInterface(
 		for _, mp := range m.Params {
 			params = append(params, paramSig{name: mp.Name, typ: refconv.FromNode(mp.Type)})
 		}
+		// Return names are available on m.Returns but not carried
+		// here: a mock method delegates to its Func field, so a
+		// named result would be declared and never assigned. A
+		// generator deriving identifiers from returns — a recorded-
+		// call struct, say — reads r.Name instead.
 		returns := make([]emit.Ref, 0, len(m.Returns))
 		for _, r := range m.Returns {
-			returns = append(returns, refconv.FromNode(r))
+			returns = append(returns, refconv.FromNode(r.Type))
 		}
 		sigs = append(sigs, methodSig{name: m.Name, params: params, returns: returns})
 	}

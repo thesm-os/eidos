@@ -27,11 +27,11 @@ func TestDetector_MatchesTwoValues(t *testing.T) {
 	fn := &node.Function{
 		Name: "Pair", Package: "x",
 		Params: []*node.Param{dt.Param("ctx", dt.Ctx())},
-		Returns: []*node.TypeRef{
+		Returns: node.AnonReturns(
 			dt.Named("int"),
 			dt.Qualified("x", "Article"),
 			dt.Err(),
-		},
+		),
 	}
 	bag := dt.RunFn(t, multiaggregator.Detector(), fn)
 	dt.AssertShape(t, bag, multiaggregator.Name, "", "int")
@@ -45,20 +45,20 @@ func TestDetector_Rejects(t *testing.T) {
 	}{
 		{"single value (Aggregator territory)", &node.Function{
 			Name: "Count", Package: "x",
-			Returns: []*node.TypeRef{dt.Named("int"), dt.Err()},
+			Returns: node.AnonReturns(dt.Named("int"), dt.Err()),
 		}},
 		{"has non-ctx param (MultiReader territory)", &node.Function{
 			Name: "Pair", Package: "x",
 			Params: []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Named("int"),
 				dt.Named("int"),
 				dt.Err(),
-			},
+			),
 		}},
 		{"no error return", &node.Function{
 			Name: "Pair", Package: "x",
-			Returns: []*node.TypeRef{dt.Named("int"), dt.Named("int")},
+			Returns: node.AnonReturns(dt.Named("int"), dt.Named("int")),
 		}},
 	}
 	for _, tc := range cases {

@@ -30,7 +30,7 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 	if len(keys) != 1 || len(returns) != 1 {
 		return shape.Match{}, false
 	}
-	elem := shape.GoPointerElem(returns[0])
+	elem := shape.GoPointerElem(returns[0].Type)
 	if elem == nil {
 		return shape.Match{}, false
 	}

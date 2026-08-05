@@ -102,7 +102,7 @@ func TestDetector_RejectsNonReader(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "id", Type: &node.TypeRef{Name: "string"}},
 				},
-				Returns: []*node.TypeRef{{Name: "Article", Package: "x"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "Article", Package: "x"}),
 			},
 		},
 		{
@@ -112,7 +112,7 @@ func TestDetector_RejectsNonReader(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "a", Type: &node.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: []*node.TypeRef{{Name: "error"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 			},
 		},
 		{
@@ -123,10 +123,10 @@ func TestDetector_RejectsNonReader(t *testing.T) {
 					{Name: "a", Type: &node.TypeRef{Name: "string"}},
 					{Name: "b", Type: &node.TypeRef{Name: "string"}},
 				},
-				Returns: []*node.TypeRef{
-					{Name: "Article", Package: "x"},
-					{Name: "error"},
-				},
+				Returns: node.AnonReturns(
+					&node.TypeRef{Name: "Article", Package: "x"},
+					&node.TypeRef{Name: "error"},
+				),
 			},
 		},
 		{
@@ -136,11 +136,11 @@ func TestDetector_RejectsNonReader(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "id", Type: &node.TypeRef{Name: "string"}},
 				},
-				Returns: []*node.TypeRef{
-					{Name: "Article", Package: "x"},
-					{Name: "Meta", Package: "x"},
-					{Name: "error"},
-				},
+				Returns: node.AnonReturns(
+					&node.TypeRef{Name: "Article", Package: "x"},
+					&node.TypeRef{Name: "Meta", Package: "x"},
+					&node.TypeRef{Name: "error"},
+				),
 			},
 		},
 		{
@@ -150,7 +150,7 @@ func TestDetector_RejectsNonReader(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: []*node.TypeRef{{Name: "error"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 			},
 		},
 	}
@@ -247,10 +247,10 @@ func readerFunc(name string, withCtx bool) *node.Function {
 	return &node.Function{
 		Name: name, Package: "x",
 		Params: params,
-		Returns: []*node.TypeRef{
-			{Name: "Article", Package: "x"},
-			{Name: "error"},
-		},
+		Returns: node.AnonReturns(
+			&node.TypeRef{Name: "Article", Package: "x"},
+			&node.TypeRef{Name: "error"},
+		),
 	}
 }
 

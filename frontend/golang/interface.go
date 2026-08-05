@@ -190,7 +190,10 @@ func (c *converter) methodFromSignature(name string, sig *types.Signature) *node
 	}
 	if results := sig.Results(); results != nil {
 		for r := range results.Variables() {
-			m.Returns = append(m.Returns, c.typeRefOf(r.Type()))
+			m.Returns = append(m.Returns, &node.Return{
+				Name: returnBindingName(r),
+				Type: c.typeRefOf(r.Type()),
+			})
 		}
 	}
 	return m

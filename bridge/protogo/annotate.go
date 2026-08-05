@@ -38,7 +38,7 @@ func annotateInterface(iface *node.Interface) {
 			}
 		}
 		for _, r := range m.Returns {
-			stampTypeRef(r)
+			stampTypeRef(r.Type)
 		}
 	}
 }

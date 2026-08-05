@@ -289,24 +289,26 @@
           "receiver_name": "r",
           "returns": [
             {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "int",
-              "pos": {
-                "column": 28,
-                "file": "ops.go",
-                "line": 10,
-                "offset": 344
-              },
-              "type_kind": 0
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "int",
+                "pos": {
+                  "column": 28,
+                  "file": "ops.go",
+                  "line": 10,
+                  "offset": 344
+                },
+                "type_kind": 0
+              }
             }
           ]
         },
@@ -399,51 +401,55 @@
           "receiver_name": "r",
           "returns": [
             {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "pos": {
-                      "column": 6,
-                      "file": "types.go",
-                      "line": 12,
-                      "offset": 469
-                    },
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "User",
-              "package": "example.com/golangtest",
-              "pos": {
-                "column": 30,
-                "file": "ops.go",
-                "line": 17,
-                "offset": 541
-              },
-              "type_kind": 0
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "pos": {
+                        "column": 6,
+                        "file": "types.go",
+                        "line": 12,
+                        "offset": 469
+                      },
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "User",
+                "package": "example.com/golangtest",
+                "pos": {
+                  "column": 30,
+                  "file": "ops.go",
+                  "line": 17,
+                  "offset": 541
+                },
+                "type_kind": 0
+              }
             },
             {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "bool",
-              "pos": {
-                "column": 36,
-                "file": "ops.go",
-                "line": 17,
-                "offset": 547
-              },
-              "type_kind": 0
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "bool",
+                "pos": {
+                  "column": 36,
+                  "file": "ops.go",
+                  "line": 17,
+                  "offset": 547
+                },
+                "type_kind": 0
+              }
             }
           ]
         }

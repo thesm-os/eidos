@@ -41,6 +41,6 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 		return shape.Match{}, false
 	}
 	return shape.Match{
-		ValueType: shape.QName(returns[0]),
+		ValueType: shape.QName(returns[0].Type),
 	}, true
 }

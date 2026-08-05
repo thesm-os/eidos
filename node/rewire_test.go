@@ -100,7 +100,7 @@ func TestRewireOwners(t *testing.T) {
 		method := &node.Method{
 			Name:    "Mul",
 			Params:  []*node.Param{{Name: "by", Type: namedRef("", "int")}},
-			Returns: []*node.TypeRef{namedRef("", "int")},
+			Returns: node.AnonReturns(namedRef("", "int")),
 		}
 		alias := &node.Alias{
 			Name:    "Seconds",

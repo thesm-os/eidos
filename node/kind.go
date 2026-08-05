@@ -34,5 +34,6 @@ const (
 	KindEmbed       kind.Kind = "embed"
 	KindTypeRef     kind.Kind = "type_ref"
 	KindParam       kind.Kind = "param"
+	KindReturn      kind.Kind = "return"
 	KindTypeParam   kind.Kind = "type_param"
 )

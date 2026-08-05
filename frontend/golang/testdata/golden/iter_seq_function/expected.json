@@ -119,34 +119,36 @@
       },
       "returns": [
         {
-          "meta": {
-            "entries": []
-          },
-          "name": "Seq",
-          "package": "iter",
-          "pos": {
-            "column": 26,
-            "file": "source.go",
-            "line": 13,
-            "offset": 416
-          },
-          "type_args": [
-            {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "string",
-              "type_kind": 0
-            }
-          ],
-          "type_kind": 0
+          "type": {
+            "meta": {
+              "entries": []
+            },
+            "name": "Seq",
+            "package": "iter",
+            "pos": {
+              "column": 26,
+              "file": "source.go",
+              "line": 13,
+              "offset": 416
+            },
+            "type_args": [
+              {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "string",
+                "type_kind": 0
+              }
+            ],
+            "type_kind": 0
+          }
         }
       ]
     },
@@ -242,48 +244,50 @@
       },
       "returns": [
         {
-          "meta": {
-            "entries": []
-          },
-          "name": "Seq2",
-          "package": "iter",
-          "pos": {
-            "column": 28,
-            "file": "source.go",
-            "line": 25,
-            "offset": 712
-          },
-          "type_args": [
-            {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "int",
-              "type_kind": 0
+          "type": {
+            "meta": {
+              "entries": []
             },
-            {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
+            "name": "Seq2",
+            "package": "iter",
+            "pos": {
+              "column": 28,
+              "file": "source.go",
+              "line": 25,
+              "offset": 712
+            },
+            "type_args": [
+              {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "int",
+                "type_kind": 0
               },
-              "name": "string",
-              "type_kind": 0
-            }
-          ],
-          "type_kind": 0
+              {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "string",
+                "type_kind": 0
+              }
+            ],
+            "type_kind": 0
+          }
         }
       ]
     }

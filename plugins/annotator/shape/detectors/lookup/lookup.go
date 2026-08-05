@@ -40,14 +40,14 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 	if len(keys) != 1 || len(returns) != 3 {
 		return shape.Match{}, false
 	}
-	if !shape.GoIsBool(returns[2]) {
+	if !shape.GoIsBool(returns[2].Type) {
 		return shape.Match{}, false
 	}
 	return shape.Match{
 		KeyType:   shape.QName(keys[0].Type),
-		ValueType: shape.QName(returns[0]),
+		ValueType: shape.QName(returns[0].Type),
 		StringStamps: []shape.StringStamp{
-			{Key: MetaType, Value: shape.QName(returns[1])},
+			{Key: MetaType, Value: shape.QName(returns[1].Type)},
 		},
 	}, true
 }

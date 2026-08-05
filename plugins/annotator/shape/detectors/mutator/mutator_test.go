@@ -56,7 +56,7 @@ func TestDetector_Rejects(t *testing.T) {
 		{"has error return (Writer territory)", &node.Function{
 			Name: "Save", Package: "x",
 			Params:  []*node.Param{dt.Param("v", dt.Qualified("x", "Article"))},
-			Returns: []*node.TypeRef{dt.Err()},
+			Returns: node.AnonReturns(dt.Err()),
 		}},
 		{"no params (Lifecycle territory)", &node.Function{
 			Name: "Tick", Package: "x",

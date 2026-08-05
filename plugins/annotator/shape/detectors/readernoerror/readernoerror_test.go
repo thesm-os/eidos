@@ -33,7 +33,7 @@ func TestDetector_Matches(t *testing.T) {
 				dt.Param("ctx", dt.Ctx()),
 				dt.Param("id", dt.Named("string")),
 			},
-			Returns: []*node.TypeRef{dt.Qualified("x", "Article")},
+			Returns: node.AnonReturns(dt.Qualified("x", "Article")),
 		}
 		bag := dt.RunFn(t, readernoerror.Detector(), fn)
 		dt.AssertShape(t, bag, readernoerror.Name, "string", "x.Article")
@@ -44,7 +44,7 @@ func TestDetector_Matches(t *testing.T) {
 		fn := &node.Function{
 			Name: "Get", Package: "x",
 			Params:  []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: []*node.TypeRef{dt.Qualified("x", "Article")},
+			Returns: node.AnonReturns(dt.Qualified("x", "Article")),
 		}
 		bag := dt.RunFn(t, readernoerror.Detector(), fn)
 		dt.AssertShape(t, bag, readernoerror.Name, "string", "x.Article")
@@ -60,14 +60,14 @@ func TestDetector_Rejects(t *testing.T) {
 		{"has error return (Reader territory)", &node.Function{
 			Name: "Get", Package: "x",
 			Params: []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Qualified("x", "Article"),
 				dt.Err(),
-			},
+			),
 		}},
 		{"no params (Aggregator territory)", &node.Function{
 			Name: "Count", Package: "x",
-			Returns: []*node.TypeRef{dt.Named("int")},
+			Returns: node.AnonReturns(dt.Named("int")),
 		}},
 		{"void return (Mutator territory)", &node.Function{
 			Name: "Set", Package: "x",

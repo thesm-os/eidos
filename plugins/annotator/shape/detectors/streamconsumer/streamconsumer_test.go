@@ -92,7 +92,7 @@ func TestDetector_RejectsNonConsumers(t *testing.T) {
 			fn: &node.Function{
 				Name: "Load", Package: "x",
 				Params:  []*node.Param{{Name: "r", Type: stampedInterface("io", "Reader")}},
-				Returns: []*node.TypeRef{{Name: "int"}, {Name: "error"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "int"}, &node.TypeRef{Name: "error"}),
 			},
 		},
 		{
@@ -116,7 +116,7 @@ func TestDetector_RejectsNonConsumers(t *testing.T) {
 					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 					{Name: "r", Type: stampedInterface("io", "Reader")},
 				},
-				Returns: []*node.TypeRef{{Name: "int"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "int"}),
 			},
 		},
 		{
@@ -127,7 +127,11 @@ func TestDetector_RejectsNonConsumers(t *testing.T) {
 					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 					{Name: "r", Type: stampedInterface("io", "Reader")},
 				},
-				Returns: []*node.TypeRef{{Name: "int"}, {Name: "int"}, {Name: "error"}},
+				Returns: node.AnonReturns(
+					&node.TypeRef{Name: "int"},
+					&node.TypeRef{Name: "int"},
+					&node.TypeRef{Name: "error"},
+				),
 			},
 		},
 	}
@@ -168,7 +172,7 @@ func consumerFunc(name string, stream *node.TypeRef) *node.Function {
 			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 			{Name: "r", Type: stream},
 		},
-		Returns: []*node.TypeRef{{Name: "int"}, {Name: "error"}},
+		Returns: node.AnonReturns(&node.TypeRef{Name: "int"}, &node.TypeRef{Name: "error"}),
 	}
 }
 

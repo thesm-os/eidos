@@ -103,7 +103,8 @@ func rewireMethod(m *Method) {
 		rewireTypeRef(p.Type)
 	}
 	for _, r := range m.Returns {
-		rewireTypeRef(r)
+		r.Owner = m
+		rewireTypeRef(r.Type)
 	}
 	rewireTypeRef(m.Receiver)
 }
@@ -119,7 +120,8 @@ func rewireFunction(f *Function) {
 		rewireTypeRef(p.Type)
 	}
 	for _, r := range f.Returns {
-		rewireTypeRef(r)
+		r.Owner = f
+		rewireTypeRef(r.Type)
 	}
 }
 

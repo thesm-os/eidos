@@ -72,9 +72,11 @@ func convertRPCs(
 			Params: []*node.Param{{
 				Type: namedTypeRef(md.Input().ParentFile(), md.Input().FullName()),
 			}},
-			Returns: []*node.TypeRef{
+			// Proto has no named results: an RPC declares one
+			// output message and no binding for it.
+			Returns: node.AnonReturns(
 				namedTypeRef(md.Output().ParentFile(), md.Output().FullName()),
-			},
+			),
 		}
 		stampStreamingMeta(m, md, pos)
 		attachRPCDocs(ctx, m, fd, md)

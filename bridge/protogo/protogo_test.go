@@ -136,7 +136,7 @@ func TestAnnotate_TranslatesRPCSignatureTypes(t *testing.T) {
 				t.Errorf("param %d go.type = %q, want %q", i, got, w)
 			}
 		}
-		if got, _ := protogo.MetaGoType.Get(iface.Methods[0].Returns[0].Meta()); got != "bool" {
+		if got, _ := protogo.MetaGoType.Get(iface.Methods[0].Returns[0].Type.Meta()); got != "bool" {
 			t.Errorf("return go.type = %q, want bool", got)
 		}
 	})
@@ -158,7 +158,7 @@ func TestAnnotate_WellKnownTypes(t *testing.T) {
 		})
 		annotateProto(t, s)
 
-		ret := store.NewReader(s).Interfaces().Slice()[0].Methods[0].Returns[0]
+		ret := store.NewReader(s).Interfaces().Slice()[0].Methods[0].Returns[0].Type
 		if got, _ := protogo.MetaGoType.Get(ret.Meta()); got != "*timestamppb.Timestamp" {
 			t.Errorf("well-known go.type = %q, want *timestamppb.Timestamp", got)
 		}
@@ -183,7 +183,7 @@ func TestAnnotate_WellKnownTypes(t *testing.T) {
 		})
 		annotateProto(t, s)
 
-		ret := store.NewReader(s).Interfaces().Slice()[0].Methods[0].Returns[0]
+		ret := store.NewReader(s).Interfaces().Slice()[0].Methods[0].Returns[0].Type
 		if got, ok := protogo.MetaGoType.Get(ret.Meta()); ok {
 			t.Errorf("named message ref should not be stamped; got %q", got)
 		}

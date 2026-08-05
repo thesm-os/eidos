@@ -32,7 +32,7 @@ func TestDetector_MatchesThreeArgs(t *testing.T) {
 			dt.Param("b", dt.Named("string")),
 			dt.Param("c", dt.Named("string")),
 		},
-		Returns: []*node.TypeRef{dt.Err()},
+		Returns: node.AnonReturns(dt.Err()),
 	}
 	bag := dt.RunFn(t, multiargwriter.Detector(), fn)
 	dt.AssertShape(t, bag, multiargwriter.Name, "", "")
@@ -50,7 +50,7 @@ func TestDetector_Rejects(t *testing.T) {
 				dt.Param("k", dt.Named("string")),
 				dt.Param("v", dt.Qualified("x", "Article")),
 			},
-			Returns: []*node.TypeRef{dt.Err()},
+			Returns: node.AnonReturns(dt.Err()),
 		}},
 		{"no error return", &node.Function{
 			Name: "Record", Package: "x",

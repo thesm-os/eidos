@@ -23,7 +23,7 @@ type Function struct {
 	Params []*Param `json:"params,omitempty"`
 
 	// Returns are the function's return types in source order.
-	Returns []*TypeRef `json:"returns,omitempty"`
+	Returns []*Return `json:"returns,omitempty"`
 
 	// TypeParams are the function's generic type parameters.
 	TypeParams []*TypeParam `json:"type_params,omitempty"`
@@ -69,7 +69,7 @@ func (f *Function) ParamAt(i int) *Param {
 
 // ReturnAt returns the return type at the given positional index, or
 // nil when i is out of range.
-func (f *Function) ReturnAt(i int) *TypeRef {
+func (f *Function) ReturnAt(i int) *Return {
 	if i < 0 || i >= len(f.Returns) {
 		return nil
 	}
@@ -87,9 +87,10 @@ func (f *Function) ParamsWith(pred func(*Param) bool) []*Param {
 	return out
 }
 
-// ReturnsWith returns return types matching pred in declaration order.
-func (f *Function) ReturnsWith(pred func(*TypeRef) bool) []*TypeRef {
-	out := make([]*TypeRef, 0, len(f.Returns))
+// ReturnsWith returns the return slots matching pred in
+// declaration order.
+func (f *Function) ReturnsWith(pred func(*Return) bool) []*Return {
+	out := make([]*Return, 0, len(f.Returns))
 	for _, r := range f.Returns {
 		if pred(r) {
 			out = append(out, r)

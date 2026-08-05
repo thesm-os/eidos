@@ -31,11 +31,11 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 	if len(keys) != 1 || len(returns) != 2 {
 		return shape.Match{}, false
 	}
-	if !shape.GoIsBool(returns[1]) {
+	if !shape.GoIsBool(returns[1].Type) {
 		return shape.Match{}, false
 	}
 	return shape.Match{
 		KeyType:   shape.QName(keys[0].Type),
-		ValueType: shape.QName(returns[0]),
+		ValueType: shape.QName(returns[0].Type),
 	}, true
 }

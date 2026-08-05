@@ -99,7 +99,7 @@ func TestDetector_RejectsNonLifecycle(t *testing.T) {
 			name: "missing context (would be VoidLifecycle / Predicate / PoisonAccessor)",
 			fn: &node.Function{
 				Name: "Start", Package: "x",
-				Returns: []*node.TypeRef{{Name: "error"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 			},
 		},
 		{
@@ -119,7 +119,7 @@ func TestDetector_RejectsNonLifecycle(t *testing.T) {
 					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 					{Name: "x", Type: &node.TypeRef{Name: "string"}},
 				},
-				Returns: []*node.TypeRef{{Name: "error"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 			},
 		},
 		{
@@ -129,10 +129,10 @@ func TestDetector_RejectsNonLifecycle(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: []*node.TypeRef{
-					{Name: "string"},
-					{Name: "error"},
-				},
+				Returns: node.AnonReturns(
+					&node.TypeRef{Name: "string"},
+					&node.TypeRef{Name: "error"},
+				),
 			},
 		},
 	}
@@ -155,7 +155,7 @@ func lifecycleFunc(name string) *node.Function {
 		Params: []*node.Param{
 			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 		},
-		Returns: []*node.TypeRef{{Name: "error"}},
+		Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 	}
 }
 

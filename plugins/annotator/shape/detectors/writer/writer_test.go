@@ -80,7 +80,7 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "a", Type: &node.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: []*node.TypeRef{{Name: "Article", Package: "x"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "Article", Package: "x"}),
 			},
 		},
 		{
@@ -104,7 +104,7 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 					{Name: "k", Type: &node.TypeRef{Name: "string"}},
 					{Name: "v", Type: &node.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: []*node.TypeRef{{Name: "error"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 			},
 		},
 		{
@@ -114,7 +114,7 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: []*node.TypeRef{{Name: "error"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 			},
 		},
 		{
@@ -124,11 +124,11 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "v", Type: &node.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: []*node.TypeRef{
-					{Name: "R1", Package: "x"},
-					{Name: "R2", Package: "x"},
-					{Name: "error"},
-				},
+				Returns: node.AnonReturns(
+					&node.TypeRef{Name: "R1", Package: "x"},
+					&node.TypeRef{Name: "R2", Package: "x"},
+					&node.TypeRef{Name: "error"},
+				),
 			},
 		},
 	}
@@ -165,7 +165,7 @@ func writerFunc(name string, withCtx, withResult bool) *node.Function {
 	return &node.Function{
 		Name: name, Package: "x",
 		Params:  params,
-		Returns: returns,
+		Returns: node.AnonReturns(returns...),
 	}
 }
 

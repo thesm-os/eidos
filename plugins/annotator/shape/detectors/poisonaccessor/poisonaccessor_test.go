@@ -26,7 +26,7 @@ func TestDetector_MatchesPoison(t *testing.T) {
 	t.Parallel()
 	fn := &node.Function{
 		Name: "Check", Package: "x",
-		Returns: []*node.TypeRef{dt.Err()},
+		Returns: node.AnonReturns(dt.Err()),
 	}
 	bag := dt.RunFn(t, poisonaccessor.Detector(), fn)
 	dt.AssertShape(t, bag, poisonaccessor.Name, "", "")
@@ -41,11 +41,11 @@ func TestDetector_Rejects(t *testing.T) {
 		{"has params (Lifecycle territory)", &node.Function{
 			Name: "Check", Package: "x",
 			Params:  []*node.Param{dt.Param("ctx", dt.Ctx())},
-			Returns: []*node.TypeRef{dt.Err()},
+			Returns: node.AnonReturns(dt.Err()),
 		}},
 		{"non-error single return (Predicate territory)", &node.Function{
 			Name: "Check", Package: "x",
-			Returns: []*node.TypeRef{dt.Named("bool")},
+			Returns: node.AnonReturns(dt.Named("bool")),
 		}},
 		{"void return (VoidLifecycle territory)", &node.Function{
 			Name: "Check", Package: "x",

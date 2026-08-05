@@ -96,6 +96,8 @@ func walkChildren(n Node, v Visitor) {
 		Walk(x.Type, v)
 	case *Param:
 		Walk(x.Type, v)
+	case *Return:
+		Walk(x.Type, v)
 	case *TypeParam:
 		walkTypeParam(x, v)
 	case *Enum:

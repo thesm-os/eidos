@@ -473,7 +473,16 @@ func renderMethodSig(m *node.Method) string {
 	}
 	returns := make([]string, 0, len(m.Returns))
 	for _, r := range m.Returns {
-		returns = append(returns, renderTypeRef(r))
+		// A declared return name is documentation the signature
+		// carries; `explain` exists to show what the model holds, so
+		// render it when the source declared one. Blank returns
+		// normalise to unnamed upstream, so a mixed rendering here
+		// reflects a genuinely mixed source signature.
+		if r.Name != "" {
+			returns = append(returns, r.Name+" "+renderTypeRef(r.Type))
+			continue
+		}
+		returns = append(returns, renderTypeRef(r.Type))
 	}
 	sig := m.Name + "(" + strings.Join(params, ", ") + ")"
 	switch len(returns) {

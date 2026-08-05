@@ -30,11 +30,11 @@ func TestDetector_MatchesMultipleValues(t *testing.T) {
 			dt.Param("ctx", dt.Ctx()),
 			dt.Param("id", dt.Named("string")),
 		},
-		Returns: []*node.TypeRef{
+		Returns: node.AnonReturns(
 			dt.Qualified("x", "Article"),
 			dt.Qualified("x", "Meta"),
 			dt.Err(),
-		},
+		),
 	}
 	bag := dt.RunFn(t, multireader.Detector(), fn)
 	dt.AssertShape(t, bag, multireader.Name, "string", "x.Article")
@@ -49,26 +49,26 @@ func TestDetector_Rejects(t *testing.T) {
 		{"single value (Reader territory)", &node.Function{
 			Name: "Get", Package: "x",
 			Params: []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Qualified("x", "Article"),
 				dt.Err(),
-			},
+			),
 		}},
 		{"no params (MultiAggregator territory)", &node.Function{
 			Name: "Pair", Package: "x",
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Named("int"),
 				dt.Named("int"),
 				dt.Err(),
-			},
+			),
 		}},
 		{"no error return (ReaderWithBool / Lookup territory)", &node.Function{
 			Name: "Get", Package: "x",
 			Params: []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Qualified("x", "Article"),
 				dt.Qualified("x", "Meta"),
-			},
+			),
 		}},
 	}
 	for _, tc := range cases {

@@ -79,7 +79,7 @@ func anonInterfaceWithMethod(
 	}
 	return &node.TypeRef{
 		TypeKind: node.TypeRefAnonInterface,
-		Methods:  []*node.Method{{Name: name, Params: params, Returns: returns}},
+		Methods:  []*node.Method{{Name: name, Params: params, Returns: node.AnonReturns(returns...)}},
 	}
 }
 
@@ -122,7 +122,7 @@ func makeRichPackage() *node.Package {
 			Name:       "Save",
 			Receiver:   &node.TypeRef{TypeKind: node.TypeRefPointer, Elem: namedRef(pkg.Path, "User")},
 			Params:     []*node.Param{{Name: "ctx", Type: namedRef("context", "Context")}},
-			Returns:    []*node.TypeRef{namedRef("", "error")},
+			Returns:    node.AnonReturns(namedRef("", "error")),
 			TypeParams: []*node.TypeParam{{Name: "M"}},
 		}},
 	}
@@ -134,7 +134,7 @@ func makeRichPackage() *node.Package {
 		TypeParams: []*node.TypeParam{{Name: "U", Constraint: constraintFrom(namedRef("fmt", "Stringer"))}},
 		Methods: []*node.Method{{
 			Name:    "Get",
-			Returns: []*node.TypeRef{namedRef(pkg.Path, "User"), namedRef("", "error")},
+			Returns: node.AnonReturns(namedRef(pkg.Path, "User"), namedRef("", "error")),
 		}},
 		Embeds: []*node.Embed{{Type: namedRef("io", "Closer")}},
 	}
@@ -170,7 +170,7 @@ func makeRichPackage() *node.Package {
 			{Name: "gen", Type: genericRef(pkg.Path, "User", namedRef("", "string"))},
 			{Name: "t", Type: &node.TypeRef{TypeKind: node.TypeRefTypeParam, Name: "K"}},
 		},
-		Returns:    []*node.TypeRef{namedRef("", "error")},
+		Returns:    node.AnonReturns(namedRef("", "error")),
 		TypeParams: []*node.TypeParam{{Name: "K"}},
 	}
 	pkg.Functions = []*node.Function{fn}

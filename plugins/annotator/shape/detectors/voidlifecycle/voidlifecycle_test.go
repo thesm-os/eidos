@@ -41,7 +41,7 @@ func TestDetector_Rejects(t *testing.T) {
 		}},
 		{"has returns", &node.Function{
 			Name: "X", Package: "x",
-			Returns: []*node.TypeRef{dt.Err()},
+			Returns: node.AnonReturns(dt.Err()),
 		}},
 	}
 	for _, tc := range cases {

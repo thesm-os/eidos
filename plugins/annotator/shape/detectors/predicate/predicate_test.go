@@ -26,7 +26,7 @@ func TestDetector_MatchesPredicate(t *testing.T) {
 	t.Parallel()
 	fn := &node.Function{
 		Name: "Ready", Package: "x",
-		Returns: []*node.TypeRef{dt.Named("bool")},
+		Returns: node.AnonReturns(dt.Named("bool")),
 	}
 	bag := dt.RunFn(t, predicate.Detector(), fn)
 	dt.AssertShape(t, bag, predicate.Name, "", "")
@@ -41,16 +41,16 @@ func TestDetector_Rejects(t *testing.T) {
 		{"void return", &node.Function{Name: "X", Package: "x"}},
 		{"error return", &node.Function{
 			Name: "X", Package: "x",
-			Returns: []*node.TypeRef{dt.Err()},
+			Returns: node.AnonReturns(dt.Err()),
 		}},
 		{"qualified bool is not a builtin", &node.Function{
 			Name: "X", Package: "x",
-			Returns: []*node.TypeRef{dt.Qualified("x", "bool")},
+			Returns: node.AnonReturns(dt.Qualified("x", "bool")),
 		}},
 		{"has params", &node.Function{
 			Name: "X", Package: "x",
 			Params:  []*node.Param{dt.Param("a", dt.Named("string"))},
-			Returns: []*node.TypeRef{dt.Named("bool")},
+			Returns: node.AnonReturns(dt.Named("bool")),
 		}},
 	}
 	for _, tc := range cases {

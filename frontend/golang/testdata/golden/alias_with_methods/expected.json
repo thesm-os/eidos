@@ -94,31 +94,33 @@
           "receiver_name": "s",
           "returns": [
             {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "pos": {
-                      "column": 6,
-                      "file": "source.go",
-                      "line": 10,
-                      "offset": 302
-                    },
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "Seconds",
-              "package": "example.com/golangtest",
-              "pos": {
-                "column": 30,
-                "file": "source.go",
-                "line": 14,
-                "offset": 469
-              },
-              "type_kind": 0
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "pos": {
+                        "column": 6,
+                        "file": "source.go",
+                        "line": 10,
+                        "offset": 302
+                      },
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "Seconds",
+                "package": "example.com/golangtest",
+                "pos": {
+                  "column": 30,
+                  "file": "source.go",
+                  "line": 14,
+                  "offset": 469
+                },
+                "type_kind": 0
+              }
             }
           ]
         }

@@ -30,10 +30,10 @@ func TestDetector_Matches(t *testing.T) {
 		fn := &node.Function{
 			Name: "Count", Package: "x",
 			Params: []*node.Param{dt.Param("ctx", dt.Ctx())},
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Named("int"),
 				dt.Err(),
-			},
+			),
 		}
 		bag := dt.RunFn(t, aggregator.Detector(), fn)
 		dt.AssertShape(t, bag, aggregator.Name, "", "int")
@@ -44,7 +44,7 @@ func TestDetector_Matches(t *testing.T) {
 		fn := &node.Function{
 			Name: "Count", Package: "x",
 			Params:  []*node.Param{dt.Param("ctx", dt.Ctx())},
-			Returns: []*node.TypeRef{dt.Named("int")},
+			Returns: node.AnonReturns(dt.Named("int")),
 		}
 		bag := dt.RunFn(t, aggregator.Detector(), fn)
 		dt.AssertShape(t, bag, aggregator.Name, "", "int")
@@ -54,7 +54,7 @@ func TestDetector_Matches(t *testing.T) {
 		t.Parallel()
 		fn := &node.Function{
 			Name: "Count", Package: "x",
-			Returns: []*node.TypeRef{dt.Named("int")},
+			Returns: node.AnonReturns(dt.Named("int")),
 		}
 		bag := dt.RunFn(t, aggregator.Detector(), fn)
 		dt.AssertShape(t, bag, aggregator.Name, "", "int")
@@ -70,15 +70,15 @@ func TestDetector_Rejects(t *testing.T) {
 		{"has non-ctx param (Reader / ReaderNoError territory)", &node.Function{
 			Name: "Find", Package: "x",
 			Params:  []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: []*node.TypeRef{dt.Named("int")},
+			Returns: node.AnonReturns(dt.Named("int")),
 		}},
 		{"two values + error (MultiAggregator territory)", &node.Function{
 			Name: "Stats", Package: "x",
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Named("int"),
 				dt.Named("int"),
 				dt.Err(),
-			},
+			),
 		}},
 		{"void return (Lifecycle / VoidLifecycle territory)", &node.Function{
 			Name: "Tick", Package: "x",

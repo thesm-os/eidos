@@ -153,7 +153,7 @@ func sweepDispatch(all []shape.Detector) (matches, wins map[string]int) {
 
 	for _, ps := range paramSpace() {
 		for _, rs := range returnSpace() {
-			callable := &node.Method{Name: "M", Params: ps, Returns: rs}
+			callable := &node.Method{Name: "M", Params: ps, Returns: node.AnonReturns(rs...)}
 			claimed := false
 			for _, d := range all {
 				detect, ok := d.Detect["golang"]

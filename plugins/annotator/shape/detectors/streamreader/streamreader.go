@@ -40,10 +40,10 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 		return shape.Match{}, false
 	}
 	variant := ""
-	elem := shape.GoIterSeqElem(returns[0])
+	elem := shape.GoIterSeqElem(returns[0].Type)
 	if elem != nil {
 		variant = "seq"
-	} else if k, _ := shape.GoIterSeq2Args(returns[0]); k != nil {
+	} else if k, _ := shape.GoIterSeq2Args(returns[0].Type); k != nil {
 		elem = k
 		variant = "seq2"
 	}

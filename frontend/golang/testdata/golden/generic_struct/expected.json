@@ -44,24 +44,26 @@
           },
           "returns": [
             {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "string",
-              "pos": {
-                "column": 11,
-                "file": "source.go",
-                "line": 10,
-                "offset": 265
-              },
-              "type_kind": 0
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "string",
+                "pos": {
+                  "column": 11,
+                  "file": "source.go",
+                  "line": 10,
+                  "offset": 265
+                },
+                "type_kind": 0
+              }
             }
           ]
         }

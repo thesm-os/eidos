@@ -81,9 +81,17 @@ func (b *MethodBuilder) Variadic(name string, elemT *node.TypeRef) *MethodBuilde
 	return b
 }
 
-// Return appends a return type to the method's signature.
+// Return appends an unnamed return slot to the method's signature.
 func (b *MethodBuilder) Return(t *node.TypeRef) *MethodBuilder {
-	b.m.Returns = append(b.m.Returns, t)
+	b.m.Returns = append(b.m.Returns, &node.Return{Type: t})
+	return b
+}
+
+// NamedReturn appends a return slot carrying a declared name, as a
+// signature written `(item string, err error)` produces. Pass an
+// empty name for the anonymous form, or use [MethodBuilder.Return].
+func (b *MethodBuilder) NamedReturn(name string, t *node.TypeRef) *MethodBuilder {
+	b.m.Returns = append(b.m.Returns, &node.Return{Name: name, Type: t})
 	return b
 }
 

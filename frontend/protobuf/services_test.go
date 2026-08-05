@@ -100,7 +100,7 @@ func TestConvert_Services(t *testing.T) {
 		if req.Name != "ExternalRequest" {
 			t.Fatalf("Echo request Type.Name = %q, want %q", req.Name, "ExternalRequest")
 		}
-		resp := echo.Returns[0]
+		resp := echo.Returns[0].Type
 		if resp.Package != wantPkg {
 			t.Fatalf("Echo response Type.Package = %q, want %q", resp.Package, wantPkg)
 		}
@@ -130,7 +130,7 @@ func TestConvert_Services(t *testing.T) {
 		if len(say.Returns) != 1 {
 			t.Fatalf("SayHello.Returns has %d entries, want 1", len(say.Returns))
 		}
-		resp := say.Returns[0]
+		resp := say.Returns[0].Type
 		if resp.Name != "HelloReply" {
 			t.Fatalf("SayHello response Name = %q, want %q", resp.Name, "HelloReply")
 		}

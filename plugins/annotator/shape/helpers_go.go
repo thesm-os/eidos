@@ -25,7 +25,7 @@ import "go.thesmos.sh/eidos/node"
 // callable node kinds. Returns `(nil, nil)` for any other node
 // type so detectors can early-return on a falsy length check
 // without a separate type-assertion ladder.
-func GoCallable(n node.Node) (params []*node.Param, returns []*node.TypeRef) {
+func GoCallable(n node.Node) (params []*node.Param, returns []*node.Return) {
 	switch x := n.(type) {
 	case *node.Function:
 		return x.Params, x.Returns
@@ -75,9 +75,9 @@ func GoStripVariadic(params []*node.Param) []*node.Param {
 
 // GoErrorIndex returns the index of the first bare builtin
 // `error` return, or -1 when no error return is present.
-func GoErrorIndex(returns []*node.TypeRef) int {
+func GoErrorIndex(returns []*node.Return) int {
 	for i, r := range returns {
-		if isGoErrorRef(r) {
+		if r != nil && isGoErrorRef(r.Type) {
 			return i
 		}
 	}
@@ -86,22 +86,28 @@ func GoErrorIndex(returns []*node.TypeRef) int {
 
 // GoHasError reports whether any return is the bare builtin
 // `error` type.
-func GoHasError(returns []*node.TypeRef) bool {
+func GoHasError(returns []*node.Return) bool {
 	return GoErrorIndex(returns) >= 0
 }
 
-// GoStripError returns the return list with the first bare
-// builtin `error` return dropped. Returns the slice unchanged
-// when no error return is present.
-func GoStripError(returns []*node.TypeRef) []*node.TypeRef {
+// GoStripError returns the declared types of every return except
+// the first bare builtin `error`, in declaration order.
+//
+// It takes slots and yields types deliberately. Detectors classify
+// on the type vector — arity, element kinds, error position — and a
+// return's binding name has no bearing on which shape a signature
+// is. Projecting here keeps that the common case while leaving the
+// names reachable on [node.Method.Returns] for the generators that
+// derive identifiers from them.
+func GoStripError(returns []*node.Return) []*node.TypeRef {
 	i := GoErrorIndex(returns)
 	if i < 0 {
-		return returns
+		return node.ReturnTypes(returns)
 	}
-	out := make([]*node.TypeRef, 0, len(returns)-1)
-	out = append(out, returns[:i]...)
-	out = append(out, returns[i+1:]...)
-	return out
+	kept := make([]*node.Return, 0, len(returns)-1)
+	kept = append(kept, returns[:i]...)
+	kept = append(kept, returns[i+1:]...)
+	return node.ReturnTypes(kept)
 }
 
 // GoIterSeqElem returns the element type V when r is

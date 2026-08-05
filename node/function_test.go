@@ -17,10 +17,10 @@ func makeFunction() *node.Function {
 			{Name: "ctx", Type: namedRef("context", "Context")},
 			{Name: "dsn", Type: namedRef("", "string")},
 		},
-		Returns: []*node.TypeRef{
-			{TypeKind: node.TypeRefPointer, Elem: namedRef("db", "Conn")},
+		Returns: node.AnonReturns(
+			&node.TypeRef{TypeKind: node.TypeRefPointer, Elem: namedRef("db", "Conn")},
 			namedRef("", "error"),
-		},
+		),
 	}
 }
 
@@ -93,10 +93,10 @@ func TestFunction_ParamAt(t *testing.T) {
 func TestFunction_ReturnAt(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns the return type at the given index", func(t *testing.T) {
+	t.Run("returns the return slot at the given index", func(t *testing.T) {
 		t.Parallel()
 		got := makeFunction().ReturnAt(1)
-		if got == nil || got.Name != "error" {
+		if got == nil || got.Type.Name != "error" {
 			t.Fatalf("ReturnAt(1) = %+v", got)
 		}
 	})
@@ -130,8 +130,8 @@ func TestFunction_ReturnsWith(t *testing.T) {
 
 	t.Run("filters returns by predicate", func(t *testing.T) {
 		t.Parallel()
-		got := makeFunction().ReturnsWith(func(r *node.TypeRef) bool { return r.IsPointer() })
-		if len(got) != 1 || !got[0].IsPointer() {
+		got := makeFunction().ReturnsWith(func(r *node.Return) bool { return r.Type.IsPointer() })
+		if len(got) != 1 || !got[0].Type.IsPointer() {
 			t.Fatalf("ReturnsWith filter mismatch: %+v", got)
 		}
 	})

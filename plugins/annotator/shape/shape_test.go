@@ -457,10 +457,10 @@ func readerFunc(name string) *node.Function {
 			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 			{Name: "id", Type: &node.TypeRef{Name: "string"}},
 		},
-		Returns: []*node.TypeRef{
-			{Name: "Article", Package: "x"},
-			{Name: "error"},
-		},
+		Returns: node.AnonReturns(
+			&node.TypeRef{Name: "Article", Package: "x"},
+			&node.TypeRef{Name: "error"},
+		),
 	}
 }
 

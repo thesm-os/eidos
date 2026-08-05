@@ -196,24 +196,26 @@
           "receiver_name": "c",
           "returns": [
             {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "int",
-              "pos": {
-                "column": 25,
-                "file": "source.go",
-                "line": 22,
-                "offset": 768
-              },
-              "type_kind": 0
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "int",
+                "pos": {
+                  "column": 25,
+                  "file": "source.go",
+                  "line": 22,
+                  "offset": 768
+                },
+                "type_kind": 0
+              }
             }
           ]
         }

@@ -31,7 +31,7 @@ func TestDetector_Matches(t *testing.T) {
 			dt.Param("k", dt.Named("string")),
 			dt.Param("v", dt.Qualified("x", "Article")),
 		},
-		Returns: []*node.TypeRef{dt.Err()},
+		Returns: node.AnonReturns(dt.Err()),
 	}
 	bag := dt.RunFn(t, compositewriter.Detector(), fn)
 	dt.AssertShape(t, bag, compositewriter.Name, "string", "x.Article")
@@ -46,7 +46,7 @@ func TestDetector_Rejects(t *testing.T) {
 		{"one non-ctx param (Writer territory)", &node.Function{
 			Name: "Save", Package: "x",
 			Params:  []*node.Param{dt.Param("v", dt.Qualified("x", "Article"))},
-			Returns: []*node.TypeRef{dt.Err()},
+			Returns: node.AnonReturns(dt.Err()),
 		}},
 		{"three non-ctx params (MultiArgWriter territory)", &node.Function{
 			Name: "Save", Package: "x",
@@ -55,7 +55,7 @@ func TestDetector_Rejects(t *testing.T) {
 				dt.Param("b", dt.Named("string")),
 				dt.Param("c", dt.Named("string")),
 			},
-			Returns: []*node.TypeRef{dt.Err()},
+			Returns: node.AnonReturns(dt.Err()),
 		}},
 		{"no error return", &node.Function{
 			Name: "Set", Package: "x",
@@ -70,10 +70,10 @@ func TestDetector_Rejects(t *testing.T) {
 				dt.Param("k", dt.Named("string")),
 				dt.Param("v", dt.Qualified("x", "Article")),
 			},
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.Qualified("x", "Result"),
 				dt.Err(),
-			},
+			),
 		}},
 	}
 	for _, tc := range cases {

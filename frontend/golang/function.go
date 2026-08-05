@@ -94,7 +94,7 @@ func (c *converter) paramsAndReturnsFromSignature(
 	sig *types.Signature,
 	owner node.Node,
 	astFn *ast.FuncType,
-) ([]*node.Param, []*node.TypeRef) {
+) ([]*node.Param, []*node.Return) {
 	params := c.paramsFromSignature(sig, owner, astFn)
 	returns := c.returnsFromSignature(sig, astFn)
 	return params, returns
@@ -137,17 +137,36 @@ func (c *converter) paramsFromSignature(
 // returnsFromSignature returns the result-type slice for sig in
 // positional order, with AST-derived positions overlaid when the
 // supplied [ast.FuncType] has them.
-func (c *converter) returnsFromSignature(sig *types.Signature, astFn *ast.FuncType) []*node.TypeRef {
+func (c *converter) returnsFromSignature(sig *types.Signature, astFn *ast.FuncType) []*node.Return {
 	results := sig.Results()
 	if results == nil {
 		return nil
 	}
-	out := make([]*node.TypeRef, 0, results.Len())
+	out := make([]*node.Return, 0, results.Len())
+	refs := make([]*node.TypeRef, 0, results.Len())
 	for r := range results.Variables() {
-		out = append(out, c.typeRefOf(r.Type()))
+		ref := c.typeRefOf(r.Type())
+		refs = append(refs, ref)
+		out = append(out, &node.Return{Name: returnBindingName(r), Type: ref})
 	}
-	c.overlayReturnTypePos(out, astFn)
+	c.overlayReturnTypePos(refs, astFn)
 	return out
+}
+
+// returnBindingName reports the declared name of a result variable,
+// normalising the blank identifier to empty.
+//
+// go/types reports an anonymous result with an empty name and a
+// blank one as "_". Neither can be used as a derived identifier, so
+// collapsing them here keeps every consumer from special-casing
+// "_" — at the cost of making the two indistinguishable downstream,
+// which is intended: what a consumer needs to know is whether a
+// usable name exists.
+func returnBindingName(v *types.Var) string {
+	if name := v.Name(); name != "_" {
+		return name
+	}
+	return ""
 }
 
 // fillReceiver records the receiver type ref and the source-level

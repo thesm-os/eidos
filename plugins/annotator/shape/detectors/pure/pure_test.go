@@ -40,7 +40,7 @@ func TestDetector_MatchesPure(t *testing.T) {
 		t.Parallel()
 		fn := &node.Function{
 			Name: "Now", Package: "x",
-			Returns: []*node.TypeRef{{Name: "Time", Package: "time"}},
+			Returns: node.AnonReturns(&node.TypeRef{Name: "Time", Package: "time"}),
 		}
 		runDetectFunc(t, fn)
 		assertShape(t, fn.Meta(), pure.Name, "time.Time")
@@ -54,7 +54,7 @@ func TestDetector_MatchesPure(t *testing.T) {
 				{Name: "a", Type: &node.TypeRef{Name: "int"}},
 				{Name: "b", Type: &node.TypeRef{Name: "int"}},
 			},
-			Returns: []*node.TypeRef{{Name: "int"}},
+			Returns: node.AnonReturns(&node.TypeRef{Name: "int"}),
 		}
 		runDetectFunc(t, fn)
 		assertShape(t, fn.Meta(), pure.Name, "int")
@@ -67,7 +67,7 @@ func TestDetector_MatchesPure(t *testing.T) {
 			Params: []*node.Param{
 				{Name: "xs", Type: &node.TypeRef{Name: "int"}, Variadic: true},
 			},
-			Returns: []*node.TypeRef{{Name: "int"}},
+			Returns: node.AnonReturns(&node.TypeRef{Name: "int"}),
 		}
 		runDetectFunc(t, fn)
 		assertShape(t, fn.Meta(), pure.Name, "int")
@@ -90,7 +90,7 @@ func TestDetector_RejectsImpure(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: []*node.TypeRef{{Name: "Time", Package: "time"}},
+				Returns: node.AnonReturns(&node.TypeRef{Name: "Time", Package: "time"}),
 			},
 		},
 		{
@@ -100,20 +100,20 @@ func TestDetector_RejectsImpure(t *testing.T) {
 				Params: []*node.Param{
 					{Name: "xs", Type: &node.TypeRef{Name: "int"}, Variadic: true},
 				},
-				Returns: []*node.TypeRef{
-					{Name: "int"},
-					{Name: "error"},
-				},
+				Returns: node.AnonReturns(
+					&node.TypeRef{Name: "int"},
+					&node.TypeRef{Name: "error"},
+				),
 			},
 		},
 		{
 			name: "two non-error returns (MultiAggregator territory)",
 			fn: &node.Function{
 				Name: "Pair", Package: "x",
-				Returns: []*node.TypeRef{
-					{Name: "int"},
-					{Name: "string"},
-				},
+				Returns: node.AnonReturns(
+					&node.TypeRef{Name: "int"},
+					&node.TypeRef{Name: "string"},
+				),
 			},
 		},
 		{

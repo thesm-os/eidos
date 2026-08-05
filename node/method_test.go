@@ -17,10 +17,10 @@ func makeMethod() *node.Method {
 			{Name: "ctx", Type: namedRef("context", "Context")},
 			{Name: "id", Type: namedRef("", "string")},
 		},
-		Returns: []*node.TypeRef{
+		Returns: node.AnonReturns(
 			namedRef("repo", "User"),
 			namedRef("", "error"),
-		},
+		),
 	}
 }
 
@@ -79,10 +79,10 @@ func TestMethod_ParamAt(t *testing.T) {
 func TestMethod_ReturnAt(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns the return type at the given index", func(t *testing.T) {
+	t.Run("returns the return slot at the given index", func(t *testing.T) {
 		t.Parallel()
 		got := makeMethod().ReturnAt(1)
-		if got == nil || got.Name != "error" {
+		if got == nil || got.Type.Name != "error" {
 			t.Fatalf("ReturnAt(1) = %+v", got)
 		}
 	})
@@ -116,8 +116,8 @@ func TestMethod_ReturnsWith(t *testing.T) {
 
 	t.Run("filters returns by predicate", func(t *testing.T) {
 		t.Parallel()
-		got := makeMethod().ReturnsWith(func(r *node.TypeRef) bool { return r.Name == "error" })
-		if len(got) != 1 || got[0].Name != "error" {
+		got := makeMethod().ReturnsWith(func(r *node.Return) bool { return r.Type.Name == "error" })
+		if len(got) != 1 || got[0].Type.Name != "error" {
 			t.Fatalf("ReturnsWith filter mismatch: %+v", got)
 		}
 	})

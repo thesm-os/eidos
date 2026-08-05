@@ -33,7 +33,7 @@ type Method struct {
 	Params []*Param `json:"params,omitempty"`
 
 	// Returns are the method's return types in source order.
-	Returns []*TypeRef `json:"returns,omitempty"`
+	Returns []*Return `json:"returns,omitempty"`
 
 	// TypeParams are the method's generic type parameters
 	// (rarely used in Go; declared on the receiver type instead,
@@ -80,7 +80,7 @@ func (m *Method) ParamAt(i int) *Param {
 
 // ReturnAt returns the return type at the given positional index, or
 // nil when i is out of range.
-func (m *Method) ReturnAt(i int) *TypeRef {
+func (m *Method) ReturnAt(i int) *Return {
 	if i < 0 || i >= len(m.Returns) {
 		return nil
 	}
@@ -98,9 +98,10 @@ func (m *Method) ParamsWith(pred func(*Param) bool) []*Param {
 	return out
 }
 
-// ReturnsWith returns return types matching pred in declaration order.
-func (m *Method) ReturnsWith(pred func(*TypeRef) bool) []*TypeRef {
-	out := make([]*TypeRef, 0, len(m.Returns))
+// ReturnsWith returns the return slots matching pred in
+// declaration order.
+func (m *Method) ReturnsWith(pred func(*Return) bool) []*Return {
+	out := make([]*Return, 0, len(m.Returns))
 	for _, r := range m.Returns {
 		if pred(r) {
 			out = append(out, r)

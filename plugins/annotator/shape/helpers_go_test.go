@@ -20,7 +20,7 @@ func TestGoCallable(t *testing.T) {
 		t.Parallel()
 		fn := &node.Function{
 			Params:  []*node.Param{{Name: "a"}},
-			Returns: []*node.TypeRef{{Name: "error"}},
+			Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
 		}
 		p, r := shape.GoCallable(fn)
 		if len(p) != 1 || len(r) != 1 {
@@ -32,7 +32,7 @@ func TestGoCallable(t *testing.T) {
 		t.Parallel()
 		m := &node.Method{
 			Params:  []*node.Param{{Name: "a"}, {Name: "b"}},
-			Returns: []*node.TypeRef{{Name: "string"}, {Name: "error"}},
+			Returns: node.AnonReturns(&node.TypeRef{Name: "string"}, &node.TypeRef{Name: "error"}),
 		}
 		p, r := shape.GoCallable(m)
 		if len(p) != 2 || len(r) != 2 {
@@ -157,31 +157,31 @@ func TestGoErrorHelpers(t *testing.T) {
 
 	t.Run("ErrorIndex returns the index of the bare error", func(t *testing.T) {
 		t.Parallel()
-		if got := shape.GoErrorIndex([]*node.TypeRef{valRef, errRef}); got != 1 {
+		if got := shape.GoErrorIndex(node.AnonReturns(valRef, errRef)); got != 1 {
 			t.Fatalf("GoErrorIndex = %d, want 1", got)
 		}
 	})
 
 	t.Run("ErrorIndex returns -1 when no error is present", func(t *testing.T) {
 		t.Parallel()
-		if got := shape.GoErrorIndex([]*node.TypeRef{valRef}); got != -1 {
+		if got := shape.GoErrorIndex(node.AnonReturns(valRef)); got != -1 {
 			t.Fatalf("GoErrorIndex = %d, want -1", got)
 		}
 	})
 
 	t.Run("HasError reports presence", func(t *testing.T) {
 		t.Parallel()
-		if !shape.GoHasError([]*node.TypeRef{valRef, errRef}) {
+		if !shape.GoHasError(node.AnonReturns(valRef, errRef)) {
 			t.Fatalf("GoHasError should be true when error is present")
 		}
-		if shape.GoHasError([]*node.TypeRef{valRef}) {
+		if shape.GoHasError(node.AnonReturns(valRef)) {
 			t.Fatalf("GoHasError should be false when no error is present")
 		}
 	})
 
 	t.Run("StripError drops the bare error return", func(t *testing.T) {
 		t.Parallel()
-		got := shape.GoStripError([]*node.TypeRef{valRef, errRef})
+		got := shape.GoStripError(node.AnonReturns(valRef, errRef))
 		if len(got) != 1 || got[0] != valRef {
 			t.Fatalf("GoStripError = %v, want [valRef]", got)
 		}
@@ -189,10 +189,10 @@ func TestGoErrorHelpers(t *testing.T) {
 
 	t.Run("StripError is a no-op when no error is present", func(t *testing.T) {
 		t.Parallel()
-		in := []*node.TypeRef{valRef}
+		in := node.AnonReturns(valRef)
 		got := shape.GoStripError(in)
 		if len(got) != 1 || got[0] != valRef {
-			t.Fatalf("GoStripError(no-error) = %v, want unchanged", got)
+			t.Fatalf("GoStripError(no-error) = %v, want the declared types unchanged", got)
 		}
 	})
 }

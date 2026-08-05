@@ -130,7 +130,7 @@ func matchSignature(s *node.Struct) (*node.Method, bool) {
 		if !isByteSlice(m.Params[0].Type) {
 			continue
 		}
-		if !isBuiltin(m.Returns[0], "int") || !isBuiltin(m.Returns[1], "error") {
+		if !isBuiltin(m.Returns[0].Type, "int") || !isBuiltin(m.Returns[1].Type, "error") {
 			continue
 		}
 		return m, true

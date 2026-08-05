@@ -131,8 +131,25 @@ func TestMethodBuilder_Return(t *testing.T) {
 		got := captureFirstMethod(t, func(b *storefixture.MethodBuilder) {
 			b.Return(storefixture.Named("error"))
 		})
-		if got.ReturnCount() != 1 || got.Returns[0].Name != "error" {
+		if got.ReturnCount() != 1 || got.Returns[0].Type.Name != "error" {
 			t.Fatalf("Return wiring wrong: %+v", got.Returns)
+		}
+		if got.Returns[0].Name != "" {
+			t.Fatalf("Return should produce an unnamed slot; got name %q", got.Returns[0].Name)
+		}
+	})
+
+	t.Run("appends a named return", func(t *testing.T) {
+		t.Parallel()
+		got := captureFirstMethod(t, func(b *storefixture.MethodBuilder) {
+			b.NamedReturn("item", storefixture.Named("string"))
+		})
+		if got.ReturnCount() != 1 {
+			t.Fatalf("NamedReturn wiring wrong: %+v", got.Returns)
+		}
+		if got.Returns[0].Name != "item" || got.Returns[0].Type.Name != "string" {
+			t.Fatalf("NamedReturn = %q %q, want item string",
+				got.Returns[0].Name, got.Returns[0].Type.Name)
 		}
 	})
 }

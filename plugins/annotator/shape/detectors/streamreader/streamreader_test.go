@@ -27,7 +27,7 @@ func TestDetector_MatchesSeq(t *testing.T) {
 	fn := &node.Function{
 		Name: "All", Package: "x",
 		Params:  []*node.Param{dt.Param("ctx", dt.Ctx())},
-		Returns: []*node.TypeRef{dt.IterSeq(dt.Qualified("x", "Article"))},
+		Returns: node.AnonReturns(dt.IterSeq(dt.Qualified("x", "Article"))),
 	}
 	bag := dt.RunFn(t, streamreader.Detector(), fn)
 	dt.AssertShape(t, bag, streamreader.Name, "", "x.Article")
@@ -41,7 +41,7 @@ func TestDetector_MatchesSeqWithKey(t *testing.T) {
 			dt.Param("ctx", dt.Ctx()),
 			dt.Param("category", dt.Named("string")),
 		},
-		Returns: []*node.TypeRef{dt.IterSeq(dt.Qualified("x", "Article"))},
+		Returns: node.AnonReturns(dt.IterSeq(dt.Qualified("x", "Article"))),
 	}
 	bag := dt.RunFn(t, streamreader.Detector(), fn)
 	dt.AssertShape(t, bag, streamreader.Name, "string", "x.Article")
@@ -52,9 +52,9 @@ func TestDetector_MatchesSeq2(t *testing.T) {
 	fn := &node.Function{
 		Name: "All", Package: "x",
 		Params: []*node.Param{dt.Param("ctx", dt.Ctx())},
-		Returns: []*node.TypeRef{
+		Returns: node.AnonReturns(
 			dt.IterSeq2(dt.Qualified("x", "Article"), dt.Err()),
-		},
+		),
 	}
 	bag := dt.RunFn(t, streamreader.Detector(), fn)
 	dt.AssertShape(t, bag, streamreader.Name, "", "x.Article")
@@ -69,14 +69,14 @@ func TestDetector_Rejects(t *testing.T) {
 		{"non-iter return (Reader / Aggregator territory)", &node.Function{
 			Name: "Get", Package: "x",
 			Params:  []*node.Param{dt.Param("ctx", dt.Ctx())},
-			Returns: []*node.TypeRef{dt.Qualified("x", "Article")},
+			Returns: node.AnonReturns(dt.Qualified("x", "Article")),
 		}},
 		{"multiple returns", &node.Function{
 			Name: "All", Package: "x",
-			Returns: []*node.TypeRef{
+			Returns: node.AnonReturns(
 				dt.IterSeq(dt.Qualified("x", "Article")),
 				dt.Err(),
-			},
+			),
 		}},
 		{"too many input keys", &node.Function{
 			Name: "All", Package: "x",
@@ -84,7 +84,7 @@ func TestDetector_Rejects(t *testing.T) {
 				dt.Param("a", dt.Named("string")),
 				dt.Param("b", dt.Named("string")),
 			},
-			Returns: []*node.TypeRef{dt.IterSeq(dt.Qualified("x", "Article"))},
+			Returns: node.AnonReturns(dt.IterSeq(dt.Qualified("x", "Article"))),
 		}},
 	}
 	for _, tc := range cases {

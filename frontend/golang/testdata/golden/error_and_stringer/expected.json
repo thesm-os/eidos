@@ -45,36 +45,38 @@
       },
       "returns": [
         {
-          "meta": {
-            "entries": [
-              {
-                "authority": 0,
-                "name": "go.isComparable",
-                "set_by": "golang",
-                "value": true
-              },
-              {
-                "authority": 0,
-                "name": "go.isError",
-                "set_by": "golang",
-                "value": true
-              },
-              {
-                "authority": 0,
-                "name": "go.isInterface",
-                "set_by": "golang",
-                "value": true
-              }
-            ]
-          },
-          "name": "error",
-          "pos": {
-            "column": 12,
-            "file": "source.go",
-            "line": 12,
-            "offset": 462
-          },
-          "type_kind": 0
+          "type": {
+            "meta": {
+              "entries": [
+                {
+                  "authority": 0,
+                  "name": "go.isComparable",
+                  "set_by": "golang",
+                  "value": true
+                },
+                {
+                  "authority": 0,
+                  "name": "go.isError",
+                  "set_by": "golang",
+                  "value": true
+                },
+                {
+                  "authority": 0,
+                  "name": "go.isInterface",
+                  "set_by": "golang",
+                  "value": true
+                }
+              ]
+            },
+            "name": "error",
+            "pos": {
+              "column": 12,
+              "file": "source.go",
+              "line": 12,
+              "offset": 462
+            },
+            "type_kind": 0
+          }
         }
       ]
     },
@@ -97,43 +99,45 @@
       },
       "returns": [
         {
-          "meta": {
-            "entries": [
-              {
-                "authority": 0,
-                "name": "go.isComparable",
-                "pos": {
-                  "column": 6,
-                  "file": "source.go",
-                  "line": 18,
-                  "offset": 699
+          "type": {
+            "meta": {
+              "entries": [
+                {
+                  "authority": 0,
+                  "name": "go.isComparable",
+                  "pos": {
+                    "column": 6,
+                    "file": "source.go",
+                    "line": 18,
+                    "offset": 699
+                  },
+                  "set_by": "golang",
+                  "value": true
                 },
-                "set_by": "golang",
-                "value": true
-              },
-              {
-                "authority": 0,
-                "name": "go.isStringer",
-                "pos": {
-                  "column": 6,
-                  "file": "source.go",
-                  "line": 18,
-                  "offset": 699
-                },
-                "set_by": "golang",
-                "value": true
-              }
-            ]
-          },
-          "name": "Label",
-          "package": "example.com/golangtest",
-          "pos": {
-            "column": 15,
-            "file": "source.go",
-            "line": 29,
-            "offset": 1108
-          },
-          "type_kind": 0
+                {
+                  "authority": 0,
+                  "name": "go.isStringer",
+                  "pos": {
+                    "column": 6,
+                    "file": "source.go",
+                    "line": 18,
+                    "offset": 699
+                  },
+                  "set_by": "golang",
+                  "value": true
+                }
+              ]
+            },
+            "name": "Label",
+            "package": "example.com/golangtest",
+            "pos": {
+              "column": 15,
+              "file": "source.go",
+              "line": 29,
+              "offset": 1108
+            },
+            "type_kind": 0
+          }
         }
       ]
     }
@@ -253,24 +257,26 @@
           "receiver_name": "l",
           "returns": [
             {
-              "meta": {
-                "entries": [
-                  {
-                    "authority": 0,
-                    "name": "go.isComparable",
-                    "set_by": "golang",
-                    "value": true
-                  }
-                ]
-              },
-              "name": "string",
-              "pos": {
-                "column": 25,
-                "file": "source.go",
-                "line": 24,
-                "offset": 887
-              },
-              "type_kind": 0
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "string",
+                "pos": {
+                  "column": 25,
+                  "file": "source.go",
+                  "line": 24,
+                  "offset": 887
+                },
+                "type_kind": 0
+              }
             }
           ]
         }
