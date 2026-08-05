@@ -19,7 +19,7 @@ func New{{ $s.Name }}{{ renderTypeParams (typeParams $s) }}() *{{ $builderName }
 // New{{ $s.Name }}WithDefaults creates a builder seeded from the
 // directive-pinned defaults factory.
 func New{{ $s.Name }}WithDefaults{{ renderTypeParams (typeParams $s) }}() *{{ $builderName }}{{ $args }} {
-	return &{{ $builderName }}{{ $args }}{v: {{ renderExpr (defaultsExpr .DefaultsArg) }}()}
+	return &{{ $builderName }}{{ $args }}{v: {{ renderExpr (defaultsExpr .DefaultsArg $s.Package) }}()}
 }
 {{ end }}
 // New{{ $s.Name }}From creates a builder seeded with v. Use when the

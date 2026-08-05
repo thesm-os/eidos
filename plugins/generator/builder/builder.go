@@ -141,8 +141,10 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 				"Opts the host struct in for fluent-builder generation. " +
 					"`defaults=<value>` adds a `New<Name>WithDefaults` " +
 					"constructor seeded from the named factory; no " +
-					"auto-discovery is performed. The value's parsing " +
-					"convention is defined per target language.",
+					"auto-discovery is performed. A bare name resolves " +
+					"beside the annotated type; a qualified one names " +
+					"another package. The value's parsing convention is " +
+					"defined per target language.",
 			).
 			Build(),
 	}
@@ -220,8 +222,9 @@ type Type struct {
 
 	// DefaultsArg is the verbatim `defaults=` directive value
 	// or the empty string when the arg is absent. The active
-	// language's funcmap parses the value at render time;
-	// malformed values surface as render-time errors.
+	// language's funcmap parses the value at render time,
+	// resolving a bare identifier against [Builder.Source]'s
+	// package; malformed values surface as render-time errors.
 	DefaultsArg string
 }
 

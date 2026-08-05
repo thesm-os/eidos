@@ -96,9 +96,9 @@ func TestConformance_Golang(t *testing.T) {
 }
 
 // TestGoDefaultsExpr pins the builder-specific `defaults=`
-// parser — the empty-input → nil case, the well-formed split
-// case, and every malformed shape that should surface
-// [builder.ErrMalformedDefaults] as a render-time error.
+// parser — both accepted forms and every malformed shape that
+// should surface [builder.ErrMalformedDefaults] as a
+// render-time error.
 // Identifier-convention and type-ref-shape helpers used by
 // the same template are tested upstream in the
 // [go.thesmos.sh/eidos/lang/golang] package.
@@ -107,12 +107,35 @@ func TestGoDefaultsExpr(t *testing.T) {
 
 	t.Run("well-formed value parses into an External call", func(t *testing.T) {
 		t.Parallel()
-		got, err := builderplugin.GoDefaultsExpr("example.com/blog.ArticleDefaults")
+		got, err := builderplugin.GoDefaultsExpr("example.com/blog.ArticleDefaults", "example.com/src")
 		if err != nil {
 			t.Fatalf("well-formed value must parse: %v", err)
 		}
 		if got == nil {
 			t.Fatalf("well-formed value must return non-nil expression")
+		}
+		if got.Pkg != "example.com/blog" {
+			t.Fatalf("Pkg = %q, want the qualified path, not the source package", got.Pkg)
+		}
+	})
+
+	t.Run("a bare identifier resolves against the source package", func(t *testing.T) {
+		t.Parallel()
+		// The factory beside the annotated struct is the common
+		// case. Resolving it to a package rather than leaving a
+		// bare identifier is what lets the same directive work
+		// when `out=` / `pkg=` moves the builder elsewhere: the
+		// backend elides the qualifier in the source package and
+		// adds it everywhere else.
+		got, err := builderplugin.GoDefaultsExpr("defaultUser", "example.com/src")
+		if err != nil {
+			t.Fatalf("bare identifier must parse: %v", err)
+		}
+		if got.Pkg != "example.com/src" {
+			t.Fatalf("Pkg = %q, want the source package", got.Pkg)
+		}
+		if got.Name != "defaultUser" {
+			t.Fatalf("Name = %q, want defaultUser", got.Name)
 		}
 	})
 
@@ -120,14 +143,13 @@ func TestGoDefaultsExpr(t *testing.T) {
 		t.Parallel()
 		malformed := []string{
 			"",
-			"no_dot_at_all",
 			".leading_dot",
 			"trailing_dot.",
 		}
 		for _, raw := range malformed {
 			t.Run(raw, func(t *testing.T) {
 				t.Parallel()
-				_, err := builderplugin.GoDefaultsExpr(raw)
+				_, err := builderplugin.GoDefaultsExpr(raw, "example.com/src")
 				if !errors.Is(err, builderplugin.ErrMalformedDefaults) {
 					t.Errorf("expected ErrMalformedDefaults for %q; got %v", raw, err)
 				}

@@ -22,14 +22,14 @@ import (
 const GoSuffix = "_builder.go"
 
 // ErrMalformedDefaults is the sentinel surfaced by
-// [GoDefaultsExpr] when a `defaults=` value cannot be split
-// into a non-empty import path + non-empty function
-// identifier (Go's `<import-path>.<FuncName>` convention).
+// [GoDefaultsExpr] when a `defaults=` value is neither a bare
+// function identifier nor a non-empty import path plus a
+// non-empty function identifier.
 // Template execution fails with this error wrapped so the
 // offending struct's whole render attempt errors out rather
 // than silently dropping the `New<Name>WithDefaults` branch.
 var ErrMalformedDefaults = errors.New(
-	`builder: defaults value must have form "import/path.FuncName"`,
+	`builder: defaults value must be "FuncName" or "import/path.FuncName"`,
 )
 
 //go:embed templates/golang/*.tmpl
@@ -62,10 +62,29 @@ func GoFuncMap() template.FuncMap {
 	}
 }
 
-// GoDefaultsExpr parses a Go-shape `<import-path>.<FuncName>`
-// defaults value into an [emit.External] expression suitable
-// for the rendered `New<Name>WithDefaults` body. Malformed
-// input — empty string, no `.`, leading `.`, trailing `.` —
+// GoDefaultsExpr parses a `defaults=` value into an
+// [emit.External] expression suitable for the rendered
+// `New<Name>WithDefaults` body. Two forms are accepted:
+//
+//   - A bare identifier — `defaults=defaultUser` — naming a
+//     function beside the annotated struct. It resolves
+//     against srcPkg, the source struct's package. This is the
+//     common case, and the one a source author writes without
+//     thinking about it.
+//   - `<import-path>.<FuncName>` — `defaults=example.com/x.New`
+//     — naming a factory in another package.
+//
+// Both render through [emit.External], so the same-package
+// elision rule picks the spelling: a builder emitted alongside
+// its source renders the bare name, and one redirected by
+// `out=` / `pkg=` renders it qualified against the import the
+// backend registers. Resolving the bare form to a package
+// rather than emitting a bare identifier is what makes the
+// redirected case work at all — and when the named factory is
+// unexported, turns a reference that would bind to nothing
+// into a compile error naming the symbol.
+//
+// Malformed input — empty string, leading `.`, trailing `.` —
 // returns [ErrMalformedDefaults] wrapped with the offending
 // value, surfaced as a render-time error.
 //
@@ -74,13 +93,18 @@ func GoFuncMap() template.FuncMap {
 // rendering; the empty-input rejection is defence-in-depth
 // for direct callers.
 //
-// The parser is plugin-local because the directive's
-// "import-path.FuncName" convention is specific to the
-// builder's `defaults=` arg; shared identifier-convention
-// helpers live in [golang].
-func GoDefaultsExpr(raw string) (*sdk.Expr, error) {
+// The parser is plugin-local because the two-form convention
+// is specific to the builder's `defaults=` arg; shared
+// identifier-convention helpers live in [golang].
+func GoDefaultsExpr(raw, srcPkg string) (*sdk.Expr, error) {
 	i := strings.LastIndex(raw, ".")
-	if i <= 0 || i == len(raw)-1 {
+	if i < 0 {
+		if raw == "" {
+			return nil, fmt.Errorf("%w (got %q)", ErrMalformedDefaults, raw)
+		}
+		return sdk.NewExternal(srcPkg, raw), nil
+	}
+	if i == 0 || i == len(raw)-1 {
 		return nil, fmt.Errorf("%w (got %q)", ErrMalformedDefaults, raw)
 	}
 	return sdk.NewExternal(raw[:i], raw[i+1:]), nil
