@@ -3,7 +3,11 @@
 
 package pipeline
 
-import "go.thesmos.sh/eidos/core/directive"
+import (
+	"slices"
+
+	"go.thesmos.sh/eidos/core/directive"
+)
 
 // OutDirective is the name of the canonical `out` directive — the
 // per-source routing override the Layout phase consumes. Source
@@ -97,6 +101,45 @@ const ValueDirective directive.Name = "value"
 //
 // This is the rare case; the per-directive form covers the common
 // "this directive's outputs travel together" intent without typing.
+
+// RoutingKeys are the KV keys the Layout phase honours on any
+// plugin-owned directive: `out=<path>` redirects the emitted file,
+// `pkg=<name>` pins its package clause, and `tag=<name>` scopes both
+// to one of the owning plugin's declared outputs.
+//
+// They are reserved rather than plugin-declared because routing is a
+// framework concern that applies uniformly. A plugin author writing
+// `AllowedKeys("defaults")` is describing their own option surface
+// and has no reason to suspect they are also switching off
+// redirection — which is exactly what a literal reading of
+// AllowedKeys would do. [widenRoutingKeys] closes that gap at
+// registration.
+var RoutingKeys = []string{"out", "pkg", "tag"}
+
+// widenRoutingKeys returns s with [RoutingKeys] added to its
+// AllowedKeys, so a plugin that restricts its own key surface does
+// not accidentally reject the framework's routing overrides.
+//
+// A schema with an empty AllowedKeys already accepts every key and
+// is returned untouched — appending would convert "accepts
+// anything" into "accepts exactly the routing keys", which is the
+// opposite of the intent.
+//
+// Applied only to plugin-owned directives. The standalone `+gen:out`
+// directive spells its own scope with `plugin=` and takes the path
+// positionally, so it neither needs nor accepts these.
+func widenRoutingKeys(s directive.Schema) directive.Schema {
+	if len(s.AllowedKeys) == 0 {
+		return s
+	}
+	for _, k := range RoutingKeys {
+		if !slices.Contains(s.AllowedKeys, k) {
+			s.AllowedKeys = append(s.AllowedKeys, k)
+		}
+	}
+	return s
+}
+
 func coreDirectives() []directive.Schema {
 	return []directive.Schema{
 		directive.NewSchema(OutDirective).

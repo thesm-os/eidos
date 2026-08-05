@@ -912,6 +912,13 @@ func (b *Builder) buildDirectiveRegistry() (*directive.Registry, map[directive.N
 			continue
 		}
 		for _, s := range dp.Directives() {
+			// Ownership is what makes a directive routing-bearing: the
+			// Layout phase reads out= / pkg= / tag= from exactly the
+			// directives recorded below. Widening here keeps the
+			// validator's view and the router's view of the same
+			// directive from disagreeing — the split that let builder
+			// report "does not accept key out" and then honour it.
+			s = widenRoutingKeys(s)
 			if err := r.Register(s); err != nil {
 				errs = append(errs, fmt.Errorf("%w: %w", ErrDuplicateDirective, err))
 				continue
