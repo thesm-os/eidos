@@ -17,8 +17,9 @@ func (c *Caser) Pascal(s string) string {
 		return ""
 	}
 	var b strings.Builder
+	b.Grow(len(s))
 	for _, w := range words {
-		b.WriteString(c.titleWord(w))
+		c.writeTitleWord(&b, w)
 	}
 	return b.String()
 }
@@ -35,39 +36,30 @@ func (c *Caser) Camel(s string) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(strings.ToLower(words[0]))
+	b.Grow(len(s))
+	writeCased(&b, words[0], false)
 	for _, w := range words[1:] {
-		b.WriteString(c.titleWord(w))
+		c.writeTitleWord(&b, w)
 	}
 	return b.String()
 }
 
 // Snake converts s to snake_case (lower-case words joined by '_').
-func (c *Caser) Snake(s string) string {
-	return joinWith(c.Words(s), "_", strings.ToLower)
-}
+func (c *Caser) Snake(s string) string { return c.joined(s, '_', false) }
 
 // ScreamingSnake converts s to SCREAMING_SNAKE_CASE (upper-case words
 // joined by '_').
-func (c *Caser) ScreamingSnake(s string) string {
-	return joinWith(c.Words(s), "_", strings.ToUpper)
-}
+func (c *Caser) ScreamingSnake(s string) string { return c.joined(s, '_', true) }
 
 // Kebab converts s to kebab-case (lower-case words joined by '-').
-func (c *Caser) Kebab(s string) string {
-	return joinWith(c.Words(s), "-", strings.ToLower)
-}
+func (c *Caser) Kebab(s string) string { return c.joined(s, '-', false) }
 
 // ScreamingKebab converts s to SCREAMING-KEBAB-CASE (upper-case words
 // joined by '-').
-func (c *Caser) ScreamingKebab(s string) string {
-	return joinWith(c.Words(s), "-", strings.ToUpper)
-}
+func (c *Caser) ScreamingKebab(s string) string { return c.joined(s, '-', true) }
 
 // Dot converts s to dot.case (lower-case words joined by '.').
-func (c *Caser) Dot(s string) string {
-	return joinWith(c.Words(s), ".", strings.ToLower)
-}
+func (c *Caser) Dot(s string) string { return c.joined(s, '.', false) }
 
 // Title converts s to Title Case (each word title-cased per the rules
 // of [Caser.Pascal], joined by single spaces).
@@ -76,25 +68,65 @@ func (c *Caser) Title(s string) string {
 	if len(words) == 0 {
 		return ""
 	}
-	parts := make([]string, len(words))
+	var b strings.Builder
+	b.Grow(len(s))
 	for i, w := range words {
-		parts[i] = c.titleWord(w)
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		c.writeTitleWord(&b, w)
 	}
-	return strings.Join(parts, " ")
+	return b.String()
 }
 
-// joinWith applies transform to each word and joins the result with sep.
-// Returns "" for an empty input slice. The transform is invoked exactly
-// once per word.
-func joinWith(words []string, sep string, transform func(string) string) string {
+// joined splits s and writes its words into one Builder, separated by
+// sep and case-mapped by up. It is the shared body of the five
+// separator styles.
+//
+// It replaces a helper that built a []string of transformed words and
+// handed it to strings.Join: one allocation for the slice, one per
+// word whose case actually changed, and one more for Join's buffer,
+// with every byte copied twice. Writing through a single Builder makes
+// it one allocation for the whole call.
+//
+// Grow(len(s)) is a hint, not a bound. len(s) is not an upper bound on
+// the output for Unicode input — U+0250 is two bytes and upper-cases
+// to a three-byte rune — and Builder regrows on overflow, which is
+// exactly why a Builder is the right target and a fixed buffer sized
+// on that assumption would not be.
+func (c *Caser) joined(s string, sep byte, up bool) string {
+	words := c.Words(s)
 	if len(words) == 0 {
 		return ""
 	}
-	parts := make([]string, len(words))
+	var b strings.Builder
+	b.Grow(len(s))
 	for i, w := range words {
-		parts[i] = transform(w)
+		if i > 0 {
+			b.WriteByte(sep)
+		}
+		writeCased(&b, w, up)
 	}
-	return strings.Join(parts, sep)
+	return b.String()
+}
+
+// writeCased writes w into b, upper-cased when up is set and
+// lower-cased otherwise.
+//
+// Case mapping is per rune. Falling back to a byte loop past 0x7F is
+// not implementable: a byte above that range is part of a multi-byte
+// sequence, and case-mapping it individually would corrupt the
+// encoding — the mapped rune may not even be the same width.
+func writeCased(b *strings.Builder, w string, up bool) {
+	if up {
+		for _, r := range w {
+			b.WriteRune(upperRune(r))
+		}
+		return
+	}
+	for _, r := range w {
+		b.WriteRune(lowerRune(r))
+	}
 }
 
 // Words returns the component words of s using the default Caser. See

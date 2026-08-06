@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // ErrInvalidInitialism is returned by [Caser.WithInitialisms] when a
@@ -73,7 +74,13 @@ var CommonInitialisms = []string{
 // source name. [FuzzCaser_Idempotence] pins both halves of this
 // contract.
 type Caser struct {
-	initialisms map[string]struct{}
+	// initialisms maps the normalised (upper-case) form of a
+	// recognised initialism to its canonical spelling. Both are the
+	// same text for anything passing isValidInitialism, which is the
+	// point: a hit can return the stored string instead of the
+	// freshly upper-cased probe, so recognising "http" as "HTTP"
+	// costs no allocation.
+	initialisms map[string]string
 }
 
 // Default returns a Caser pre-loaded with [CommonInitialisms]. The same
@@ -85,7 +92,7 @@ func Default() *Caser { return defaultCaser }
 // split and converted purely by case and separator transitions; "url"
 // becomes "Url" rather than "URL" under Pascal.
 func New() *Caser {
-	return &Caser{initialisms: map[string]struct{}{}}
+	return &Caser{initialisms: map[string]string{}}
 }
 
 // WithInitialisms returns a new Caser that recognises the given
@@ -97,13 +104,13 @@ func New() *Caser {
 func (c *Caser) WithInitialisms(words ...string) (*Caser, error) {
 	out := &Caser{initialisms: maps.Clone(c.initialisms)}
 	if out.initialisms == nil {
-		out.initialisms = map[string]struct{}{}
+		out.initialisms = map[string]string{}
 	}
 	for _, w := range words {
 		if !isValidInitialism(w) {
 			return nil, fmt.Errorf("%w: %q", ErrInvalidInitialism, w)
 		}
-		out.initialisms[w] = struct{}{}
+		out.initialisms[w] = w
 	}
 	return out, nil
 }
@@ -111,16 +118,56 @@ func (c *Caser) WithInitialisms(words ...string) (*Caser, error) {
 // Initialisms returns the recognised initialisms in alphabetical order.
 // The returned slice is a fresh copy; callers may modify it freely.
 func (c *Caser) Initialisms() []string {
-	out := slices.Collect(maps.Keys(c.initialisms))
+	// Pre-sized rather than slices.Collect: collecting walks a
+	// doubling ladder from cap 1 for a set whose size is known.
+	out := slices.AppendSeq(make([]string, 0, len(c.initialisms)), maps.Keys(c.initialisms))
 	slices.Sort(out)
 	return out
 }
 
-// isInitialism reports whether the upper-case form of w is registered.
-// w is expected to already be upper-case; the caller normalises.
-func (c *Caser) isInitialism(upperW string) bool {
-	_, ok := c.initialisms[upperW]
-	return ok
+// maxProbeLen bounds the stack buffer [Caser.lookupInitialism] normalises
+// into. Words longer than this fall back to strings.ToUpper, which is
+// correct but allocates; no entry of [CommonInitialisms] comes close, and
+// a longer word is overwhelmingly unlikely to be one.
+const maxProbeLen = 16
+
+// lookupInitialism reports whether w names a recognised initialism, and
+// returns its canonical spelling.
+//
+// The probe is the allocation this package used to pay on every word.
+// strings.ToUpper is not inlinable and builds its result in its own
+// frame, so the buffer was allocated whether or not the lookup hit —
+// and on a miss, which is the common case, it was discarded one line
+// later. Upper-casing into a stack array instead lets the compiler
+// elide the conversion in m[string(buf[:n])] entirely.
+//
+// A non-ASCII byte falls through to strings.ToUpper rather than
+// reporting a miss. That distinction is load-bearing: 'ı' (U+0131)
+// upper-cases to 'I', so "ıd" probes "ID" and legitimately hits a
+// registered initialism. A fast path that declared a miss on
+// non-ASCII would silently stop recognising it.
+func (c *Caser) lookupInitialism(w string) (string, bool) {
+	if len(w) <= maxProbeLen {
+		var buf [maxProbeLen]byte
+		ascii := true
+		for i := range len(w) {
+			ch := w[i]
+			if ch >= utf8.RuneSelf {
+				ascii = false
+				break
+			}
+			if ch >= 'a' && ch <= 'z' {
+				ch -= 'a' - 'A'
+			}
+			buf[i] = ch
+		}
+		if ascii {
+			canon, ok := c.initialisms[string(buf[:len(w)])]
+			return canon, ok
+		}
+	}
+	canon, ok := c.initialisms[strings.ToUpper(w)]
+	return canon, ok
 }
 
 // isAllUpperASCII reports whether every byte of s is an upper-case
@@ -169,32 +216,44 @@ var defaultCaser = withInitialismsUnchecked(CommonInitialisms)
 // for [defaultCaser] construction; external callers go through
 // [Caser.WithInitialisms].
 func withInitialismsUnchecked(words []string) *Caser {
-	out := &Caser{initialisms: make(map[string]struct{}, len(words))}
+	out := &Caser{initialisms: make(map[string]string, len(words))}
 	for _, w := range words {
-		out.initialisms[w] = struct{}{}
+		out.initialisms[w] = w
 	}
 	return out
 }
 
-// titleWord returns w with the first rune upper-cased and the rest
-// lower-cased, except that an all-upper input is left untouched and
-// any word whose upper-cased form is a recognised initialism is
-// upper-cased in full. The caller guarantees w is non-empty.
+// writeTitleWord writes w's title-cased form straight into b: the
+// first rune upper-cased and the rest lower-cased, except that an
+// all-upper input is left untouched and any word naming a recognised
+// initialism is written in its canonical spelling.
 //
-// This is the building block of [Caser.Pascal] and [Caser.Camel]
-// (for non-leading words).
-func (c *Caser) titleWord(w string) string {
-	upper := strings.ToUpper(w)
-	if c.isInitialism(upper) {
-		return upper
+// This is the building block of [Caser.Pascal], [Caser.Camel] and
+// [Caser.Title]. It replaced a string-returning form whose result
+// every caller immediately copied into a Builder and dropped — one
+// allocation per word, on every style that title-cases.
+func (c *Caser) writeTitleWord(b *strings.Builder, w string) {
+	if canon, ok := c.lookupInitialism(w); ok {
+		b.WriteString(canon)
+		return
 	}
 	if isAllUpperASCII(w) {
-		return w
+		b.WriteString(w)
+		return
 	}
-	runes := []rune(w)
-	runes[0] = upperRune(runes[0])
-	for i := 1; i < len(runes); i++ {
-		runes[i] = lowerRune(runes[i])
+	writeTitleCased(b, w)
+}
+
+// writeTitleCased writes w with its first rune upper-cased and the
+// rest lower-cased. Case mapping is per rune, not per byte: past 0x7F
+// a byte is a continuation byte, and case-mapping one individually
+// would corrupt the encoding.
+func writeTitleCased(b *strings.Builder, w string) {
+	for i, r := range w {
+		if i == 0 {
+			b.WriteRune(upperRune(r))
+			continue
+		}
+		b.WriteRune(lowerRune(r))
 	}
-	return string(runes)
 }
