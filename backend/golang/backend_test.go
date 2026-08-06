@@ -899,7 +899,7 @@ func TestConformance(t *testing.T) {
 func BenchmarkBackend_Render(b *testing.B) {
 	b.ReportAllocs()
 
-	ctx, _, _ := newBenchmarkContext(b, 24, sameImportPath)
+	ctx, _, _ := newBenchmarkContext(b, 24, sharedPackage)
 	be := golang.New()
 
 	for b.Loop() {
@@ -950,7 +950,7 @@ func BenchmarkBackend_Render(b *testing.B) {
 func BenchmarkBackend_Render_Targets(b *testing.B) {
 	b.ReportAllocs()
 
-	for _, paths := range []benchImportPaths{sameImportPath, distinctImportPaths} {
+	for _, paths := range []benchImportPaths{sharedPackage, distinctPackages, renamedPackages} {
 		b.Run(string(paths), func(b *testing.B) {
 			b.ReportAllocs()
 			for _, targets := range []int{1, 10, 100, 1000} {
@@ -990,13 +990,25 @@ func BenchmarkBackend_New(b *testing.B) {
 	}
 }
 
-// benchImportPaths selects whether the fixture routes every target
-// into one output package or into a distinct one per target.
+// benchImportPaths selects the fixture's output-package shape.
+//
+// The three arms exercise different things and none subsumes another.
+// sharedPackage holds package count at one while target count varies,
+// which is the axis the sweep had for a long time — and which hides
+// every per-package term in the render loop.
+// distinctPackages is the ordinary multi-package run: one output
+// package per target, each declaring the name its path derives to.
+// renamedPackages is the `pkg=`-override shape, where a package's
+// declared name diverges from its directory and every referring file
+// needs an explicit alias registered. It is the case
+// applySelfAliases exists for, and the only one where its work is
+// not discarded.
 type benchImportPaths string
 
 const (
-	sameImportPath      benchImportPaths = "same_import_path"
-	distinctImportPaths benchImportPaths = "distinct_import_paths"
+	sharedPackage    benchImportPaths = "shared_package"
+	distinctPackages benchImportPaths = "distinct_packages"
+	renamedPackages  benchImportPaths = "renamed_packages"
 )
 
 // newBenchmarkContext builds a [plugin.BackendContext] whose store
@@ -1020,10 +1032,21 @@ func newBenchmarkContext(
 	pkg := &emit.Package{Name: "bench", Path: "example.com/bench"}
 	for i := range targets {
 		name := fmt.Sprintf("Entity%d", i)
-		dir, importPath := "bench", "example.com/bench"
-		if paths == distinctImportPaths {
+		dir, importPath, pkgName := "bench", "example.com/bench", "bench"
+		switch paths {
+		case distinctPackages:
 			dir = fmt.Sprintf("bench%d", i)
 			importPath = fmt.Sprintf("example.com/bench%d", i)
+			// Declared name matches the path's last segment, which
+			// is what a package without a pkg= override looks like.
+			pkgName = dir
+		case renamedPackages:
+			dir = fmt.Sprintf("bench%d", i)
+			importPath = fmt.Sprintf("example.com/bench%d", i)
+			// Diverges from the derived alias, so every referring
+			// file needs an explicit registration.
+			pkgName = "renamed"
+		case sharedPackage:
 		}
 		pkg.Structs = append(pkg.Structs, &emit.Struct{
 			Name:    name,
@@ -1031,7 +1054,7 @@ func newBenchmarkContext(
 			Target: emit.Target{
 				Dir:        dir,
 				Filename:   fmt.Sprintf("entity%d.go", i),
-				Package:    "bench",
+				Package:    pkgName,
 				ImportPath: importPath,
 			},
 			Fields: []*emit.Field{

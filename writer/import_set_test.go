@@ -704,3 +704,113 @@ func TestNeedsExplicitAlias(t *testing.T) {
 		}
 	})
 }
+
+// TestImportSet_Reset covers the clear-in-place path the backend uses
+// between files.
+//
+// Each field gets its own subtest because forgetting any one of them
+// produces a different, silent defect on the next file, and a single
+// combined assertion would not say which.
+func TestImportSet_Reset(t *testing.T) {
+	t.Parallel()
+
+	seeded := func(t *testing.T) *writer.ImportSet {
+		t.Helper()
+		i := writer.NewImportSet(nil)
+		i.SetSelf("example.com/self", "self")
+		if err := i.Alias("example.com/x/users", "renamed"); err != nil {
+			t.Fatalf("Alias: %v", err)
+		}
+		// z collides with y on the derived base, so the suffix
+		// bookkeeping is actually populated — without a real
+		// collision here, lastSfx stays zero and a Reset that
+		// forgot it would look correct.
+		for _, p := range []string{
+			"context", "example.com/x/users",
+			"example.com/y/users", "example.com/z/users",
+		} {
+			if _, err := i.Imp(p); err != nil {
+				t.Fatalf("Imp %q: %v", p, err)
+			}
+		}
+		i.Reset()
+		return i
+	}
+
+	t.Run("the recorded imports are gone", func(t *testing.T) {
+		t.Parallel()
+		if got := seeded(t).Imports(); len(got) != 0 {
+			t.Fatalf("Reset left %d imports: %+v", len(got), got)
+		}
+	})
+
+	t.Run("same-package elision no longer fires", func(t *testing.T) {
+		t.Parallel()
+		// self is the field a careless Reset forgets. It makes a
+		// path equal to it render bare — no qualifier, no import —
+		// so leaving it set makes the next file emit unqualified
+		// names for a package it does not live in. That compiles
+		// against the wrong symbol or not at all, with no
+		// diagnostic.
+		i := seeded(t)
+		alias, err := i.Imp("example.com/self")
+		if err != nil {
+			t.Fatalf("Imp: %v", err)
+		}
+		if alias == "" {
+			t.Fatalf("Reset left self set; the path still elides")
+		}
+	})
+
+	t.Run("an explicit alias override is gone", func(t *testing.T) {
+		t.Parallel()
+		i := seeded(t)
+		alias, err := i.Imp("example.com/x/users")
+		if err != nil {
+			t.Fatalf("Imp: %v", err)
+		}
+		if alias != "users" {
+			t.Fatalf("alias = %q, want the derived %q — the override survived Reset", alias, "users")
+		}
+	})
+
+	t.Run("collision suffixes restart", func(t *testing.T) {
+		t.Parallel()
+		// used and lastSfx both feed suffix assignment. A Reset that
+		// cleared one but not the other would hand the first import
+		// of the next file a suffix it did not earn.
+		i := seeded(t)
+		first, err := i.Imp("example.com/a/users")
+		if err != nil {
+			t.Fatalf("Imp: %v", err)
+		}
+		if first != "users" {
+			t.Fatalf("first alias after Reset = %q, want %q", first, "users")
+		}
+		second, err := i.Imp("example.com/b/users")
+		if err != nil {
+			t.Fatalf("Imp: %v", err)
+		}
+		if second != "users2" {
+			t.Fatalf("second alias after Reset = %q, want %q", second, "users2")
+		}
+	})
+
+	t.Run("the derive function survives", func(t *testing.T) {
+		t.Parallel()
+		// derive is the one field that must not be cleared: it is
+		// construction-time configuration, not per-file state.
+		i := writer.NewImportSet(func(string) string { return "fixed" })
+		if _, err := i.Imp("example.com/anything"); err != nil {
+			t.Fatalf("Imp: %v", err)
+		}
+		i.Reset()
+		alias, err := i.Imp("example.com/other")
+		if err != nil {
+			t.Fatalf("Imp: %v", err)
+		}
+		if alias != "fixed" {
+			t.Fatalf("alias = %q, want %q — Reset cleared the derive func", alias, "fixed")
+		}
+	})
+}

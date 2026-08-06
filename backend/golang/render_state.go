@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"sync"
 	"text/template"
@@ -73,29 +74,31 @@ type renderState struct {
 	// translation collapses to a no-op.
 	bridgeImports map[string]string
 
-	// selfPackages maps each import path this run writes output into
-	// to the package name that output declares. Populated once at
-	// [Backend.Render] entry from the run's resolved Targets.
+	// selfAliases are the run's own output packages whose declared
+	// name diverges from the alias their import path derives to.
 	//
-	// Go binds an unaliased import to the *declared package name*,
-	// not to the last segment of the path, but
-	// [writer.DefaultAlias] can only guess from the path. The two
-	// agree for the overwhelming majority of packages and diverge
-	// exactly when a `pkg=` override renames an output away from its
-	// directory — `out=testkit/ pkg=storetest` produces a directory
-	// `testkit` holding `package storetest`. Without this map a
-	// reference into that package renders `testkit.Thing` against an
-	// import that actually bound `storetest`, and the generated file
-	// does not compile.
+	// Go binds an unaliased import to the package's declared name,
+	// not to the last segment of its path. The writer can only derive
+	// from the path, so the two diverge exactly when a pkg= override
+	// renames an output away from its directory — the shape
+	// `+gen:stub out=testkit/ pkg=storetest` produces. Without an
+	// explicit alias the referring file renders `testkit.Thing`
+	// against an import that bound `storetest`, and does not compile.
+	//
+	// Pre-filtered at collection time, so this is empty on every run
+	// without such an override — which is nearly all of them.
 	//
 	// Only the run's own outputs are covered. Third-party packages
 	// whose name diverges from their directory stay on the derived
 	// alias, because nothing in the emit graph knows their package
-	// clause. Nothing corrects that afterwards any more — the
-	// resolve pass that used to is gone — so a plugin referencing
-	// such a package must supply the alias itself, through
-	// [emit.Import.Alias] or a `imp`-side registration.
-	selfPackages map[string]string
+	// clause, and nothing corrects that afterwards — a plugin
+	// referencing such a package supplies the alias itself.
+	selfAliases []selfAlias
+
+	// buffers is the free list [renderState.takeBuffer] draws from.
+	// Its depth tracks template nesting, not target count, so it
+	// stays small; the state is per-worker, so it needs no locking.
+	buffers []*bytes.Buffer
 }
 
 // applySelfAliases pre-registers an explicit import alias for every
@@ -112,21 +115,13 @@ type renderState struct {
 // self-references and reserves the file's own package identifier
 // against collision.
 func (s *renderState) applySelfAliases(selfPath string) {
-	for path, pkg := range s.selfPackages {
-		if path == "" || pkg == "" || path == selfPath {
-			continue
-		}
-		// Skipping the agreeing case is not required for correct
-		// output — the writer omits an alias that matches the
-		// derived one. It keeps the intervention to the packages
-		// that need it, so an explicit registration never perturbs
-		// collision resolution for an import that was already fine.
-		if writer.DefaultAlias(path) == pkg {
+	for _, sa := range s.selfAliases {
+		if sa.path == selfPath {
 			continue
 		}
 		// The only error is ErrAliasAfterImp, unreachable here: this
 		// runs before template execution, so nothing has imported yet.
-		_ = s.imports.Alias(path, pkg)
+		_ = s.imports.Alias(sa.path, sa.pkg)
 	}
 }
 
@@ -269,13 +264,58 @@ func (s *renderState) imp(path string) (string, error) {
 // returns the rendered text inline. Returns [ErrTemplateMissing]
 // wrapped with the kind when no template is registered.
 func (s *renderState) render(n emit.Node) (string, error) {
-	kind := string(n.Kind())
-	if s.tmpl.Lookup(kind) == nil {
-		return "", fmt.Errorf("%w: %s", ErrTemplateMissing, kind)
-	}
-	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, kind, n); err != nil {
-		return "", fmt.Errorf("backend/golang: render %s: %w", kind, err)
+	buf := s.takeBuffer()
+	defer s.putBuffer(buf)
+	if err := s.renderInto(buf, n); err != nil {
+		return "", err
 	}
 	return buf.String(), nil
+}
+
+// renderInto executes n's kind-template straight into w.
+//
+// The string-returning [renderState.render] materialises the whole
+// rendered node out of its buffer, and both of its in-package callers
+// immediately append that string to a buffer of their own and discard
+// it. Writing through skips the copy. render itself keeps its
+// signature: it is the reserved `render` funcmap entry and a template
+// cannot consume an io.Writer.
+func (s *renderState) renderInto(w io.Writer, n emit.Node) error {
+	kind := string(n.Kind())
+	if s.tmpl.Lookup(kind) == nil {
+		return fmt.Errorf("%w: %s", ErrTemplateMissing, kind)
+	}
+	if err := s.tmpl.ExecuteTemplate(w, kind, n); err != nil {
+		return fmt.Errorf("backend/golang: render %s: %w", kind, err)
+	}
+	return nil
+}
+
+// takeBuffer returns a scratch buffer for one render.
+//
+// A stack, not a single scratch field and not a sync.Pool. render is
+// re-entrant through the funcmap — `{{ render . }}` fires from inside
+// an in-flight template — so a nested call must not write into its
+// parent's buffer, which rules out one field. And renderState is
+// per-worker and single-goroutine by construction, so a sync.Pool
+// would buy per-P sharding and GC interaction against contention
+// that cannot occur; a slice used as a stack is the exact shape
+// re-entrancy needs.
+//
+// Paired with putBuffer through defer, so an error path cannot leak
+// depth.
+func (s *renderState) takeBuffer() *bytes.Buffer {
+	if n := len(s.buffers); n > 0 {
+		buf := s.buffers[n-1]
+		s.buffers = s.buffers[:n-1]
+		buf.Reset()
+		return buf
+	}
+	return &bytes.Buffer{}
+}
+
+// putBuffer returns buf for reuse by a later render at the same or a
+// shallower nesting depth.
+func (s *renderState) putBuffer(buf *bytes.Buffer) {
+	s.buffers = append(s.buffers, buf)
 }

@@ -119,7 +119,7 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 	}
 	pluginOrder := pluginOrderFrom(ctx)
 	bridgeImports := collectBridgeImports(ctx.Store)
-	selfPackages := collectSelfPackages(ctx.Store)
+	selfAliases := collectSelfPackages(ctx.Store)
 
 	keys := ctx.Store.Emit().ByTarget().Keys()
 	results := make([]renderResult, len(keys))
@@ -127,7 +127,7 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 		func() *renderState {
 			st := newRenderState(merged.tmpl, pluginOrder, merged.extensions, merged.overrides)
 			st.bridgeImports = bridgeImports
-			st.selfPackages = selfPackages
+			st.selfAliases = selfAliases
 			return st
 		},
 		func(st *renderState, i int) renderResult {
@@ -287,7 +287,14 @@ func renderTarget(
 	// everything the templates write — see [renderState.imp], which
 	// exists to keep that invariant true for the one entry whose
 	// work is the import set's rather than the state's.
-	state.imports = writer.NewImportSet(nil)
+	//
+	// Cleared in place rather than reallocated: the set is
+	// per-worker and the previous target's contents are dead by the
+	// time this runs. Note that this makes the identity stable,
+	// which would make a captured-pointer funcmap binding
+	// accidentally work — the reason the invariant above is stated
+	// as a rule rather than left to the reset's shape.
+	state.imports.Reset()
 
 	entities := ctx.Store.Emit().ByTarget().Get(target)
 	{
@@ -339,24 +346,61 @@ func renderTarget(
 	return res
 }
 
-// collectSelfPackages maps each import path the run writes into to
-// the package name that output declares, for every resolved Target.
+// selfAlias is one output package whose declared name diverges from
+// the alias its import path derives to, and therefore needs an
+// explicit alias registered on any file that imports it.
+type selfAlias struct {
+	path string
+	pkg  string
+}
+
+// collectSelfPackages returns the run's own output packages whose
+// declared name diverges from their path-derived alias.
 //
-// The pair is only interesting where the two disagree — see
-// [renderState.selfPackages] — but collecting all of them keeps the
-// filter in one place, at the point of use.
+// The divergence test used to live in the per-target loop, which ran
+// it for every (target, package) pair and continued on all of them:
+// a run with T targets across P output packages did T×P alias
+// derivations to perform, normally, zero registrations. That is the
+// only quadratic in the render path, and it is invisible unless a
+// benchmark varies package count independently of target count.
+//
+// Filtering here is safe because the test is target-independent — a
+// package's name either matches its derived alias or it does not,
+// whatever file is being rendered. The one genuinely per-target skip,
+// a package not importing itself, stays in [renderState.applySelfAliases].
+//
+// The map is kept for deduplication and only then flattened.
+// ByTarget().Keys() yields one entry per target, not per package, so
+// building the slice directly would give a thousand entries for a
+// thousand targets in one package — turning a constant-time scan
+// into a linear one, which is worse than what it replaces.
 //
 // Targets sharing an import path agree on their package name in any
 // run that passes the layout phase's one-file-one-package check, so
 // last-write-wins is not observable.
-func collectSelfPackages(s *store.Store) map[string]string {
-	out := map[string]string{}
+func collectSelfPackages(s *store.Store) []selfAlias {
+	seen := map[string]string{}
 	for _, t := range s.Emit().ByTarget().Keys() {
 		if t.ImportPath == "" || t.Package == "" {
 			continue
 		}
-		out[t.ImportPath] = t.Package
+		seen[t.ImportPath] = t.Package
 	}
+	out := make([]selfAlias, 0, len(seen))
+	for path, pkg := range seen {
+		// The writer omits an alias that matches the derived one, so
+		// registering an agreeing pair is a no-op. Dropping it here
+		// keeps the per-target loop empty on every run without a
+		// pkg= override.
+		if writer.DefaultAlias(path) == pkg {
+			continue
+		}
+		out = append(out, selfAlias{path: path, pkg: pkg})
+	}
+	// Sorted for a stable slice and a stable diff, not for
+	// correctness: Alias keys by path and each path appears once, so
+	// iteration order was never observable.
+	slices.SortFunc(out, func(a, b selfAlias) int { return cmp.Compare(a.path, b.path) })
 	return out
 }
 
@@ -433,11 +477,11 @@ func renderFile(
 	decls := declEntities(entities)
 	var declsBuf bytes.Buffer
 	for _, n := range decls {
-		rendered, err := state.render(n)
-		if err != nil {
+		// Written through rather than via render's string: every
+		// decl's spelling is appended here and immediately dropped.
+		if err := state.renderInto(&declsBuf, n); err != nil {
 			return nil, nil, fileRefs{}, err
 		}
-		declsBuf.WriteString(rendered)
 		declsBuf.WriteString("\n\n")
 	}
 

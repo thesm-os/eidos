@@ -145,11 +145,11 @@ func (s *renderState) renderFileNodeSlot(slot *emit.Slot) (string, error) {
 	items, _ := orderByPlugin(slot.Items, slot.ProvenanceList, s.pluginOrder)
 	var b strings.Builder
 	for _, item := range items {
-		rendered, err := s.render(item)
-		if err != nil {
+		// Written through rather than via render's string: the
+		// result is appended here and dropped.
+		if err := s.renderInto(&b, item); err != nil {
 			return "", err
 		}
-		b.WriteString(rendered)
 		b.WriteString("\n\n")
 	}
 	return b.String(), nil

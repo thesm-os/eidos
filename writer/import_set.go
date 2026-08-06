@@ -356,3 +356,27 @@ func (i *ImportSet) Len() int {
 	defer i.mu.Unlock()
 	return len(i.order)
 }
+
+// Reset clears the set for reuse, preserving the alias-derivation
+// function it was constructed with.
+//
+// The backend holds one ImportSet per render worker and needs a clean
+// one per file. Reallocating the struct and its four maps per target
+// is measurable at scale; clearing in place is not.
+//
+// self is cleared too, and that is the field a careless
+// implementation forgets. It drives same-package elision — a path
+// equal to self renders bare, with no qualifier and no import — so a
+// Reset that left it set would make the next file render unqualified
+// names for a package it does not live in. That compiles against the
+// wrong symbol or not at all, and nothing diagnoses it.
+func (i *ImportSet) Reset() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.order = i.order[:0]
+	clear(i.aliases)
+	clear(i.explicit)
+	clear(i.used)
+	clear(i.lastSfx)
+	i.self = ""
+}
