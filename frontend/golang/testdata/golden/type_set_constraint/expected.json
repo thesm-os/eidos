@@ -13,9 +13,6 @@
         "for each union-of-terms entry, with `~` rendered as an \"approx\"",
         "flag on the term."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {

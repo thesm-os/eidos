@@ -9,9 +9,6 @@
         "Package fixture exercises interface conversion with explicit",
         "methods (params + returns) plus an embedded interface."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -35,9 +32,6 @@
           "docs": [
             "Close releases any resources the implementation holds."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "Close",
           "pos": {
             "column": 2,
@@ -155,9 +149,6 @@
             "Read fills p and returns the number of bytes read plus an",
             "optional error."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "Read",
           "params": [
             {

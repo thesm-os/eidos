@@ -13,9 +13,6 @@
         "satisfies fmt.Stringer via a String() method, so any reference",
         "to *Label (and Label) gets stamped accordingly."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -32,9 +29,6 @@
         "Run returns an error to drive the go.isError stamping path. The",
         "returned reference's type-ref meta must carry the flag."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "Run",
       "package": "example.com/golangtest",
       "pos": {
@@ -86,9 +80,6 @@
         "the go.isStringer marker — the value of having a dedicated",
         "fixture is in pinning that downstream wiring."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "Render",
       "package": "example.com/golangtest",
       "pos": {
@@ -164,9 +155,6 @@
       ],
       "fields": [
         {
-          "meta": {
-            "entries": []
-          },
           "name": "Text",
           "pos": {
             "column": 2,
@@ -196,18 +184,12 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "methods": [
         {
           "docs": [
             "String renders Label.Text. The exact signature `String() string`",
             "is what the converter probes for when stamping go.isStringer."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "String",
           "pos": {
             "column": 1,

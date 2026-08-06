@@ -535,6 +535,9 @@ func TestEmitView_ByMetaKey(t *testing.T) {
 	t.Run("captures keys set after AddPackage via the observer hook", func(t *testing.T) {
 		t.Parallel()
 		s := store.New()
+		// See the node-side twin: the observer is opt-in and must be
+		// enabled before ingest.
+		s.Emit().EnableMetaKeyIndex()
 		assertNoError(t, s.Emit().AddPackage(makeUserEmitPackage()))
 		user, _ := s.Emit().Structs().ByQName("users.User")
 		keyEmitViewMeta.Set(user.EnsureMeta(), true, "test")

@@ -13,9 +13,6 @@
       ],
       "imports": [
         {
-          "meta": {
-            "entries": []
-          },
           "path": "iter",
           "pos": {
             "column": 8,
@@ -25,9 +22,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -294,9 +288,6 @@
   ],
   "imports": [
     {
-      "meta": {
-        "entries": []
-      },
       "path": "iter",
       "pos": {
         "column": 8,

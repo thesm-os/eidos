@@ -9,9 +9,6 @@
         "Package fixture exercises generic type parameters and their",
         "embedded-bound constraints."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -32,9 +29,6 @@
       },
       "methods": [
         {
-          "meta": {
-            "entries": []
-          },
           "name": "String",
           "pos": {
             "column": 2,
@@ -97,9 +91,6 @@
       ],
       "fields": [
         {
-          "meta": {
-            "entries": []
-          },
           "name": "Value",
           "pos": {
             "column": 2,
@@ -135,9 +126,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "Box",
       "package": "example.com/golangtest",
       "pos": {

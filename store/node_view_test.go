@@ -5,8 +5,10 @@ package store_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
@@ -375,6 +377,10 @@ func TestNodeView_ByMetaKey(t *testing.T) {
 	t.Run("captures keys set after AddPackage via the observer hook", func(t *testing.T) {
 		t.Parallel()
 		s := store.New()
+		// Post-ingest capture is what the observer provides, and the
+		// observer is opt-in. Enabling has to precede AddPackage:
+		// registration happens per node as it is ingested.
+		s.Nodes().EnableMetaKeyIndex()
 		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
 		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
 		keyNodeViewMeta.Set(user.EnsureMeta(), true, "test")
@@ -464,4 +470,151 @@ func TestNodeView_Freeze(t *testing.T) {
 			t.Fatalf("Freeze should remain set after repeat calls")
 		}
 	})
+}
+
+// TestNodeView_MetaKeyIndexIsOptIn covers the gate on the
+// by-metadata-key observer.
+//
+// Registration is what costs: a closure and an observer slice per
+// ingested node, a metadata bag for nodes that would otherwise never
+// need one, and — since observers fire synchronously while the bag
+// holds its write lock — an index-wide mutex acquisition on every
+// later Set, during a phase the pipeline dispatches concurrently.
+// Nothing in this repository reads the index.
+func TestNodeView_MetaKeyIndexIsOptIn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("keys present at ingest are recorded either way", func(t *testing.T) {
+		t.Parallel()
+		// The seed loop is unconditional. Only the observer is gated,
+		// so a disabled index is incomplete rather than empty.
+		s := store.New()
+		pre := makeUserPackage()
+		keyNodeViewMeta.Set(pre.Structs[0].EnsureMeta(), true, "pre-add")
+		assertNoError(t, s.Nodes().AddPackage(pre))
+		if got := s.Nodes().ByMetaKey().Get(keyNodeViewMeta.Name()); len(got) != 1 {
+			t.Fatalf("ingest-time keys should be seeded regardless of the flag; got %+v", got)
+		}
+	})
+
+	t.Run("keys set after ingest are dropped when disabled", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
+		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
+		keyNodeViewMeta.Set(user.EnsureMeta(), true, "post-add")
+		if got := s.Nodes().ByMetaKey().Get(keyNodeViewMeta.Name()); len(got) != 0 {
+			t.Fatalf("disabled index recorded a post-ingest Set; got %+v", got)
+		}
+	})
+
+	t.Run("ingest leaves no metadata bag on an unstamped node", func(t *testing.T) {
+		t.Parallel()
+		// The seed reads through the nil-tolerant accessor, so a node
+		// carrying no metadata never acquires a bag — which is what
+		// keeps an empty "meta" block out of its serialised form.
+		s := store.New()
+		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
+		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
+		if user.Meta() != nil {
+			t.Fatalf("ingest created a metadata bag on an unstamped node")
+		}
+	})
+}
+
+// TestNodeView_ByMetaKeyReportsWhenDisabled covers the signal that
+// keeps the opt-in from being a silent contract change.
+//
+// ByMetaKey is exported and documented; an out-of-tree annotator that
+// reads it gets an incomplete index rather than an error. Without a
+// notice the only way to discover that is by diffing generated
+// output, which is the worst way to learn it.
+func TestNodeView_ByMetaKeyReportsWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a disabled read emits one Info", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		d := diag.New()
+		s.SetDiag(d)
+		_ = s.Nodes().ByMetaKey()
+		if got := infoCount(d, "metadata-key index is disabled"); got != 1 {
+			t.Fatalf("expected exactly one notice; got %d in %+v", got, d.Diagnostics())
+		}
+	})
+
+	t.Run("repeated reads do not repeat the notice", func(t *testing.T) {
+		t.Parallel()
+		// An annotator consulting the index per node would otherwise
+		// bury the run in identical lines.
+		s := store.New()
+		d := diag.New()
+		s.SetDiag(d)
+		for range 5 {
+			_ = s.Nodes().ByMetaKey()
+		}
+		if got := infoCount(d, "metadata-key index is disabled"); got != 1 {
+			t.Fatalf("expected the notice once; got %d", got)
+		}
+	})
+
+	t.Run("an enabled index is silent", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		d := diag.New()
+		s.SetDiag(d)
+		s.Nodes().EnableMetaKeyIndex()
+		_ = s.Nodes().ByMetaKey()
+		if got := infoCount(d, "metadata-key index is disabled"); got != 0 {
+			t.Fatalf("enabled index emitted %d notices", got)
+		}
+	})
+
+	t.Run("no sink is not a panic", func(t *testing.T) {
+		t.Parallel()
+		// Library and test callers construct stores without one, and
+		// they behaved fine before the sink existed.
+		_ = store.New().Nodes().ByMetaKey()
+	})
+}
+
+// infoCount returns how many Info diagnostics in d mention substr.
+func infoCount(d *diag.Sink, substr string) int {
+	n := 0
+	for _, dg := range d.Diagnostics() {
+		if dg.Severity == diag.Info && strings.Contains(dg.Message, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestNodeView_MetaKeyIndexRegistrationCost measures what the opt-in
+// buys: the observer registration, which is the part that was
+// unconditional and that nothing in this repository reads.
+//
+// Asserted as a comparison rather than an absolute, so it stays true
+// as the rest of ingest changes — and as an allocation count rather
+// than a duration, so it is host-independent.
+//
+//nolint:paralleltest // testing.AllocsPerRun panics in a parallel test.
+func TestNodeView_MetaKeyIndexRegistrationCost(t *testing.T) {
+	ingest := func(enable bool) float64 {
+		return testing.AllocsPerRun(20, func() {
+			s := store.New()
+			if enable {
+				s.Nodes().EnableMetaKeyIndex()
+			}
+			if err := s.Nodes().AddPackage(makeUserPackage()); err != nil {
+				t.Fatalf("AddPackage: %v", err)
+			}
+		})
+	}
+
+	off, on := ingest(false), ingest(true)
+	if off >= on {
+		t.Fatalf("ingest allocated %v with the index off and %v with it on; "+
+			"the observer registration should be the difference", off, on)
+	}
+	t.Logf("ingest allocations: index off %v, index on %v (delta %v)", off, on, on-off)
 }

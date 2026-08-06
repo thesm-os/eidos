@@ -11,9 +11,6 @@
         "integration tests. The source intentionally stays minimal so the",
         "expected JSON is small enough to review by eye."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -46,9 +43,6 @@
           "docs": [
             "Name is the user's display name."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "Name",
           "pos": {
             "column": 2,
@@ -78,9 +72,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "User",
       "package": "example.com/golangtest",
       "pos": {

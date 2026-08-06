@@ -11,9 +11,6 @@
         "file forces the converter to associate methods with receivers",
         "declared in a sibling source file."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "ops.go",
       "path": "ops.go",
       "pos": {
@@ -31,9 +28,6 @@
         "resulting node.Package must merge declarations from both files",
         "into a single, deterministic package node."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "types.go",
       "path": "types.go",
       "pos": {
@@ -63,9 +57,6 @@
       ],
       "fields": [
         {
-          "meta": {
-            "entries": []
-          },
           "name": "ID",
           "pos": {
             "column": 2,
@@ -95,9 +86,6 @@
           }
         },
         {
-          "meta": {
-            "entries": []
-          },
           "name": "Name",
           "pos": {
             "column": 2,
@@ -127,9 +115,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "User",
       "package": "example.com/golangtest",
       "pos": {
@@ -145,9 +130,6 @@
       ],
       "fields": [
         {
-          "meta": {
-            "entries": []
-          },
           "name": "Users",
           "pos": {
             "column": 2,
@@ -190,9 +172,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "methods": [
         {
           "docs": [

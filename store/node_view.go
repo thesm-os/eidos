@@ -5,8 +5,10 @@ package store
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/node"
 )
@@ -41,6 +43,23 @@ type NodeView struct {
 	byPackage   *MultiIndex[string, node.Node]
 	byDirective *MultiIndex[directive.Name, node.Node]
 	byMetaKey   *MultiIndex[string, node.Node]
+
+	// metaIndex gates the by-metadata-key observer registration.
+	// Off by default: registering an observer per ingested node
+	// costs two allocations plus a bag that would otherwise never
+	// exist, and makes every later meta.Bag.Set take the
+	// index-wide write lock while holding the bag's own — during a
+	// phase the pipeline dispatches concurrently.
+	metaIndex bool
+
+	// warnedMetaIndex ensures the disabled-read notice fires once
+	// per view, not once per lookup. An annotator consulting the
+	// index in a per-node loop would otherwise bury the run.
+	warnedMetaIndex sync.Once
+
+	// diag is the optional sink the disabled-index notice goes
+	// to. Nil for stores built outside a pipeline.
+	diag *diag.Sink
 
 	frozen atomic.Bool
 }
@@ -151,11 +170,17 @@ func (v *NodeView) indexCommon(n node.Node, pkgPath string) {
 	for _, d := range n.Directives() {
 		v.byDirective.Add(d.Name, n)
 	}
-	bag := n.EnsureMeta()
-	for _, name := range bag.Names() {
+	// Seeded unconditionally, off the read accessor: the nil bag
+	// reads as the empty bag, so a node nothing has stamped costs
+	// nothing here and never acquires one.
+	for _, name := range n.Meta().Names() {
 		v.byMetaKey.Add(name, n)
 	}
-	bag.AddObserver(func(name string) {
+	if !v.metaIndex {
+		return
+	}
+	// Only the registration is gated, and only it needs a real bag.
+	n.EnsureMeta().AddObserver(func(name string) {
 		v.byMetaKey.Add(name, n)
 	})
 }
@@ -319,6 +344,25 @@ func (v *NodeView) ByPackage() *MultiIndex[string, node.Node] { return v.byPacka
 // directive in the order the frontend recorded.
 func (v *NodeView) ByDirective() *MultiIndex[directive.Name, node.Node] { return v.byDirective }
 
+// EnableMetaKeyIndex opts this view into by-metadata-key indexing.
+//
+// Off by default. When enabled, every ingested node has an observer
+// registered on its metadata bag so keys set after ingest still reach
+// [NodeView.ByMetaKey]; when disabled, the index carries only the keys
+// present at ingest.
+//
+// The default is off because the registration is not free and, in
+// this repository, nothing reads the index: two allocations per node
+// for the closure and the observer slice, a metadata bag for nodes
+// that would otherwise never need one, and — because observers fire
+// synchronously inside the mutating call while the bag holds its
+// write lock — an index-wide mutex acquisition on every later Set,
+// during a phase the pipeline dispatches concurrently.
+//
+// Call it before ingesting anything. Enabling it after AddPackage has
+// run leaves the nodes already ingested without observers.
+func (v *NodeView) EnableMetaKeyIndex() { v.metaIndex = true }
+
 // ByMetaKey returns the cross-cutting "by metadata key presence"
 // index. The index is additive — it records every (key, node) pair
 // observed via [meta.Bag.AddObserver]. Tombstones do not remove
@@ -326,7 +370,21 @@ func (v *NodeView) ByDirective() *MultiIndex[directive.Name, node.Node] { return
 // combine the index with [meta.Bag.Has] checks per node. The same
 // node can appear under a key multiple times if the key has been
 // re-Set; deduplication is the caller's concern when relevant.
-func (v *NodeView) ByMetaKey() *MultiIndex[string, node.Node] { return v.byMetaKey }
+//
+// Unless [NodeView.EnableMetaKeyIndex] has been called the index holds only the
+// keys present when each node was ingested, and the first call here
+// emits one Info diagnostic saying so. It returns the index rather
+// than an error or a panic: an incomplete result is closer to the
+// accessor's documented additive contract than a failed read, and a
+// panic in a read path is the worse contract of the two.
+func (v *NodeView) ByMetaKey() *MultiIndex[string, node.Node] {
+	if !v.metaIndex {
+		v.warnedMetaIndex.Do(func() {
+			v.warnDisabledMetaIndex("NodeView.EnableMetaKeyIndex")
+		})
+	}
+	return v.byMetaKey
+}
 
 // Freeze marks the view as immutable: subsequent calls to
 // [NodeView.AddPackage] return [ErrFrozen]. The pipeline calls

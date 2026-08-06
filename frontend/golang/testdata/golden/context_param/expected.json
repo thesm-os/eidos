@@ -15,9 +15,6 @@
       ],
       "imports": [
         {
-          "meta": {
-            "entries": []
-          },
           "path": "context",
           "pos": {
             "column": 8,
@@ -27,9 +24,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -47,9 +41,6 @@
         "from ctx. Drives the go.isContext stamping path for a directly-",
         "referenced context.Context parameter."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "Fetch",
       "package": "example.com/golangtest",
       "params": [
@@ -189,9 +180,6 @@
   ],
   "imports": [
     {
-      "meta": {
-        "entries": []
-      },
       "path": "context",
       "pos": {
         "column": 8,

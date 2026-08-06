@@ -67,6 +67,9 @@ func (p *Pipeline) Run(ctx context.Context, patterns ...string) error {
 	p.lastRecorder.Store(recorder)
 
 	s := store.New()
+	// So the store can report a caller consulting an index it
+	// switched off; see [store.Store.SetDiag].
+	s.SetDiag(p.diag)
 	p.lastStore.Store(s)
 
 	// Cancellation is checked between phases, not inside them. A

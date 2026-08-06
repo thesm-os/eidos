@@ -161,9 +161,6 @@
         "`type Seconds int` carries a method set that the converter must",
         "route to the Alias node (not orphan)."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {

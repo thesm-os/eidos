@@ -7,9 +7,6 @@
       "docs": [
         "Package fixture exercises struct-tag stamping under go.tag.*."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -155,9 +152,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "Record",
       "package": "example.com/golangtest",
       "pos": {

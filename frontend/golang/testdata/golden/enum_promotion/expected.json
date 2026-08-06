@@ -144,9 +144,6 @@
         "Package fixture exercises the typed-iota → Enum promotion path,",
         "including iota-value stamping on each variant."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {

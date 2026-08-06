@@ -13,9 +13,6 @@
         "resulting [node.Interface]; an interface with explicit methods",
         "must NOT."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -68,9 +65,6 @@
       },
       "methods": [
         {
-          "meta": {
-            "entries": []
-          },
           "name": "Do",
           "pos": {
             "column": 2,

@@ -13,9 +13,6 @@
         "onto every chan-typed reference; bidirectional, send-only, and",
         "recv-only channels each carry a distinct direction string."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -50,9 +47,6 @@
           "docs": [
             "Both is a bidirectional channel of ints."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "Both",
           "pos": {
             "column": 2,
@@ -120,9 +114,6 @@
           "docs": [
             "Out is a send-only channel of strings."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "Out",
           "pos": {
             "column": 2,
@@ -190,9 +181,6 @@
           "docs": [
             "In is a recv-only channel of booleans."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "In",
           "pos": {
             "column": 2,
@@ -257,9 +245,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "Pipes",
       "package": "example.com/golangtest",
       "pos": {

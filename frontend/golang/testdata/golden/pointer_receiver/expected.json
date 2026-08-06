@@ -11,9 +11,6 @@
         "converter stamps the flag whenever the receiver expression is",
         "`*T`; value-receiver methods on the same type carry no marker."
       ],
-      "meta": {
-        "entries": []
-      },
       "name": "source.go",
       "path": "source.go",
       "pos": {
@@ -45,9 +42,6 @@
       ],
       "fields": [
         {
-          "meta": {
-            "entries": []
-          },
           "name": "N",
           "pos": {
             "column": 2,
@@ -77,9 +71,6 @@
           }
         }
       ],
-      "meta": {
-        "entries": []
-      },
       "methods": [
         {
           "docs": [
@@ -156,9 +147,6 @@
             "Read returns the current count. Value receiver: must NOT stamp",
             "go.receiverIsPointer (its absence is the assertion)."
           ],
-          "meta": {
-            "entries": []
-          },
           "name": "Read",
           "pos": {
             "column": 1,

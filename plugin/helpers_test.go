@@ -167,6 +167,11 @@ var errSinkBoom = errors.New("plugin: sink boom (test)")
 func makeStubReader(t *testing.T) (*store.Store, *store.Reader) {
 	t.Helper()
 	s := store.New()
+	// The annotator contract asserts that metadata stamped after
+	// ingest reaches ByMetaKey, which is exactly what the opt-in
+	// observer provides. Enabled before Load so registration covers
+	// every node the stub frontend adds.
+	s.Nodes().EnableMetaKeyIndex()
 	d := diag.New()
 	fe := &stubFrontend{name: "stub-fe"}
 	assertNoError(t, fe.Load(&plugin.FrontendContext{
