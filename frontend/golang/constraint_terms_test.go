@@ -93,7 +93,7 @@ func TestMetaConstraintTerms_DirectiveParser(t *testing.T) {
 		})
 		tp := pkg.StructByName("Box").TypeParams[0]
 		raw := `[{"type":{"Name":"int"},"approximate":true}]`
-		if err := golang.MetaConstraintTerms.SetDirectiveFromString(tp.Meta(), raw, tp.Pos()); err != nil {
+		if err := golang.MetaConstraintTerms.SetDirectiveFromString(tp.EnsureMeta(), raw, tp.Pos()); err != nil {
 			t.Fatalf("SetDirectiveFromString: %v", err)
 		}
 		terms, ok := golang.MetaConstraintTerms.Get(tp.Meta())
@@ -111,7 +111,7 @@ func TestMetaConstraintTerms_DirectiveParser(t *testing.T) {
 			"a.go": "package a\n\ntype Box[T any] struct{}\n",
 		})
 		tp := pkg.StructByName("Box").TypeParams[0]
-		if err := golang.MetaConstraintTerms.SetDirectiveFromString(tp.Meta(), "", tp.Pos()); err != nil {
+		if err := golang.MetaConstraintTerms.SetDirectiveFromString(tp.EnsureMeta(), "", tp.Pos()); err != nil {
 			t.Fatalf("SetDirectiveFromString empty: %v", err)
 		}
 		terms, ok := golang.MetaConstraintTerms.Get(tp.Meta())
@@ -126,7 +126,7 @@ func TestMetaConstraintTerms_DirectiveParser(t *testing.T) {
 			"a.go": "package a\n\ntype Box[T any] struct{}\n",
 		})
 		tp := pkg.StructByName("Box").TypeParams[0]
-		err := golang.MetaConstraintTerms.SetDirectiveFromString(tp.Meta(), "{not json", tp.Pos())
+		err := golang.MetaConstraintTerms.SetDirectiveFromString(tp.EnsureMeta(), "{not json", tp.Pos())
 		if err == nil {
 			t.Fatalf("expected error for malformed JSON")
 		}

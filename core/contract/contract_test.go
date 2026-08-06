@@ -125,5 +125,6 @@ func (*fakeOwner) Directives() []*directive.Directive              { return nil 
 func (*fakeOwner) Directive(_ directive.Name) *directive.Directive { return nil }
 func (*fakeOwner) HasDirective(_ directive.Name) bool              { return false }
 func (*fakeOwner) Meta() *meta.Bag                                 { return nil }
+func (*fakeOwner) EnsureMeta() *meta.Bag                           { return meta.NewBag() }
 func (o *fakeOwner) OwnerName() string                             { return o.name }
 func (o *fakeOwner) OwnerQName() string                            { return o.qname }

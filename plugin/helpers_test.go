@@ -52,7 +52,7 @@ type stubAnnotator struct{ name string }
 func (a *stubAnnotator) Name() string { return a.name }
 func (a *stubAnnotator) Annotate(ctx *plugin.AnnotatorContext) error {
 	ctx.Reader.Structs().Each(func(s *node.Struct) {
-		stubKey.Set(s.Meta(), true, a.name)
+		stubKey.Set(s.EnsureMeta(), true, a.name)
 	})
 	return nil
 }

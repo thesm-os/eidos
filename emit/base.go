@@ -122,10 +122,39 @@ func (b *BaseEmit) HasNegatedDirective(name directive.Name) bool {
 	return directive.HasNegated(b.DirectiveList, name)
 }
 
-// Meta returns the metadata bag for this emit value, allocating one
-// on first access. The allocation is one-shot per value; the bag is
-// concurrent-safe via its own internal lock.
+// Meta returns the metadata bag for this emit value, or nil when
+// none has been created. It does not allocate, and every read method
+// on [meta.Bag] treats the nil bag as the empty bag — so
+// `n.Meta().Has(k)` is correct on a value nothing has written to.
+//
+// Reading must not write. The accessor used to allocate a bag on
+// first access, which made three consequences follow from a call
+// whose published purpose was to answer a question: two allocations
+// retained for the life of the emit tree per node anything ever
+// asked about; a change to the value's serialised form, because
+// `json:"meta,omitempty"` does not omit a non-nil pointer to an
+// empty bag; and a data race. The bag's own lock cannot defend
+// against the last one — two goroutines reaching a nil MetaBag each
+// build a bag and each proceed through a mutex the other's bag does
+// not share, so the lock is the object being raced on. Both
+// [Backend.Render]'s worker pool and the pipeline's parallel
+// NodesOnly generators traverse a shared graph.
+//
+// Writers call [BaseEmit.EnsureMeta].
 func (b *BaseEmit) Meta() *meta.Bag {
+	return b.MetaBag
+}
+
+// EnsureMeta returns the metadata bag for this emit value, creating
+// one on first call. The allocation is one-shot per value.
+//
+// This is the write-side accessor: take it when you intend to Set,
+// Tombstone, or AddObserver. It is not safe to call concurrently on
+// the same value — the creation it performs is the write [Meta]
+// exists to avoid — which is not a constraint in practice, because
+// every writer runs in a sequential phase (frontend stamping, store
+// indexing) while the concurrent phases only read.
+func (b *BaseEmit) EnsureMeta() *meta.Bag {
 	if b.MetaBag == nil {
 		b.MetaBag = meta.NewBag()
 	}

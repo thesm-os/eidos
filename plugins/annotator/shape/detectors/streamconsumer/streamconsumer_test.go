@@ -150,7 +150,7 @@ func TestDetector_RejectsNonConsumers(t *testing.T) {
 // interface-ness fact, as the Go frontend would produce it.
 func stampedInterface(pkg, name string) *node.TypeRef {
 	ref := &node.TypeRef{Name: name, Package: pkg}
-	metaIsInterface.Set(ref.Meta(), true, "test")
+	metaIsInterface.Set(ref.EnsureMeta(), true, "test")
 	return ref
 }
 
@@ -159,7 +159,7 @@ func stampedInterface(pkg, name string) *node.TypeRef {
 // detector's own exclusion rather than the frontend's.
 func stampedTypeParam() *node.TypeRef {
 	ref := &node.TypeRef{TypeKind: node.TypeRefTypeParam, Name: "K"}
-	metaIsInterface.Set(ref.Meta(), true, "test")
+	metaIsInterface.Set(ref.EnsureMeta(), true, "test")
 	return ref
 }
 
@@ -185,7 +185,7 @@ func runDetectFunc(t *testing.T, fn *node.Function) {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	p := shape.New().Detectors(streamconsumer.Detector())
 	if err := p.Annotate(&sdk.AnnotatorContext{

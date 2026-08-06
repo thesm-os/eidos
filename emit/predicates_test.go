@@ -50,7 +50,7 @@ func TestWithMeta(t *testing.T) {
 	t.Run("matches when the named meta key is set", func(t *testing.T) {
 		t.Parallel()
 		var s emit.Struct
-		keyEmitPredicateUntyped.Set(s.Meta(), true, "test")
+		keyEmitPredicateUntyped.Set(s.EnsureMeta(), true, "test")
 		if !emit.WithMeta(keyEmitPredicateUntyped.Name())(&s) {
 			t.Fatalf("predicate should match")
 		}
@@ -71,7 +71,7 @@ func TestWithMetaKey(t *testing.T) {
 	t.Run("matches when the typed key resolves to a value", func(t *testing.T) {
 		t.Parallel()
 		var s emit.Struct
-		keyEmitPredicateTyped.Set(s.Meta(), true, "test")
+		keyEmitPredicateTyped.Set(s.EnsureMeta(), true, "test")
 		if !emit.WithMetaKey(keyEmitPredicateTyped)(&s) {
 			t.Fatalf("predicate should match")
 		}

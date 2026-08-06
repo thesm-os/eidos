@@ -46,7 +46,7 @@ func appendServiceInterface(
 		Methods:  convertRPCs(ctx, fd, sd),
 	}
 	attachInterfaceDocs(ctx, iface, fd, sd)
-	stampHostOptions(ctx.Diag.For(FrontendName), iface.Meta(), sd.Options(), sourcePos(fd, sd))
+	stampHostOptions(ctx.Diag.For(FrontendName), iface.EnsureMeta(), sd.Options(), sourcePos(fd, sd))
 	pkg.Interfaces = append(pkg.Interfaces, iface)
 }
 
@@ -80,7 +80,7 @@ func convertRPCs(
 		}
 		stampStreamingMeta(m, md, pos)
 		attachRPCDocs(ctx, m, fd, md)
-		stampHostOptions(ctx.Diag.For(FrontendName), m.Meta(), md.Options(), pos)
+		stampHostOptions(ctx.Diag.For(FrontendName), m.EnsureMeta(), md.Options(), pos)
 		out = append(out, m)
 	}
 	return out
@@ -93,9 +93,9 @@ func convertRPCs(
 // both keys; unary RPCs carry neither.
 func stampStreamingMeta(m *node.Method, md protoreflect.MethodDescriptor, pos position.Pos) {
 	if md.IsStreamingClient() {
-		MetaRPCStreamClient.SetAt(m.Meta(), true, meta.AuthorityPlugin, FrontendName, pos)
+		MetaRPCStreamClient.SetAt(m.EnsureMeta(), true, meta.AuthorityPlugin, FrontendName, pos)
 	}
 	if md.IsStreamingServer() {
-		MetaRPCStreamServer.SetAt(m.Meta(), true, meta.AuthorityPlugin, FrontendName, pos)
+		MetaRPCStreamServer.SetAt(m.EnsureMeta(), true, meta.AuthorityPlugin, FrontendName, pos)
 	}
 }

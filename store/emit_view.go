@@ -230,7 +230,7 @@ func (v *EmitView) indexCommon(n emit.Node, pkgPath string, target emit.Target) 
 	if !target.IsZero() {
 		v.byTarget.Add(target, n)
 	}
-	bag := n.Meta()
+	bag := n.EnsureMeta()
 	for _, name := range bag.Names() {
 		v.byMetaKey.Add(name, n)
 	}

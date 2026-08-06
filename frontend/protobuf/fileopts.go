@@ -73,7 +73,7 @@ func stampFileOption(
 			ps, pkg, name, value.Bool(), fd.Path(), pos, "%t",
 		)
 	}
-	stampOptionOnBag(ps, pkg.Meta(), field, value, pos)
+	stampOptionOnBag(ps, pkg.EnsureMeta(), field, value, pos)
 }
 
 // warnIfFileOptionOverwrites detects a same-key cross-file

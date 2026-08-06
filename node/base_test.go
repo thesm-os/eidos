@@ -4,6 +4,7 @@
 package node_test
 
 import (
+	"sync"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
@@ -136,28 +137,75 @@ func TestBaseNode_HasNegatedDirective(t *testing.T) {
 func TestBaseNode_Meta(t *testing.T) {
 	t.Parallel()
 
-	t.Run("lazy-initialises a non-nil bag on first call", func(t *testing.T) {
+	t.Run("returns nil without allocating on an unstamped node", func(t *testing.T) {
 		t.Parallel()
 		var b node.BaseNode
+		if got := b.Meta(); got != nil {
+			t.Fatalf("Meta should not allocate; got %p", got)
+		}
 		if b.MetaBag != nil {
-			t.Fatalf("zero-value BaseNode should have nil MetaBag")
-		}
-		bag := b.Meta()
-		if bag == nil {
-			t.Fatalf("Meta should return a non-nil bag")
-		}
-		if b.MetaBag != bag {
-			t.Fatalf("Meta should cache the lazily-allocated bag on the receiver")
+			t.Fatalf("Meta wrote to the receiver: %p", b.MetaBag)
 		}
 	})
 
-	t.Run("returns the same bag on subsequent calls", func(t *testing.T) {
+	t.Run("the nil bag reads as the empty bag", func(t *testing.T) {
 		t.Parallel()
 		var b node.BaseNode
-		first := b.Meta()
-		second := b.Meta()
-		if first != second {
-			t.Fatalf("Meta should return the same instance on every call")
+		if b.Meta().Has("anything") {
+			t.Fatalf("nil bag should report nothing set")
+		}
+		if got := b.Meta().Names(); got != nil {
+			t.Fatalf("nil bag should report no names; got %v", got)
 		}
 	})
+
+	t.Run("EnsureMeta creates and caches the bag", func(t *testing.T) {
+		t.Parallel()
+		var b node.BaseNode
+		bag := b.EnsureMeta()
+		if bag == nil {
+			t.Fatalf("EnsureMeta should return a non-nil bag")
+		}
+		if b.MetaBag != bag {
+			t.Fatalf("EnsureMeta should cache the bag on the receiver")
+		}
+	})
+
+	t.Run("EnsureMeta returns the same bag on subsequent calls", func(t *testing.T) {
+		t.Parallel()
+		var b node.BaseNode
+		if first, second := b.EnsureMeta(), b.EnsureMeta(); first != second {
+			t.Fatalf("EnsureMeta should return the same instance on every call")
+		}
+	})
+
+	t.Run("concurrent reads of an unstamped node do not race", func(t *testing.T) {
+		t.Parallel()
+		// The node graph is the one a bucket of parallel NodesOnly
+		// generators shares, and reading annotator-stamped metadata
+		// is exactly what they do — so this path is concurrent by
+		// contract rather than by accident.
+		var b node.BaseNode
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				_ = b.Meta().Has("shape")
+			})
+		}
+		wg.Wait()
+		if b.MetaBag != nil {
+			t.Fatalf("concurrent reads created a bag: %p", b.MetaBag)
+		}
+	})
+}
+
+// TestBaseNode_MetaAllocations mirrors the emit-side assertion. Not
+// parallel: testing.AllocsPerRun panics inside a parallel test.
+//
+//nolint:paralleltest // testing.AllocsPerRun panics in a parallel test.
+func TestBaseNode_MetaAllocations(t *testing.T) {
+	var b node.BaseNode
+	if got := testing.AllocsPerRun(100, func() { _ = b.Meta().Has("k") }); got != 0 {
+		t.Fatalf("Meta().Has on an unstamped node should not allocate; got %v allocs/op", got)
+	}
 }

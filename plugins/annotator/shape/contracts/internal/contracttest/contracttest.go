@@ -80,7 +80,7 @@ func RunPipeline(t *testing.T, c shape.Contract, pkg *node.Package) []diag.Diag 
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	umbrella := shape.New().Contracts(c)
 	sink := diag.New()

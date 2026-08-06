@@ -911,12 +911,8 @@ func (c *ExplainCommand) reportSourceSlot(
 // same shape as the emit-side reportMeta to keep the user
 // experience uniform across selector forms.
 func (*ExplainCommand) reportSourceMeta(env *Env, n node.Node, key string) int {
-	meta := n.Meta()
-	if meta == nil {
-		writeErr(env, "explain: source entity has no meta bag")
-		return ExitUserError
-	}
-	v, ok := meta.RawValue(key)
+	// See reportMeta: the nil bag reads as empty.
+	v, ok := n.Meta().RawValue(key)
 	if !ok {
 		writeErr(env, "explain: meta key %q is unset on %s", key, sourceQName(n))
 		return ExitUserError
@@ -1191,12 +1187,12 @@ func (*ExplainCommand) reportSlot(env *Env, host emit.Node, name string) int {
 // entity. Unset keys exit ExitUserError so CI gates can detect
 // "I asked about a key that doesn't exist".
 func (*ExplainCommand) reportMeta(env *Env, n emit.Node, key string) int {
-	meta := n.Meta()
-	if meta == nil {
-		writeErr(env, "explain: entity has no meta bag")
-		return ExitUserError
-	}
-	v, ok := meta.RawValue(key)
+	// No nil check: the nil bag is the empty bag, and RawValue
+	// answers "unset" for it. Distinguishing "this entity never had
+	// metadata written" from "this key is not set on it" would be a
+	// distinction without a difference to someone asking about a
+	// key, and the message below is the one they can act on.
+	v, ok := n.Meta().RawValue(key)
 	if !ok {
 		writeErr(env, "explain: meta key %q is unset on %s", key, n.Kind())
 		return ExitUserError

@@ -187,7 +187,7 @@ func runDetect(t *testing.T, pkg *node.Package) {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	p := shape.New().Detectors(lifecycle.Detector())
 	ctx := &sdk.AnnotatorContext{

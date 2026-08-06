@@ -39,7 +39,7 @@ func RunFn(t *testing.T, det shape.Detector, fn *node.Function) *meta.Bag {
 		Functions: []*node.Function{fn},
 	}
 	runUmbrella(t, det, pkg)
-	return fn.Meta()
+	return fn.EnsureMeta()
 }
 
 // RunMethod wires s into a single-struct "x" package, runs the
@@ -51,7 +51,7 @@ func RunMethod(t *testing.T, det shape.Detector, s *node.Struct, m *node.Method)
 		Structs: []*node.Struct{s},
 	}
 	runUmbrella(t, det, pkg)
-	return m.Meta()
+	return m.EnsureMeta()
 }
 
 // RunInterfaceMethod wires i into a single-interface "x" package,
@@ -63,7 +63,7 @@ func RunInterfaceMethod(t *testing.T, det shape.Detector, i *node.Interface, m *
 		Interfaces: []*node.Interface{i},
 	}
 	runUmbrella(t, det, pkg)
-	return m.Meta()
+	return m.EnsureMeta()
 }
 
 // AssertShape fails when bag's shape / key_type / value_type
@@ -158,7 +158,7 @@ func runUmbrella(t *testing.T, det shape.Detector, pkg *node.Package) {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	p := shape.New().Detectors(det)
 	ctx := &sdk.AnnotatorContext{

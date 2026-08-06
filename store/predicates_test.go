@@ -52,7 +52,7 @@ func TestWithMeta(t *testing.T) {
 		s := store.New()
 		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
 		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
-		keyShapeDetected.Set(user.Meta(), true, "test")
+		keyShapeDetected.Set(user.EnsureMeta(), true, "test")
 		r := store.NewReader(s)
 		got := r.Structs().Where(store.WithMeta[*node.Struct](keyShapeDetected.Name())).Slice()
 		if len(got) != 1 || got[0].Name != "User" {
@@ -80,7 +80,7 @@ func TestWithMetaKey(t *testing.T) {
 		s := store.New()
 		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
 		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
-		keyShapeDetected.Set(user.Meta(), true, "test")
+		keyShapeDetected.Set(user.EnsureMeta(), true, "test")
 		r := store.NewReader(s)
 		got := r.Structs().Where(store.WithMetaKey[*node.Struct](keyShapeDetected)).Slice()
 		if len(got) != 1 || got[0].Name != "User" {
@@ -97,7 +97,7 @@ func TestMetaEq(t *testing.T) {
 		s := store.New()
 		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
 		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
-		keyMockOptions.Set(user.Meta(), "exhaustive", "test")
+		keyMockOptions.Set(user.EnsureMeta(), "exhaustive", "test")
 		r := store.NewReader(s)
 		got := r.Structs().Where(store.MetaEq[*node.Struct](keyMockOptions, "exhaustive")).Slice()
 		if len(got) != 1 || got[0].Name != "User" {
@@ -110,7 +110,7 @@ func TestMetaEq(t *testing.T) {
 		s := store.New()
 		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
 		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
-		keyMockOptions.Set(user.Meta(), "exhaustive", "test")
+		keyMockOptions.Set(user.EnsureMeta(), "exhaustive", "test")
 		r := store.NewReader(s)
 		got := r.Structs().Where(store.MetaEq[*node.Struct](keyMockOptions, "minimal")).Slice()
 		if len(got) != 0 {
@@ -208,7 +208,7 @@ func TestPredicateComposition(t *testing.T) {
 		s := store.New()
 		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
 		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
-		keyMockOptions.Set(user.Meta(), "exhaustive", "test")
+		keyMockOptions.Set(user.EnsureMeta(), "exhaustive", "test")
 		r := store.NewReader(s)
 		got := r.Structs().Where(store.And(
 			store.WithDirective[*node.Struct]("repo"),

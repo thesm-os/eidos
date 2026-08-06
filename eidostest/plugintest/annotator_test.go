@@ -151,7 +151,7 @@ func (a *taggingAnnotator) Name() string { return a.name }
 // Annotate stamps the tag key on every struct in the store.
 func (a *taggingAnnotator) Annotate(ctx *plugin.AnnotatorContext) error {
 	for _, s := range ctx.Store.Nodes().Structs().Items() {
-		annotatorTagKey.Set(s.Meta(), "tag:"+s.Name, a.name)
+		annotatorTagKey.Set(s.EnsureMeta(), "tag:"+s.Name, a.name)
 	}
 	return nil
 }
@@ -183,7 +183,7 @@ func (a *flappingAnnotator) Name() string { return a.name }
 func (a *flappingAnnotator) Annotate(ctx *plugin.AnnotatorContext) error {
 	a.count++
 	for _, s := range ctx.Store.Nodes().Structs().Items() {
-		annotatorTagKey.Set(s.Meta(), fmt.Sprintf("flap-%d", a.count), a.name)
+		annotatorTagKey.Set(s.EnsureMeta(), fmt.Sprintf("flap-%d", a.count), a.name)
 	}
 	return nil
 }

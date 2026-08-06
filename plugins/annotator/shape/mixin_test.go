@@ -308,7 +308,7 @@ func contracttestCtxForMixin(t *testing.T, pkg *node.Package) *sdk.AnnotatorCont
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 	return &sdk.AnnotatorContext{
 		Store:  s,
 		Reader: store.NewReader(s),
@@ -326,7 +326,7 @@ func annotateCapturing(t *testing.T, p *shape.Plugin, fn *node.Function) *diag.S
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 	ctx := newAnnotatorContext(t, s)
 	if err := p.Annotate(ctx); err != nil {
 		t.Fatalf("Annotate: %v", err)

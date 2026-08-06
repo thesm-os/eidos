@@ -33,6 +33,21 @@ type entry struct {
 // All methods are safe to call concurrently. The internal lock is a
 // RWMutex so reads (the common case) are uncontended.
 //
+// # The nil Bag is the empty Bag
+//
+// Every read method tolerates a nil receiver and returns the answer
+// an empty bag would give. That is what lets an owner hold a nil
+// *Bag until something actually writes metadata, instead of
+// allocating one the moment anybody asks a question — an allocation
+// that is also a write, and therefore a race when two goroutines
+// ask at once.
+//
+// Writes through a nil Bag panic, by design. The panic marks a
+// caller that took a write path without asking its owner for a bag
+// first (`EnsureMeta` on the emit and node accessors). On the
+// plugin boundary it surfaces through diag.RecoverAs as an
+// attributed diagnostic rather than a crash.
+//
 // The zero value is unusable; construct with [NewBag].
 type Bag struct {
 	mu        sync.RWMutex
@@ -86,6 +101,9 @@ func (b *Bag) Has(name string) bool {
 // Tombstoned reports whether the resolution for name is a tombstone
 // (either direct or via a prefix ancestor).
 func (b *Bag) Tombstoned(name string) bool {
+	if b == nil {
+		return false
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	p, ok := b.winningLocked(name)
@@ -96,6 +114,9 @@ func (b *Bag) Tombstoned(name string) bool {
 // The second return is false when name resolves to "not set" — either
 // because no entry exists or because the winning entry is a tombstone.
 func (b *Bag) RawValue(name string) (any, bool) {
+	if b == nil {
+		return nil, false
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	p, ok := b.winningLocked(name)
@@ -108,6 +129,9 @@ func (b *Bag) RawValue(name string) (any, bool) {
 // Winning returns the Provenance entry the resolution algorithm picks
 // for name. The second return is false when no entry covers the name.
 func (b *Bag) Winning(name string) (Provenance, bool) {
+	if b == nil {
+		return Provenance{}, false
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.winningLocked(name)
@@ -175,6 +199,9 @@ func (b *Bag) prefixTombstoneLocked(name string, auth Authority) (*entry, string
 // not included; use [Bag.Winning] for the resolved entry that
 // accounts for ancestors.
 func (b *Bag) History(name string) []Provenance {
+	if b == nil {
+		return nil
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	slot, ok := b.entries[name]
@@ -194,6 +221,9 @@ func (b *Bag) History(name string) []Provenance {
 // sorted order. Tombstones count: a name with only a tombstone entry
 // still appears in the result.
 func (b *Bag) Names() []string {
+	if b == nil {
+		return nil
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	out := make([]string, 0, len(b.entries))

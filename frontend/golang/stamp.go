@@ -33,7 +33,7 @@ import (
 // [buildTypeRef] returns a non-nil ref, and ref is non-nil only for
 // non-nil t — both arguments are guaranteed live.
 func (c *converter) stampTypeRefMeta(ref *node.TypeRef, t types.Type) {
-	bag := ref.Meta()
+	bag := ref.EnsureMeta()
 	pos := ref.Pos()
 	if pos.IsZero() {
 		// The converter assembles refs in two passes — buildTypeRef
@@ -163,7 +163,7 @@ func (*converter) stampStructMeta(s *node.Struct, st *types.Struct) {
 			continue
 		}
 		if isInterfaceUnderlying(v.Type()) {
-			MetaEmbedsInterface.SetAt(s.Meta(), true, meta.AuthorityPlugin, FrontendName, s.Pos())
+			MetaEmbedsInterface.SetAt(s.EnsureMeta(), true, meta.AuthorityPlugin, FrontendName, s.Pos())
 			return
 		}
 	}
@@ -185,7 +185,7 @@ func isInterfaceUnderlying(t types.Type) bool {
 //   - [MetaIsConstraintInterface] when the interface declares at
 //     least one type-set or `~T` term.
 func (*converter) stampInterfaceMeta(i *node.Interface, it *types.Interface, _ *types.TypeName) {
-	bag := i.Meta()
+	bag := i.EnsureMeta()
 	pos := i.Pos()
 	if it.NumExplicitMethods() == 0 && it.NumEmbeddeds() == 0 {
 		MetaIsEmptyInterface.SetAt(bag, true, meta.AuthorityPlugin, FrontendName, pos)
@@ -212,7 +212,7 @@ func hasConstraintEmbed(it *types.Interface) bool {
 // non-nil check.
 func (*converter) stampAliasMeta(a *node.Alias, obj *types.TypeName) {
 	underlying := obj.Type().Underlying()
-	MetaUnderlyingKind.SetAt(a.Meta(), underlyingKindOf(underlying), meta.AuthorityPlugin, FrontendName, a.Pos())
+	MetaUnderlyingKind.SetAt(a.EnsureMeta(), underlyingKindOf(underlying), meta.AuthorityPlugin, FrontendName, a.Pos())
 }
 
 // underlyingKindOf returns a short string describing the kind of
@@ -251,7 +251,7 @@ func underlyingKindOf(t types.Type) (kind string) {
 //     pointer receiver.
 func (*converter) stampMethodMeta(m *node.Method) {
 	if m.Receiver != nil && m.Receiver.IsPointer() {
-		MetaReceiverIsPointer.SetAt(m.Meta(), true, meta.AuthorityPlugin, FrontendName, m.Pos())
+		MetaReceiverIsPointer.SetAt(m.EnsureMeta(), true, meta.AuthorityPlugin, FrontendName, m.Pos())
 	}
 }
 
@@ -271,7 +271,7 @@ func (*converter) stampFunctionMeta(fn *node.Function, sig *types.Signature) {
 		return
 	}
 	args := named.TypeArgs()
-	bag := fn.Meta()
+	bag := fn.EnsureMeta()
 	pos := fn.Pos()
 	switch obj.Name() {
 	case "Seq":
@@ -301,14 +301,14 @@ func (*converter) stampConstantMeta(cst *node.Constant, obj *types.Const) {
 	if !exact {
 		return
 	}
-	MetaIotaValue.SetAt(cst.Meta(), int(i), meta.AuthorityPlugin, FrontendName, cst.Pos())
+	MetaIotaValue.SetAt(cst.EnsureMeta(), int(i), meta.AuthorityPlugin, FrontendName, cst.Pos())
 }
 
 // stampVariantMeta forwards [MetaIotaValue] from an underlying
 // constant onto an enum variant.
 func (*converter) stampVariantMeta(v *node.EnumVariant, cst *node.Constant) {
 	if val, ok := MetaIotaValue.Get(cst.Meta()); ok {
-		MetaIotaValue.SetAt(v.Meta(), val, meta.AuthorityPlugin, FrontendName, v.Pos())
+		MetaIotaValue.SetAt(v.EnsureMeta(), val, meta.AuthorityPlugin, FrontendName, v.Pos())
 	}
 }
 
@@ -321,7 +321,7 @@ func (*converter) stampFieldTagMeta(f *node.Field) {
 	}
 	pos := f.Pos()
 	for _, entry := range tagEntriesOf(reflect.StructTag(f.Tag)) {
-		setTagEntry(f.Meta(), MetaTagPrefix+entry.key, entry.value, pos)
+		setTagEntry(f.EnsureMeta(), MetaTagPrefix+entry.key, entry.value, pos)
 	}
 }
 

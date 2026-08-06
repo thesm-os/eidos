@@ -47,7 +47,7 @@ func (p *Pipeline) runDirectiveOverride(s *store.Store) {
 			if d.Name != MetaDirectiveName {
 				continue
 			}
-			applyMetaDirective(n.Meta(), d, ps)
+			applyMetaDirective(n.EnsureMeta(), d, ps)
 		}
 	}
 	rangeNodeView(v, visit)

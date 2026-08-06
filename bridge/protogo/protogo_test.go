@@ -79,7 +79,7 @@ func TestConformance(t *testing.T) {
 func protoStore(t *testing.T, build func(*storefixture.Builder)) *store.Store {
 	t.Helper()
 	b := storefixture.New().Package("pb", "example.com/pb")
-	protobuf.MetaFrontend.Set(b.PackageNode().Meta(), protobuf.FrontendName, "test")
+	protobuf.MetaFrontend.Set(b.PackageNode().EnsureMeta(), protobuf.FrontendName, "test")
 	if build != nil {
 		build(b)
 	}
@@ -151,7 +151,7 @@ func TestAnnotate_WellKnownTypes(t *testing.T) {
 			b.Interface("Clock", func(i *storefixture.InterfaceBuilder) {
 				i.Method("Now", func(m *storefixture.MethodBuilder) {
 					ref := storefixture.Named("Timestamp")
-					protobuf.MetaWellKnown.Set(ref.Meta(), "Timestamp", "test")
+					protobuf.MetaWellKnown.Set(ref.EnsureMeta(), "Timestamp", "test")
 					m.Return(ref)
 				})
 			})

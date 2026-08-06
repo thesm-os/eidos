@@ -40,6 +40,15 @@ type bagEntryJSON struct {
 // observer wiring is re-attached by the caller (the store's
 // indexCommon, for example).
 func (b *Bag) MarshalJSON() ([]byte, error) {
+	// The nil bag is the empty bag, and encoding a value must not
+	// require it to have been written to first. `null` rather than
+	// an empty entry list because that is what encoding/json
+	// produces for a nil pointer anywhere else, and because an
+	// owner holding a nil bag omits the field entirely — the two
+	// spellings never appear in the same document.
+	if b == nil {
+		return []byte("null"), nil
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 

@@ -51,7 +51,7 @@ func stampFieldName(f *node.Field) {
 	if _, ok := MetaGoName.Get(f.Meta()); ok {
 		return
 	}
-	MetaGoName.Set(f.Meta(), GoFieldName(f.Name), Name)
+	MetaGoName.Set(f.EnsureMeta(), GoFieldName(f.Name), Name)
 }
 
 // stampFieldType records [MetaGoType] on f.Type using the
@@ -76,7 +76,7 @@ func stampFieldType(f *node.Field) {
 	if optional, _ := protobuf.MetaFieldOptional.Get(f.Meta()); optional {
 		inner = "*" + inner
 	}
-	MetaGoType.Set(f.Type.Meta(), inner, Name)
+	MetaGoType.Set(f.Type.EnsureMeta(), inner, Name)
 	stampWellKnownImport(f.Type)
 }
 
@@ -95,7 +95,7 @@ func stampTypeRef(r *node.TypeRef) {
 	if got == "" {
 		return
 	}
-	MetaGoType.Set(r.Meta(), got, Name)
+	MetaGoType.Set(r.EnsureMeta(), got, Name)
 	stampWellKnownImport(r)
 }
 
@@ -110,7 +110,7 @@ func stampWellKnownImport(r *node.TypeRef) {
 		return
 	}
 	if path := wellKnownImport(wk); path != "" {
-		MetaGoImport.Set(r.Meta(), path, Name)
+		MetaGoImport.Set(r.EnsureMeta(), path, Name)
 	}
 }
 
@@ -185,7 +185,7 @@ func stampPackageMeta(pkg *node.Package, ps *diag.PluginSink) {
 	}
 	if _, ok := MetaGoImport.Get(pkg.Meta()); !ok {
 		if path := GoImportPath(rawOption); path != "" {
-			MetaGoImport.Set(pkg.Meta(), path, Name)
+			MetaGoImport.Set(pkg.EnsureMeta(), path, Name)
 		}
 	}
 	if _, ok := MetaGoName.Get(pkg.Meta()); !ok {
@@ -194,7 +194,7 @@ func stampPackageMeta(pkg *node.Package, ps *diag.PluginSink) {
 			name = pkg.Name
 		}
 		if name != "" {
-			MetaGoName.Set(pkg.Meta(), name, Name)
+			MetaGoName.Set(pkg.EnsureMeta(), name, Name)
 		}
 	}
 }

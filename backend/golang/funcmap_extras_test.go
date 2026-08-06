@@ -104,8 +104,8 @@ func TestFuncmapExtras_Meta(t *testing.T) {
 const {{ .Name }} = {{ renderExpr .Value }}
 {{- end -}}`,
 		func(c *emit.Constant) {
-			testMetaKindKey.SetManual(c.Meta(), "primary", "extrasprobe")
-			testMetaExportedKey.SetManual(c.Meta(), true, "extrasprobe")
+			testMetaKindKey.SetManual(c.EnsureMeta(), "primary", "extrasprobe")
+			testMetaExportedKey.SetManual(c.EnsureMeta(), true, "extrasprobe")
 		})
 	for _, want := range []string{
 		"// hasMeta:  true",
@@ -191,8 +191,8 @@ func TestFuncmapExtras_MetaMismatch(t *testing.T) {
 const {{ .Name }} = {{ renderExpr .Value }}
 {{- end -}}`,
 		func(c *emit.Constant) {
-			testMetaKindKey.SetManual(c.Meta(), "primary", "extrasprobe")
-			testMetaExportedKey.SetManual(c.Meta(), true, "extrasprobe")
+			testMetaKindKey.SetManual(c.EnsureMeta(), "primary", "extrasprobe")
+			testMetaExportedKey.SetManual(c.EnsureMeta(), true, "extrasprobe")
 		})
 	for _, want := range []string{
 		"// metaBoolMismatch: false",
@@ -306,7 +306,7 @@ const {{ .Name }} = {{ renderExpr .Value }}
 			c.DirectiveList = []*directive.Directive{
 				{Name: directive.Name("gen:probe")},
 			}
-			testMetaKindKey.SetManual(c.Meta(), "primary", "extrasprobe")
+			testMetaKindKey.SetManual(c.EnsureMeta(), "primary", "extrasprobe")
 		})
 	for _, want := range []string{
 		"from=pkg/source.go:7",

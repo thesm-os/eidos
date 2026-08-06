@@ -398,7 +398,7 @@ func runMixinPipeline(t *testing.T, m shape.Mixin, pkg *node.Package) []diag.Dia
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	umbrella := shape.New().Mixins(m)
 	sink := diag.New()
@@ -433,7 +433,7 @@ func runFullPipeline(t *testing.T, pkg *node.Package, cs ...shape.Contract) []di
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	umbrella := shape.New().Contracts(cs...)
 	sink := diag.New()

@@ -195,9 +195,9 @@ func pointerChain(depth int) emit.Ref {
 func chanRef(t *testing.T, dir string, elem emit.Ref) emit.Ref {
 	t.Helper()
 	origin := &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "go", Name: "chan"}
-	goIsChannelKey.SetAt(origin.Meta(), true, meta.AuthorityPlugin, "golang", origin.Pos())
+	goIsChannelKey.SetAt(origin.EnsureMeta(), true, meta.AuthorityPlugin, "golang", origin.Pos())
 	if dir != "" {
-		goChanDirKey.SetAt(origin.Meta(), dir, meta.AuthorityPlugin, "golang", origin.Pos())
+		goChanDirKey.SetAt(origin.EnsureMeta(), dir, meta.AuthorityPlugin, "golang", origin.Pos())
 	}
 	ref := emit.External("go", "chan", elem)
 	ref.OriginNode = origin
@@ -264,7 +264,7 @@ func TestRenderType_Channel(t *testing.T) {
 		// plugin bug; naming it beats rendering "chan " and letting
 		// the formatter report a syntax error with no attribution.
 		origin := &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "go", Name: "chan"}
-		goIsChannelKey.SetAt(origin.Meta(), true, meta.AuthorityPlugin, "golang", origin.Pos())
+		goIsChannelKey.SetAt(origin.EnsureMeta(), true, meta.AuthorityPlugin, "golang", origin.Pos())
 		ref := emit.External("go", "chan")
 		ref.OriginNode = origin
 

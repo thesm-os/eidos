@@ -377,7 +377,7 @@ func TestNodeView_ByMetaKey(t *testing.T) {
 		s := store.New()
 		assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
 		user, _ := s.Nodes().Structs().ByQName("github.com/example/users.User")
-		keyNodeViewMeta.Set(user.Meta(), true, "test")
+		keyNodeViewMeta.Set(user.EnsureMeta(), true, "test")
 		got := s.Nodes().ByMetaKey().Get(keyNodeViewMeta.Name())
 		if len(got) != 1 || got[0] != node.Node(user) {
 			t.Fatalf("ByMetaKey should record the post-add Set; got %+v", got)
@@ -389,7 +389,7 @@ func TestNodeView_ByMetaKey(t *testing.T) {
 		s := store.New()
 		pre := makeUserPackage()
 		// Pre-stamp metadata before adding the package.
-		keyNodeViewMeta.Set(pre.Structs[0].Meta(), true, "pre-add")
+		keyNodeViewMeta.Set(pre.Structs[0].EnsureMeta(), true, "pre-add")
 		assertNoError(t, s.Nodes().AddPackage(pre))
 		got := s.Nodes().ByMetaKey().Get(keyNodeViewMeta.Name())
 		if len(got) != 1 {

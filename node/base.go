@@ -78,10 +78,33 @@ func (b *BaseNode) HasNegatedDirective(name directive.Name) bool {
 	return directive.HasNegated(b.DirectiveList, name)
 }
 
-// Meta returns the metadata bag for this node, allocating one on
-// first access. The allocation is one-shot per node; the bag itself
-// is concurrent-safe via its own RWMutex.
+// Meta returns the metadata bag for this node, or nil when none has
+// been created. It does not allocate, and every read method on
+// [meta.Bag] treats the nil bag as the empty bag — so
+// `n.Meta().Has(k)` is correct on a node nothing has stamped.
+//
+// The read path here is concurrent by contract, not by accident:
+// the pipeline runs a bucket of [plugin.NodesOnly] generators in
+// parallel over one shared node graph, and reading the metadata an
+// annotator stamped is precisely what those generators do. An
+// accessor that allocated on first access made every such read a
+// write, racing on the creation of the very lock meant to make the
+// bag safe.
+//
+// Writers call [BaseNode.EnsureMeta]. Mirrors
+// [go.thesmos.sh/eidos/emit.BaseEmit.Meta] deliberately: the two
+// accessors are the same contract on either side of the pipeline.
 func (b *BaseNode) Meta() *meta.Bag {
+	return b.MetaBag
+}
+
+// EnsureMeta returns the metadata bag for this node, creating one on
+// first call. The allocation is one-shot per node.
+//
+// This is the write-side accessor: annotators and frontend stamping
+// take it, and both run in sequential phases. It is not safe to call
+// concurrently on the same node.
+func (b *BaseNode) EnsureMeta() *meta.Bag {
 	if b.MetaBag == nil {
 		b.MetaBag = meta.NewBag()
 	}

@@ -4,8 +4,10 @@
 package emit_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
@@ -136,31 +138,186 @@ func TestBaseEmit_HasNegatedDirective(t *testing.T) {
 	})
 }
 
+// TestBaseEmit_Meta pins the read/write split. Meta answers
+// questions and must not touch the receiver; EnsureMeta is the
+// accessor that creates.
 func TestBaseEmit_Meta(t *testing.T) {
 	t.Parallel()
 
-	t.Run("lazy-initialises a non-nil bag on first call", func(t *testing.T) {
+	t.Run("returns nil without allocating on an unwritten value", func(t *testing.T) {
 		t.Parallel()
 		var b emit.BaseEmit
+		if got := b.Meta(); got != nil {
+			t.Fatalf("Meta should not allocate; got %p", got)
+		}
 		if b.MetaBag != nil {
-			t.Fatalf("zero-value BaseEmit should have nil MetaBag")
-		}
-		bag := b.Meta()
-		if bag == nil {
-			t.Fatalf("Meta should return a non-nil bag")
-		}
-		if b.MetaBag != bag {
-			t.Fatalf("Meta should cache the lazily-allocated bag on the receiver")
+			t.Fatalf("Meta wrote to the receiver: %p", b.MetaBag)
 		}
 	})
 
-	t.Run("returns the same bag on subsequent calls", func(t *testing.T) {
+	t.Run("the nil bag reads as the empty bag", func(t *testing.T) {
+		t.Parallel()
+		// This is what makes the nil return safe to publish: a
+		// caller writes n.Meta().Has(k) with no nil check.
+		var b emit.BaseEmit
+		if b.Meta().Has("anything") {
+			t.Fatalf("nil bag should report nothing set")
+		}
+		if got := b.Meta().Names(); got != nil {
+			t.Fatalf("nil bag should report no names; got %v", got)
+		}
+	})
+
+	t.Run("EnsureMeta creates and caches the bag", func(t *testing.T) {
 		t.Parallel()
 		var b emit.BaseEmit
-		first := b.Meta()
-		second := b.Meta()
-		if first != second {
-			t.Fatalf("Meta should return the same instance on every call")
+		bag := b.EnsureMeta()
+		if bag == nil {
+			t.Fatalf("EnsureMeta should return a non-nil bag")
+		}
+		if b.MetaBag != bag {
+			t.Fatalf("EnsureMeta should cache the bag on the receiver")
+		}
+	})
+
+	t.Run("EnsureMeta returns the same bag on subsequent calls", func(t *testing.T) {
+		t.Parallel()
+		var b emit.BaseEmit
+		if first, second := b.EnsureMeta(), b.EnsureMeta(); first != second {
+			t.Fatalf("EnsureMeta should return the same instance on every call")
+		}
+	})
+
+	t.Run("Meta returns what EnsureMeta created", func(t *testing.T) {
+		t.Parallel()
+		var b emit.BaseEmit
+		created := b.EnsureMeta()
+		if got := b.Meta(); got != created {
+			t.Fatalf("Meta should return the bag EnsureMeta created")
+		}
+	})
+
+	t.Run("concurrent reads of an unwritten value do not race", func(t *testing.T) {
+		t.Parallel()
+		// The regression barrier. Under -race the lazy-allocating
+		// accessor produced several distinct reports here, the worst
+		// being a reader inside Bag.Has holding its own bag's read
+		// lock while another goroutine's NewBag initialised a
+		// different mutex word — the lock was the object being raced
+		// on, so the bag could not defend itself.
+		var b emit.BaseEmit
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				_ = b.Meta().Has("validate")
+			})
+		}
+		wg.Wait()
+		if b.MetaBag != nil {
+			t.Fatalf("concurrent reads created a bag: %p", b.MetaBag)
+		}
+	})
+
+	t.Run("reading does not change the serialised form", func(t *testing.T) {
+		t.Parallel()
+		// json:"meta,omitempty" does not omit a non-nil pointer to
+		// an empty bag, so the lazy allocation made a read change
+		// the document a later marshal produced.
+		f := &emit.Field{Name: "F"}
+		// Same reason as the sibling marshalling tests: the Type and
+		// OriginNode fields are tagged `json:"-"`.
+		//
+		//nolint:musttag
+		before, err := json.Marshal(f)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		_ = f.Meta().Has("k")
+		//nolint:musttag
+		after, err := json.Marshal(f)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if !bytes.Equal(before, after) {
+			t.Fatalf("a read changed the document:\nbefore: %s\nafter:  %s", before, after)
+		}
+	})
+}
+
+// TestBaseEmit_MetaAllocations pins the cost side of the read/write
+// split.
+//
+// Deliberately not parallel, and not a subtest of a parallel test:
+// testing.AllocsPerRun panics in either, because a concurrent
+// goroutine's allocations would land in the same count.
+//
+// The allocation this asserts away was one-shot and permanent — one
+// bag per node anything ever asked a question about, retained for
+// the life of the emit tree. Measured at 2 allocs and 112 B before
+// the split: 64 for the Bag, rounded up from 56, plus a 48-byte map
+// header for a map that then stays empty because the caller was
+// reading. An allocation assertion rather than a timing one, so it
+// cannot go flaky.
+//
+//nolint:paralleltest // testing.AllocsPerRun panics in a parallel test.
+func TestBaseEmit_MetaAllocations(t *testing.T) {
+	var b emit.BaseEmit
+	if got := testing.AllocsPerRun(100, func() { _ = b.Meta().Has("k") }); got != 0 {
+		t.Fatalf("Meta().Has on an unwritten value should not allocate; got %v allocs/op", got)
+	}
+}
+
+// TestSlotsByName_DoesNotMaterialise pins the slot-map accessor.
+//
+// An allocation assertion cannot carry this one: the lazy map was
+// created once and cached, so testing.AllocsPerRun charges it to the
+// warm-up run and reports zero for a host that very much did
+// allocate. The observable that survives is the returned value —
+// nil, repeatedly, for a host with no slots.
+//
+// nil is a valid empty map here: every consumer in the tree only
+// takes len or ranges it, and both are nil-safe.
+func TestSlotsByName_DoesNotMaterialise(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a slot-less host returns nil", func(t *testing.T) {
+		t.Parallel()
+		var s emit.Struct
+		if got := s.SlotsByName(); got != nil {
+			t.Fatalf("SlotsByName materialised a map: %v", got)
+		}
+	})
+
+	t.Run("repeated reads keep returning nil", func(t *testing.T) {
+		t.Parallel()
+		// The lazy version answered nil once and non-nil forever
+		// after, so a single call could not tell the two apart.
+		var s emit.Struct
+		_ = s.SlotsByName()
+		if got := s.SlotsByName(); got != nil {
+			t.Fatalf("a read created the map: %v", got)
+		}
+	})
+
+	t.Run("len and range tolerate the nil result", func(t *testing.T) {
+		t.Parallel()
+		var s emit.Struct
+		if n := len(s.SlotsByName()); n != 0 {
+			t.Fatalf("len = %d, want 0", n)
+		}
+		for name := range s.SlotsByName() {
+			t.Fatalf("ranged an entry %q on a slot-less host", name)
+		}
+	})
+
+	t.Run("a host with a slot still returns it", func(t *testing.T) {
+		t.Parallel()
+		// The control: returning m.slots unconditionally must not
+		// have broken the case the accessor exists for.
+		s := &emit.Struct{Name: "S"}
+		s.FieldsSlot()
+		if got := s.SlotsByName(); len(got) == 0 {
+			t.Fatalf("SlotsByName lost a registered slot")
 		}
 	})
 }

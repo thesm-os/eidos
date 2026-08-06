@@ -236,7 +236,7 @@ type ConstraintTerm struct {
 // this stamp; bridge annotators and the cross-namespace audit step
 // filter their walks by reading it.
 func stampFrontendMarker(pkg *node.Package) {
-	MetaFrontend.Set(pkg.Meta(), FrontendName, FrontendName)
+	MetaFrontend.Set(pkg.EnsureMeta(), FrontendName, FrontendName)
 }
 
 // stampChanMeta records [MetaIsChannel], [MetaChanDir], and
@@ -246,9 +246,9 @@ func stampFrontendMarker(pkg *node.Package) {
 // --explain output.
 func stampChanMeta(ref *node.TypeRef, ch *types.Chan) {
 	pos := ref.Pos()
-	MetaIsChannel.SetAt(ref.Meta(), true, meta.AuthorityPlugin, FrontendName, pos)
-	MetaChanDir.SetAt(ref.Meta(), chanDirString(ch.Dir()), meta.AuthorityPlugin, FrontendName, pos)
-	MetaChanElem.SetAt(ref.Meta(), ch.Elem().String(), meta.AuthorityPlugin, FrontendName, pos)
+	MetaIsChannel.SetAt(ref.EnsureMeta(), true, meta.AuthorityPlugin, FrontendName, pos)
+	MetaChanDir.SetAt(ref.EnsureMeta(), chanDirString(ch.Dir()), meta.AuthorityPlugin, FrontendName, pos)
+	MetaChanElem.SetAt(ref.EnsureMeta(), ch.Elem().String(), meta.AuthorityPlugin, FrontendName, pos)
 }
 
 // chanDirString translates a [types.ChanDir] into the convention

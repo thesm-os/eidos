@@ -120,7 +120,7 @@ func TestExplainCommand_MetaJSONRawMessage(t *testing.T) {
 			t.Parallel()
 			env, stdout, _ := freshEnv(t, "eidos")
 			src := &node.Struct{Name: "User", Package: "users"}
-			explainMetaKey.Set(src.Meta(), true, "fixture")
+			explainMetaKey.Set(src.EnsureMeta(), true, "fixture")
 			// Round-trip the Bag through JSON so its stored values
 			// become json.RawMessage — the cache path the bug fix
 			// exercises in production.
@@ -129,7 +129,7 @@ func TestExplainCommand_MetaJSONRawMessage(t *testing.T) {
 				t.Fatalf("marshal: %v", err)
 			}
 			src.MetaBag = nil
-			if err := json.Unmarshal(raw, src.Meta()); err != nil {
+			if err := json.Unmarshal(raw, src.EnsureMeta()); err != nil {
 				t.Fatalf("unmarshal: %v", err)
 			}
 			pkg := &node.Package{
@@ -300,7 +300,7 @@ func TestExplainCommand_ProtoServiceShape(t *testing.T) {
 		// Method shape: one positional param, one return ref, and
 		// the streaming-meta stamp the protobuf frontend produces.
 		stream := &node.Method{Name: "SayHellos"}
-		streamServer.Set(stream.Meta(), true, "protobuf")
+		streamServer.Set(stream.EnsureMeta(), true, "protobuf")
 		iface := &node.Interface{
 			Name: "Greeter", Package: "eidos.protobuf.testdata.services",
 			Methods: []*node.Method{
@@ -336,7 +336,7 @@ func TestExplainCommand_ProtoServiceShape(t *testing.T) {
 		env, stdout, _ := freshEnv(t, "eidos")
 		streamServer := meta.EnsureKey("proto.service.rpc.stream.server.member", meta.BoolParser)
 		stream := &node.Method{Name: "SayHellos"}
-		streamServer.Set(stream.Meta(), true, "protobuf")
+		streamServer.Set(stream.EnsureMeta(), true, "protobuf")
 		iface := &node.Interface{
 			Name: "Greeter", Package: "eidos.protobuf.testdata.services",
 			Methods: []*node.Method{stream},

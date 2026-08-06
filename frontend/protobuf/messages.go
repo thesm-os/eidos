@@ -58,7 +58,7 @@ func appendMessageStruct(
 	}
 	stampMessageReserved(s, fd, md)
 	attachStructDocs(ctx, s, fd, md)
-	stampHostOptions(ctx.Diag.For(FrontendName), s.Meta(), md.Options(), sourcePos(fd, md))
+	stampHostOptions(ctx.Diag.For(FrontendName), s.EnsureMeta(), md.Options(), sourcePos(fd, md))
 	pkg.Structs = append(pkg.Structs, s)
 	// The order below is load-bearing:
 	//   1. The host Struct is appended first so back-pointer
@@ -103,7 +103,7 @@ func convertFields(
 		}
 		stampFieldMeta(f, desc, pos)
 		attachFieldDocs(ctx, f, fd, desc)
-		stampHostOptions(ctx.Diag.For(FrontendName), f.Meta(), desc.Options(), pos)
+		stampHostOptions(ctx.Diag.For(FrontendName), f.EnsureMeta(), desc.Options(), pos)
 		out = append(out, f)
 	}
 	return out
@@ -116,7 +116,7 @@ func convertFields(
 // on proto3-explicit-presence fields, and oneof on oneof-member
 // fields.
 func stampFieldMeta(f *node.Field, desc protoreflect.FieldDescriptor, pos position.Pos) {
-	bag := f.Meta()
+	bag := f.EnsureMeta()
 	MetaFieldNumber.SetAt(bag, int(desc.Number()), meta.AuthorityPlugin, FrontendName, pos)
 	MetaFieldJSONName.SetAt(bag, desc.JSONName(), meta.AuthorityPlugin, FrontendName, pos)
 	if opts := fieldOptions(desc); opts != nil {
@@ -205,7 +205,7 @@ func namedTypeRef(parent protoreflect.FileDescriptor, fullName protoreflect.Full
 		Package:  pkgPath,
 	}
 	if wk := wellKnownName(pkgPath, local); wk != "" {
-		MetaWellKnown.Set(ref.Meta(), wk, FrontendName)
+		MetaWellKnown.Set(ref.EnsureMeta(), wk, FrontendName)
 	}
 	return ref
 }
@@ -220,10 +220,10 @@ func stampMessageReserved(s *node.Struct, fd protoreflect.FileDescriptor, md pro
 	sl := fd.SourceLocations().ByDescriptor(md)
 	pos := position.Pos{File: fd.Path(), Line: sl.StartLine + 1, Column: sl.StartColumn + 1}
 	if nums := expandReservedRanges(md.ReservedRanges()); len(nums) > 0 {
-		MetaMessageReservedNumbers.SetAt(s.Meta(), nums, meta.AuthorityPlugin, FrontendName, pos)
+		MetaMessageReservedNumbers.SetAt(s.EnsureMeta(), nums, meta.AuthorityPlugin, FrontendName, pos)
 	}
 	if names := reservedNames(md.ReservedNames()); len(names) > 0 {
-		MetaMessageReservedNames.SetAt(s.Meta(), names, meta.AuthorityPlugin, FrontendName, pos)
+		MetaMessageReservedNames.SetAt(s.EnsureMeta(), names, meta.AuthorityPlugin, FrontendName, pos)
 	}
 }
 

@@ -134,8 +134,8 @@ func (r *Resolver) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
 	owner := r.methodOwner[m]
 	scope := methodScope(owner)
 	hostQName := methodQName(owner.qname, m.Name)
-	r.resolve(ctx, m, m.Meta(), hostQName, scope)
-	r.resolveMixins(ctx, m, m.Meta(), scope)
+	r.resolve(ctx, m, m.EnsureMeta(), hostQName, scope)
+	r.resolveMixins(ctx, m, m.EnsureMeta(), scope)
 }
 
 // OnFunction resolves contract memberships and mixin sibling
@@ -143,8 +143,8 @@ func (r *Resolver) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
 // partner-lookup scope.
 func (r *Resolver) OnFunction(ctx *sdk.AnnotatorContext, fn *node.Function) {
 	scope := packageScope(r.funcPkg[fn])
-	r.resolve(ctx, fn, fn.Meta(), fn.QName(), scope)
-	r.resolveMixins(ctx, fn, fn.Meta(), scope)
+	r.resolve(ctx, fn, fn.EnsureMeta(), fn.QName(), scope)
+	r.resolveMixins(ctx, fn, fn.EnsureMeta(), scope)
 }
 
 // resolveScope is the abstract sibling-lookup the per-callable
@@ -365,12 +365,12 @@ func (r *Resolver) backstamp(
 func (r *Resolver) bagByQName(qname string) *meta.Bag {
 	for m, owner := range r.methodOwner {
 		if methodQName(owner.qname, m.Name) == qname {
-			return m.Meta()
+			return m.EnsureMeta()
 		}
 	}
 	for fn := range r.funcPkg {
 		if fn.QName() == qname {
-			return fn.Meta()
+			return fn.EnsureMeta()
 		}
 	}
 	return nil

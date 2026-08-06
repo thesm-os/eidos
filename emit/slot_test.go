@@ -6,6 +6,7 @@ package emit_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -719,4 +720,91 @@ func BenchmarkSlot_InsertBefore(b *testing.B) {
 			}
 		})
 	}
+}
+
+// TestSlot_InsertAllocations pins the insert path's allocation
+// behaviour where a test can gate it. BenchmarkSlot_InsertBefore
+// measures the same thing but nothing fails a build on a benchmark,
+// and the benchmark anchors on the last element — the cheapest
+// position — so the front-anchored case that Prepend always takes
+// was invisible to it.
+//
+// Not parallel: testing.AllocsPerRun panics inside a parallel test.
+//
+// The old idiom appended onto a one-element literal and then
+// appended that temporary back over the tail it came from: two heap
+// allocations and two full tail copies per insert. At n=1000
+// front-anchored that was 90 kB an insert, three quarters of it the
+// discarded Provenance copy, since Provenance is 72 bytes against
+// Node's 16.
+//
+//nolint:paralleltest // testing.AllocsPerRun panics in a parallel test.
+func TestSlot_InsertAllocations(t *testing.T) {
+	const n = 1000
+
+	build := func() *emit.Slot {
+		s := emit.NewSlot("items", emit.KindStruct)
+		for i := range n {
+			if err := s.Append(&emit.Struct{Name: fmt.Sprintf("S%d", i)}, emit.Provenance{SetBy: "seed"}); err != nil {
+				t.Fatalf("seed append: %v", err)
+			}
+		}
+		return s
+	}
+
+	t.Run("front-anchored insert does not allocate", func(t *testing.T) {
+		s := build()
+		item := &emit.Struct{Name: "Inserted"}
+		got := testing.AllocsPerRun(50, func() {
+			if err := s.InsertAt(0, item, emit.Provenance{SetBy: "probe"}); err != nil {
+				t.Fatalf("InsertAt: %v", err)
+			}
+		})
+		if got != 0 {
+			t.Fatalf("front-anchored InsertAt allocated %v times per op", got)
+		}
+	})
+
+	t.Run("insert preserves order", func(t *testing.T) {
+		// slices.Insert is only a valid substitution if the element
+		// order is identical; determinism of rendered output depends
+		// on it.
+		s := emit.NewSlot("items", emit.KindStruct)
+		for _, name := range []string{"A", "C"} {
+			if err := s.Append(&emit.Struct{Name: name}, emit.Provenance{SetBy: "seed"}); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+		}
+		if err := s.InsertAt(1, &emit.Struct{Name: "B"}, emit.Provenance{SetBy: "probe"}); err != nil {
+			t.Fatalf("InsertAt: %v", err)
+		}
+		got := make([]string, 0, s.Len())
+		for i := range s.Len() {
+			got = append(got, s.At(i).(*emit.Struct).Name)
+		}
+		if want := []string{"A", "B", "C"}; !slices.Equal(got, want) {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("provenance stays index-aligned with items", func(t *testing.T) {
+		// Items and ProvenanceList are two slices holding one
+		// invariant. Both inserts take the same index; a divergence
+		// would misattribute every entry after the insertion point.
+		s := emit.NewSlot("items", emit.KindStruct)
+		for _, name := range []string{"A", "C"} {
+			if err := s.Append(&emit.Struct{Name: name}, emit.Provenance{SetBy: name}); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+		}
+		if err := s.InsertAt(1, &emit.Struct{Name: "B"}, emit.Provenance{SetBy: "B"}); err != nil {
+			t.Fatalf("InsertAt: %v", err)
+		}
+		for i := range s.Len() {
+			name := s.At(i).(*emit.Struct).Name
+			if got := s.ProvenanceAt(i).SetBy; got != name {
+				t.Fatalf("index %d: item %q carries provenance %q", i, name, got)
+			}
+		}
+	})
 }

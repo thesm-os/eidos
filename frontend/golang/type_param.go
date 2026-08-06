@@ -43,7 +43,7 @@ func (c *converter) typeParamsFromList(owner node.Node, fl *ast.FieldList) []*no
 				Owner:      owner,
 			}
 			if len(terms) > 0 {
-				MetaConstraintTerms.SetAt(tp.Meta(), terms, meta.AuthorityPlugin, FrontendName, tp.Pos())
+				MetaConstraintTerms.SetAt(tp.EnsureMeta(), terms, meta.AuthorityPlugin, FrontendName, tp.Pos())
 			}
 			out = append(out, tp)
 		}

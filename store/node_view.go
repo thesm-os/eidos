@@ -151,7 +151,7 @@ func (v *NodeView) indexCommon(n node.Node, pkgPath string) {
 	for _, d := range n.Directives() {
 		v.byDirective.Add(d.Name, n)
 	}
-	bag := n.Meta()
+	bag := n.EnsureMeta()
 	for _, name := range bag.Names() {
 		v.byMetaKey.Add(name, n)
 	}

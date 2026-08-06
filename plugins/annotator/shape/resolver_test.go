@@ -290,7 +290,7 @@ func TestResolver_Diagnostics(t *testing.T) {
 		if err := s.Nodes().AddPackage(pkg); err != nil {
 			t.Fatalf("AddPackage: %v", err)
 		}
-		frontendMarker.Set(pkg.Meta(), "golang", "test")
+		frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 		umbrella := shape.New().Contracts(txContract())
 		resolverOnly := shape.New() // resolver knows no contracts
@@ -444,7 +444,7 @@ func runSplitResolver(t *testing.T, stamped, resolved []shape.Contract, pkg *nod
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	ctx := newAnnotatorContext(t, s)
 	if err := shape.New().Contracts(stamped...).Annotate(ctx); err != nil {
@@ -536,7 +536,7 @@ func setupResolverPipeline(t *testing.T, c shape.Contract, pkg *node.Package) (*
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	umbrella := shape.New().Contracts(c)
 	return s, &resolverPipeline{

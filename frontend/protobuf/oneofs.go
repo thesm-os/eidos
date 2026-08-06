@@ -73,11 +73,11 @@ func appendOneofInterface(
 		Package:  pkg.Path,
 	}
 	MetaOneofMessage.SetAt(
-		iface.Meta(), pkg.Path+"."+hostName,
+		iface.EnsureMeta(), pkg.Path+"."+hostName,
 		meta.AuthorityPlugin, FrontendName, pos,
 	)
 	attachOneofDocs(ctx, iface, fd, oo)
-	stampHostOptions(ctx.Diag.For(FrontendName), iface.Meta(), oo.Options(), pos)
+	stampHostOptions(ctx.Diag.For(FrontendName), iface.EnsureMeta(), oo.Options(), pos)
 	pkg.Interfaces = append(pkg.Interfaces, iface)
 	stampOneofVariantBackPointers(host, oo, iface.QName(), pos)
 }
@@ -99,7 +99,7 @@ func stampOneofVariantBackPointers(
 			continue
 		}
 		MetaOneofInterface.SetAt(
-			f.Meta(), ifaceQName,
+			f.EnsureMeta(), ifaceQName,
 			meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}

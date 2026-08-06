@@ -67,10 +67,25 @@ type Node interface {
 	// the given name is attached.
 	HasDirective(name directive.Name) bool
 
-	// Meta returns the metadata bag for this node, allocating
-	// one on first access. Plugins read and write through typed
-	// [meta.Key] values.
+	// Meta returns the metadata bag for this node, or nil when
+	// none has been created. It must not allocate: reading is
+	// not writing, and the read paths are concurrent. Every
+	// read method on [meta.Bag] treats the nil bag as the empty
+	// bag, so plugins read through typed [meta.Key] values
+	// without a nil check.
 	Meta() *meta.Bag
+
+	// EnsureMeta returns the metadata bag for this node,
+	// creating one on first call. Plugins take it when they
+	// intend to write through a typed [meta.Key], and the store
+	// takes it to register its index observer.
+	//
+	// Separate from [Node.Meta] because the allocation is a
+	// write. Folding the two together made every reader a
+	// writer, which is a data race on any path that traverses a
+	// shared graph concurrently — and both the backend's render
+	// pool and the pipeline's parallel NodesOnly generators do.
+	EnsureMeta() *meta.Bag
 }
 
 // Owner is the contract for any node that can be the conceptual

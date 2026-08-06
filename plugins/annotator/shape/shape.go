@@ -389,13 +389,13 @@ func (p *Plugin) BeforeNodes(ctx *sdk.AnnotatorContext) {
 // a nil [node.Method.Receiver]; detectors that care about the
 // receiver shape must handle the absence explicitly.
 func (p *Plugin) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
-	p.handle(ctx, m, m.Meta(), m.Directives(), p.frontByMethod[m])
+	p.handle(ctx, m, m.EnsureMeta(), m.Directives(), p.frontByMethod[m])
 }
 
 // OnFunction dispatches detection over every free function in the
 // store.
 func (p *Plugin) OnFunction(ctx *sdk.AnnotatorContext, fn *node.Function) {
-	p.handle(ctx, fn, fn.Meta(), fn.Directives(), p.frontByFunc[fn])
+	p.handle(ctx, fn, fn.EnsureMeta(), fn.Directives(), p.frontByFunc[fn])
 }
 
 // handle is the per-callable pipeline. Contract and mixin

@@ -112,8 +112,8 @@ func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *node.Struct) {
 	if detected && matched {
 		qname = methodQName(s, method)
 	}
-	Detected.Set(s.Meta(), detected, Name)
-	MethodQName.Set(s.Meta(), qname, Name)
+	Detected.Set(s.EnsureMeta(), detected, Name)
+	MethodQName.Set(s.EnsureMeta(), qname, Name)
 }
 
 // matchSignature returns the method that matches the canonical

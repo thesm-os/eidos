@@ -273,7 +273,7 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		if err := s.Nodes().AddPackage(pkg); err != nil {
 			t.Fatalf("AddPackage: %v", err)
 		}
-		frontendMarker.Set(pkg.Meta(), "rust", "test")
+		frontendMarker.Set(pkg.EnsureMeta(), "rust", "test")
 		runAnnotateAgainst(t, shape.New().Detectors(testReaderDetector()), s)
 		if shape.IsStamped(fn.Meta()) {
 			t.Fatalf("callable stamped despite unsupported frontend: shape=%q", shape.Get(fn.Meta()))
@@ -535,7 +535,7 @@ func runAnnotate(t *testing.T, p *shape.Plugin, pkg *node.Package) {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 	runAnnotateAgainst(t, p, s)
 }
 
@@ -594,7 +594,7 @@ func buildStoreWithReader(t *testing.T) *store.Store {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 	return s
 }
 

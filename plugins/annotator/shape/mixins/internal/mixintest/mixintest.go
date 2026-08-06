@@ -75,7 +75,7 @@ func RunPipeline(t *testing.T, m shape.Mixin, fn *node.Function) *meta.Bag {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	p := shape.New().Mixins(m)
 	ctx := &sdk.AnnotatorContext{
@@ -86,7 +86,7 @@ func RunPipeline(t *testing.T, m shape.Mixin, fn *node.Function) *meta.Bag {
 	if err := p.Annotate(ctx); err != nil {
 		t.Fatalf("Annotate: %v", err)
 	}
-	return fn.Meta()
+	return fn.EnsureMeta()
 }
 
 // RunWithResolver wires pkg into a fresh store, stamps the
@@ -100,7 +100,7 @@ func RunWithResolver(t *testing.T, m shape.Mixin, pkg *node.Package) {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.Meta(), "golang", "test")
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
 
 	p := shape.New().Mixins(m)
 	ctx := &sdk.AnnotatorContext{

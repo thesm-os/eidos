@@ -6,6 +6,7 @@ package emit
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"go.thesmos.sh/eidos/core/kind"
 )
@@ -132,8 +133,16 @@ func (s *Slot) InsertAt(index int, item Node, prov Provenance) error {
 	if err := s.checkKind(item); err != nil {
 		return err
 	}
-	s.Items = append(s.Items[:index], append([]Node{item}, s.Items[index:]...)...)
-	s.ProvenanceList = append(s.ProvenanceList[:index], append([]Provenance{prov}, s.ProvenanceList[index:]...)...)
+	// slices.Insert rather than the append-of-append idiom: the
+	// inner append starts from a one-element literal whose capacity
+	// is one, so it allocates the whole tail and copies it, and the
+	// outer append then copies that temporary back over the tail it
+	// came from. Two heap allocations and two full tail copies per
+	// insert, worst at index 0 — which is exactly where Prepend
+	// lands, unconditionally. Provenance is 72 bytes against Node's
+	// 16, so the discarded provenance temporary was the larger one.
+	s.Items = slices.Insert(s.Items, index, item)
+	s.ProvenanceList = slices.Insert(s.ProvenanceList, index, prov)
 	return nil
 }
 
@@ -293,13 +302,22 @@ func (m *slotMap) slot(owner Node, name string, elemKind kind.Kind) *Slot {
 }
 
 // SlotsByName returns every slot registered on this host, indexed
-// by name. The returned map aliases the host's internal state;
-// callers must not mutate it. Useful for tooling that walks a
-// host's full slot surface (provenance reporters, drift checkers,
-// per-target plugin-attribution collectors).
+// by name, or nil when the host has no slots. The returned map
+// aliases the host's internal state; callers must not mutate it.
+// Useful for tooling that walks a host's full slot surface
+// (provenance reporters, drift checkers, per-target
+// plugin-attribution collectors).
+//
+// A nil map is a valid empty result: `len` and `range` both handle
+// it, which is all any consumer of this method does. Materialising
+// an empty map instead made the documented read-only accessor a
+// writer — an allocation per slot-less host, retained, and a race
+// wherever two goroutines walked the same host. [Backend.Render]'s
+// header attribution reaches it once per target from the worker
+// pool, so the concurrent path was the live one.
+//
+// The lazily-created map in [slotMap.slot] stays: that is a writer
+// and correctly allocates.
 func (m *slotMap) SlotsByName() map[string]*Slot {
-	if m.slots == nil {
-		m.slots = map[string]*Slot{}
-	}
 	return m.slots
 }

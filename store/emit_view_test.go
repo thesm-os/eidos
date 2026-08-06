@@ -537,7 +537,7 @@ func TestEmitView_ByMetaKey(t *testing.T) {
 		s := store.New()
 		assertNoError(t, s.Emit().AddPackage(makeUserEmitPackage()))
 		user, _ := s.Emit().Structs().ByQName("users.User")
-		keyEmitViewMeta.Set(user.Meta(), true, "test")
+		keyEmitViewMeta.Set(user.EnsureMeta(), true, "test")
 		got := s.Emit().ByMetaKey().Get(keyEmitViewMeta.Name())
 		if len(got) != 1 || got[0] != emit.Node(user) {
 			t.Fatalf("ByMetaKey should record the post-add Set; got %+v", got)
@@ -548,7 +548,7 @@ func TestEmitView_ByMetaKey(t *testing.T) {
 		t.Parallel()
 		s := store.New()
 		pre := makeUserEmitPackage()
-		keyEmitViewMeta.Set(pre.Structs[0].Meta(), true, "pre-add")
+		keyEmitViewMeta.Set(pre.Structs[0].EnsureMeta(), true, "pre-add")
 		assertNoError(t, s.Emit().AddPackage(pre))
 		got := s.Emit().ByMetaKey().Get(keyEmitViewMeta.Name())
 		if len(got) != 1 {

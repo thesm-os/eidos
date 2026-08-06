@@ -317,5 +317,5 @@ func optionKeyName(field protoreflect.FieldDescriptor) string {
 // bridge annotators and the cross-namespace audit step pivot on it
 // to scope their walks to the correct frontend's sources.
 func stampFrontendMarker(pkg *node.Package) {
-	MetaFrontend.Set(pkg.Meta(), FrontendName, FrontendName)
+	MetaFrontend.Set(pkg.EnsureMeta(), FrontendName, FrontendName)
 }

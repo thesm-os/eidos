@@ -50,7 +50,7 @@ func appendEnum(
 	}
 	stampEnumMeta(e, fd, ed)
 	attachEnumDocs(ctx, e, fd, ed)
-	stampHostOptions(ctx.Diag.For(FrontendName), e.Meta(), ed.Options(), sourcePos(fd, ed))
+	stampHostOptions(ctx.Diag.For(FrontendName), e.EnsureMeta(), ed.Options(), sourcePos(fd, ed))
 	pkg.Enums = append(pkg.Enums, e)
 }
 
@@ -80,11 +80,11 @@ func convertEnumVariants(
 			Value:    strconv.Itoa(int(v.Number())),
 		}
 		MetaEnumVariantNumber.SetAt(
-			variant.Meta(), int(v.Number()),
+			variant.EnsureMeta(), int(v.Number()),
 			meta.AuthorityPlugin, FrontendName, pos,
 		)
 		attachVariantDocs(ctx, variant, fd, v)
-		stampHostOptions(ctx.Diag.For(FrontendName), variant.Meta(), v.Options(), pos)
+		stampHostOptions(ctx.Diag.For(FrontendName), variant.EnsureMeta(), v.Options(), pos)
 		out = append(out, variant)
 	}
 	return out
@@ -99,13 +99,13 @@ func stampEnumMeta(e *node.Enum, fd protoreflect.FileDescriptor, ed protoreflect
 	sl := fd.SourceLocations().ByDescriptor(ed)
 	pos := position.Pos{File: fd.Path(), Line: sl.StartLine + 1, Column: sl.StartColumn + 1}
 	if opts := enumOptions(ed); opts != nil && opts.GetAllowAlias() {
-		MetaEnumAllowAlias.SetAt(e.Meta(), true, meta.AuthorityPlugin, FrontendName, pos)
+		MetaEnumAllowAlias.SetAt(e.EnsureMeta(), true, meta.AuthorityPlugin, FrontendName, pos)
 	}
 	if nums := expandReservedEnumRanges(ed.ReservedRanges()); len(nums) > 0 {
-		MetaEnumReservedNumbers.SetAt(e.Meta(), nums, meta.AuthorityPlugin, FrontendName, pos)
+		MetaEnumReservedNumbers.SetAt(e.EnsureMeta(), nums, meta.AuthorityPlugin, FrontendName, pos)
 	}
 	if names := reservedNames(ed.ReservedNames()); len(names) > 0 {
-		MetaEnumReservedNames.SetAt(e.Meta(), names, meta.AuthorityPlugin, FrontendName, pos)
+		MetaEnumReservedNames.SetAt(e.EnsureMeta(), names, meta.AuthorityPlugin, FrontendName, pos)
 	}
 }
 

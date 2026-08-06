@@ -86,7 +86,7 @@ func attachStructDocs(
 	}
 	if trailing != "" {
 		MetaMessageTrailingDoc.SetAt(
-			s.Meta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
+			s.EnsureMeta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}
 }
@@ -111,7 +111,7 @@ func attachFieldDocs(
 	}
 	if trailing != "" {
 		MetaFieldTrailingDoc.SetAt(
-			f.Meta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
+			f.EnsureMeta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}
 }
@@ -136,7 +136,7 @@ func attachEnumDocs(
 	}
 	if trailing != "" {
 		MetaEnumTrailingDoc.SetAt(
-			e.Meta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
+			e.EnsureMeta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}
 }
@@ -162,7 +162,7 @@ func attachOneofDocs(
 	}
 	if trailing != "" {
 		MetaOneofTrailingDoc.SetAt(
-			iface.Meta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
+			iface.EnsureMeta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}
 }
@@ -187,7 +187,7 @@ func attachInterfaceDocs(
 	}
 	if trailing != "" {
 		MetaServiceTrailingDoc.SetAt(
-			iface.Meta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
+			iface.EnsureMeta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}
 }
@@ -211,7 +211,7 @@ func attachRPCDocs(
 	}
 	if trailing != "" {
 		MetaRPCTrailingDoc.SetAt(
-			m.Meta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
+			m.EnsureMeta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}
 }
@@ -236,7 +236,7 @@ func attachVariantDocs(
 	}
 	if trailing != "" {
 		MetaEnumVariantTrailingDoc.SetAt(
-			v.Meta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
+			v.EnsureMeta(), trailing, meta.AuthorityPlugin, FrontendName, pos,
 		)
 	}
 }
