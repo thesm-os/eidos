@@ -4,6 +4,7 @@
 package store_test
 
 import (
+	"strconv"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
@@ -86,4 +87,46 @@ func makeUserPackage() *node.Package {
 		Enums:      []*node.Enum{status},
 		Aliases:    []*node.Alias{id},
 	}
+}
+
+// makeBenchPackage builds a source package of n structs, each with
+// three fields and one method, with every fourth struct carrying a
+// "repo" directive. It is the shared fixture behind the query and
+// reader benchmarks.
+//
+// The directive spread matters: a predicate benchmark over a fixture
+// where every value matches (or none does) measures the scan, not
+// the predicate, because the branch predictor sees a single outcome
+// and the result slice never grows partially. One in four keeps both
+// arms live.
+//
+// Allocation note: this allocates 1 package + n structs + 4n children
+// on the heap. It is a setup helper — benchmarks must call it above
+// their timed loop, never inside it.
+func makeBenchPackage(n int) *node.Package {
+	pkg := &node.Package{
+		Name:    "bench",
+		Path:    "github.com/example/bench",
+		Files:   []*node.File{{Name: "bench.go", Path: "github.com/example/bench/bench.go"}},
+		Structs: make([]*node.Struct, 0, n),
+	}
+	for i := range n {
+		s := &node.Struct{
+			Name:    "Entity" + strconv.Itoa(i),
+			Package: pkg.Path,
+			Fields: []*node.Field{
+				{Name: "ID", Type: builtinTypeRef("string")},
+				{Name: "Count", Type: builtinTypeRef("int")},
+				{Name: "Label", Type: builtinTypeRef("string")},
+			},
+			Methods: []*node.Method{{Name: "Validate"}},
+		}
+		if i%4 == 0 {
+			s.DirectiveList = []*directive.Directive{
+				directiveAt("repo", position.At("bench.go", i+1, 1)),
+			}
+		}
+		pkg.Structs = append(pkg.Structs, s)
+	}
+	return pkg
 }

@@ -1257,8 +1257,28 @@ func originPos(origin node.Node) position.Pos {
 // escape the source tree.
 func splitOutDirectivePath(value string) (dir, filename string) {
 	value = filepath.ToSlash(value)
-	value = strings.TrimLeft(value, "/")
-	dir, filename = filepath.Split(value)
-	dir = strings.TrimRight(filepath.ToSlash(dir), "/")
+
+	// A trailing separator is the directive's only way to say
+	// "directory, keep the composed filename" (`+gen:out build/`).
+	// path.Clean discards it, so the signal is captured before the
+	// clamp and restored after.
+	dirOnly := strings.HasSuffix(value, "/")
+
+	// Rooting before cleaning is what makes the containment contract
+	// true rather than merely documented. Cleaning `value` in place
+	// would leave a leading `..` intact, and composeTarget applies
+	// filepath.Join(originDir, dir) — Join cleans, so each surviving
+	// `..` cancels a component of the origin's own directory and the
+	// output lands outside the package, or with enough segments
+	// outside the module. Against a synthetic root the same segments
+	// cancel harmlessly, and the leading-separator strip that used to
+	// be a special case falls out of the same operation.
+	value = strings.TrimPrefix(path.Clean("/"+value), "/")
+	if dirOnly && value != "" {
+		value += "/"
+	}
+
+	dir, filename = path.Split(value)
+	dir = strings.TrimRight(dir, "/")
 	return dir, filename
 }

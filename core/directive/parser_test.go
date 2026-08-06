@@ -7,6 +7,8 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
@@ -526,4 +528,80 @@ func FuzzParser_Parse(f *testing.F) {
 			}
 		}
 	})
+}
+
+// BenchmarkParser_Parse measures one Parse of a comment body carrying
+// n directives.
+//
+// Parse is the per-comment cost of a run: the pipeline hands it every
+// comment in every source file it scans, so the number here is
+// multiplied by the comment count of the whole tree, not by the
+// directive count. That makes even a small constant factor visible on
+// large inputs, and it is why the parser is a hand-rolled lexer rather
+// than a regexp.
+//
+// The scaling axis is directives-per-comment because that is the axis
+// on which the greedy scan could go quadratic: parseOne re-tests all
+// three prefix forms at every whitespace boundary of every argument
+// list, and the sub-slicing that feeds those tests has to stay O(1).
+// Growth worse than linear across the sizes below is the signal that
+// it has stopped being.
+//
+// The Parser is constructed once, and each body is built above its own
+// sub-benchmark; only Parse is timed. Parse allocates a Directive and a
+// KV map per directive, so allocations are expected to track n — a
+// flat alloc count across sizes would mean the loop body was folded
+// away. The post-loop count assertion guards the same thing.
+func BenchmarkParser_Parse(b *testing.B) {
+	b.ReportAllocs()
+
+	p, err := directive.NewParser("gen")
+	if err != nil {
+		b.Fatalf("NewParser: %v", err)
+	}
+
+	for _, n := range []int{1, 10, 100, 1000} {
+		text := benchDirectiveLine(n)
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			var ds []*directive.Directive
+			for b.Loop() {
+				got, parseErr := p.Parse(text, position.Pos{})
+				if parseErr != nil {
+					b.Fatalf("Parse: %v", parseErr)
+				}
+				ds = got
+			}
+			if len(ds) != n {
+				b.Fatalf("Parse returned %d directives, want %d", len(ds), n)
+			}
+		})
+	}
+}
+
+// benchDirectiveLine builds a comment body carrying exactly n
+// directives, each with one positional argument and one key/value pair.
+//
+// The shape mirrors what a real annotation looks like rather than the
+// cheapest thing the parser accepts: a bare `+gen:x` would skip the
+// argument loop entirely, which is where the per-boundary prefix
+// re-testing this benchmark exists to measure actually happens. Names
+// are distinct so no accidental interning flatters the numbers.
+func benchDirectiveLine(n int) string {
+	var b strings.Builder
+	for i := range n {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		id := strconv.Itoa(i)
+		b.WriteString("+gen:stub")
+		b.WriteString(id)
+		b.WriteString(" positional")
+		b.WriteString(id)
+		b.WriteString(" out=file")
+		b.WriteString(id)
+		b.WriteString(".go")
+	}
+	return b.String()
 }

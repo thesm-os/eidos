@@ -6,6 +6,7 @@ package golang_test
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -902,6 +903,54 @@ func BenchmarkBackend_Render(b *testing.B) {
 		if err := golang.New().Render(ctx); err != nil {
 			b.Fatalf("Render: %v", err)
 		}
+	}
+}
+
+// BenchmarkBackend_Render_Targets measures one full render pass per
+// operation over emit graphs of increasing target count.
+//
+// Render walks its targets sequentially, and each iteration of that
+// loop builds an independent [renderState] and writes to a distinct
+// sink key — there is no shared mutable state between targets. The
+// standing question is whether the loop is worth parallelising, and
+// that is a question about the shape of this curve: a per-target
+// cost that stays flat as the count grows means the sequential loop
+// is a pure multiplier and the work is embarrassingly parallel,
+// while a per-target cost that climbs would mean the win is
+// elsewhere.
+//
+// Pair the ns/op here with BenchmarkFinaliseBody, which separates
+// the format-and-goimports tax from template execution. Together
+// they say both how much of a target's cost is parallelisable and
+// how much of the total that is.
+//
+// Store construction is hoisted per size, outside the timed region;
+// the in-memory sink is reused across iterations and overwrites by
+// target, so it does not grow with b.N.
+//
+// A fresh [golang.Backend] per iteration is deliberate and matches
+// BenchmarkBackend_Render: [golang.New] parses the embedded
+// template set, which is a real part of what a caller pays, and
+// hoisting it would report a cost no production path enjoys.
+func BenchmarkBackend_Render_Targets(b *testing.B) {
+	b.ReportAllocs()
+
+	for _, targets := range []int{1, 10, 100, 1000} {
+		b.Run(strconv.Itoa(targets), func(b *testing.B) {
+			b.ReportAllocs()
+			ctx, mem, _ := newBenchmarkContext(b, targets)
+			for b.Loop() {
+				if err := golang.New().Render(ctx); err != nil {
+					b.Fatalf("Render: %v", err)
+				}
+			}
+			// A render that silently produced nothing would report a
+			// flattering number for no work; the sink must hold one
+			// file per target.
+			if got := mem.Len(); got != targets {
+				b.Fatalf("sink holds %d files, want %d", got, targets)
+			}
+		})
 	}
 }
 

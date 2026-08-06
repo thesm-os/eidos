@@ -4,6 +4,7 @@
 package builder_test
 
 import (
+	"strconv"
 	"testing"
 
 	"go.thesmos.sh/eidos/emit"
@@ -364,4 +365,63 @@ func TestPackageBuilder_Method(t *testing.T) {
 			t.Fatalf("returns/body not threaded: returns=%d body=%d", len(m.Returns), len(m.Body))
 		}
 	})
+}
+
+// BenchmarkContext_Package measures the generator hot path: one
+// plugin pass building a whole package of entities — n structs, each
+// with six fields and one method — and closing it with Build.
+//
+// This is the allocation profile every generator pays per run, and it
+// is dominated by graph construction rather than by any single
+// builder call, so the interesting number is per-struct cost. The
+// scaling axis exists to prove that cost is flat: the builder appends
+// to slices and wires Owner back-pointers as callbacks return, all of
+// which should be linear in the number of decls. A per-decl scan of
+// the accumulated package would surface here as quadratic.
+//
+// Deliberately outside the timed region: the struct and field name
+// strings, and the shared type refs. Formatting names inside the loop
+// would measure strconv, and refs are immutable values a real plugin
+// would equally hoist. Everything from [builder.For] onwards is
+// inside, because a plugin pays for the Context and the accumulating
+// package on every run.
+func BenchmarkContext_Package(b *testing.B) {
+	const fieldsPerStruct = 6
+
+	for _, structs := range []int{1, 10, 100, 1000} {
+		b.Run(strconv.Itoa(structs), func(b *testing.B) {
+			b.ReportAllocs()
+
+			structNames := make([]string, structs)
+			for i := range structNames {
+				structNames[i] = "Entity" + strconv.Itoa(i)
+			}
+			fieldNames := make([]string, fieldsPerStruct)
+			for i := range fieldNames {
+				fieldNames[i] = "field" + strconv.Itoa(i)
+			}
+			stringRef := emit.Builtin("string")
+			ctxRef := emit.External("context", "Context")
+			errRef := emit.Builtin("error")
+
+			for b.Loop() {
+				pb := builder.For("bench").Package("bench", "example.com/bench")
+				for _, name := range structNames {
+					pb.Struct(name, func(s *builder.StructBuilder) {
+						for _, field := range fieldNames {
+							s.Field(field, stringRef, nil)
+						}
+						s.Method("Save", func(m *builder.MethodBuilder) {
+							m.Receiver("e", emit.Ptr(emit.Internal(s.Node())))
+							m.Param("ctx", ctxRef)
+							m.Return(errRef)
+						})
+					})
+				}
+				if _, err := pb.Build(); err != nil {
+					b.Fatalf("Build: %v", err)
+				}
+			}
+		})
+	}
 }

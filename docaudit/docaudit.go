@@ -63,11 +63,30 @@ func AssertEveryMetaKeyDocumented(t TB, packageDir string) {
 	}
 	doc := string(body)
 	for _, key := range keys {
-		if !strings.Contains(doc, key) {
+		if !mentionsKey(doc, key) {
 			t.Errorf("docaudit: doc.go missing mention of meta key %q (declared in package source)",
 				key)
 		}
 	}
+}
+
+// MetaKeys returns every literal metadata-key name declared under
+// packageDir, sorted and de-duplicated.
+//
+// It exposes the same collection [AssertEveryMetaKeyDocumented] uses,
+// for callers that need the key set itself rather than the
+// documentation assertion. The motivating case is a frontend pinning
+// its cache-invalidating version constant to its stamping surface: a
+// key added without a version bump leaves every warm cache serving a
+// node graph that predates the key, and deriving the set here means
+// the guard cannot drift from the code the way a hand-maintained list
+// would.
+//
+// Calls whose first argument is not a string literal are skipped, as
+// they are for the documentation audit — those are the dynamic-name
+// pattern, documented by namespace prefix instead.
+func MetaKeys(packageDir string) ([]string, error) {
+	return collectMetaKeyLiterals(packageDir)
 }
 
 // collectMetaKeyLiterals returns the sorted, de-duplicated list
@@ -115,6 +134,37 @@ func collectMetaKeyLiterals(dir string) ([]string, error) {
 	return out, nil
 }
 
+// calleeSelector unwraps a call's function expression to the
+// underlying selector, seeing through explicit generic instantiation.
+//
+// [meta.NewKey] and [meta.EnsureKey] are generic. Written with the
+// type argument inferred — meta.NewKey("go.isChannel", ...) — the
+// callee is a plain [ast.SelectorExpr]. Written with it explicit —
+// meta.NewKey[bool]("go.isChannel", ...) — the parser wraps that
+// selector in an [ast.IndexExpr], or an [ast.IndexListExpr] for two
+// or more type arguments.
+//
+// Both forms compile and both declare a published key. Matching only
+// the bare selector meant the explicit form was skipped in silence,
+// so a key declared that way was exempt from the documentation audit
+// and from the frontends' stamping-surface guard while appearing to
+// be covered by both. That is the failure mode this package exists to
+// prevent, reproduced inside the package itself.
+func calleeSelector(fun ast.Expr) (*ast.SelectorExpr, bool) {
+	switch f := fun.(type) {
+	case *ast.SelectorExpr:
+		return f, true
+	case *ast.IndexExpr:
+		sel, ok := f.X.(*ast.SelectorExpr)
+		return sel, ok
+	case *ast.IndexListExpr:
+		sel, ok := f.X.(*ast.SelectorExpr)
+		return sel, ok
+	default:
+		return nil, false
+	}
+}
+
 // metaKeyLiteralFrom returns the first-argument literal string
 // of n when n is a `meta.NewKey(...)` or `meta.EnsureKey(...)`
 // call; ok=false otherwise. Calls whose first argument is not a
@@ -126,7 +176,7 @@ func metaKeyLiteralFrom(n ast.Node) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	sel, ok := calleeSelector(call.Fun)
 	if !ok {
 		return "", false
 	}
@@ -149,6 +199,74 @@ func metaKeyLiteralFrom(n ast.Node) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+// mentionsKey reports whether doc documents key as a key rather than
+// merely containing its text.
+//
+// A plain substring test passes coincidentally in two ways this
+// package cannot afford, because a gate that passes by accident is
+// worse than an absent one — it produces a green tick a reader
+// trusts:
+//
+//   - A short key is a common word. `frontend` matched any doc.go that
+//     used the word "frontend" in prose, so it was never actually
+//     audited.
+//   - A key that is a prefix of a sibling rides on the sibling.
+//     `go.isIterSeq` matched inside `go.isIterSeq2`, so documenting
+//     one silently discharged the obligation for both.
+//
+// A match therefore has to end at a boundary: the character following
+// the occurrence must not be one that could continue a key name.
+// Leading context is deliberately not constrained — keys appear after
+// backticks, brackets and hyphens in ordinary documentation prose, and
+// no false pass observed here came from the left.
+func mentionsKey(doc, key string) bool {
+	for offset := 0; ; {
+		i := strings.Index(doc[offset:], key)
+		if i < 0 {
+			return false
+		}
+		end := offset + i + len(key)
+		if !continuesKey(doc, end) {
+			return true
+		}
+		offset = end
+	}
+}
+
+// continuesKey reports whether the text at index i extends a key name
+// that ends just before it.
+//
+// The dot needs care, because it is both a key separator and the most
+// common way an English sentence ends. Treating it as key-continuing
+// unconditionally rejected "the go.chanDir key." — a perfectly good
+// mention terminated by a full stop — and the package's own fixture
+// caught it. A dot therefore continues a key only when an identifier
+// character follows it, which distinguishes `shape.key_type` from
+// `shape.` at the end of a clause.
+func continuesKey(doc string, i int) bool {
+	if i >= len(doc) {
+		return false
+	}
+	if doc[i] == '.' {
+		return i+1 < len(doc) && isIdentRune(rune(doc[i+1]))
+	}
+	return isIdentRune(rune(doc[i]))
+}
+
+// isIdentRune reports whether r can appear inside one dotted segment
+// of a metadata-key name. The vocabulary is the one this repo's keys
+// use: lower-camel segments with underscores.
+func isIdentRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	case r == '_':
+		return true
+	default:
+		return false
+	}
 }
 
 // unquoteDoubleQuoted strips the surrounding double quotes from

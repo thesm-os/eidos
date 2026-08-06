@@ -376,6 +376,155 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 	})
 }
 
+// TestPlugin_DetectorCascade pins the cascade's skip semantics: a
+// detector that does not claim a callable hands the turn to the
+// next one instead of ending dispatch.
+//
+// Both subtests exist to kill a `continue` -> `break` mutant in
+// [shape.Plugin]'s detector loop — one at the frontend-lookup skip,
+// one at the declined-match skip. Either mutation makes the FIRST
+// detector that passes on a callable abort the whole cascade, so
+// every lower-priority detector goes dead. That is the defect this
+// repo already shipped: the reader detector never won dispatch
+// because a higher-priority sibling swallowed its inputs, and a
+// green suite reported nothing for months (see
+// detectors/reachability_test.go). A one-detector fixture cannot
+// see it — the assertion needs two, where the first declines and
+// the second must still be reached, which is why these do not fold
+// into TestPlugin_DetectorDispatch's single-detector cases.
+func TestPlugin_DetectorCascade(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a detector that declines does not stop the ones below it", func(t *testing.T) {
+		t.Parallel()
+		declining := shape.Detector{
+			Name: "declining", Priority: 900,
+			Detect: map[string]shape.DetectFunc{
+				"golang": func(node.Node) (shape.Match, bool) {
+					return shape.Match{}, false
+				},
+			},
+		}
+		accepting := shape.Detector{
+			Name: "accepting", Priority: 100,
+			Detect: map[string]shape.DetectFunc{
+				"golang": func(node.Node) (shape.Match, bool) {
+					return shape.Match{ValueType: "Article"}, true
+				},
+			},
+		}
+		fn := &node.Function{Name: "X", Package: "x"}
+		runAnnotate(t, shape.New().Detectors(declining, accepting), pkgWithFunction(fn))
+
+		assertShape(t, fn.Meta(), "accepting")
+		assertMeta(t, fn.Meta(), shape.MetaValueType, "Article")
+		assertStampedBy(t, fn.Meta(), shape.MetaShape, shape.PluginName+".accepting")
+	})
+
+	t.Run("a detector with no function for this frontend does not stop the ones below it", func(t *testing.T) {
+		t.Parallel()
+		// The protobuf-only detector accepts everything it is
+		// handed, so a stamp of "protobufOnly" would prove it was
+		// invoked for a Go callable; absence of that stamp plus a
+		// "golangOnly" one proves the cascade stepped over it.
+		protobufOnly := shape.Detector{
+			Name: "protobufOnly", Priority: 900,
+			Detect: map[string]shape.DetectFunc{
+				"protobuf": func(node.Node) (shape.Match, bool) {
+					return shape.Match{}, true
+				},
+			},
+		}
+		golangOnly := shape.Detector{
+			Name: "golangOnly", Priority: 100,
+			Detect: map[string]shape.DetectFunc{
+				"golang": func(node.Node) (shape.Match, bool) {
+					return shape.Match{ValueType: "Article"}, true
+				},
+			},
+		}
+		fn := &node.Function{Name: "X", Package: "x"}
+		runAnnotate(t, shape.New().Detectors(protobufOnly, golangOnly), pkgWithFunction(fn))
+
+		assertShape(t, fn.Meta(), "golangOnly")
+		assertMeta(t, fn.Meta(), shape.MetaValueType, "Article")
+		assertStampedBy(t, fn.Meta(), shape.MetaShape, shape.PluginName+".golangOnly")
+	})
+}
+
+// TestPlugin_DirectiveScan pins the directive scan's skip
+// semantics: a directive the shape scan does not own is stepped
+// over, not read as the end of the list.
+//
+// Exists to kill a `continue` -> `break` mutant on the non-shape
+// guard inside the plugin's `+gen:shape` directive scan. With
+// `break`, a callable whose directive list opens with
+// `+gen:contract` loses its explicit `+gen:shape` override and
+// falls back to detector inference — the override is not dropped
+// loudly, it is replaced by a plausible wrong shape. Directive
+// order belongs to the author, so shape-second is ordinary source.
+// The fixture therefore puts a foreign directive FIRST and
+// registers a detector that infers a different shape, so the mutant
+// surfaces as the wrong stamp rather than as a missing one.
+func TestPlugin_DirectiveScan(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a foreign directive ahead of +gen:shape does not hide the override", func(t *testing.T) {
+		t.Parallel()
+		fn := readerFunc("Find")
+		fn.DirectiveList = []*directive.Directive{
+			{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"persister"},
+				KV:   map[string]string{"role": "reader"},
+			},
+			{Name: shape.DirectiveName, Args: []string{"lifecycle"}},
+		}
+		p := shape.New().
+			Detectors(testReaderDetector()).
+			Contracts(shape.Contract{Name: "persister", Roles: []string{"reader", "writer"}})
+		runAnnotate(t, p, pkgWithFunction(fn))
+
+		// The contract stamp proves the leading directive really is
+		// the foreign one the scan had to step over — without it a
+		// green result would only say the list was scanned, not that
+		// anything preceded the override.
+		assertMeta(t, fn.Meta(), shape.ContractRoleKey("persister"), "reader")
+		assertShape(t, fn.Meta(), "lifecycle")
+		assertStampedBy(t, fn.Meta(), shape.MetaShape, shape.PluginName+".directive")
+	})
+
+	// Closes the last `continue` -> `break` site in matchFromDirective,
+	// which sat outside every agent's assignment in the cascade audit
+	// and which no fixture in this package reached: nothing anywhere
+	// constructed a nameless +gen:shape ahead of a named one.
+	//
+	// A nameless directive is legal to construct — the schema marks
+	// the positional Required, so the parser rejects it, but plugin
+	// code and other annotators build directive.Directive values
+	// directly, which is the same path the negation guards defend.
+	// Under `break` the nameless entry aborts the scan, the explicit
+	// override is lost, and detection quietly substitutes an inferred
+	// shape. As with the foreign-directive case, the damage is a
+	// plausible wrong answer rather than an absent one.
+	t.Run("a nameless +gen:shape does not discard the named one after it", func(t *testing.T) {
+		t.Parallel()
+		fn := readerFunc("Find")
+		fn.DirectiveList = []*directive.Directive{
+			{Name: shape.DirectiveName},
+			{Name: shape.DirectiveName, Args: []string{"lifecycle"}},
+		}
+		p := shape.New().Detectors(testReaderDetector())
+		runAnnotate(t, p, pkgWithFunction(fn))
+
+		// "reader" is what the detector would infer if the override
+		// were lost, so asserting the value — not merely that a stamp
+		// exists — is what separates the mutant from the fix.
+		assertShape(t, fn.Meta(), "lifecycle")
+		assertStampedBy(t, fn.Meta(), shape.MetaShape, shape.PluginName+".directive")
+	})
+}
+
 // runAnnotate wires the supplied package into a fresh store, runs
 // the plugin's Annotate, and fails the test on error. Stamps the
 // "golang" frontend marker on the package so the default test
@@ -552,6 +701,23 @@ func assertMeta(t *testing.T, bag *meta.Bag, k meta.Key[string], want string) {
 	}
 	if got != want {
 		t.Fatalf("%s = %q, want %q", k.Name(), got, want)
+	}
+}
+
+// assertStampedBy fails when the winning provenance for k on bag
+// names a setter other than want. The cascade tests need it because
+// a shape name alone cannot say WHICH detector produced the stamp:
+// two detectors can legitimately stamp the same name, and the
+// attribution is the only per-detector fingerprint the meta bag
+// carries.
+func assertStampedBy(t *testing.T, bag *meta.Bag, k meta.Key[string], want string) {
+	t.Helper()
+	p, ok := bag.Winning(k.Name())
+	if !ok {
+		t.Fatalf("%s unstamped; want a stamp set by %q", k.Name(), want)
+	}
+	if p.SetBy != want {
+		t.Fatalf("%s set by %q, want %q", k.Name(), p.SetBy, want)
 	}
 }
 

@@ -6,9 +6,11 @@ package pipeline_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1054,6 +1056,73 @@ func TestPipeline_Run_ManifestScopePreserve(t *testing.T) {
 	})
 }
 
+// TestPipeline_ScopeImportPaths pins [Pipeline.ScopeImportPaths] —
+// the narrowing filter `eidos prune` passes to [manifest.Prune] so a
+// `run ./sub/...` invocation only ever calls entries orphaned when
+// their source package was actually re-scanned.
+//
+// The accessor was entirely uncovered, which made two mutations
+// survive: negating the nil-store guard, and negating the
+// empty-import-path guard inside the loop. Both are silent data
+// loss, not a crash — a scope that comes back nil (or full of empty
+// strings) makes every prior manifest entry look in-scope, so prune
+// deletes generated files belonging to packages the run never loaded.
+//
+// The assertions therefore compare the returned set's exact contents.
+// A non-nil or len > 0 check would pass against a scope populated
+// with nothing but the empty string, which is precisely the shape the
+// second mutation produces.
+func TestPipeline_ScopeImportPaths(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, pkgs ...*node.Package) *pipeline.Pipeline {
+		t.Helper()
+		p, err := pipeline.New().
+			WithFrontend(&multiNodePackageFE{name: "fe", pkgs: pkgs}).
+			WithBackend(&recBE{name: "be", lang: "stub"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		return p
+	}
+
+	t.Run("a pipeline that has not run yet reports no scope at all", func(t *testing.T) {
+		t.Parallel()
+		if got := build(t).ScopeImportPaths(); got != nil {
+			t.Fatalf("ScopeImportPaths before Run = %v, want nil (no run has loaded anything)", got)
+		}
+	})
+
+	t.Run("the scope is exactly the import paths the run loaded", func(t *testing.T) {
+		t.Parallel()
+		p := build(t,
+			&node.Package{Name: "repo", Path: "example.com/proj/internal/repo"},
+			&node.Package{Name: "svc", Path: "example.com/proj/internal/svc"},
+		)
+		assertNoError(t, p.Run(t.Context(), "./..."))
+		want := []string{
+			"example.com/proj/internal/repo",
+			"example.com/proj/internal/svc",
+		}
+		if got := slices.Sorted(maps.Keys(p.ScopeImportPaths())); !slices.Equal(got, want) {
+			t.Fatalf("ScopeImportPaths = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a package carrying no import path stays out of the scope", func(t *testing.T) {
+		t.Parallel()
+		p := build(t,
+			&node.Package{Name: "repo", Path: "example.com/proj/internal/repo"},
+			&node.Package{Name: "anonymous"},
+		)
+		assertNoError(t, p.Run(t.Context(), "./..."))
+		want := []string{"example.com/proj/internal/repo"}
+		if got := slices.Sorted(maps.Keys(p.ScopeImportPaths())); !slices.Equal(got, want) {
+			t.Fatalf("ScopeImportPaths = %q, want %q (the empty path must not become a scope entry)", got, want)
+		}
+	})
+}
+
 // test reads os.Args or asserts on BackendContext.Command, so
 // parallel siblings stay safe across the mutation window.
 //
@@ -1311,3 +1380,171 @@ func (c *keyRecordingCache) Put(key string, _ []byte) error {
 	c.keys = append(c.keys, key)
 	return nil
 }
+
+// benchRunSizes are the source-declaration populations
+// BenchmarkPipeline_Run sweeps. 1 exposes the fixed per-run cost —
+// store construction, plan walk, the six phase boundaries, the
+// recording sink — and 1000 is the order of magnitude a real run
+// over a mid-size module reaches, above which any hidden per-decl
+// rescan in a phase stops hiding.
+var benchRunSizes = []int{1, 10, 100, 1000}
+
+// BenchmarkPipeline_Run measures one end-to-end pipeline execution
+// over n source structs: fresh store construction, the frontend
+// load, the node-view freeze, the annotator and directive-override
+// passes, the generator emit, the whole Layout phase, the emit-view
+// freeze, the backend render through the recording sink, and the
+// run summary.
+//
+// This is the framework's headline number — every plugin a user
+// writes pays it once per invocation — and the reason to measure the
+// composition rather than any single phase is that most of the cost
+// is in the store indexing and phase plumbing between plugins, which
+// no per-phase benchmark can attribute.
+//
+// Two deliberate exclusions:
+//
+//   - The fixture's node and emit packages are built once, above the
+//     timed region, and handed to the plugins to install. The timed
+//     region therefore covers the pipeline re-indexing them into a
+//     fresh store on every run — which is real per-run work — but
+//     not the cost of allocating the fixture, which is not.
+//   - The backend writes a fixed body per resolved Target instead of
+//     rendering one. The Go backend lives in its own module and the
+//     root module deliberately declares no requirements, so it
+//     cannot be imported here; its own BenchmarkBackend_Render
+//     covers template execution, gofmt, and the goimports pass. Read
+//     the two together for the true end-to-end cost — this number is
+//     the framework's overhead around whatever a backend does.
+//
+// The memory sink is reused across iterations rather than
+// reallocated. It overwrites by Target, so it does not grow and the
+// reported allocation is the pipeline's rather than the fixture's.
+func BenchmarkPipeline_Run(b *testing.B) {
+	b.ReportAllocs()
+
+	for _, n := range benchRunSizes {
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+			srcPkg, emitPkg := newRunBenchFixture(n)
+			mem := sink.NewMemory()
+			d := diag.Capture()
+			p, err := pipeline.New().
+				WithFrontend(&benchRunFE{pkg: srcPkg}).
+				WithGenerator(&benchRunGen{pkg: emitPkg}).
+				WithBackend(&benchRunBE{}).
+				WithSink(mem).
+				WithDiag(d).
+				Build()
+			if err != nil {
+				b.Fatalf("Build: %v", err)
+			}
+			ctx := b.Context()
+
+			for b.Loop() {
+				if err := p.Run(ctx, "./..."); err != nil {
+					b.Fatalf("Run: %v", err)
+				}
+			}
+
+			// A run that routed nothing would still return nil and
+			// would time the empty path through every phase. Pinning
+			// the write count to n makes the loop load-bearing.
+			if got := mem.Len(); got != n {
+				b.Fatalf("sink holds %d files after the run, want %d; the run measured "+
+					"the unrouted path (diagnostics: %v)", got, n, d.Diagnostics())
+			}
+		})
+	}
+}
+
+// newRunBenchFixture builds the source and emit graphs the run
+// benchmark installs on every iteration: n source structs, each in
+// its own directory so the Layout phase resolves n distinct Targets,
+// and one emit struct per source struct attributed to the benchmark
+// generator.
+//
+// Each source struct carries two fields so the store's per-decl
+// indexing does more than the minimum, and the emit struct carries
+// an Origin so it takes the ordinary alongside-source routing path
+// rather than the synthetic-origin error path.
+func newRunBenchFixture(n int) (*node.Package, *emit.Package) {
+	srcPkg := &node.Package{Name: "bench", Path: "example.com/bench"}
+	emitPkg := &emit.Package{Name: "bench", Path: "example.com/bench"}
+	for i := range n {
+		id := strconv.Itoa(i)
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos: position.Pos{File: "internal/bench/pkg" + id + "/entity" + id + ".go"},
+			},
+			Name:    "Entity" + id,
+			Package: "example.com/bench",
+		}
+		srcPkg.Structs = append(srcPkg.Structs, origin)
+		emitPkg.Structs = append(emitPkg.Structs, &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin, SetByName: benchRunGenName},
+			Name:     "Entity" + id + "Gen",
+			Package:  "example.com/bench",
+		})
+	}
+	return srcPkg, emitPkg
+}
+
+// benchRunGenName is the generator's registered name. The benchmark
+// fixture stamps it as each emit decl's SetBy so the Layout phase
+// resolves a filename suffix; a mismatch would route every decl down
+// the ErrMissingFilenameProvider path and the benchmark would time
+// error reporting instead of routing.
+const benchRunGenName = "bench-generator"
+
+// benchRunFE installs the prebuilt source package into whichever
+// store the run under measurement created.
+type benchRunFE struct{ pkg *node.Package }
+
+func (*benchRunFE) Name() string { return "bench-frontend" }
+func (f *benchRunFE) Load(ctx *plugin.FrontendContext) error {
+	return ctx.Store.Nodes().AddPackage(f.pkg)
+}
+
+// benchRunGen installs the prebuilt emit package and declares the
+// single default output the Layout phase needs to route it.
+type benchRunGen struct{ pkg *emit.Package }
+
+func (*benchRunGen) Name() string { return benchRunGenName }
+func (*benchRunGen) Outputs(_ string) []plugin.Output {
+	return []plugin.Output{{Suffix: "_gen.go"}}
+}
+
+func (g *benchRunGen) Generate(ctx *plugin.GeneratorContext) error {
+	return ctx.Store.Emit().AddPackage(g.pkg)
+}
+
+// benchRunBE stands in for a real backend: it writes one fixed body
+// per routed decl so the run exercises the recording sink, the
+// manifest-free write path, and the sink itself, without paying a
+// template engine's cost inside a benchmark that is not measuring
+// one.
+type benchRunBE struct{}
+
+func (*benchRunBE) Name() string     { return "bench-backend" }
+func (*benchRunBE) Language() string { return "bench" }
+
+func (*benchRunBE) Render(ctx *plugin.BackendContext) error {
+	var err error
+	ctx.Store.Emit().Structs().Range(func(e *emit.Struct) bool {
+		if e.Target.Filename == "" {
+			return true
+		}
+		if werr := ctx.Sink.Write(e.Target, benchRenderedBody); werr != nil {
+			err = werr
+			return false
+		}
+		return true
+	})
+	return err
+}
+
+// benchRenderedBody is the payload benchRunBE writes. It is a
+// package-level constant so the sink write measures the sink rather
+// than a per-iteration allocation.
+var benchRenderedBody = []byte("package bench\n\ntype Generated struct{}\n")

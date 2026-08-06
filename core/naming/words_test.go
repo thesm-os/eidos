@@ -4,6 +4,8 @@
 package naming_test
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/naming"
@@ -48,4 +50,137 @@ func TestCaser_Words(t *testing.T) {
 func TestWords_packageLevel(t *testing.T) {
 	t.Parallel()
 	assertEqualSlices(t, naming.Words("HelloWorld"), []string{"Hello", "World"})
+}
+
+// FuzzCaser_Words drives the splitter over arbitrary input.
+//
+// Words is the primitive every style converter is built on: each style
+// renders exactly the words this function returns, so a splitter that
+// invents, drops, or reorders content corrupts every identifier the
+// framework generates — silently, and in a way no table of expected
+// splits is broad enough to catch. The properties asserted here are
+// therefore about conservation and stability rather than about any
+// particular split, checked against a deliberately naive reference
+// (stripSeparators) that knows one rule and nothing about boundaries.
+//
+// The seeds cover each branch the splitter takes: both boundary rules
+// (lower-to-upper, acronym-then-word), every separator rune, the digit
+// rule that deliberately does not break, and the degenerate inputs
+// around each — empty, separator-only, repeated separators, a leading
+// separator, non-ASCII case pairs, and invalid UTF-8.
+func FuzzCaser_Words(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		"hello",
+		"helloWorld",
+		"HelloWorld",
+		"HTTPServer",
+		"userID",
+		"HTTP",
+		"hello_world",
+		"hello-world",
+		"hello.world",
+		"hello world",
+		"hello\tworld",
+		"hello/world",
+		"___---...",
+		"__hello-_-world__",
+		"Version2",
+		"URLPath_v2 helloWorld",
+		"ßa",
+		"aÉ",
+		"\xff\xfe",
+	} {
+		f.Add(seed)
+	}
+
+	c := naming.Default()
+
+	f.Fuzz(func(t *testing.T, s string) {
+		words := c.Words(s)
+
+		// Conservation: the splitter is only ever allowed to remove
+		// separators. Any other difference means a rune was invented,
+		// dropped, or reordered, which every downstream converter
+		// inherits verbatim.
+		if got, want := strings.Join(words, ""), stripSeparators(s); got != want {
+			t.Fatalf("Words(%q) concatenates to %q, want %q", s, got, want)
+		}
+
+		for i, w := range words {
+			// An empty word renders as nothing but still contributes a
+			// joiner in the separator styles, so it would surface as
+			// "a__b" from Snake rather than as a visible split bug.
+			if w == "" {
+				t.Fatalf("Words(%q) returned an empty word at index %d (%q)", s, i, words)
+			}
+			// A separator surviving inside a word would be re-split on
+			// the next pass through any converter, so the converters
+			// would not be stable under repeated application.
+			if strings.ContainsAny(w, separators) {
+				t.Fatalf("Words(%q) returned word %q containing a separator", s, w)
+			}
+			// Splitting an already-split word is the identity. The
+			// boundary rules read one rune either side of each
+			// position, so a word that split further would mean the
+			// split depended on the context the word was lifted from —
+			// exactly the bug that makes a converter's output differ
+			// from its own re-parse.
+			if again := c.Words(w); len(again) != 1 || again[0] != w {
+				t.Fatalf("re-splitting word %q of %q yielded %q, want [%q]", w, s, again, w)
+			}
+		}
+	})
+}
+
+// BenchmarkCaser_Words measures one split of an identifier holding n
+// words.
+//
+// Words runs at least once per generated name and once more per style
+// conversion layered on top of it, so its per-call cost multiplies
+// across a run. The scaling axis is the word count because that is what
+// drives the two costs the implementation cannot avoid: the per-rune
+// boundary test, and the growth of both the accumulating rune buffer
+// and the words slice, neither of which is pre-sized. Super-linear
+// growth here would mean the append strategy, not the scan, dominates.
+//
+// Input construction is hoisted above each sub-benchmark; only the
+// split itself is timed. The post-loop word-count assertion is what
+// proves the benchmark measured a split of the intended size rather
+// than a call the compiler folded away.
+func BenchmarkCaser_Words(b *testing.B) {
+	b.ReportAllocs()
+
+	c := naming.Default()
+	for _, n := range []int{1, 10, 100, 1000} {
+		in := benchIdentifier(n)
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			var words []string
+			for b.Loop() {
+				words = c.Words(in)
+			}
+			if len(words) != n {
+				b.Fatalf("Words returned %d words, want %d", len(words), n)
+			}
+		})
+	}
+}
+
+// benchIdentifier builds a PascalCase identifier of exactly n words by
+// cycling a fixed vocabulary.
+//
+// Every vocabulary entry is one capital followed by lower-case runes,
+// so each contributes exactly one word and the word count is the
+// benchmark's size parameter rather than an artefact of the text. The
+// acronym branch is deliberately absent here — it is measured by
+// [BenchmarkCaser_Pascal], where the initialism lookup is the subject.
+func benchIdentifier(n int) string {
+	vocab := []string{"Http", "Server", "Config", "Handler", "Node"}
+	var b strings.Builder
+	for i := range n {
+		b.WriteString(vocab[i%len(vocab)])
+	}
+	return b.String()
 }

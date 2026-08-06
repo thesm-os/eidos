@@ -1,0 +1,95 @@
+name: Release
+
+# Verification and publication for a tagged module release.
+#
+# eidos publishes Go modules, not binaries: a release is a tag that
+# pkg.go.dev and the module proxy pick up. There is nothing to compile
+# and upload, so this workflow does the two things that genuinely need
+# automating — proving the gate passes at the tagged commit, and
+# recording the release so consumers have something to watch.
+#
+# The workspace versions each module independently, so tags are
+# per-module (`eidostest/v1.5.0`, `frontend/golang/v1.6.0`) alongside
+# the bare `vX.Y.Z` for the root module. Both shapes are matched below.
+#
+# Why this exists: releasing was a local `make release` on one
+# maintainer's machine. That concentrates the one step nobody else can
+# perform at the point where the project has the least redundancy. This
+# does not change who decides to release — tagging is still a
+# deliberate local act — but it removes the maintainer's laptop from
+# the verification path.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "*/v*.*.*"
+      - "*/*/v*.*.*"
+
+permissions:
+  contents: read
+
+env:
+  ERGON_VERSION: v1.8.1
+
+jobs:
+  # The gate, re-run at the tagged commit rather than trusted from the
+  # branch build. A tag can point at a commit that never passed CI —
+  # an amend after the check job, a tag placed on an older commit — and
+  # the module proxy caches immutably, so a bad release cannot be
+  # withdrawn, only superseded.
+  verify:
+    name: Verify the tagged commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          check-latest: true
+          cache: true
+
+      - name: Install ergon
+        run: go install go.thesmos.sh/ergon/cmd/ergon@${{ env.ERGON_VERSION }}
+
+      - name: Bootstrap the tool chain
+        run: make bootstrap
+
+      - name: Run the full pre-merge gate
+        run: make check
+
+      - name: Run the race detector
+        run: make test-race
+
+  # Consumers resolve a module version through the proxy, which fetches
+  # from the tag. Nothing here uploads an artifact; the job records the
+  # release and points at the changelog so a version bump is
+  # accompanied by a statement of what changed and what breaks.
+  publish:
+    name: Record the release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes "Module release \`$TAG\`.
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/$TAG/CHANGELOG.md)
+          for what changed and whether anything breaks.
+
+          Modules are versioned independently; upgrading this one does not pull the others." \
+            --verify-tag

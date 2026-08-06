@@ -26,6 +26,22 @@ var (
 	keyBagHistoryBasic      = meta.NewKey("bag.history.basic", meta.BoolParser)
 	keyBagNamesAlpha        = meta.NewKey("bag.names.alpha", meta.BoolParser)
 	keyBagNamesBeta         = meta.NewKey("bag.names.beta", meta.BoolParser)
+
+	// Four segments deep on purpose: a tombstone on bag.prefix.deep is
+	// two levels above this key, so resolving it exercises the ancestor
+	// walk rather than a single parent lookup. Registered keys in this
+	// repo really do go that deep (proto.service.rpc.stream.server.member).
+	keyBagPrefixDeepGrandchild = meta.NewKey("bag.prefix.deep.child.grandchild", meta.StringParser)
+)
+
+// Prefix-tombstone targets. These are plain names, not keys:
+// [meta.Bag.TombstonePrefix] takes a raw string because
+// pipeline/override.go routes `-gen:meta NAME` there exactly when NAME
+// is *not* a registered key, and a suppression prefix is free to name
+// an interior node of the dotted namespace that no key occupies.
+const (
+	nameBagPrefixDeep      = "bag.prefix.deep"
+	nameBagPrefixDeepChild = "bag.prefix.deep.child"
 )
 
 func TestNewBag(t *testing.T) {
@@ -188,7 +204,7 @@ func TestBag_Winning(t *testing.T) {
 func TestBag_PrefixTombstone(t *testing.T) {
 	t.Parallel()
 
-	t.Run("prefix tombstone covers descendant at same authority", func(t *testing.T) {
+	t.Run("a directive prefix tombstone covers a plugin-set descendant", func(t *testing.T) {
 		t.Parallel()
 		b := meta.NewBag()
 		keyBagPrefixRootMethod.Set(b, "Write", "p")
@@ -221,6 +237,88 @@ func TestBag_PrefixTombstone(t *testing.T) {
 		got, ok := keyBagPrefixRootMethod.Get(b)
 		if !ok || got != "override" {
 			t.Fatalf("manual value should beat plugin prefix tombstone; got %q ok=%v", got, ok)
+		}
+	})
+
+	// Pins the arm order inside entryAtAuthorityLocked: the prefix-
+	// tombstone arm must sit above the direct-value arm. A mutant that
+	// swaps them keeps every other subtest here green, because they all
+	// split the value and the tombstone across *different* authorities,
+	// where the authority walk in winningLocked picks a winner before
+	// arm order can matter. Only a same-authority pair reaches the
+	// switch with both a direct value and a covering tombstone — and
+	// that is the primary production shape, not a corner: one file
+	// carrying `-gen:meta bag.prefix.root` plus `+gen:meta
+	// bag.prefix.root.method=Write` lands both at AuthorityDirective
+	// (pipeline/override.go setMeta and tombstoneMeta).
+	t.Run("a prefix tombstone beats a descendant value set at the same authority", func(t *testing.T) {
+		t.Parallel()
+		b := meta.NewBag()
+		pos := position.At("d.go", 1, 1)
+		keyBagPrefixRootMethod.SetDirective(b, "Write", pos)
+		b.TombstonePrefix(keyBagPrefixRoot.Name(), meta.AuthorityDirective, "directive", pos)
+
+		p, ok := b.Winning(keyBagPrefixRootMethod.Name())
+		if !ok {
+			t.Fatalf("Winning should resolve the descendant; got ok=false")
+		}
+		if !p.Tombstone {
+			t.Fatalf("prefix tombstone should beat the same-authority value; got Tombstone=false value=%v", p.Value)
+		}
+		if p.CoveredBy != keyBagPrefixRoot.Name() {
+			t.Fatalf("CoveredBy = %q, want %q", p.CoveredBy, keyBagPrefixRoot.Name())
+		}
+		if leaked, isSet := keyBagPrefixRootMethod.Get(b); isSet {
+			t.Fatalf("suppressed key still readable; Get = %q, want not-set", leaked)
+		}
+	})
+
+	// Pins the ancestor *walk* in prefixTombstoneLocked. A mutant that
+	// collapses the loop to a single check on the immediate parent
+	// survives every other subtest here, because their fixture pair
+	// (bag.prefix.root / bag.prefix.root.method) is exactly one level
+	// apart. Suppression must cascade the whole dotted chain: real key
+	// names in this repo run six segments deep, so `-gen:meta` on an
+	// interior node has several levels to cross before it reaches them.
+	t.Run("a prefix tombstone covers a descendant more than one level below it", func(t *testing.T) {
+		t.Parallel()
+		b := meta.NewBag()
+		keyBagPrefixDeepGrandchild.Set(b, "Write", "p")
+		b.TombstonePrefix(nameBagPrefixDeep, meta.AuthorityDirective, "directive", position.At("d.go", 1, 1))
+
+		p, ok := b.Winning(keyBagPrefixDeepGrandchild.Name())
+		if !ok {
+			t.Fatalf("Winning should resolve the grandchild via the ancestor walk; got ok=false")
+		}
+		if !p.Tombstone {
+			t.Fatalf("walk must not stop at the immediate parent; got Tombstone=false value=%v", p.Value)
+		}
+		if p.CoveredBy != nameBagPrefixDeep {
+			t.Fatalf("CoveredBy = %q, want %q", p.CoveredBy, nameBagPrefixDeep)
+		}
+	})
+
+	// Pins first-match (nearest ancestor) over last-match (outermost)
+	// in prefixTombstoneLocked. A mutant that keeps walking and returns
+	// the farthest tombstoned ancestor still resolves the name as
+	// suppressed, so only CoveredBy exposes it — and no other subtest
+	// puts two tombstoned ancestors in the bag at once, which is the
+	// sole configuration where nearest and farthest differ. CoveredBy
+	// is what --explain prints, so a wrong answer here sends whoever is
+	// hunting a vanished fact to the wrong `-gen:` directive.
+	t.Run("a suppression is attributed to the closest tombstoned ancestor", func(t *testing.T) {
+		t.Parallel()
+		b := meta.NewBag()
+		pos := position.At("d.go", 1, 1)
+		b.TombstonePrefix(nameBagPrefixDeep, meta.AuthorityDirective, "directive", pos)
+		b.TombstonePrefix(nameBagPrefixDeepChild, meta.AuthorityDirective, "directive", pos)
+
+		p, ok := b.Winning(keyBagPrefixDeepGrandchild.Name())
+		if !ok || !p.Tombstone {
+			t.Fatalf("grandchild should resolve as tombstoned; got %+v ok=%v", p, ok)
+		}
+		if p.CoveredBy != nameBagPrefixDeepChild {
+			t.Fatalf("CoveredBy = %q, want the closest ancestor %q", p.CoveredBy, nameBagPrefixDeepChild)
 		}
 	})
 }

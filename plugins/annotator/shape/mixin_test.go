@@ -623,3 +623,102 @@ func TestMixin_NamelessDirectiveIsIgnoredByStamping(t *testing.T) {
 		assertNoErrors(t, sink)
 	})
 }
+
+// retryingMixin is the many-parameter fixture for the blank-value
+// skip below. Six declared parameters give a single directive room
+// to interleave populated and blank values, which is what makes the
+// skip observable no matter which order the parameter map is walked
+// in.
+func retryingMixin() shape.Mixin {
+	return shape.Mixin{
+		Name:   "retrying",
+		Params: []string{"attempts", "backoff", "jitter", "budget", "ceiling", "floor"},
+	}
+}
+
+// TestMixin_SkippedEntryDoesNotStopTheCascade pins the two skip
+// points in the mixin stamping pass that a mutation audit found
+// unguarded: the `continue` on an argument-less directive, and the
+// `continue` on a blank parameter value. Rewriting either to
+// `break` survived the whole suite, because every fixture above
+// exercises the skip with nothing behind it — and a one-entry
+// fixture cannot tell `continue` from `break`.
+//
+// Each subtest therefore puts a skipped entry AHEAD of an entry
+// that must still be processed, and names the survivor it expects.
+// That ordering is the entire assertion; do not fold these cases
+// back into the single-entry tests above, and do not delete them as
+// duplicates of the "nameless directive" or "empty parameter
+// values" cases, neither of which constrains what happens next.
+//
+// The defect this guards is not hypothetical: the reader detector
+// went months never winning dispatch because a sibling swallowed
+// the cascade, under a green suite.
+func TestMixin_SkippedEntryDoesNotStopTheCascade(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an argument-less directive does not discard the mixins declared after it", func(t *testing.T) {
+		t.Parallel()
+		// The argument-less line is skipped, not fatal: both
+		// directives written below it still have to stamp, values
+		// included.
+		fn := mixinFn(
+			"Put",
+			&directive.Directive{Name: shape.MixinDirectiveName},
+			&directive.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
+			&directive.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"rate-limited"},
+				KV:   map[string]string{"limit": "100"},
+			},
+		)
+		sink := annotateCapturing(t, shape.New().Mixins(atomicMixin(), rateLimitedMixin()), fn)
+
+		assertMixins(t, fn.Meta(), []string{"atomic", "rate-limited"})
+		assertMeta(t, fn.Meta(), shape.MixinParamKey("rate-limited", "limit"), "100")
+		assertNoErrors(t, sink)
+	})
+
+	t.Run("a blank parameter value does not discard the parameters after it", func(t *testing.T) {
+		t.Parallel()
+		// Parameters arrive in a map, so the pass walks them in an
+		// order the runtime deliberately randomises. Interleaving the
+		// blanks between the populated keys is what makes the
+		// assertion sound rather than lucky: no walk order reaches all
+		// three populated keys before meeting a blank, so aborting on
+		// the first blank always loses at least one.
+		//
+		// The pass is still repeated, because that argument leans on
+		// how small maps happen to be ordered today. Repetition holds
+		// the assertion up even if that ordering becomes a true
+		// shuffle, where one pass would leak with probability 3!·3!/6!.
+		const passes = 16
+
+		blanks := []string{"backoff", "budget", "floor"}
+		for range passes {
+			fn := mixinFn("Charge", &directive.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"retrying"},
+				KV: map[string]string{
+					"attempts": "3",
+					"backoff":  "",
+					"jitter":   "0.2",
+					"budget":   "",
+					"ceiling":  "30s",
+					"floor":    "",
+				},
+			})
+			annotateCapturing(t, shape.New().Mixins(retryingMixin()), fn)
+
+			assertMeta(t, fn.Meta(), shape.MixinParamKey("retrying", "attempts"), "3")
+			assertMeta(t, fn.Meta(), shape.MixinParamKey("retrying", "jitter"), "0.2")
+			assertMeta(t, fn.Meta(), shape.MixinParamKey("retrying", "ceiling"), "30s")
+			for _, blank := range blanks {
+				if got, ok := shape.MixinParamKey("retrying", blank).Get(fn.Meta()); ok {
+					t.Fatalf("blank parameter %q was stamped as %q; a blank value must be skipped, not stamped",
+						blank, got)
+				}
+			}
+		}
+	})
+}

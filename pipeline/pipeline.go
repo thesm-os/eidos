@@ -263,11 +263,11 @@ func (p *Pipeline) EmittedTargets() map[emit.Target]struct{} {
 // [Pipeline.Run] invocation produced, or nil when Run has not
 // been called or the manifest path was unconfigured. The
 // returned manifest is the post-merge view — every prior entry
-// plus every current entry with its [manifest.Output.LastSeenRun]
-// refreshed. Tooling that wants to know "what would this run
-// have produced" without consulting disk reads from here; the
-// prune subcommand uses it under `--dry-run` so the manifest
-// stays untouched.
+// this run did not re-emit, plus every entry this run produced,
+// with [manifest.Manifest.RunID] taken from the current run.
+// Tooling that wants to know "what would this run have produced"
+// without consulting disk reads from here; the prune subcommand
+// uses it under `--dry-run` so the manifest stays untouched.
 func (p *Pipeline) LastManifest() *manifest.Manifest { return p.lastManifest.Load() }
 
 // PipelineID returns the stable identifier the manifest tags

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -852,13 +853,30 @@ func TestManifest_RecordsBackendWrites(t *testing.T) {
 			run(t)
 			first, err := os.ReadFile(manifestPath)
 			assertNoError(t, err)
-			// Ensure the second run's wall-clock timestamp would
-			// otherwise differ — a one-second sleep is excessive
-			// for a unit test, so the test instead asserts that the
-			// bytes stay identical regardless of timing.
+			beforeRerun, err := os.Stat(manifestPath)
+			assertNoError(t, err)
 			run(t)
 			second, err := os.ReadFile(manifestPath)
 			assertNoError(t, err)
+			afterRerun, err := os.Stat(manifestPath)
+			assertNoError(t, err)
+			// Byte equality alone cannot observe the skip this test
+			// is named for. RunID is stamped at one-second
+			// resolution, so two runs inside the same second produce
+			// identical bytes whether the write was skipped or
+			// performed — and sleeping a second to force the
+			// difference is not worth it in a unit test. manifest.Write
+			// publishes through a temp file and a rename, so a write
+			// that did happen swaps the inode underneath the path:
+			// os.SameFile is what distinguishes "skipped the write"
+			// from "rewrote the same content".
+			if !os.SameFile(beforeRerun, afterRerun) {
+				t.Fatalf(
+					"re-run replaced the manifest file instead of skipping the write "+
+						"(inode changed at %s)",
+					manifestPath,
+				)
+			}
 			if !bytes.Equal(first, second) {
 				t.Fatalf(
 					"re-run dirtied the manifest:\nfirst=%s\nsecond=%s",
@@ -868,4 +886,93 @@ func TestManifest_RecordsBackendWrites(t *testing.T) {
 			}
 		},
 	)
+}
+
+// TestManifest_OutputOrderTiebreaks pins the third and fourth keys of
+// the Target sort comparator that fixes the manifest's Outputs order —
+// Package, then ImportPath, after Dir and Filename.
+//
+// Every existing ordering test uses targets that already differ on Dir
+// or Filename, so the comparator returned before it ever reached the
+// Package tiebreak and negating that comparison survived mutation
+// testing. Negated, the comparator reports two Targets that share a
+// Dir and Filename but differ in Package as unordered, and reports two
+// that agree on Package as ordered without consulting ImportPath. The
+// relation stops being a total order, slices.SortFunc is not stable,
+// and the surviving order falls out of map iteration — so the
+// manifest's bytes reshuffle on every run against unchanged input,
+// destroying the stable-bytes property the sort exists to provide.
+//
+// Both collisions are reachable in production: the _test.go package
+// shift and a per-plugin package override can each hand two plugins
+// the same Dir and Filename under different Packages, and a
+// centralised layout can route two source packages to one directory
+// under different ImportPaths.
+//
+// The run repeats because the mutation does not produce one specific
+// wrong order — it produces an arbitrary one. A single run could draw
+// the sorted order by luck; independent runs drawing it every time
+// cannot.
+func TestManifest_OutputOrderTiebreaks(t *testing.T) {
+	t.Parallel()
+
+	// Five targets whose first two sort keys collide, so the whole
+	// ordering rests on the Package and ImportPath tiebreaks. The
+	// backend writes them in an order that is not the sorted one, so
+	// a comparator that declines to order them leaves them wrong.
+	want := []emit.Target{
+		{Dir: "internal/gen", Filename: "x_gen.go", Package: "alpha", ImportPath: "example.com/one"},
+		{Dir: "internal/gen", Filename: "x_gen.go", Package: "alpha", ImportPath: "example.com/two"},
+		{Dir: "internal/gen", Filename: "x_gen.go", Package: "beta", ImportPath: "example.com/one"},
+		{Dir: "internal/gen", Filename: "x_gen.go", Package: "gamma", ImportPath: "example.com/one"},
+		{Dir: "internal/z", Filename: "x_gen.go", Package: "alpha", ImportPath: "example.com/one"},
+	}
+	written := make([]emit.Target, len(want))
+	copy(written, want)
+	slices.Reverse(written)
+
+	be := &recBE{
+		name: "be", lang: "stub",
+		render: func(ctx *plugin.BackendContext) {
+			for _, target := range written {
+				_ = ctx.Sink.Write(target, []byte("body"))
+			}
+		},
+	}
+
+	// manifestOrder runs one pipeline and returns the Targets in the
+	// order the manifest recorded them. Dry-run mode keeps the prior
+	// manifest off disk, so LastManifest is the freshly assembled one
+	// and not the output of the separate merge-time re-sort.
+	manifestOrder := func(t *testing.T) []emit.Target {
+		t.Helper()
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(be).
+			WithSink(sink.NewMemory()).
+			WithManifestPath(filepath.Join(t.TempDir(), "manifest.json")).
+			WithDryRun(true).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context()))
+		m := p.LastManifest()
+		if m == nil {
+			t.Fatalf("LastManifest = nil; the run assembled no manifest")
+		}
+		got := make([]emit.Target, 0, len(m.Outputs))
+		for _, o := range m.Outputs {
+			got = append(got, o.Target)
+		}
+		return got
+	}
+
+	t.Run("outputs sharing a dir and filename order by package then import path", func(t *testing.T) {
+		t.Parallel()
+		const runs = 24
+		for i := range runs {
+			if got := manifestOrder(t); !slices.Equal(got, want) {
+				t.Fatalf("run %d ordered the manifest as\n  %+v\nwant\n  %+v", i, got, want)
+			}
+		}
+	})
 }

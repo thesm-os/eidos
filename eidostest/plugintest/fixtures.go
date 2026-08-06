@@ -5,6 +5,7 @@ package plugintest
 
 import (
 	"fmt"
+	"slices"
 
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/opt"
@@ -81,7 +82,7 @@ func NewFixturePlugin() *FixturePlugin {
 	return &FixturePlugin{
 		PluginName:         "fixture",
 		PluginPriority:     priority.GeneratorFoundation,
-		CapabilityProvides: []string{"cap.one"},
+		CapabilityProvides: []string{fixtureCapability},
 		CapabilityRequires: []string{"cap.zero"},
 		DirectiveSchemas: []directive.Schema{
 			directive.NewSchema("foo").On("Struct").Build(),
@@ -90,7 +91,11 @@ func NewFixturePlugin() *FixturePlugin {
 		VersionString: "v1.0.0",
 		EmitMajors:    []string{"1"},
 		OutputsByLang: map[string][]plugin.Output{
-			"go": {{Suffix: "_fixture.go"}},
+			// Keyed on the language the suite actually probes. It read
+			// "go" while every real plugin answers to "golang", which
+			// is why the Outputs-shape check passed against this
+			// fixture and iterated an empty slice for everything else.
+			ConformanceLanguage: {{Suffix: "_fixture.go"}},
 		},
 		NodesOnlyDecl: true,
 	}
@@ -114,7 +119,7 @@ func NewMultiOutputFixturePlugin() *FixturePlugin {
 	p.OutputsByLang = map[string][]plugin.Output{
 		"go": {
 			{Suffix: "_fixture.go"},
-			{Tag: "test", Suffix: "_fixture_test.go"},
+			{Tag: fixtureTag, Suffix: "_fixture_test.go"},
 		},
 	}
 	return p
@@ -131,13 +136,13 @@ func (*FixturePlugin) Generate(_ *plugin.GeneratorContext) error { return nil }
 func (p *FixturePlugin) Priority() priority.Priority { return p.PluginPriority }
 
 // Provides satisfies [plugin.CapabilityProvider].
-func (p *FixturePlugin) Provides() []string { return p.CapabilityProvides }
+func (p *FixturePlugin) Provides() []string { return slices.Clone(p.CapabilityProvides) }
 
 // Requires satisfies [plugin.CapabilityProvider].
-func (p *FixturePlugin) Requires() []string { return p.CapabilityRequires }
+func (p *FixturePlugin) Requires() []string { return slices.Clone(p.CapabilityRequires) }
 
 // Directives satisfies [plugin.DirectiveProvider].
-func (p *FixturePlugin) Directives() []directive.Schema { return p.DirectiveSchemas }
+func (p *FixturePlugin) Directives() []directive.Schema { return slices.Clone(p.DirectiveSchemas) }
 
 // Version satisfies [plugin.Versioned].
 func (p *FixturePlugin) Version() string { return p.VersionString }
@@ -146,7 +151,9 @@ func (p *FixturePlugin) Version() string { return p.VersionString }
 func (p *FixturePlugin) EmitVersions() []string { return p.EmitMajors }
 
 // Outputs satisfies [plugin.FilenameProvider].
-func (p *FixturePlugin) Outputs(lang string) []plugin.Output { return p.OutputsByLang[lang] }
+func (p *FixturePlugin) Outputs(lang string) []plugin.Output {
+	return slices.Clone(p.OutputsByLang[lang])
+}
 
 // NodesOnly satisfies [plugin.NodesOnly].
 func (p *FixturePlugin) NodesOnly() bool { return p.NodesOnlyDecl }

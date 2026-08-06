@@ -42,6 +42,36 @@ var CommonInitialisms = []string{
 // Caser values are immutable once constructed. [Caser.WithInitialisms]
 // returns a new Caser, leaving the receiver unchanged. This makes it
 // safe to share a Caser across goroutines without locking.
+//
+// # Idempotence
+//
+// Every style is idempotent over identifiers built from ASCII letters
+// and the recognised separators: converting an already-converted name
+// returns it unchanged. That covers the input a frontend derives from
+// source identifiers, which is what these functions exist for.
+//
+// Outside that domain a first application can move a word boundary
+// that the second then reads differently, so f(f(x)) may differ from
+// f(x). Every style reaches a fixed point by the second application —
+// f(f(f(x))) always equals f(f(x)) — so the divergence is bounded at
+// one step rather than oscillating. Three worked cases:
+//
+//	Pascal("aA1")        -> "AA1" -> "Aa1"
+//	Pascal("aÉ")         -> "AÉ"  -> "Aé"
+//	ScreamingSnake("ßa") -> "ßA"   -> "ß_A"
+//
+// In the first, splitting "aA1" yields the words "a" and "A1", which
+// Pascal renders "AA1"; re-splitting that reads a leading acronym run
+// instead. The others turn on runes whose case mapping changes which
+// side of a boundary they fall.
+//
+// This is documented rather than repaired because the repair is not
+// backwards compatible: these functions name generated identifiers, so
+// changing their output renames symbols in consumers' generated code.
+// Callers converting non-ASCII input, or feeding already-converted
+// names back through a style, should convert once from the original
+// source name. [FuzzCaser_Idempotence] pins both halves of this
+// contract.
 type Caser struct {
 	initialisms map[string]struct{}
 }

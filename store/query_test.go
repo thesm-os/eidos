@@ -4,7 +4,9 @@
 package store_test
 
 import (
+	"fmt"
 	"slices"
+	"strconv"
 	"testing"
 
 	"go.thesmos.sh/eidos/node"
@@ -41,6 +43,23 @@ func TestQuery_Where(t *testing.T) {
 			Slice()
 		if len(got) != 1 || got[0].Name != "User" {
 			t.Fatalf("composed Where mismatch: %+v", got)
+		}
+	})
+
+	// The AND case above cannot tell composition from replacement:
+	// its last predicate is the narrowest, so a Where that discarded
+	// everything before it would return the same one struct. Ordering
+	// the narrow predicate first makes the two behaviours disagree —
+	// replacement would widen the result back to both structs.
+	t.Run("an earlier predicate still constrains a later, wider one", func(t *testing.T) {
+		t.Parallel()
+		r := makeStructPopulatedReader(t)
+		got := r.Structs().
+			Where(func(s *node.Struct) bool { return s.Name == "User" }).
+			Where(func(s *node.Struct) bool { return s.Package != "" }).
+			Slice()
+		if len(got) != 1 || got[0].Name != "User" {
+			t.Fatalf("later predicate should intersect, not replace, the earlier one: %+v", got)
 		}
 	})
 
@@ -191,4 +210,81 @@ func TestQuery_RecordsReadOnTerminalsOnly(t *testing.T) {
 			t.Fatalf("ReadSet should dedupe by tag; got Len=%d", r.ReadSet().Len())
 		}
 	})
+}
+
+// ExampleQuery_Where shows the predicate chain a plugin writes to
+// narrow a query to the declarations it was asked to handle: the
+// directive predicate selects the annotated structs, the second
+// Where ANDs an ordinary closure on top.
+func ExampleQuery_Where() {
+	s := store.New()
+	if err := s.Nodes().AddPackage(makeUserPackage()); err != nil {
+		fmt.Println("add package:", err)
+		return
+	}
+
+	store.NewReader(s).Structs().
+		Where(store.WithDirective[*node.Struct]("repo")).
+		Where(func(st *node.Struct) bool { return len(st.Fields) > 0 }).
+		Each(func(st *node.Struct) { fmt.Println(st.QName()) })
+
+	// Output:
+	// github.com/example/users.User
+}
+
+// BenchmarkQuery_Where measures the composed predicate chain at 1, 2
+// and 3 predicates over a 500-struct store — the size of a mid-sized
+// real package set, and enough that per-item work dominates fixed
+// overhead.
+//
+// Where composes by wrapping: each call allocates a closure that
+// calls the previous one, so evaluating three predicates costs three
+// closure calls per item and not one fused test. The number that
+// matters is therefore the delta between 1, 2 and 3, which is the
+// price a plugin pays per additional filter clause.
+//
+// Every case carries the same constant baseline, deliberately inside
+// the timed region because no plugin can avoid it: Reader.Structs
+// materialises a defensive copy of the whole struct bucket before
+// the first predicate ever runs. If the deltas look small next to
+// the total, that copy is the reason — and that is the finding, not
+// a flaw in the measurement.
+//
+// Count is the terminal so the result slice does not dominate:
+// what is being measured is predicate evaluation, not
+// materialisation.
+func BenchmarkQuery_Where(b *testing.B) {
+	b.ReportAllocs()
+
+	s := store.New()
+	if err := s.Nodes().AddPackage(makeBenchPackage(500)); err != nil {
+		b.Fatalf("AddPackage: %v", err)
+	}
+	r := store.NewReader(s)
+
+	// Ordered cheapest-first so each added predicate is genuinely
+	// extra work rather than an early-out that skips the others.
+	preds := []func(*node.Struct) bool{
+		func(st *node.Struct) bool { return st.Package != "" },
+		store.WithDirective[*node.Struct]("repo"),
+		func(st *node.Struct) bool { return len(st.Fields) == 3 },
+	}
+
+	for _, n := range []int{1, 2, 3} {
+		chain := preds[:n]
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+			matched := 0
+			for b.Loop() {
+				q := r.Structs()
+				for _, p := range chain {
+					q = q.Where(p)
+				}
+				matched += q.Count()
+			}
+			if matched == 0 {
+				b.Fatalf("no struct matched %d predicates: the benchmark measures an empty scan", n)
+			}
+		})
+	}
 }

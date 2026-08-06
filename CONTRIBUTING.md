@@ -53,6 +53,37 @@ aren't aspirational; they're enforced by lint and reviewed in every PR.
 The `.golangci.yml` and `.markdownlint.yml` in the repo root encode the lint
 contract; `make lint` runs both.
 
+## Compatibility and deprecation
+
+eidos has downstream consumers, and the modules are versioned independently, so
+a consumer upgrades one at a time. Two rules follow.
+
+**Every change a consumer can observe gets a `CHANGELOG.md` entry.** That means
+the published API, the directive surface, the conformance suite's checks, and
+generated-output bytes. A change that only moves code does not.
+
+**Removing from the published API takes two releases.** Mark the symbol
+`Deprecated:` with the replacement named in the same sentence, ship it, and
+remove it no earlier than the next minor release. The `Deprecated:` marker is
+what `staticcheck` and editors surface, so it reaches consumers who never read
+release notes.
+
+Three things are exempt, because a deprecation cycle cannot express them:
+
+- **A defect fix that changes behaviour.** A generator emitting the wrong
+  package qualifier is not a contract to preserve for a release. Fix it and
+  describe the change under Fixed.
+- **A new conformance check in `eidostest/plugintest`.** These exist to fail
+  against plugins that were always wrong, so a cycle would mean knowingly
+  shipping a check that does nothing. Document what each new check catches and
+  what a failing plugin should do — see the Unreleased entry for the shape.
+- **Anything under `internal/`, or a package documented as not part of the
+  published surface.**
+
+When a change is exempt, say so in the changelog entry rather than leaving the
+reader to infer it. The cost of a surprising upgrade is paid by someone who
+cannot see the reasoning.
+
 ## Commit conventions
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).

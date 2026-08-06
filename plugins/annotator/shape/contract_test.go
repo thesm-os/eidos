@@ -268,6 +268,106 @@ func TestContract_DirectiveStamping(t *testing.T) {
 	})
 }
 
+// TestContract_DecliningDirectiveDoesNotStopTheRest pins the
+// cascade property of the stamping loop: a directive the loop
+// declines to act on must skip that one directive, never abandon
+// the ones written below it.
+//
+// Every row exists to kill a specific surviving mutant. A mutation
+// audit turned `continue` into `break` at all three declining
+// guards in applyContracts — the nil/foreign/negated guard, the
+// unregistered-contract-name guard, and the empty-`role=` guard —
+// and the suite stayed green, because no test carried two contract
+// directives where the first one declines. Under `break`, the
+// leading directive in each row below silently discards the
+// trailing `+gen:contract outbox`, which is the same class of
+// defect that let the `reader` detector lose dispatch unnoticed.
+//
+// Do not fold these rows back into TestContract_DirectiveStamping:
+// a callable carrying one directive cannot tell `continue` and
+// `break` apart, which is precisely why the mutants survived.
+//
+// The first guard's third arm — `d == nil` — gets no row of its
+// own: [store.NodeView] dereferences every directive as it indexes
+// a package, so a nil entry panics before any annotator sees it.
+// That arm is defence-in-depth for hand-built nodes, and the two
+// rows above it already cover the `continue` all three arms share.
+func TestContract_DecliningDirectiveDoesNotStopTheRest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// leading declines for one specific reason; the trailing
+		// directive appended in the body must be stamped regardless.
+		leading *directive.Directive
+	}{
+		{
+			name: "a shape directive above a contract does not drop the contract",
+			leading: &directive.Directive{
+				Name: shape.DirectiveName,
+				Args: []string{"reader"},
+			},
+		},
+		{
+			name: "a negated contract does not drop the contract below it",
+			leading: &directive.Directive{
+				Name:    shape.ContractDirectiveName,
+				Args:    []string{"tx"},
+				KV:      map[string]string{"role": "begin"},
+				Negated: true,
+			},
+		},
+		{
+			name: "an unregistered contract name does not drop the contract below it",
+			leading: &directive.Directive{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"never-registered"},
+				KV:   map[string]string{"role": "begin"},
+			},
+		},
+		{
+			name: "a contract directive without role= does not drop the contract below it",
+			leading: &directive.Directive{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"tx"},
+				KV:   map[string]string{"commit": "Commit"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fn := contractFn(
+				"Append",
+				tc.leading,
+				&directive.Directive{
+					Name: shape.ContractDirectiveName,
+					Args: []string{"outbox"},
+					KV:   map[string]string{"role": "append", "subscribe": "Sub"},
+				},
+			)
+			runAnnotate(
+				t,
+				shape.New().Contracts(txContract(), outboxContract()),
+				pkgWithFunction(fn),
+			)
+
+			// Identity, not existence: the outbox membership below
+			// the declining directive is the thing that must survive,
+			// with its own role and partner stamps intact.
+			assertContracts(t, fn.Meta(), []string{"outbox"})
+			assertMeta(t, fn.Meta(), shape.ContractRoleKey("outbox"), "append")
+			assertMeta(t, fn.Meta(), shape.ContractPartnerKey("outbox", "subscribe"), "Sub")
+
+			// The declining directive itself must stay inert: skipping
+			// it is not licence to half-apply it.
+			if got, ok := shape.ContractRoleKey("tx").Get(fn.Meta()); ok {
+				t.Fatalf("declined directive stamped tx role = %q; want no tx stamp", got)
+			}
+		})
+	}
+}
+
 // contractFn returns a free-function node carrying the supplied
 // directives — used by every test that exercises directive-driven
 // contract stamping.

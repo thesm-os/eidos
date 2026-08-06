@@ -4,6 +4,7 @@
 package pipeline_test
 
 import (
+	"fmt"
 	"testing"
 
 	"go.thesmos.sh/eidos/pipeline"
@@ -31,4 +32,23 @@ func TestPhase_String(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ExamplePhase_String shows the textual form each [pipeline.Phase]
+// takes. These are the exact tokens a verbose run prints in the
+// `phase=` prefix of its Info diagnostics, so this is how to read a
+// log line back to the [pipeline.Builder.WithParallel] argument that
+// governs it.
+func ExamplePhase_String() {
+	for _, p := range []pipeline.Phase{
+		pipeline.PhaseFrontend,
+		pipeline.PhaseAnnotator,
+		pipeline.PhaseGenerator,
+	} {
+		fmt.Println(p)
+	}
+	// Output:
+	// frontend
+	// annotator
+	// generator
 }

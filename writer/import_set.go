@@ -21,6 +21,16 @@ type AliasFunc func(path string) string
 // Go-conventional default; pass it (or a custom function) to
 // [NewImportSet] to control aliasing.
 func DefaultAlias(path string) string {
+	// Trailing separators are trimmed before the scan because the
+	// last segment of "example.com/foo/" is the empty string, and an
+	// empty alias is [ImportSet.Imp]'s sentinel for "this is the
+	// file's own package, emit the bare name". Deriving it for a
+	// genuinely foreign package renders that package's symbols
+	// unqualified — a miscompile, or a silent bind to whatever else
+	// is in scope. Go source never yields such a path, but
+	// [emit.External] takes one from plugin code, which is precisely
+	// where a joined or configured path picks up a trailing slash.
+	path = strings.TrimRight(path, "/")
 	if i := strings.LastIndexByte(path, '/'); i >= 0 {
 		return path[i+1:]
 	}
@@ -54,6 +64,7 @@ type ImportSet struct {
 	aliases  map[string]string // path -> assigned alias
 	explicit map[string]string // path -> caller-supplied override
 	used     map[string]string // alias -> path it resolved to
+	lastSfx  map[string]int    // derived base -> highest suffix handed out
 	self     string            // import path of the rendered file's own package
 }
 
@@ -68,6 +79,7 @@ func NewImportSet(derive AliasFunc) *ImportSet {
 		aliases:  map[string]string{},
 		explicit: map[string]string{},
 		used:     map[string]string{},
+		lastSfx:  map[string]int{},
 	}
 }
 
@@ -140,14 +152,53 @@ func (i *ImportSet) Imp(path string) (string, error) {
 	if desired == "" {
 		desired = i.derive(path)
 	}
+	// The empty alias is reserved for same-package elision, handled
+	// above. Reaching it here means the path carries no derivable
+	// identifier — "/" and "///" after trimming, or an injected
+	// derive func returning "" — and handing it back would tell the
+	// caller to emit the symbol unqualified against a package it
+	// does not live in. The invariant belongs here rather than in
+	// [DefaultAlias] so a caller-supplied derive cannot bypass it.
+	if desired == "" {
+		return "", fmt.Errorf("%w: %q has no derivable alias", ErrEmptyPath, path)
+	}
 
+	// Collision resolution resumes from the highest suffix already
+	// handed out for this base rather than rescanning from 2.
+	//
+	// An alias is never released once taken, so the prefix below the
+	// remembered mark is densely occupied and probing it can only
+	// ever fail. Rescanning it made registration quadratic in the
+	// number of paths sharing a last segment — 1000 such imports
+	// cost 31ms and 1.27M allocations, almost all of them Sprintf
+	// results discarded on the next iteration. A centralised-layout
+	// run collecting many `<x>/models` packages into one file is
+	// exactly that shape.
+	//
+	// The loop still verifies each candidate against `used`, so an
+	// explicit Alias registration that claimed a suffixed name out
+	// of band is still skipped rather than double-issued; the mark
+	// is an optimisation of where to start, never a substitute for
+	// the check.
 	alias := desired
-	for n := 2; ; n++ {
+	n := i.lastSfx[desired]
+	if n != 0 {
+		alias = fmt.Sprintf("%s%d", desired, n)
+	}
+	for {
 		owner, taken := i.used[alias]
 		if !taken || owner == path {
 			break
 		}
+		if n == 0 {
+			n = 2
+		} else {
+			n++
+		}
 		alias = fmt.Sprintf("%s%d", desired, n)
+	}
+	if n != 0 {
+		i.lastSfx[desired] = n
 	}
 
 	i.order = append(i.order, path)

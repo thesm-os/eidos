@@ -529,6 +529,243 @@ func TestRoutingFlags_Validate(t *testing.T) {
 	})
 }
 
+// FuzzRoutingFlags_OutputSpec drives the hand-rolled `-o`
+// output-spec parser over arbitrary flag values.
+//
+// The parser is the CLI's only bespoke grammar: three shapes
+// (`<path>`, `<plugin>=<path>`, `<plugin>:<tag>=<path>`) share one
+// string, and the `:` that separates plugin from tag is legal
+// inside a path. Its dangerous failure is therefore a silent
+// misroute — a value the user wrote to pin one plugin's output
+// landing on a different key, or on the unscoped global pin — not
+// a crash. The properties asserted here are about where the value
+// ends up, so a parser that returns cleanly but routes wrongly
+// still fails.
+//
+// Two independent properties run per input:
+//
+//   - Differential. [refParseOutputSpec] below re-derives the
+//     documented grammar with index arithmetic rather than
+//     [strings.Cut]; its accept/reject verdict must match
+//     Validate's on every input.
+//   - Round-trip through the pipeline. For an accepted value the
+//     path is read back out of the built [pipeline.Pipeline] and
+//     recomposed with its separators; the result must equal the
+//     original flag text. That catches a parser that accepts the
+//     value but truncates the path — the failure a crash-only
+//     target misses entirely.
+//
+// Rejected values must leave the pipeline observationally
+// identical to one that never saw the flag: Apply skips malformed
+// entries, and a half-applied spec would route a decl to a
+// filename the user never asked for.
+//
+// Target is pinned so the "unscoped -o needs a scope" rule never
+// fires and the only rejection the target can observe is the spec
+// parser's own.
+//
+// The seeds cover every branch of the grammar plus the boundaries
+// around each separator: absent, leading, trailing, repeated, and
+// present-in-the-path, along with the empty input and invalid
+// UTF-8.
+func FuzzRoutingFlags_OutputSpec(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		"gen.go",
+		"internal/gen/article_gen.go",
+		"mock=mocks/handler.go",
+		"mock:test=tests/handler.go",
+		"mock:test=tests/handler.go:1",
+		"mock=C:\\out\\gen.go",
+		"C:/out/gen.go",
+		"=path.go",
+		"plugin=",
+		"plugin:=p.go",
+		":tag=p.go",
+		"=",
+		":",
+		"::",
+		":=",
+		"a=b=c",
+		"a:b:c=d",
+		"a=b:c=d",
+		"::::::::=x",
+		"\xff=\xfe",
+		"p\x00lugin=path\x00.go",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, value string) {
+		flags := cli.RoutingFlags{Target: "T", Output: []string{value}}
+		want, wantOK := refParseOutputSpec(value)
+
+		warnings, err := flags.Validate(cli.DefaultConfig())
+		if (err == nil) != wantOK {
+			t.Fatalf("Validate(%q): err = %v, reference accepts = %v", value, err, wantOK)
+		}
+		// -output-dir is the only warning source and it is unset, so
+		// a warning here means Validate grew a path -o can reach.
+		if len(warnings) != 0 {
+			t.Fatalf("Validate(%q) returned warnings %v; none are reachable from -o alone", value, warnings)
+		}
+
+		p := applyRoutingFlags(t, flags)
+
+		if !wantOK {
+			// Nothing partial: a rejected value must not have
+			// written the unscoped pin, nor any (plugin, tag) key a
+			// half-completed parse could plausibly have derived
+			// from the text.
+			if got := p.OutputFilename(); got != "" {
+				t.Fatalf("rejected %q still pinned OutputFilename = %q", value, got)
+			}
+			for _, key := range routingProbeKeys(value) {
+				if got, ok := p.PluginOutputFilename(key[0], key[1]); ok {
+					t.Fatalf("rejected %q still pinned (%q, %q) = %q", value, key[0], key[1], got)
+				}
+			}
+			return
+		}
+
+		if want.plugin == "" {
+			// Unscoped: the whole value is the path, and no
+			// per-plugin key may have been written.
+			if got := p.OutputFilename(); got != value {
+				t.Fatalf("unscoped %q pinned OutputFilename = %q", value, got)
+			}
+			if got, ok := p.PluginOutputFilename("", ""); ok {
+				t.Fatalf("unscoped %q also pinned the empty plugin key = %q", value, got)
+			}
+			return
+		}
+
+		// Scoped: the unscoped pin stays clear and the path routes
+		// to exactly the key the grammar names.
+		if got := p.OutputFilename(); got != "" {
+			t.Fatalf("scoped %q also pinned the unscoped OutputFilename = %q", value, got)
+		}
+		got, ok := p.PluginOutputFilename(want.plugin, want.tag)
+		if !ok {
+			t.Fatalf("scoped %q left (%q, %q) unpinned", value, want.plugin, want.tag)
+		}
+		// Recomposition reads the path back out of the pipeline
+		// rather than from the reference, so a production parser
+		// that mangles the path fails here even though the
+		// reference agreed on accept/reject.
+		recomposed := want.plugin + "=" + got
+		if want.tag != "" {
+			recomposed = want.plugin + ":" + want.tag + "=" + got
+		}
+		if recomposed != value {
+			t.Fatalf("scoped %q recomposed to %q from (%q, %q, %q)",
+				value, recomposed, want.plugin, want.tag, got)
+		}
+	})
+}
+
+// outputSpecRef mirrors the CLI's unexported parsed `-o` shape for
+// the fuzz target's differential comparison. Kept structurally
+// separate from the production type so a field the parser stops
+// populating does not silently vanish from the reference too.
+type outputSpecRef struct {
+	plugin string
+	tag    string
+	path   string
+}
+
+// refParseOutputSpec is the deliberately naive re-derivation of the
+// documented `-o` grammar used by [FuzzRoutingFlags_OutputSpec].
+//
+// It locates both separators in a single forward byte scan rather
+// than by splitting twice with [strings.Cut], so it shares no code
+// path with the production parser: a bug in one is unlikely to be
+// reproduced verbatim in the other, which is the entire value of a
+// differential oracle.
+//
+// Grammar, first-separator-wins at both levels:
+//
+//	<path>                  — no `=` anywhere
+//	<plugin>=<path>         — key has no `:`
+//	<plugin>:<tag>=<path>   — key splits at its first `:`
+//
+// Rejects the empty value, an empty key, an empty path, an empty
+// plugin, and an empty tag. Everything after the first `=` is the
+// path verbatim, colons included — which is why the scan stops at
+// the `=` and a colon found after it is never recorded.
+func refParseOutputSpec(value string) (outputSpecRef, bool) {
+	if value == "" {
+		return outputSpecRef{}, false
+	}
+	eq, colon := -1, -1
+	for i := range len(value) {
+		if value[i] == ':' && colon < 0 {
+			colon = i
+		}
+		if value[i] == '=' {
+			eq = i
+			break
+		}
+	}
+	if eq < 0 {
+		return outputSpecRef{path: value}, true
+	}
+	key, path := value[:eq], value[eq+1:]
+	if key == "" || path == "" {
+		return outputSpecRef{}, false
+	}
+	if colon < 0 {
+		return outputSpecRef{plugin: key, path: path}, true
+	}
+	plugin, tag := value[:colon], value[colon+1:eq]
+	if plugin == "" || tag == "" {
+		return outputSpecRef{}, false
+	}
+	return outputSpecRef{plugin: plugin, tag: tag, path: path}, true
+}
+
+// routingProbeKeys enumerates the (plugin, tag) keys a partially
+// applied parse of value could plausibly have written, so
+// [FuzzRoutingFlags_OutputSpec] can assert a rejected value left
+// none of them behind.
+//
+// [pipeline.Pipeline] exposes no way to enumerate its override map,
+// so the check is by probe. The candidates are every prefix the
+// grammar's two split points can produce, plus the whole value and
+// the empty key — the shapes an early return that forgot to
+// discard its work would leave.
+func routingProbeKeys(value string) [][2]string {
+	keys := [][2]string{{"", ""}, {value, ""}}
+	key, _, hasEq := strings.Cut(value, "=")
+	if !hasEq {
+		return keys
+	}
+	keys = append(keys, [2]string{key, ""})
+	if plugin, tag, hasColon := strings.Cut(key, ":"); hasColon {
+		keys = append(keys, [2]string{plugin, tag}, [2]string{plugin, ""})
+	}
+	return keys
+}
+
+// applyRoutingFlags threads flags onto a minimally-wired Builder
+// and returns the built Pipeline. The stub frontend and backend
+// exist only to satisfy Build's completeness check — routing
+// overrides are recorded on the Builder regardless of which plugins
+// are registered, which is what lets the fuzz target assert on
+// arbitrary plugin names.
+func applyRoutingFlags(t *testing.T, flags cli.RoutingFlags) *pipeline.Pipeline {
+	t.Helper()
+	b := pipeline.New().
+		WithFrontend(stubFrontend{name: "fe"}).
+		WithBackend(stubBackend{name: "be", lang: "stub"})
+	flags.Apply(b)
+	p, err := b.Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	return p
+}
+
 // errsAs is the standard errors.As entry typed for the test
 // assertions — keeps each Validate-error subtest terse without
 // repeating the import + var declaration at every site.

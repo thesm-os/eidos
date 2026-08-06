@@ -6,11 +6,29 @@ package writer_test
 import (
 	"errors"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
 	"go.thesmos.sh/eidos/writer"
 )
+
+// fuzzMaxImportPaths caps how many paths a single fuzz input
+// registers. The suffix-escalation loop in [writer.ImportSet.Imp] is
+// quadratic in the number of colliding paths, so an unbounded blob of
+// newlines would present to the fuzzer as a hang — a timeout report
+// that buries whatever property violation the same corpus entry might
+// actually have found. Sixty-four is well past the largest import
+// block the backend emits in practice and still finishes instantly.
+const fuzzMaxImportPaths = 64
+
+// impSink defends the benchmark loop bodies from dead-code
+// elimination. Without a store to a package-level variable the
+// compiler is free to drop a call whose result is discarded, and the
+// benchmark would then report the cost of an empty loop as if it were
+// the cost of registering an import.
+var impSink string
 
 func TestDefaultAlias(t *testing.T) {
 	t.Parallel()
@@ -22,7 +40,9 @@ func TestDefaultAlias(t *testing.T) {
 	}{
 		{"single-segment path", "context", "context"},
 		{"multi-segment path", "github.com/foo/bar", "bar"},
-		{"trailing slash returns empty", "github.com/foo/", ""},
+		{"trailing separator does not swallow the last segment", "github.com/foo/", "foo"},
+		{"repeated trailing separators still yield the last segment", "github.com/foo///", "foo"},
+		{"a path of only separators has no alias", "///", ""},
 		{"empty path returns empty", "", ""},
 	}
 
@@ -286,4 +306,328 @@ func TestImportSet_ConcurrentImp(t *testing.T) {
 			t.Fatalf("16 concurrent Imp(\"context\") should record one path; got Len=%d", is.Len())
 		}
 	})
+}
+
+// FuzzImportSet_Imp drives alias derivation and the collision-suffix
+// loop over a *sequence* of import paths.
+//
+// Imp is the one place in the writer where a plugin-supplied string
+// becomes an identifier in generated source, and its dangerous
+// failure is silent: a wrong alias still renders, still formats, and
+// only surfaces at the compiler in the consumer's repository. So the
+// properties asserted here are the four that make an import block a
+// legal declaration set, not the absence of a panic.
+//
+//   - Distinct paths never share an alias. Two imports under one
+//     identifier is a redeclaration error in the generated file.
+//   - One path resolves to one alias for the life of the set. An
+//     alias that drifted mid-file would qualify half the references
+//     with a name the import block never declares.
+//   - Only the self path resolves to the empty alias. The Go backend
+//     reads "" as same-package elision and drops the qualifier
+//     (backend/golang/render_type.go), so an empty alias handed back
+//     for a foreign path emits a bare, undefined symbol.
+//   - The self path always elides and is never recorded as an import.
+//
+// Plus determinism, which is a repo-wide contract rather than a
+// property of this type alone: replaying the same sequence against a
+// fresh set must reproduce the same import block entry for entry, or
+// regenerating an untouched project churns its output.
+//
+// Paths arrive newline-separated in one argument because collisions
+// exist only *between* paths — a single-path target could never reach
+// the suffix loop at all. Self path and self short name are separate
+// arguments so the fuzzer can aim them at a path in the sequence
+// (elision) or at a derived alias (reservation) independently.
+func FuzzImportSet_Imp(f *testing.F) {
+	seeds := [][3]string{
+		// The empty path, which Imp must reject rather than alias.
+		{"", "", ""},
+		// One stdlib-shaped path taking the plain derived branch.
+		{"context", "", ""},
+		// A repeat, so the second call takes the cached branch.
+		{strings.Repeat("context\n", 2), "", ""},
+		// Three paths sharing a last segment: suffix escalation.
+		{"context\nfoo.com/x/context\nbar.com/y/context", "", ""},
+		// A derived name that collides with an already-issued suffix.
+		{"a.com/ctx\nb.com/ctx\nc.com/ctx2", "", ""},
+		// Self elision together with short-name reservation.
+		{"example.com/foo", "example.com/foo", "foo"},
+		// Reservation with no self path: nothing elides, "foo" is taken.
+		{"example.com/bar/foo", "", "foo"},
+		// Elision beside a genuine import from the same prefix.
+		{"example.com/foo\nexample.com/foo/bar", "example.com/foo", ""},
+		// Every element empty: the whole sequence must be rejected.
+		{"\n\n", "", ""},
+		// A trailing separator, which yields an empty tail element.
+		{"context\n", "", ""},
+		// Self appearing last rather than first in the sequence.
+		{"a\nb\nc\nd", "d", ""},
+		// A deeply nested path, exercising the last-segment scan.
+		{"a/b/c/d/e/f/g/h", "", ""},
+		// Invalid UTF-8 in a path: aliases are byte strings, not text.
+		{"\xff\xfe/pkg", "", ""},
+		// Duplicates interleaved with collisions.
+		{strings.Repeat("x/ctx\n", 2) + strings.Repeat("y/ctx\n", 2) + "z/ctx", "", ""},
+		// Regression for a defect this target found: a path whose
+		// last segment was empty derived to the empty alias, which
+		// Imp returned as though the path were the file's own
+		// package — so a foreign package rendered unqualified. Two
+		// hand-written unit tests asserted that behaviour as
+		// intended before the fuzzer contradicted them.
+		{"example.com/foo/", "", ""},
+		// The minimised form of the same defect, where trimming
+		// leaves nothing at all and Imp must reject rather than
+		// alias.
+		{"/", "", ""},
+	}
+	for _, seed := range seeds {
+		f.Add(seed[0], seed[1], seed[2])
+	}
+
+	f.Fuzz(func(t *testing.T, blob, selfPath, selfName string) {
+		paths := strings.Split(blob, "\n")
+		if len(paths) > fuzzMaxImportPaths {
+			paths = paths[:fuzzMaxImportPaths]
+		}
+
+		first := registerSequence(t, paths, selfPath, selfName)
+		second := registerSequence(t, paths, selfPath, selfName)
+		if !slices.Equal(first, second) {
+			t.Fatalf("replaying the same sequence produced a different import block:\n first: %+v\nsecond: %+v",
+				first, second)
+		}
+	})
+}
+
+// registerSequence registers paths against a fresh [writer.ImportSet]
+// and asserts the invariants that make the resulting import block a
+// legal declaration set. It returns the recorded imports so the caller
+// can compare two independent replays and catch any dependence on map
+// iteration order.
+//
+// Every failure message names the input that produced it: a fuzz
+// corpus entry is only useful if the report identifies which path in
+// the sequence broke the invariant.
+func registerSequence(t *testing.T, paths []string, selfPath, selfName string) []writer.Import {
+	t.Helper()
+
+	is := writer.NewImportSet(nil)
+	is.SetSelf(selfPath, selfName)
+
+	assigned := make(map[string]string, len(paths)) // path -> alias
+	owner := make(map[string]string, len(paths))    // alias -> path
+	order := make([]string, 0, len(paths))          // first-registration order
+
+	for _, p := range paths {
+		alias, err := is.Imp(p)
+
+		// Self-path elision is decided before aliasability, because
+		// the two rules overlap and this one wins. SetSelf declares p
+		// to be the rendered file's own package, so Imp returns the
+		// empty alias by contract whether or not p would otherwise
+		// carry a derivable identifier — SetSelf("/") being the case
+		// the fuzzer produced. Testing aliasability first reported
+		// that legitimate elision as a missing rejection.
+		if selfPath != "" && p == selfPath {
+			if err != nil {
+				t.Fatalf("Imp(%q) rejected the self path: %v", p, err)
+			}
+			if alias != "" {
+				t.Fatalf("Imp(%q) = %q for the self path; want the empty alias (same-package elision)", p, alias)
+			}
+			continue
+		}
+
+		// A path that is nothing but separators carries no derivable
+		// identifier, and Imp rejects it rather than returning the
+		// empty alias — which the caller cannot distinguish from
+		// same-package elision. "" and "///" are one case; only the
+		// spelling differs. Keying the arm on that property rather
+		// than on p == "" is what lets the corpus entry for "/"
+		// assert the rejection instead of reporting it as a refusal
+		// of a legitimate path.
+		unaliasable := strings.Trim(p, "/") == ""
+		switch {
+		case unaliasable && !errors.Is(err, writer.ErrEmptyPath):
+			t.Fatalf("Imp(%q) returned alias %q, err %v; want ErrEmptyPath", p, alias, err)
+		case unaliasable:
+			continue
+		case err != nil:
+			t.Fatalf("Imp(%q) rejected a path with a derivable alias: %v", p, err)
+		}
+
+		// An empty alias for anything other than the self path is a
+		// miscompile: renderType treats "" as same-package elision and
+		// emits the bare symbol name for a foreign package.
+		if alias == "" {
+			t.Fatalf("Imp(%q) returned the empty alias for a path that is not self (self=%q); "+
+				"the Go backend reads \"\" as same-package elision and drops the qualifier, "+
+				"so the rendered file references an undefined bare symbol", p, selfPath)
+		}
+
+		// SetSelf reserves the rendered file's own package identifier.
+		// An import that took it would shadow the name the file
+		// declares, and every unqualified reference in the file would
+		// silently resolve to the imported package instead.
+		if selfName != "" && alias == selfName {
+			t.Fatalf("Imp(%q) = %q, the rendered file's own package name; the import shadows it", p, alias)
+		}
+
+		if prev, seen := assigned[p]; seen {
+			if prev != alias {
+				t.Fatalf("Imp(%q) drifted: first returned %q, later %q", p, prev, alias)
+			}
+			continue
+		}
+
+		if other, taken := owner[alias]; taken {
+			t.Fatalf("alias %q assigned to two distinct paths: %q and %q", alias, other, p)
+		}
+		assigned[p] = alias
+		owner[alias] = p
+		order = append(order, p)
+	}
+
+	// The recorded set must agree with what Imp handed back. A
+	// disagreement means the rendered import block declares different
+	// names than the body of the file uses.
+	imports := is.Imports()
+	if len(imports) != len(order) {
+		t.Fatalf("Imports() has %d entries, want %d (one per distinct non-self path)", len(imports), len(order))
+	}
+	if is.Len() != len(order) {
+		t.Fatalf("Len() = %d, want %d", is.Len(), len(order))
+	}
+	for k, imp := range imports {
+		if imp.Path != order[k] {
+			t.Fatalf("Imports()[%d].Path = %q, want %q (insertion order)", k, imp.Path, order[k])
+		}
+		if imp.Alias != assigned[imp.Path] {
+			t.Fatalf("Imports()[%d].Alias = %q, but Imp returned %q", k, imp.Alias, assigned[imp.Path])
+		}
+		if a, ok := is.AliasOf(imp.Path); !ok || a != imp.Alias {
+			t.Fatalf("AliasOf(%q) = %q, %v; want %q, true", imp.Path, a, ok, imp.Alias)
+		}
+	}
+	return imports
+}
+
+// BenchmarkImportSet_Imp measures import registration, the operation
+// the Go backend performs once per type reference in every rendered
+// file.
+//
+// Three shapes, because Imp has three cost regimes and only the last
+// can degrade:
+//
+//   - repeat lookups of an already-registered path: the branch a
+//     template hits for the second and every later reference to the
+//     same package. Allocation-free by construction, so the reported
+//     0 B/op is the assertion rather than an artifact of an
+//     eliminated loop body — the stored alias keeps the call live.
+//   - registering distinct paths: linear, one map insert each.
+//   - registering colliding last segments: every path derives to the
+//     same alias, so the suffix loop rescans the used table for each
+//     new registration and formats a fresh candidate name per probe.
+//     This is the only superlinear path in the type, which is why the
+//     scaling sizes run out to 1000.
+//
+// One op is one whole import block. The [writer.ImportSet] allocation
+// sits inside the timed region for the two scaling shapes because a
+// fresh set per iteration is what keeps the measurement on the
+// registration path instead of the cached path; the path slices
+// themselves are built once, above the loop.
+func BenchmarkImportSet_Imp(b *testing.B) {
+	b.ReportAllocs()
+
+	sizes := []int{1, 10, 100, 1000}
+
+	b.Run("repeat lookups of a registered path", func(b *testing.B) {
+		b.ReportAllocs()
+		is := writer.NewImportSet(nil)
+		if _, err := is.Imp("context"); err != nil {
+			b.Fatalf("Imp: %v", err)
+		}
+		for b.Loop() {
+			alias, err := is.Imp("context")
+			if err != nil {
+				b.Fatalf("Imp: %v", err)
+			}
+			impSink = alias
+		}
+	})
+
+	b.Run("registering distinct paths", func(b *testing.B) {
+		for _, n := range sizes {
+			paths := benchDistinctPaths(n)
+			b.Run(strconv.Itoa(n), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					impSink = registerAll(paths)
+				}
+				if impSink == "" {
+					b.Fatal("registerAll reported a rejected path; the benchmark measured an error path")
+				}
+			})
+		}
+	})
+
+	b.Run("registering colliding last segments", func(b *testing.B) {
+		for _, n := range sizes {
+			paths := benchCollidingPaths(n)
+			b.Run(strconv.Itoa(n), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					impSink = registerAll(paths)
+				}
+				if impSink == "" {
+					b.Fatal("registerAll reported a rejected path; the benchmark measured an error path")
+				}
+			})
+		}
+	})
+}
+
+// registerAll builds one complete import block from paths and returns
+// the last alias issued.
+//
+// It deliberately takes no *testing.B: a b.Helper() call inside the
+// timed region costs a locked map insert per iteration and would
+// swamp the very cost being measured. A rejected path collapses the
+// return to the empty string instead, which the caller checks once
+// after the loop.
+func registerAll(paths []string) string {
+	is := writer.NewImportSet(nil)
+	last := ""
+	for _, p := range paths {
+		alias, err := is.Imp(p)
+		if err != nil {
+			return ""
+		}
+		last = alias
+	}
+	return last
+}
+
+// benchDistinctPaths returns n import paths whose derived aliases are
+// all distinct, so registration cost is the map insert alone and the
+// suffix loop never runs.
+func benchDistinctPaths(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "example.com/bench/pkg" + strconv.Itoa(i)
+	}
+	return out
+}
+
+// benchCollidingPaths returns n distinct import paths that all derive
+// to the same alias, forcing Imp's suffix loop to escalate through
+// every alias already issued. This is the shape that turns
+// registration quadratic, and the reason the scaling case exists.
+func benchCollidingPaths(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "example.com/bench/p" + strconv.Itoa(i) + "/ctx"
+	}
+	return out
 }

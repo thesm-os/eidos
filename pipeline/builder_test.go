@@ -10,6 +10,7 @@ import (
 	"go.thesmos.sh/eidos/cache"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/manifest"
 	"go.thesmos.sh/eidos/pipeline"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/sink"
@@ -540,6 +541,214 @@ func TestBuilder_WithRoutingOverrides(t *testing.T) {
 			b := pipeline.New()
 			if got := tc.set(b); got != b {
 				t.Fatalf("%s should return the receiver", tc.name)
+			}
+		})
+	}
+}
+
+// TestBuilder_WithPluginTagOutput pins the per-(plugin, tag) routing
+// block — `plugins[*].output.tags.<tag>.*` in `.eidos.yaml`, layer 3
+// of the six-layer precedence merge, and its most specific
+// refinement. Nothing in the workspace called
+// [pipeline.Builder.WithPluginTagOutput] from a test, so
+// `applyPerTagOverride` never got past its "no override registered"
+// early return and every branch inside it survived mutation testing:
+//
+//   - negating the lazy map init in WithPluginTagOutput assigns into
+//     a nil map, so any `.eidos.yaml` carrying a tags block crashes
+//     the CLI outright;
+//   - negating an `over.<field> != ""` guard drops the configured
+//     value AND writes the empty string over the inherited one — an
+//     emptied Layout reaches composeTarget's unreachable-default arm
+//     and drops every decl for the tag;
+//   - negating a `b.output<Field> != ""` guard inverts the documented
+//     "CLI overrides win over per-tag" ordering, so a `-p` / `-layout`
+//     / output-dir flag loses to the config file it is meant to
+//     override.
+//
+// Each case therefore asserts the whole resolved [pipeline.LayoutPolicy],
+// value and attribution together. Asserting the value alone would let
+// the ordering mutations live on: they resolve a plausible value while
+// stamping the wrong [manifest.Layer] into the manifest's
+// `resolved_from` block, which is the only record of why a file
+// landed where it did.
+func TestBuilder_WithPluginTagOutput(t *testing.T) {
+	t.Parallel()
+
+	const (
+		plug = "enumgen"
+		tag  = "test"
+	)
+
+	policyFor := func(t *testing.T, configure func(*pipeline.Builder) *pipeline.Builder) pipeline.LayoutPolicy {
+		t.Helper()
+		p, err := configure(pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithGenerator(&stubGen{name: plug}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory())).
+			Build()
+		assertNoError(t, err)
+		return p.LayoutPolicyForTag(plug, tag)
+	}
+
+	cases := []struct {
+		name      string
+		configure func(*pipeline.Builder) *pipeline.Builder
+		want      pipeline.LayoutPolicy
+	}{
+		{
+			name: "the first tag block on a builder that has none is accepted",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.WithPluginTagOutput(plug, tag, "", "enums", "")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutAlongsideSource,
+				LayoutFrom:  manifest.LayerFramework,
+				Package:     "enums",
+				PackageFrom: manifest.LayerPerPlugin,
+				DirFrom:     manifest.LayerFramework,
+			},
+		},
+		{
+			name: "a tag layout overrides the layout the plugin inherited",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithProjectOutput(pipeline.LayoutAlongsideSource, "", "").
+					WithPluginTagOutput(plug, tag, pipeline.LayoutCentralised, "", "")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutCentralised,
+				LayoutFrom:  manifest.LayerPerPlugin,
+				PackageFrom: manifest.LayerFramework,
+				DirFrom:     manifest.LayerFramework,
+			},
+		},
+		{
+			name: "a tag block that names no layout leaves the inherited layout untouched",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithProjectOutput(pipeline.LayoutCentralised, "", "").
+					WithPluginTagOutput(plug, tag, "", "enums", "")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutCentralised,
+				LayoutFrom:  manifest.LayerProject,
+				Package:     "enums",
+				PackageFrom: manifest.LayerPerPlugin,
+				DirFrom:     manifest.LayerFramework,
+			},
+		},
+		{
+			name: "a tag package overrides the package the plugin inherited",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithPluginOutput(plug, "", "gen", "").
+					WithPluginTagOutput(plug, tag, "", "enums", "")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutAlongsideSource,
+				LayoutFrom:  manifest.LayerFramework,
+				Package:     "enums",
+				PackageFrom: manifest.LayerPerPlugin,
+				DirFrom:     manifest.LayerFramework,
+			},
+		},
+		{
+			name: "a tag block that names no package leaves the inherited package untouched",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithPluginOutput(plug, "", "gen", "").
+					WithPluginTagOutput(plug, tag, pipeline.LayoutCentralised, "", "")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutCentralised,
+				LayoutFrom:  manifest.LayerPerPlugin,
+				Package:     "gen",
+				PackageFrom: manifest.LayerPerPlugin,
+				DirFrom:     manifest.LayerFramework,
+			},
+		},
+		{
+			name: "a tag dir overrides the dir the plugin inherited",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithPluginOutput(plug, "", "", "internal/gen").
+					WithPluginTagOutput(plug, tag, "", "", "internal/enums")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutAlongsideSource,
+				LayoutFrom:  manifest.LayerFramework,
+				PackageFrom: manifest.LayerFramework,
+				Dir:         "internal/enums",
+				DirFrom:     manifest.LayerPerPlugin,
+			},
+		},
+		{
+			name: "a tag block that names no dir leaves the inherited dir untouched",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithPluginOutput(plug, "", "", "internal/gen").
+					WithPluginTagOutput(plug, tag, pipeline.LayoutCentralised, "", "")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutCentralised,
+				LayoutFrom:  manifest.LayerPerPlugin,
+				PackageFrom: manifest.LayerFramework,
+				Dir:         "internal/gen",
+				DirFrom:     manifest.LayerPerPlugin,
+			},
+		},
+		{
+			name: "a layout on the command line beats the tag block",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithPluginTagOutput(plug, tag, pipeline.LayoutCentralised, "", "").
+					WithOutputLayout(pipeline.LayoutAlongsideSource)
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutAlongsideSource,
+				LayoutFrom:  manifest.LayerCLI,
+				PackageFrom: manifest.LayerFramework,
+				DirFrom:     manifest.LayerFramework,
+			},
+		},
+		{
+			name: "a package on the command line beats the tag block",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithPluginTagOutput(plug, tag, "", "enums", "").
+					WithOutputPackage("cli-pkg")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutAlongsideSource,
+				LayoutFrom:  manifest.LayerFramework,
+				Package:     "cli-pkg",
+				PackageFrom: manifest.LayerCLI,
+				DirFrom:     manifest.LayerFramework,
+			},
+		},
+		{
+			name: "a dir on the command line beats the tag block",
+			configure: func(b *pipeline.Builder) *pipeline.Builder {
+				return b.
+					WithPluginTagOutput(plug, tag, "", "", "internal/enums").
+					WithOutputDir("internal/cli")
+			},
+			want: pipeline.LayoutPolicy{
+				Layout:      pipeline.LayoutAlongsideSource,
+				LayoutFrom:  manifest.LayerFramework,
+				PackageFrom: manifest.LayerFramework,
+				Dir:         "internal/cli",
+				DirFrom:     manifest.LayerCLI,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := policyFor(t, tc.configure); got != tc.want {
+				t.Fatalf("LayoutPolicyForTag(%q, %q) = %+v, want %+v", plug, tag, got, tc.want)
 			}
 		})
 	}

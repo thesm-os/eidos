@@ -79,6 +79,37 @@ func captureFatal(fn func()) (called bool) {
 	return false
 }
 
+// exampleTB adapts the package's [testing.TB]-driven harness to an
+// [Example] function, which the testing package gives no TB of its
+// own.
+//
+// Failures print to stdout rather than being recorded, and that is
+// the point: an example is verified by its `// Output:` block, so a
+// harness regression that would otherwise be swallowed shows up as
+// extra lines the block does not expect and the example fails. A
+// silent fake would turn the example into a compile check only.
+//
+// Fatalf panics with [fatalSentinel] after printing. [Builder.Build]
+// and [Pipeline.Run] call it on unrecoverable failures and expect
+// not to return; continuing with a nil pipeline would report a
+// confusing nil dereference instead of the real cause.
+type exampleTB struct{ testing.TB }
+
+// Errorf prints the failure and lets the example continue, matching
+// the non-fatal semantics of the real [testing.TB].
+func (*exampleTB) Errorf(format string, args ...any) {
+	fmt.Printf("FAILED: "+format+"\n", args...)
+}
+
+// Fatalf prints the failure and unwinds; see [exampleTB].
+func (*exampleTB) Fatalf(format string, args ...any) {
+	fmt.Printf("FATAL: "+format+"\n", args...)
+	panic(fatalSentinel{}) //nolint:forbidigo // test-only harness adapter; mirrors testing.TB's abort semantics
+}
+
+// Helper is a no-op; exampleTB does not adjust file:line reporting.
+func (*exampleTB) Helper() {}
+
 // stubBackend is a backend whose Render writes a fixed set of
 // (target → body) entries to ctx.Sink. Tests use it to seed captured
 // output without going through a real templating backend.

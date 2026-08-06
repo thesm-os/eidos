@@ -74,6 +74,9 @@ func RunGeneratorSuite(t *testing.T, g plugin.Generator, fixtures []GeneratorFix
 			s2 := buildGeneratorStore(t, fx)
 			assertGenerateIsDeterministic(t, g, s1, s2)
 		})
+		t.Run("fixture="+fx.Name+"/NodesOnly declaration is truthful", func(t *testing.T) {
+			assertNodesOnlyIsTruthful(t, g, buildGeneratorStore(t, fx), buildGeneratorStore(t, fx))
+		})
 		t.Run("fixture="+fx.Name+"/emitted output tags are declared", func(t *testing.T) {
 			s := buildGeneratorStore(t, fx)
 			assertEmittedTagsAreDeclared(t, g, s)
@@ -441,4 +444,118 @@ func formatTarget(t emit.Target) string {
 		pkg = emptyTargetSentinel
 	}
 	return fmt.Sprintf("%s/%s;package=%s", dir, filename, pkg)
+}
+
+// emitReadPrefix is the tag prefix [store.Reader] stamps on every
+// emit-side query it records. Node-side reads use "node:".
+const emitReadPrefix = "emit:"
+
+// canaryEmitPackage is the import path of the package
+// [assertNodesOnlyIsTruthful] pre-seeds into the emit graph. Named so
+// a failure message can distinguish the suite's own decl from the
+// generator's output.
+const canaryEmitPackage = "example.com/plugintest/canary"
+
+// assertNodesOnlyIsTruthful fails a generator that declares
+// [plugin.NodesOnly] and then reads the emit graph anyway.
+//
+// The declaration is not documentation. The pipeline reads it at
+// Build and dispatches an entire generator bucket concurrently when
+// every generator in that bucket returns true. A generator that lies
+// races against whichever sibling is mutating the emit graph in
+// another goroutine, and the result is a corrupted emit graph on some
+// runs and not others — the worst shape of defect this framework can
+// produce, because the output still compiles.
+//
+// Two independent detections, because each covers the other's blind
+// spot:
+//
+//   - The ReadSet names the culprit. Every [store.Reader] accessor
+//     tags its reads, emit-side ones with [emitReadPrefix], so a
+//     violation reports exactly which accessor was called. It is
+//     blind to a generator that reaches around the Reader straight
+//     into ctx.Store.Emit(), which the store documents as legal.
+//
+//   - The differential catches that one. Generate runs against two
+//     equivalent stores differing only in whether the emit graph
+//     already holds a canary package. A NodesOnly generator's output
+//     cannot depend on emit state, so its contribution must be
+//     identical in both. This covers every read path at the cost of
+//     not naming which one.
+func assertNodesOnlyIsTruthful(tb testing.TB, g plugin.Generator, clean, seeded *store.Store) {
+	tb.Helper()
+
+	no, ok := any(g).(plugin.NodesOnly)
+	if !ok || !no.NodesOnly() {
+		return // declaring nothing, or declaring false, is always honest
+	}
+
+	reader := store.NewReader(clean)
+	if err := runGenerateWithReader(g, clean, reader); err != nil {
+		return // panics and errors are the business of the other checks
+	}
+	for _, key := range reader.ReadSet().Keys() {
+		if strings.HasPrefix(key, emitReadPrefix) {
+			tb.Errorf("NodesOnly reports true but Generate read %q; a NodesOnly generator may "+
+				"not read the emit graph, because the pipeline dispatches its whole bucket "+
+				"concurrently on the strength of that declaration", key)
+		}
+	}
+
+	seedCanaryEmit(tb, seeded)
+	baseline := emitProjection(seeded)
+	if err := runGenerateRecovering(g, seeded); err != nil {
+		return
+	}
+	contributed := withoutEntries(emitProjection(seeded), baseline)
+
+	if want := emitProjection(clean); !slices.Equal(contributed, want) {
+		tb.Errorf("NodesOnly reports true but Generate produced different output when the emit "+
+			"graph was pre-populated, so it depends on emit state it declared it would not "+
+			"read.\n with a clean emit graph: %v\n with a pre-seeded one:   %v", want, contributed)
+	}
+}
+
+// seedCanaryEmit places one package into the emit graph so a
+// generator that reads emit state observes something to react to.
+func seedCanaryEmit(tb testing.TB, s *store.Store) {
+	tb.Helper()
+	pkg := &emit.Package{Name: "canary", Path: canaryEmitPackage}
+	pkg.Structs = []*emit.Struct{{Name: "Canary", Package: canaryEmitPackage}}
+	if err := s.Emit().AddPackage(pkg); err != nil {
+		tb.Fatalf("seeding the canary emit package failed: %v", err)
+	}
+}
+
+// withoutEntries returns the entries of all that do not appear in
+// remove. Both are the sorted output of [emitProjection], so the
+// result is the generator's own contribution.
+func withoutEntries(all, remove []string) []string {
+	drop := make(map[string]struct{}, len(remove))
+	for _, e := range remove {
+		drop[e] = struct{}{}
+	}
+	out := make([]string, 0, len(all))
+	for _, e := range all {
+		if _, skip := drop[e]; !skip {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// runGenerateWithReader is [runGenerateRecovering] with a
+// caller-supplied [store.Reader], so a check can inspect what the
+// generator read.
+func runGenerateWithReader(g plugin.Generator, s *store.Store, r *store.Reader) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("recovered panic: %v", rec)
+		}
+	}()
+	ctx := &plugin.GeneratorContext{Store: s, Reader: r, Diag: diag.New()}
+	if gerr := g.Generate(ctx); gerr != nil {
+		return fmt.Errorf("generate returned error: %w", gerr)
+	}
+	return nil
 }

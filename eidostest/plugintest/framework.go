@@ -4,8 +4,12 @@
 package plugintest
 
 import (
+	"fmt"
+	"io/fs"
 	"maps"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"text/template"
 
@@ -37,39 +41,11 @@ import (
 // chasing one cascade at a time.
 func RunSuite(t *testing.T, p plugin.Plugin) {
 	t.Helper()
-	t.Run("Name returns a non-empty, stable identifier", func(t *testing.T) {
-		assertStableName(t, p)
-	})
-	t.Run("implements at least one of the documented role interfaces", func(t *testing.T) {
-		assertImplementsARole(t, p)
-	})
-	t.Run("CapabilityProvider is implemented in full or not at all", func(t *testing.T) {
-		assertCapabilityProviderIsComplete(t, p)
-	})
-	t.Run("CapabilityProvider returns deterministic Provides + Requires", func(t *testing.T) {
-		assertCapabilityProviderStability(t, p)
-	})
-	t.Run("DirectiveProvider schemas declare unique non-empty names", func(t *testing.T) {
-		assertDirectiveSchemaUniqueness(t, p)
-	})
-	t.Run("Versioned reports a stable version string", func(t *testing.T) {
-		assertVersionedStability(t, p)
-	})
-	t.Run("EmitVersioned declares stable, non-empty majors", func(t *testing.T) {
-		assertEmitVersionedStability(t, p)
-	})
-	t.Run("NodesOnly returns a stable declaration", func(t *testing.T) {
-		assertNodesOnlyStability(t, p)
-	})
-	t.Run("FilenameProvider returns stable Outputs per language", func(t *testing.T) {
-		assertFilenameProviderStability(t, p)
-	})
-	t.Run("FilenameProvider returns a well-formed Outputs slice", func(t *testing.T) {
-		assertOutputsShape(t, p)
-	})
-	t.Run("TemplateProvider returns stable, well-formed template contributions", func(t *testing.T) {
-		assertTemplateProviderStability(t, p)
-	})
+	for _, c := range frameworkChecks() {
+		t.Run(c.name, func(t *testing.T) {
+			c.fn(t, p)
+		})
+	}
 }
 
 // probeLanguages are the language identifiers the framework suite
@@ -77,7 +53,78 @@ func RunSuite(t *testing.T, p plugin.Plugin) {
 // language in tree; the second entry is deliberately a language no
 // backend claims, so a plugin's negative path ("I contribute
 // nothing here") is exercised rather than assumed.
-var probeLanguages = []string{"golang", "no-such-language"}
+var probeLanguages = []string{ConformanceLanguage, "no-such-language"}
+
+// check pairs one framework contract with the assertion that enforces
+// it and the [Violation] whose fixture must defeat that assertion.
+//
+// RunSuite walks this table rather than listing t.Run calls inline so
+// the set of checks is enumerable. That is what lets the package's
+// meta-tests assert their own completeness: a check added without a
+// fixture that defeats it, or a fixture that no longer defeats the
+// check it names, fails the build on the commit that introduces the
+// gap rather than sitting green.
+//
+// Consequence worth stating: the names below are a contract, not
+// cosmetics. They appear in adopters' test output and the meta-tests
+// key on the pairing, so renaming one is a visible change.
+type check struct {
+	name      string
+	fn        func(testing.TB, plugin.Plugin)
+	violation Violation
+}
+
+// frameworkChecks returns every universal contract [RunSuite] runs,
+// in execution order.
+func frameworkChecks() []check {
+	return []check{
+		{"Name returns a non-empty, stable identifier", assertStableName, ViolationUnstableName},
+		{"implements at least one of the documented role interfaces", assertImplementsARole, ViolationNoRole},
+		{
+			"CapabilityProvider is implemented in full or not at all",
+			assertCapabilityProviderIsComplete,
+			ViolationPartialCapability,
+		},
+		{
+			"CapabilityProvider returns deterministic Provides + Requires",
+			assertCapabilityProviderStability,
+			ViolationUnstableProvides,
+		},
+		{
+			"DirectiveProvider schemas declare unique non-empty names",
+			assertDirectiveSchemaUniqueness,
+			ViolationDuplicateDirective,
+		},
+		{"Versioned reports a stable version string", assertVersionedStability, ViolationUnstableVersion},
+		{
+			"EmitVersioned declares stable, non-empty majors",
+			assertEmitVersionedStability,
+			ViolationUnstableEmitVersions,
+		},
+		{"NodesOnly returns a stable declaration", assertNodesOnlyStability, ViolationUnstableNodesOnly},
+		{
+			"FilenameProvider returns stable Outputs per language",
+			assertFilenameProviderStability,
+			ViolationUnstableOutputs,
+		},
+		{"FilenameProvider returns a well-formed Outputs slice", assertOutputsShape, ViolationEmptySuffix},
+		{
+			"TemplateProvider returns stable, well-formed template contributions",
+			assertTemplateProviderStability,
+			ViolationFuncInBothMaps,
+		},
+		{
+			"TemplateProvider ships templates that parse and claim no reserved name",
+			assertTemplatesParse,
+			ViolationUnparsableTemplate,
+		},
+		{
+			"declaration accessors return slices the caller may keep",
+			assertAccessorsReturnFreshSlices,
+			ViolationSharedSlice,
+		},
+	}
+}
 
 // assertTemplateProviderStability pins the [plugin.TemplateProvider]
 // contract the backend relies on when it merges plugin templates
@@ -401,7 +448,7 @@ func assertFilenameProviderStability(tb testing.TB, p plugin.Plugin) {
 	if !ok {
 		return
 	}
-	for _, lang := range []string{"go", "rust", "ts", "py", ""} {
+	for _, lang := range probeLanguages {
 		first := fp.Outputs(lang)
 		second := fp.Outputs(lang)
 		if !slices.Equal(first, second) {
@@ -431,7 +478,7 @@ func assertOutputsShape(tb testing.TB, p plugin.Plugin) {
 	if !ok {
 		return
 	}
-	for _, lang := range []string{"go", "rust", "ts", "py", ""} {
+	for _, lang := range probeLanguages {
 		outputs := fp.Outputs(lang)
 		seenTags := make(map[string]int, len(outputs))
 		emptyTagCount := 0
@@ -467,4 +514,184 @@ func assertOutputsShape(tb testing.TB, p plugin.Plugin) {
 			)
 		}
 	}
+}
+
+// reservedTemplatePrefix mirrors the backend's reserved template-name
+// prefix. It is duplicated rather than imported because plugintest is
+// the language-neutral conformance suite: importing backend/golang to
+// read one constant would couple every plugin author's test run to a
+// specific backend. The cost of duplication is that a change to the
+// backend's reserved set must be mirrored here; the check below
+// exists precisely so that mismatch surfaces as a conformance failure
+// rather than a render-time surprise.
+const reservedTemplatePrefix = "fragment."
+
+// assertTemplatesParse pins that a [plugin.TemplateProvider] ships
+// templates the backend can actually parse, and that none of them
+// claims a reserved name.
+//
+// Without this, a malformed template surfaces from
+// mergePluginContributions midway through Render — after the frontend
+// has parsed the workspace and every generator has run. The author
+// learns about a typo at the most expensive possible moment, and the
+// diagnostic names the merged tree rather than their file. Parsing at
+// conformance time moves that to the commit that introduced it.
+//
+// Templates are parsed into a throwaway tree with no funcmap, so
+// unresolved function names are tolerated: the plugin's own
+// TemplateFuncs and the backend's reserved set are merged later, and
+// rejecting a template here for calling `imp` would be wrong.
+func assertTemplatesParse(tb testing.TB, p plugin.Plugin) {
+	tb.Helper()
+
+	tp, ok := any(p).(plugin.TemplateProvider)
+	if !ok {
+		return
+	}
+
+	for _, lang := range probeLanguages {
+		fsys, declared := tp.Templates(lang)
+		if !declared || fsys == nil {
+			continue
+		}
+
+		entries, err := fs.Glob(fsys, "*.tmpl")
+		if err != nil {
+			tb.Errorf("TemplateProvider.Templates(%q): walking the filesystem failed: %v", lang, err)
+			continue
+		}
+
+		for _, name := range entries {
+			body, err := fs.ReadFile(fsys, name)
+			if err != nil {
+				tb.Errorf("TemplateProvider.Templates(%q): reading %s failed: %v", lang, name, err)
+				continue
+			}
+
+			// Missing functions are resolved at render time against
+			// the merged funcmap, so they must not fail the parse.
+			// template.Option("missingkey=zero") is deliberately not
+			// set: it governs execution, not parsing.
+			parsed, err := parsePermissively(name, body)
+			if err != nil {
+				tb.Errorf("TemplateProvider.Templates(%q): %s does not parse: %v; "+
+					"the backend would surface this midway through Render instead",
+					lang, name, err)
+				continue
+			}
+
+			for _, defined := range parsed.Templates() {
+				if strings.HasPrefix(defined.Name(), reservedTemplatePrefix) {
+					tb.Errorf("TemplateProvider.Templates(%q): %s defines %q, which claims the "+
+						"reserved %q prefix the backend uses for its own fragments",
+						lang, name, defined.Name(), reservedTemplatePrefix)
+				}
+			}
+		}
+	}
+}
+
+// parsePermissively parses body with every function it references
+// stubbed out, so the check judges syntax rather than resolution.
+//
+// text/template rejects an unknown function at parse time, and a
+// plugin template legitimately calls the backend's reserved funcmap
+// (render, imp, slot, …) plus its own extensions and those of any
+// other plugin in the run — none of which exist here. Rather than
+// guessing which identifiers are calls, this asks the parser: each
+// failure names the function it wanted, that name is stubbed, and the
+// parse retries. A pattern-matching approach missed `typeArgs` in
+// `{{ $x := typeArgs . }}` position, which is the general problem
+// with deciding call position by regex.
+//
+// The iteration bound stops a pathological template from looping;
+// reaching it is reported as a parse failure rather than silently
+// accepted.
+func parsePermissively(name string, body []byte) (*template.Template, error) {
+	fm := template.FuncMap{}
+	stub := func(_ ...any) any { return nil }
+
+	for range maxStubbedTemplateFuncs {
+		parsed, err := template.New(name).Funcs(fm).Parse(string(body))
+		if err == nil {
+			return parsed, nil
+		}
+		m := undefinedFuncPattern.FindStringSubmatch(err.Error())
+		if m == nil {
+			// A genuine syntax error rather than an unresolved name.
+			// The stub count is worth carrying: it distinguishes "this
+			// template was malformed on sight" from "it parsed until a
+			// function was stubbed in", which is the difference between
+			// an author's typo and a bad interaction with the funcmap.
+			return nil, fmt.Errorf("after stubbing %d undefined function(s): %w", len(fm), err)
+		}
+		fm[m[1]] = stub
+	}
+	return nil, fmt.Errorf("template references more than %d undefined functions",
+		maxStubbedTemplateFuncs)
+}
+
+// maxStubbedTemplateFuncs bounds the stub-and-retry loop in
+// [parsePermissively].
+const maxStubbedTemplateFuncs = 128
+
+// undefinedFuncPattern extracts the function name from
+// text/template's parse error, which is the oracle for what the
+// template expects to be in scope at render time.
+var undefinedFuncPattern = regexp.MustCompile(`function "([^"]+)" not defined`)
+
+// assertAccessorsReturnFreshSlices pins that a plugin's declaration
+// accessors hand back a slice the caller may keep, not the plugin's
+// own state.
+//
+// The pipeline calls these repeatedly and stores what it gets:
+// Provides / Requires feed the capability topo-sort, Directives feed
+// the shared registry, Outputs feeds routing. A returned slice that
+// aliases the plugin's field means any consumer that sorts, filters
+// or appends in place silently rewrites the plugin's declaration for
+// every later caller — and the corruption surfaces as a routing or
+// ordering bug far from its cause.
+//
+// `docs/plugin/recipes.md` lists this among its anti-patterns.
+// Nothing enforced it until now.
+//
+// Aliasing is detected by backing-array identity rather than by
+// mutating and observing, so the check cannot itself corrupt a plugin
+// that does share state.
+func assertAccessorsReturnFreshSlices(tb testing.TB, p plugin.Plugin) {
+	tb.Helper()
+
+	if cp, ok := any(p).(plugin.CapabilityProvider); ok {
+		assertNotAliased(tb, "CapabilityProvider.Provides", cp.Provides(), cp.Provides())
+		assertNotAliased(tb, "CapabilityProvider.Requires", cp.Requires(), cp.Requires())
+	}
+	if dp, ok := any(p).(plugin.DirectiveProvider); ok {
+		assertNotAliased(tb, "DirectiveProvider.Directives", dp.Directives(), dp.Directives())
+	}
+	if fp, ok := any(p).(plugin.FilenameProvider); ok {
+		for _, lang := range probeLanguages {
+			assertNotAliased(tb,
+				fmt.Sprintf("FilenameProvider.Outputs(%q)", lang),
+				fp.Outputs(lang), fp.Outputs(lang))
+		}
+	}
+}
+
+// assertNotAliased fails when two independent calls to the same
+// accessor return slices over one backing array.
+//
+// Two calls returning the same array means the value is stored rather
+// than constructed, so a caller holding the first result observes
+// mutations made through the second.
+func assertNotAliased[T any](tb testing.TB, label string, first, second []T) {
+	tb.Helper()
+	if len(first) == 0 || len(second) == 0 {
+		return
+	}
+	if &first[0] != &second[0] {
+		return
+	}
+	tb.Errorf("%s returns the plugin's own slice: two calls share one backing array, so a "+
+		"caller that sorts or filters the result in place rewrites the plugin's declaration "+
+		"for every later caller; return a copy", label)
 }

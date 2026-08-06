@@ -179,16 +179,21 @@ func (p *Pipeline) ScopeImportPaths() map[string]struct{} {
 
 // mergeManifestPreservingOutOfScope returns a manifest that adds
 // or refreshes every entry from current onto prior — never drops.
-// Prior entries the current run did not re-emit stay with their
-// existing [manifest.Output.LastSeenRun] stamp; current entries
-// replace prior at the same Target+PipelineID key with the fresh
-// LastSeenRun pinned to this run's RunID.
+// Prior entries the current run did not re-emit are carried over
+// verbatim; current entries replace prior at the same
+// (Target, PipelineID) key. A [manifest.Output] carries no per-entry
+// run stamp: the run identifier lives once, on
+// [manifest.Manifest.RunID], and the merge takes it from current.
+// Carried-over entries are therefore indistinguishable from
+// re-emitted ones by inspection of the entry alone — which is why
+// staleness is decided by diffing, not by reading a timestamp.
 //
 // Run's job is ADD / UPDATE only. Identifying orphans (entries
-// whose source no longer claims them) and deleting their files
-// is prune's job — prune diffs entries' LastSeenRun against the
-// manifest's current RunID, scoped by pipeline ID and the current
-// run's loaded package set.
+// whose source no longer claims them) and deleting their files is
+// prune's job — [manifest.Prune] calls a prior entry an orphan when
+// all three hold: its PipelineID matches the current pipeline, its
+// [emit.Target.ImportPath] is in the set of packages this run
+// loaded, and its Target is absent from the set this run emitted.
 //
 // A nil prior reduces to current verbatim.
 //
@@ -370,12 +375,13 @@ func (p *Pipeline) invokeFrontend(fe plugin.Frontend, pattern string, s *store.S
 	ps := p.diag.For(fe.Name())
 	defer diag.RecoverAs(ps, position.Pos{})
 	ctx := &plugin.FrontendContext{
-		Store:    s,
-		Diag:     p.diag,
-		Registry: p.registry,
-		Parser:   p.parser,
-		Cache:    p.cache,
-		Pattern:  pattern,
+		Store:       s,
+		Diag:        p.diag,
+		Registry:    p.registry,
+		Parser:      p.parser,
+		Cache:       p.cache,
+		Pattern:     pattern,
+		Fingerprint: p.compositionFingerprint(),
 	}
 	if err := fe.Load(ctx); err != nil {
 		p.reportPluginError(ps, fe.Name(), fmt.Sprintf("frontend Load(%q)", pattern), err)
@@ -501,6 +507,33 @@ func (p *Pipeline) invokeGenerator(gen plugin.Generator, s *store.Store) {
 		p.reportPluginError(ps, gen.Name(), "generator", err)
 	}
 	p.recordCacheKey(gen.Name(), r)
+}
+
+// compositionFingerprint returns a stable hash over the pipeline's
+// plugin composition: each registered plugin's name paired with its
+// [plugin.Versioned] string.
+//
+// Frontends fold this into their own cache keys so a parsed node
+// graph is never reused across a change of plugin set. The graph
+// carries frontend-stamped metadata that downstream plugins read, and
+// an upgraded plugin expecting a key an older frontend never stamped
+// is exactly the failure that made `--no-cache` a workaround.
+//
+// [cache.HashStrings] sorts before hashing, so registration order does
+// not perturb the result — two pipelines composed of the same plugins
+// in different orders share a fingerprint, which is correct: the parse
+// does not depend on the order either.
+func (p *Pipeline) compositionFingerprint() string {
+	plugins := p.registeredPlugins()
+	parts := make([]string, 0, len(plugins))
+	for _, pl := range plugins {
+		version := ""
+		if v, ok := any(pl).(plugin.Versioned); ok {
+			version = v.Version()
+		}
+		parts = append(parts, pl.Name()+"@"+version)
+	}
+	return cache.HashStrings(parts)
 }
 
 // recordCacheKey writes the per-plugin cache marker — a key

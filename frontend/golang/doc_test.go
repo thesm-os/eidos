@@ -8,8 +8,11 @@
 package golang_test
 
 import (
+	"path/filepath"
+	"runtime"
 	"testing"
 
+	"go.thesmos.sh/eidos/docaudit"
 	"go.thesmos.sh/eidos/frontend/golang"
 )
 
@@ -27,4 +30,37 @@ func TestPackageDoc(t *testing.T) {
 			t.Fatalf("FrontendVersion must not be empty")
 		}
 	})
+}
+
+// TestDocAuditCoversEveryMetaKey pins that every meta key the Go
+// frontend constructs from a literal string is mentioned in the
+// package's doc.go, so a new key cannot land in code without an
+// entry in the doc.go catalog.
+//
+// The per-struct-tag keys are the one gap the audit cannot close:
+// [golang.MetaTagPrefix] is concatenated with a tag name read at
+// runtime, so the [meta.EnsureKey] call in stamp_helpers.go carries
+// no literal for the audit to extract. Those keys are documented by
+// namespace in the catalog instead, and that entry is unenforced —
+// review is the only thing holding it to the code.
+func TestDocAuditCoversEveryMetaKey(t *testing.T) {
+	t.Parallel()
+	docaudit.AssertEveryMetaKeyDocumented(t, packageSourceDir(t))
+}
+
+// packageSourceDir returns the absolute path of the directory the
+// test file lives in.
+//
+// Resolved from the compiled-in file path rather than the process
+// working directory: sibling tests in this package pivot [os.Chdir]
+// into fixture trees while they load sources, so any caller that
+// walks the package's own sources by relative path races that pivot
+// and fails on a file it can see but not open.
+func packageSourceDir(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("runtime.Caller failed")
+	}
+	return filepath.Dir(file)
 }

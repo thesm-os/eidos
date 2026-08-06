@@ -5,8 +5,12 @@ package plugintest_test
 
 import (
 	"fmt"
+	"io/fs"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
+	"text/template"
 
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/priority"
@@ -207,3 +211,68 @@ func (*malformedOutputsPlugin) Generate(_ *plugin.GeneratorContext) error { retu
 // language so the shape check exercises the rules across the
 // language matrix the suite probes.
 func (p *malformedOutputsPlugin) Outputs(_ string) []plugin.Output { return p.outputs }
+
+// templateProviderPlugin satisfies [plugin.TemplateProvider] with a
+// caller-supplied hook behind each of the three methods.
+//
+// One configurable fixture rather than a type per failure mode is
+// deliberate: the template contract has five distinguishable
+// rejection paths (flapping ok flag, ok-with-nil-filesystem,
+// filesystem-with-false-flag, flapping funcmap names, a name
+// declared as both an extension and an override) and a bespoke
+// struct for each would bury the difference between them in
+// boilerplate. The hook signature is the interface method's own, so
+// each test reads as the misbehaviour it encodes.
+//
+// A nil hook returns the zero value — which is exactly the
+// "contributes nothing for this language" shape the check must
+// accept in silence, so the zero fixture doubles as the negative
+// control.
+type templateProviderPlugin struct {
+	name      string
+	templates func(lang string) (fs.FS, bool)
+	funcs     func(lang string) template.FuncMap
+	overrides func(lang string) template.FuncMap
+}
+
+// Name returns the configured identifier.
+func (p *templateProviderPlugin) Name() string { return p.name }
+
+// Generate satisfies [plugin.Generator] so the role probe clears
+// and the test stays scoped to the template contract.
+func (*templateProviderPlugin) Generate(_ *plugin.GeneratorContext) error { return nil }
+
+// Templates delegates to the configured hook, reporting "nothing
+// for this language" when none is set.
+func (p *templateProviderPlugin) Templates(lang string) (fs.FS, bool) {
+	if p.templates == nil {
+		return nil, false
+	}
+	return p.templates(lang)
+}
+
+// TemplateFuncs delegates to the configured hook, returning no
+// registrations when none is set.
+func (p *templateProviderPlugin) TemplateFuncs(lang string) template.FuncMap {
+	if p.funcs == nil {
+		return nil
+	}
+	return p.funcs(lang)
+}
+
+// TemplateOverrides delegates to the configured hook, returning no
+// overrides when none is set.
+func (p *templateProviderPlugin) TemplateOverrides(lang string) template.FuncMap {
+	if p.overrides == nil {
+		return nil
+	}
+	return p.overrides(lang)
+}
+
+// joinFake renders every message a fake TB recorded, for inclusion in
+// a meta-test failure. Reported in full rather than truncated: a
+// fixture that broke an unrelated check is diagnosed from which
+// message it produced, not from the fact that it produced one.
+func joinFake(f *fakeT) string {
+	return strings.Join(append(slices.Clone(f.errs), f.fatals...), "\n")
+}

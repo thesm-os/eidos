@@ -5,6 +5,7 @@ package builder_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"go.thesmos.sh/eidos/emit"
@@ -475,4 +476,61 @@ func TestAppendTag(t *testing.T) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
 		}
 	})
+}
+
+// ExampleContext_AppendPrebody shows a cross-cutting contribution
+// landing in another plugin's method — the composition mechanism the
+// slot API exists for. The host method is not owned by either
+// contributor and neither contributor knows about the other.
+//
+// The anchor id is the load-bearing argument. Passing "trace.entry"
+// on the append publishes a coordinate other plugins can aim at;
+// without it the second plugin could only append at the end, and
+// "start the timer before the trace fires" would be unexpressible.
+// Anchor ids are a cross-plugin contract — the producing plugin
+// normally exports the string as a const rather than spelling it
+// twice, as the example does for brevity.
+//
+// Contributions are rendered in slot order, so the printed order is
+// the order the statements appear in the generated method body.
+func ExampleContext_AppendPrebody() {
+	// A method some third generator already emitted.
+	method := &emit.Method{Name: "Get"}
+
+	tracer := builder.For("debug-tracer")
+	if err := tracer.AppendPrebody(
+		method,
+		emit.NewRawStmt(`log.Printf("debug: Get entered")`),
+		"trace.entry",
+	); err != nil {
+		fmt.Println("tracer:", err)
+		return
+	}
+
+	// A second, independent plugin positions itself relative to the
+	// tracer's published anchor rather than at a numeric index that
+	// would shift as further plugins contribute.
+	metrics := builder.For("metrics")
+	if err := metrics.InsertPrebody(
+		method,
+		emit.NewRawStmt(`start := time.Now()`),
+		builder.Before("trace.entry"),
+	); err != nil {
+		fmt.Println("metrics:", err)
+		return
+	}
+
+	prebody := method.Prebody()
+	for i := range prebody.Len() {
+		stmt, ok := prebody.At(i).(*emit.Stmt)
+		if !ok {
+			fmt.Println("unexpected slot element")
+			return
+		}
+		fmt.Printf("%d %-12s %s\n", i, prebody.ProvenanceAt(i).SetBy, stmt.RawText)
+	}
+
+	// Output:
+	// 0 metrics      start := time.Now()
+	// 1 debug-tracer log.Printf("debug: Get entered")
 }

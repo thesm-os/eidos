@@ -4,6 +4,8 @@
 package saga_test
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
@@ -64,6 +66,102 @@ func TestContract_Validate(t *testing.T) {
 			t.Fatalf("Validate(non-callable + dup) = %+v; want one violation on the second step", got)
 		}
 	})
+}
+
+// TestContract_ValidateScansEveryStep pins the step cascade in
+// saga's Validate hook: every step after a skipped or a flagged
+// one must still be examined. It kills two `continue -> break`
+// mutants that the rest of this file leaves alive, because no
+// other fixture here has a THIRD step behind a declining second
+// one:
+//
+//   - saga.go:50 (`continue` after recording a duplicate) — under
+//     `break` only the first duplicate is ever reported, so a
+//     saga with three duplicate compensations reports one and the
+//     author fixes one third of the bug.
+//   - saga.go:44 (`continue` on an unpaired step) — under `break`
+//     a single step without a compensate partner silently
+//     disables uniqueness checking for every step below it.
+//
+// Both mutants make the validator under-report, which is the
+// failure mode a green suite cannot see. Assertions therefore pin
+// which hosts were flagged, not merely how many.
+func TestContract_ValidateScansEveryStep(t *testing.T) {
+	t.Parallel()
+	c := saga.Contract()
+
+	t.Run("every duplicate compensation is reported, not only the first", func(t *testing.T) {
+		t.Parallel()
+		ship := &node.Function{Name: "Ship"}
+		pack := &node.Function{Name: "Pack"}
+		bill := &node.Function{Name: "Bill"}
+		members := map[string][]shape.ContractMember{
+			"step": {
+				{Host: &node.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
+				{Host: ship, Partners: map[string]string{"compensate": "x.Refund"}},
+				{Host: pack, Partners: map[string]string{"compensate": "x.Refund"}},
+				{Host: bill, Partners: map[string]string{"compensate": "x.Refund"}},
+			},
+		}
+		assertFlagged(t, c.Validate(members),
+			[]*node.Function{ship, pack, bill},
+			"saga: compensation x.Refund is already paired with step Charge")
+	})
+
+	t.Run("a step with no compensation does not stop the steps below it", func(t *testing.T) {
+		t.Parallel()
+		ship := &node.Function{Name: "Ship"}
+		members := map[string][]shape.ContractMember{
+			"step": {
+				{Host: &node.Function{Name: "Audit"}},
+				{Host: &node.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
+				{Host: ship, Partners: map[string]string{"compensate": "x.Refund"}},
+			},
+		}
+		assertFlagged(t, c.Validate(members),
+			[]*node.Function{ship},
+			"saga: compensation x.Refund is already paired with step Charge")
+	})
+}
+
+// assertFlagged fails unless got flags exactly the steps in want,
+// in order, each carrying message. Identity is the assertion that
+// matters: a count-only check still passes for a validator that
+// flags the wrong step, and it reports "1 violation" for both a
+// correct single duplicate and a truncated cascade. Failures name
+// the steps, since a raw [shape.ContractViolation] dump renders
+// its host as a pointer address.
+func assertFlagged(t *testing.T, got []shape.ContractViolation, want []*node.Function, message string) {
+	t.Helper()
+	gotSteps := make([]string, len(got))
+	for i, v := range got {
+		gotSteps[i] = hostName(v.Host)
+	}
+	wantSteps := make([]string, len(want))
+	for i, w := range want {
+		wantSteps[i] = w.Name
+	}
+	if !slices.Equal(gotSteps, wantSteps) {
+		t.Fatalf("Validate flagged steps %v; want %v", gotSteps, wantSteps)
+	}
+	for i, w := range want {
+		if got[i].Host != node.Node(w) {
+			t.Fatalf("violation %d names step %q but hangs off a different node", i, w.Name)
+		}
+		if got[i].Message != message {
+			t.Fatalf("violation on step %q: Message = %q, want %q", w.Name, got[i].Message, message)
+		}
+	}
+}
+
+// hostName renders a violation host as the step name a reader can
+// match against the fixture; non-callable hosts fall back to their
+// type so the output never degrades to a pointer address.
+func hostName(n node.Node) string {
+	if fn, ok := n.(*node.Function); ok {
+		return fn.Name
+	}
+	return fmt.Sprintf("%T", n)
 }
 
 // TestContract_PipelineRoundTrip exercises the happy path of one

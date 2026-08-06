@@ -4,6 +4,7 @@
 package shape_test
 
 import (
+	"fmt"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
@@ -83,7 +84,7 @@ func TestValidator_RequiredPartners(t *testing.T) {
 			Name: "x", Path: "x",
 			Functions: []*node.Function{fn, commit},
 		}
-		diags := runFullPipeline(t, spec, pkg)
+		diags := runFullPipeline(t, pkg, spec)
 		assertContainsDiag(t, diags, diag.Error, "rollback")
 	})
 
@@ -106,7 +107,7 @@ func TestValidator_RequiredPartners(t *testing.T) {
 			Name: "x", Path: "x",
 			Functions: []*node.Function{fn, commit},
 		}
-		for _, d := range runFullPipeline(t, spec, pkg) {
+		for _, d := range runFullPipeline(t, pkg, spec) {
 			if d.Severity >= diag.Error {
 				t.Fatalf("unexpected error diagnostic: %+v", d)
 			}
@@ -144,7 +145,7 @@ func TestValidator_ContractValidate(t *testing.T) {
 			Name: "x", Path: "x",
 			Functions: []*node.Function{begin, commit},
 		}
-		_ = runFullPipeline(t, spec, pkg)
+		_ = runFullPipeline(t, pkg, spec)
 
 		if got := len(captured["begin"]); got != 1 {
 			t.Fatalf("members[begin] = %d nodes, want 1", got)
@@ -180,7 +181,7 @@ func TestValidator_ContractValidate(t *testing.T) {
 			Name: "x", Path: "x",
 			Functions: []*node.Function{begin, commit},
 		}
-		diags := runFullPipeline(t, spec, pkg)
+		diags := runFullPipeline(t, pkg, spec)
 		assertContainsDiag(t, diags, diag.Error, "synthetic invariant breach")
 	})
 
@@ -202,7 +203,7 @@ func TestValidator_ContractValidate(t *testing.T) {
 			Name: "x", Path: "x",
 			Functions: []*node.Function{fn, commit},
 		}
-		for _, d := range runFullPipeline(t, spec, pkg) {
+		for _, d := range runFullPipeline(t, pkg, spec) {
 			if d.Severity >= diag.Error {
 				t.Fatalf("nil Validate must not produce errors; got %+v", d)
 			}
@@ -240,9 +241,110 @@ func TestValidator_ContractValidate(t *testing.T) {
 			Name: "x", Path: "x",
 			Structs: []*node.Struct{s},
 		}
-		diags := runFullPipeline(t, spec, pkg)
+		diags := runFullPipeline(t, pkg, spec)
 		assertContainsDiag(t, diags, diag.Error, "rollback")
 	})
+}
+
+// cascadeRuns is how many times
+// [TestValidator_ContractValidateCascade] re-runs the pipeline.
+// [Validator.AfterNodes] ranges over a map, so every run draws a
+// fresh random contract order; 64 runs put the odds of a `break`
+// mutant never being observed at 2^-64. The body is a couple of
+// in-memory nodes, so the repetition costs microseconds.
+const cascadeRuns = 64
+
+// TestValidator_ContractValidateCascade pins that a contract with
+// no Validate hook does not silence the contracts registered
+// beside it.
+//
+// Kills the `continue` → `break` mutant on the
+// `spec.Validate == nil` guard in [Validator.AfterNodes]. Under
+// `break` the first contract lacking a Validate hook aborts the
+// whole loop, so every contract the walk had not yet reached
+// stops being validated — violations vanish wholesale while the
+// suite stays green. Do not delete this as redundant with "nil
+// Validate hook is a permissive no-op": that one proves a lone
+// nil hook emits nothing, this one proves it does not suppress
+// its neighbours, and only the second shape is what shipped
+// broken in the reader detector's dispatch cascade.
+func TestValidator_ContractValidateCascade(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a contract with no Validate hook does not silence the ones beside it", func(t *testing.T) {
+		t.Parallel()
+
+		// audit declines — no Validate hook — and is therefore the
+		// entry that ends the walk under the mutant. tx is the
+		// neighbour whose violation must survive that decline.
+		audit := shape.Contract{Name: "audit", Roles: []string{"record"}}
+		tx := shape.Contract{
+			Name:  "tx",
+			Roles: []string{"begin", "rollback"},
+			Validate: func(members map[string][]shape.ContractMember) []shape.ContractViolation {
+				begins := members["begin"]
+				if len(begins) != 1 {
+					return []shape.ContractViolation{
+						{Message: fmt.Sprintf("want 1 begin member, got %d", len(begins))},
+					}
+				}
+				host := "<not a function>"
+				if fn, ok := begins[0].Host.(*node.Function); ok {
+					host = fn.Name
+				}
+				return []shape.ContractViolation{
+					{Host: begins[0].Host, Message: "begin member " + host + " has no rollback partner"},
+				}
+			},
+		}
+
+		// Fresh nodes per run: the umbrella stamps metadata onto
+		// the bags it walks, so reusing them would let run N see
+		// run N-1's stamps.
+		newPkg := func() *node.Package {
+			record := contractFn("Record", &directive.Directive{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"audit"},
+				KV:   map[string]string{"role": "record"},
+			})
+			begin := contractFn("Begin", &directive.Directive{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"tx"},
+				KV:   map[string]string{"role": "begin"},
+			})
+			return &node.Package{
+				Name: "x", Path: "x",
+				Functions: []*node.Function{record, begin},
+			}
+		}
+
+		// Named in full: the assertion has to pin which contract
+		// was validated and which member its hook saw, not merely
+		// that some error was emitted.
+		const want = `shape.contract "tx": begin member Begin has no rollback partner`
+		for run := range cascadeRuns {
+			diags := runFullPipeline(t, newPkg(), audit, tx)
+			if !hasDiag(diags, diag.Error, shape.ValidatorName, want) {
+				t.Fatalf("run %d/%d: contract %q never reached its Validate hook: "+
+					"want %v from %q with message %q; got %d diags: %+v",
+					run+1, cascadeRuns, "tx", diag.Error, shape.ValidatorName, want, len(diags), diags)
+			}
+		}
+	})
+}
+
+// hasDiag reports whether diags holds a diagnostic matching sev,
+// plugin and msg exactly. Exact rather than the substring match
+// [assertContainsDiag] performs, because the cascade assertion
+// above distinguishes *which* contract produced the diagnostic
+// from the mere fact that one appeared.
+func hasDiag(diags []diag.Diag, sev diag.Severity, plugin, msg string) bool {
+	for _, d := range diags {
+		if d.Severity == sev && d.Plugin == plugin && d.Message == msg {
+			return true
+		}
+	}
+	return false
 }
 
 // TestValidator_MixinValidate covers the validator's
@@ -319,9 +421,13 @@ func runMixinPipeline(t *testing.T, m shape.Mixin, pkg *node.Package) []diag.Dia
 
 // runFullPipeline wires pkg into a fresh store and runs the
 // umbrella → resolver → validator sequence with the supplied
-// contract registered on all three. Returns the accumulated
+// contracts registered on all three. Returns the accumulated
 // diagnostic snapshot.
-func runFullPipeline(t *testing.T, c shape.Contract, pkg *node.Package) []diag.Diag {
+//
+// Variadic because [Validator.AfterNodes] walks the accumulated
+// member sets as a cascade: proving one contract does not
+// suppress another needs at least two registered at once.
+func runFullPipeline(t *testing.T, pkg *node.Package, cs ...shape.Contract) []diag.Diag {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -329,7 +435,7 @@ func runFullPipeline(t *testing.T, c shape.Contract, pkg *node.Package) []diag.D
 	}
 	frontendMarker.Set(pkg.Meta(), "golang", "test")
 
-	umbrella := shape.New().Contracts(c)
+	umbrella := shape.New().Contracts(cs...)
 	sink := diag.New()
 	ctx := &sdk.AnnotatorContext{
 		Store:  s,

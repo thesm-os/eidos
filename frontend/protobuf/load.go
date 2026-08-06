@@ -87,7 +87,7 @@ func loadPattern(ctx *plugin.FrontendContext, opts Options) error {
 	for _, f := range resolved {
 		descriptors = append(descriptors, f)
 	}
-	key := composeCacheKey(ps, opts, descriptors)
+	key := composeCacheKey(ps, opts, ctx.Fingerprint, descriptors)
 	if pkgs, hit := loadPackagesFromCache(ctx.Cache, key); hit {
 		addPackages(ctx, ps, pkgs)
 		return nil

@@ -43,11 +43,14 @@ import (
 // The string return is a stable, sort-independent key suitable for
 // `cache.Cache.Get` / `cache.Cache.Put`.
 func composeCacheKey(
-	ps *diag.PluginSink, opts Options, descriptors []protoreflect.FileDescriptor,
+	ps *diag.PluginSink, opts Options, fingerprint string,
+	descriptors []protoreflect.FileDescriptor,
 ) string {
 	return cache.NewKey(
 		"plugin", FrontendName,
 		"version", FrontendVersion,
+		"build", moduleVersion(),
+		"pipeline", fingerprint,
 		"opts", hashOptions(opts),
 		"descriptors", hashDescriptorSet(ps, descriptors),
 	)

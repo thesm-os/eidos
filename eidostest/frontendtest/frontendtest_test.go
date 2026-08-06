@@ -173,3 +173,54 @@ func (*fakeFrontend) Load(ctx *plugin.FrontendContext) error {
 	}
 	return nil
 }
+
+// ExampleRun shows the shape a frontend author's test assembles:
+// the frontend under test, the source fixture it loads from, and
+// whichever downstream plugins the test wants in the chain — then
+// assertions against the store the run populated.
+//
+// The choice between [Run] and [LoadDirect] is the decision worth
+// getting right. Run builds a full pipeline, so it enforces the
+// pipeline's build invariants and reaches the layout and render
+// phases; use it when the test cares about how the frontend's output
+// travels through the rest of the chain. LoadDirect calls the
+// frontend's Load surface and nothing else; use it when the test is
+// about source mapping or parse diagnostics and the pipeline is
+// noise.
+//
+// [Run] takes the enclosing test's `*testing.T` — it reads
+// `t.Context()` for the run's cancellation scope — which an
+// [Example] function is never given, so the body below is written as
+// the helper a frontend author calls from their own
+// `func TestMyFrontend(t *testing.T)` and is not invoked here. There
+// is deliberately no `// Output:` block: without one Go compiles and
+// type-checks the example without running it, which is exactly the
+// check the package docblock's prose snippet cannot provide.
+// Execution is covered by the TestRun_* cases above.
+func ExampleRun() {
+	assertLoadsFakePackage := func(t *testing.T) {
+		t.Helper()
+
+		// A real test passes its own frontend and, usually,
+		// frontendtest.DemoFixture(t) or its own testdata directory.
+		result := frontendtest.Run(t, frontendtest.RunOptions{
+			Frontend:  &fakeFrontend{name: "fake-fe"},
+			SourceDir: "/synthetic",
+			Pattern:   "single",
+			// Command pins the header line the backend would
+			// otherwise derive from os.Args, which differs between a
+			// plain `go test` and a run under coverage tooling.
+			Command: "eidos gen ./...",
+		})
+
+		if result.RunErr != nil {
+			t.Fatalf("run: %v (diagnostics: %+v)", result.RunErr, result.Diag.Diagnostics())
+		}
+		if _, ok := result.Store.Nodes().Structs().ByQName("example.com/fake.User"); !ok {
+			t.Fatalf("frontend did not load the expected struct")
+		}
+	}
+
+	// An Example has no *testing.T to hand over; see the docblock.
+	_ = assertLoadsFakePackage
+}

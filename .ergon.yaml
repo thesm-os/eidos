@@ -57,26 +57,8 @@ test:
   count: 3
   timeout: 10m
   race_count: 3
-  bench_count: 6
   fuzz_time: 30s
 
-# bench — `ergon bench baseline` / `regression`
-bench:
-  baseline_path: bench/baseline.txt
-  thresholds:
-    # 5% time-significant deltas hard-fail; benchstat-reported
-    # insignificant (`~`) shifts never gate.
-    time_percent: 5
-    # B/op is advisory only; struct-padding shifts the metric
-    # under unrelated refactors. 10% keeps warnings useful.
-    bytes_percent: 10
-    # Allocations/op is a contract: any positive change is a
-    # regression. 0% means an explicit baseline bump is required
-    # to grow the allocation count.
-    allocs_percent: 0
-
-# release — `ergon release`. Empty list = inherit the global module
-# set from go.work for releases.
 release:
   modules: []
 

@@ -4,9 +4,13 @@
 package pipeline_test
 
 import (
+	"cmp"
+	"maps"
+	"slices"
 	"testing"
 
 	"go.thesmos.sh/eidos/cache"
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/manifest"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/pipeline"
@@ -270,6 +274,83 @@ func TestPipeline_Store(t *testing.T) {
 		second := p.Store()
 		if first == second {
 			t.Fatalf("re-running should replace the cached store; got identical pointers")
+		}
+	})
+}
+
+// TestPipeline_EmittedTargets pins the "current claims" view — the
+// set of targets prune diffs the prior manifest against. Everything
+// in the manifest that this set does NOT contain (and whose pipeline
+// and scope match) is an orphan prune deletes from disk.
+//
+// The accessor had no test at all, so negating its nil-recorder guard
+// survived mutation testing with the widest blast radius of any
+// survivor in the package: after a real Run the recorder is non-nil,
+// the negated guard returns the EMPTY set, and prune reads that as
+// "this run claimed nothing" — every generated file in the manifest
+// becomes an orphan and is deleted.
+//
+// The post-Run assertion therefore compares the set's exact contents.
+// A len > 0 or non-nil check would pass against the empty map the
+// mutation returns, which is exactly the value that destroys the
+// generated corpus.
+func TestPipeline_EmittedTargets(t *testing.T) {
+	t.Parallel()
+
+	// sorted renders a claim set deterministically for the failure
+	// message; ranging the map directly would print the same failure
+	// differently on each run.
+	sorted := func(m map[emit.Target]struct{}) []emit.Target {
+		return slices.SortedFunc(maps.Keys(m), func(a, b emit.Target) int {
+			return cmp.Or(
+				cmp.Compare(a.Dir, b.Dir),
+				cmp.Compare(a.Filename, b.Filename),
+				cmp.Compare(a.Package, b.Package),
+				cmp.Compare(a.ImportPath, b.ImportPath),
+			)
+		})
+	}
+
+	t.Run("a pipeline that has not run claims an empty set rather than panicking", func(t *testing.T) {
+		t.Parallel()
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		got := p.EmittedTargets()
+		if got == nil {
+			t.Fatalf("EmittedTargets before Run = nil, want an empty non-nil map")
+		}
+		if len(got) != 0 {
+			t.Fatalf("EmittedTargets before Run = %v, want no claims", sorted(got))
+		}
+	})
+
+	t.Run("the claimed set is exactly the targets the backend wrote", func(t *testing.T) {
+		t.Parallel()
+		want := map[emit.Target]struct{}{
+			{Dir: "internal/repo", Filename: "order_gen.go", Package: "repo"}: {},
+			{Dir: "internal/repo", Filename: "user_gen.go", Package: "repo"}:  {},
+		}
+		be := &recBE{
+			name: "be", lang: "stub",
+			render: func(ctx *plugin.BackendContext) {
+				for target := range want {
+					_ = ctx.Sink.Write(target, []byte("body"))
+				}
+			},
+		}
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(be).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context()))
+		if got := p.EmittedTargets(); !maps.Equal(got, want) {
+			t.Fatalf("EmittedTargets = %+v, want %+v", sorted(got), sorted(want))
 		}
 	})
 }

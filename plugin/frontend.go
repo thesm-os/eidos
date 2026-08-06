@@ -77,4 +77,23 @@ type FrontendContext struct {
 	// "github.com/foo/bar/...") or a filesystem glob. Frontends
 	// interpret it in a language-appropriate way.
 	Pattern string
+
+	// Fingerprint identifies the pipeline composition this Load runs
+	// within: a hash over every registered plugin's name paired with
+	// its [Versioned] string, order-independent.
+	//
+	// Frontends that cache a parsed node graph MUST fold this into
+	// their cache key. A frontend's output does not depend on the
+	// plugin set in principle — but the graph it caches carries the
+	// metadata downstream plugins read, and an upgraded plugin
+	// expecting metadata an older frontend never stamped is exactly
+	// the stale-cache failure this closes. Re-parsing when the
+	// plugin set changes is the deliberate cost of never handing a
+	// plugin a graph it cannot interpret.
+	//
+	// A plugin implementing no [Versioned] contributes its name with
+	// an empty version, so its upgrades do not invalidate anything.
+	// Declaring a version is how a plugin opts into being able to
+	// invalidate the cache its output depends on.
+	Fingerprint string
 }

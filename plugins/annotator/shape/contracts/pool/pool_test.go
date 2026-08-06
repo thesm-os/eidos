@@ -46,6 +46,56 @@ func TestContract_ValidateAcceptsExactlyOneEach(t *testing.T) {
 	}
 }
 
+// TestContract_ValidateScansEveryRole pins the role cascade in
+// pool's Validate hook. The loop over [pool.Roles] must skip a
+// compliant role and keep going, so the `continue` at pool.go:39
+// cannot become a `break`: under that mutant a compliant `get`
+// short-circuits the whole loop and a duplicated `put` is
+// reported as no violation at all — a silently-dropped
+// diagnostic of exactly the kind that shipped green for months
+// in the detector cascade. Do not fold this into
+// TestContract_ValidateAcceptsExactlyOneEach: the point is the
+// ordering of a compliant role BEFORE a violating one, which a
+// single-role fixture cannot express.
+func TestContract_ValidateScansEveryRole(t *testing.T) {
+	t.Parallel()
+	c := pool.Contract()
+
+	t.Run("a compliant get does not stop the put role from being validated", func(t *testing.T) {
+		t.Parallel()
+		putB := &node.Function{Name: "PutB"}
+		members := map[string][]shape.ContractMember{
+			"get": {{Host: &node.Function{Name: "Get"}}},
+			"put": {{Host: &node.Function{Name: "PutA"}}, {Host: putB}},
+		}
+		const want = "pool requires exactly one put; got 2 callables"
+		got := c.Validate(members)
+		if len(got) != 1 {
+			t.Fatalf("Validate(one compliant get, two puts) reported %d violations %q; "+
+				"want exactly one, %q, against the surplus put",
+				len(got), messages(got), want)
+		}
+		if got[0].Host != node.Node(putB) {
+			t.Fatalf("violation hangs off a node other than the surplus put %q", putB.Name)
+		}
+		if got[0].Message != want {
+			t.Fatalf("violation Message = %q, want %q", got[0].Message, want)
+		}
+	})
+}
+
+// messages projects violations onto their message bodies for
+// failure output. A raw [shape.ContractViolation] dump renders its
+// host as a pointer address, which tells the reader nothing about
+// which role went unchecked.
+func messages(violations []shape.ContractViolation) []string {
+	out := make([]string, len(violations))
+	for i, v := range violations {
+		out[i] = v.Message
+	}
+	return out
+}
+
 // TestContract_PipelineRoundTrip exercises the happy path of one
 // Get + one Put through umbrella → resolver → validator.
 func TestContract_PipelineRoundTrip(t *testing.T) {

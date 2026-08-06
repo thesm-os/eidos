@@ -840,3 +840,184 @@ func TestBuildPipeline_PluginOverlay(t *testing.T) {
 		}
 	})
 }
+
+// FuzzValidateConfig drives the hand-rolled config validator over
+// the routing-layer rule matrix.
+//
+// The YAML layer itself is a plain `yaml.Unmarshal` into a struct
+// and carries no bespoke grammar, so it is not the interesting
+// surface. [cli.ValidateConfig] is: it hand-rolls a precedence
+// merge (per-plugin layout and package fall back to the
+// project-level block) on top of an enum check, and it doubles as
+// the normaliser that fills Version, Sink.Kind, and
+// Directives.Prefix. A wrong merge does not crash — it silently
+// accepts a `centralised` plugin with no resolvable package, which
+// the Layout phase then routes into a package named "".
+//
+// Four properties run per input:
+//
+//   - Differential. [refValidateOutputRules] re-derives the
+//     documented rules independently; its accept verdict must match
+//     ValidateConfig's on every combination.
+//   - Warning count on the accepted path, which is the only path
+//     where the count is part of the contract rather than an
+//     artefact of where validation stopped.
+//   - Normalisation. Every accepted config leaves with a known
+//     Version, a non-empty Sink.Kind, and a non-empty directive
+//     prefix — the guarantee the doc comment makes to callers that
+//     skip the loader.
+//   - Idempotence. Re-validating the config ValidateConfig just
+//     normalised must reach the same verdict with the same
+//     warnings. A default filled on the first pass that flips a
+//     rule on the second would make `LoadConfig` order-dependent.
+//
+// The typed arguments stand in for the fields the rules read; the
+// seeds walk the enum values, the empty string, the merge's
+// fall-through cases, and the one-off garbage values that must be
+// rejected.
+func FuzzValidateConfig(f *testing.F) {
+	for _, seed := range []struct {
+		version                          int
+		projLayout, projPackage, projDir string
+		plugLayout, plugPackage, plugDir string
+	}{
+		{1, "", "", "", "", "", ""},
+		{0, "", "", "", "", "", ""},
+		{2, "", "", "", "", "", ""},
+		{-1, "", "", "", "", "", ""},
+		{1, "centralised", "gen", "", "", "", ""},
+		{1, "centralised", "", "", "", "", ""},
+		{1, "alongside-source", "", "out", "", "", ""},
+		{1, "", "", "", "centralised", "", ""},
+		{1, "", "gen", "", "centralised", "", ""},
+		{1, "centralised", "gen", "", "alongside-source", "", "d"},
+		{1, "weird", "", "", "", "", ""},
+		{1, "", "", "", "weird", "", ""},
+		{1, "", "", "d", "", "", "e"},
+		{1, "CENTRALISED", "gen", "", "", "", ""},
+		{1, " centralised", "gen", "", "", "", ""},
+	} {
+		f.Add(seed.version, seed.projLayout, seed.projPackage, seed.projDir,
+			seed.plugLayout, seed.plugPackage, seed.plugDir)
+	}
+
+	f.Fuzz(func(
+		t *testing.T,
+		version int,
+		projLayout, projPackage, projDir string,
+		plugLayout, plugPackage, plugDir string,
+	) {
+		cfg := cli.DefaultConfig()
+		cfg.Version = version
+		cfg.Output = cli.ConfigOutput{Layout: projLayout, Package: projPackage, Dir: projDir}
+		// The plugin name is pinned non-empty so the "plugins[i]:
+		// name is required" rule never fires and the only rejection
+		// this target observes comes from the output-block rules.
+		cfg.Plugins = []cli.ConfigPlugin{{
+			Name:   "p",
+			Output: &cli.ConfigOutput{Layout: plugLayout, Package: plugPackage, Dir: plugDir},
+		}}
+
+		wantWarnings, wantOK := refValidateOutputRules(
+			version, projLayout, projPackage, projDir, plugLayout, plugPackage, plugDir,
+		)
+
+		warnings, err := cli.ValidateConfig(cfg, "fuzz.yaml")
+		if (err == nil) != wantOK {
+			t.Fatalf(
+				"ValidateConfig(version=%d, proj=%q/%q/%q, plug=%q/%q/%q): err = %v, reference accepts = %v",
+				version, projLayout, projPackage, projDir,
+				plugLayout, plugPackage, plugDir, err, wantOK,
+			)
+		}
+		if !wantOK {
+			var ce *cli.ConfigError
+			if !errsAs(err, &ce) {
+				t.Fatalf("rejection should be a *cli.ConfigError; got %T (%v)", err, err)
+			}
+			return
+		}
+		if len(warnings) != wantWarnings {
+			t.Fatalf("warnings = %d (%v), reference expects %d", len(warnings), warnings, wantWarnings)
+		}
+		// Normalisation contract for the accepted path.
+		if cfg.Version != cli.ConfigVersion {
+			t.Fatalf("accepted config left Version = %d, want %d", cfg.Version, cli.ConfigVersion)
+		}
+		if cfg.Sink.Kind == "" {
+			t.Fatalf("accepted config left Sink.Kind empty")
+		}
+		if cfg.Directives.Prefix == "" {
+			t.Fatalf("accepted config left Directives.Prefix empty")
+		}
+		// Idempotence over the config the first pass normalised.
+		again, err := cli.ValidateConfig(cfg, "fuzz.yaml")
+		if err != nil {
+			t.Fatalf("re-validating a normalised config failed: %v", err)
+		}
+		if len(again) != len(warnings) {
+			t.Fatalf("re-validation produced %d warnings (%v), first pass produced %d (%v)",
+				len(again), again, len(warnings), warnings)
+		}
+	})
+}
+
+// refValidateOutputRules is the deliberately naive re-derivation of
+// the routing-layer config rules used by [FuzzValidateConfig].
+//
+// It reads as a flat transcription of the documented rule list
+// rather than as the production function's structure — no shared
+// enum helper, no shared merge helper — so a bug in the precedence
+// merge shows up as a disagreement instead of being mirrored.
+//
+// Returns the number of warnings the accepted path must produce and
+// whether the combination is accepted at all. The warning count is
+// only meaningful when ok is true: the production validator returns
+// whatever warnings it had accumulated when a plugin-level rule
+// rejected, which is a stopping artefact rather than a contract.
+func refValidateOutputRules(
+	version int,
+	projLayout, projPackage, projDir string,
+	plugLayout, plugPackage, plugDir string,
+) (warnings int, ok bool) {
+	// Version 0 is normalised to the current version before the
+	// comparison, so only a non-zero mismatch rejects.
+	if version != 0 && version != cli.ConfigVersion {
+		return 0, false
+	}
+	if !refKnownLayout(projLayout) {
+		return 0, false
+	}
+	if projLayout == pipeline.LayoutCentralised && projPackage == "" {
+		return 0, false
+	}
+	if projDir != "" && projLayout != pipeline.LayoutCentralised {
+		warnings++
+	}
+	if !refKnownLayout(plugLayout) {
+		return warnings, false
+	}
+	effLayout := plugLayout
+	if effLayout == "" {
+		effLayout = projLayout
+	}
+	effPackage := plugPackage
+	if effPackage == "" {
+		effPackage = projPackage
+	}
+	if effLayout == pipeline.LayoutCentralised && effPackage == "" {
+		return warnings, false
+	}
+	if plugDir != "" && effLayout != pipeline.LayoutCentralised {
+		warnings++
+	}
+	return warnings, true
+}
+
+// refKnownLayout reports whether layout is one of the two documented
+// selectors or the empty string that defers to the layer below.
+func refKnownLayout(layout string) bool {
+	return layout == "" ||
+		layout == pipeline.LayoutAlongsideSource ||
+		layout == pipeline.LayoutCentralised
+}

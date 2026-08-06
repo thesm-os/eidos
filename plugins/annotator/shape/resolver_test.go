@@ -5,6 +5,7 @@ package shape_test
 
 import (
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -318,6 +319,159 @@ func TestResolver_Diagnostics(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestResolver_DecliningEntryDoesNotStopTheRest pins the cascade
+// property of the resolver's three declining loops: an entry the
+// loop skips costs that entry alone, never the entries queued
+// behind it.
+//
+// Every subtest here exists to kill one specific surviving mutant.
+// A mutation audit rewrote `continue` as `break` at the
+// unregistered-contract guard in [shape.Resolver] resolve, and at
+// both guards in flagUnknownPartnerRoles — the foreign-meta-name
+// skip and the known-role skip — and the suite stayed green. It
+// stayed green because no fixture ever put a declining entry ahead
+// of an entry that still had work to do: one membership per
+// callable, and a bag whose very first meta name already matched
+// the partner prefix. That is the same blind spot that let the
+// `reader` detector lose dispatch unnoticed for months.
+//
+// Do not fold these rows into [TestResolver_Diagnostics] or
+// [TestResolver_NameRewrite]. Their fixtures cannot tell `continue`
+// from `break`, which is exactly why the mutants survived them.
+func TestResolver_DecliningEntryDoesNotStopTheRest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a contract the resolver does not know does not stop the memberships after it", func(t *testing.T) {
+		t.Parallel()
+		// Membership order follows directive order, so outbox — the
+		// one the resolver was never told about — is the first entry
+		// the cascade must decline and step past to reach tx.
+		begin := contractMethod(
+			"Begin",
+			contractDirective("outbox", "append", nil),
+			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
+		)
+		commit := &node.Method{Name: "Commit"}
+		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+
+		diags := runSplitResolver(t,
+			[]shape.Contract{outboxContract(), txContract()},
+			[]shape.Contract{txContract()},
+			pkgWithStruct(s))
+
+		// The declining membership is reported, and reported alone.
+		assertErrorDiags(t, diags,
+			`shape: contract "outbox" is stamped on this callable but not registered with the resolver`)
+
+		// Identity, not existence: the membership behind the decline
+		// is resolved all the way through — partner ref rewritten to
+		// a qname, and the partner back-stamped in return.
+		assertMeta(t, begin.Meta(), shape.ContractPartnerKey("tx", "commit"), "x.Repo.Commit")
+		assertMeta(t, commit.Meta(), shape.ContractRoleKey("tx"), "commit")
+		assertMeta(t, commit.Meta(), shape.ContractPartnerKey("tx", "begin"), "x.Repo.Begin")
+	})
+
+	t.Run("a meta name outside the partner namespace does not stop the unknown-role scan", func(t *testing.T) {
+		t.Parallel()
+		// bag.Names() is lexicographically sorted, so the opaque
+		// param stamp ("…tx.param.mode") lands ahead of the partner
+		// stamp ("…tx.partner.watcher"): the scan has to skip a
+		// foreign name before it can reach anything it can diagnose.
+		begin := contractMethod(
+			"Begin",
+			contractDirective("tx", "begin", map[string]string{
+				"mode":    "eager",
+				"watcher": "Watch",
+			}),
+		)
+		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin}}
+
+		diags := runWithResolverDiags(t, txContractWithParam(), pkgWithStruct(s))
+
+		assertErrorDiags(t, diags,
+			`shape.contract "tx": partner role "watcher" is not in the declared role vocabulary `+
+				`[begin commit rollback]`)
+	})
+
+	t.Run("a known partner role does not stop the scan for the unknown ones after it", func(t *testing.T) {
+		t.Parallel()
+		// "…partner.commit" is a declared role and sorts ahead of
+		// "…partner.watcher", so the valid entry is the first thing
+		// the scan must step over to reach the invalid one.
+		begin := contractMethod(
+			"Begin",
+			contractDirective("tx", "begin", map[string]string{
+				"commit":  "Commit",
+				"watcher": "Watch",
+			}),
+		)
+		commit := &node.Method{Name: "Commit"}
+		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+
+		diags := runWithResolverDiags(t, txContract(), pkgWithStruct(s))
+
+		assertErrorDiags(t, diags,
+			`shape.contract "tx": partner role "watcher" is not in the declared role vocabulary `+
+				`[begin commit rollback]`)
+
+		// Stepping over the valid role in the scan is not licence to
+		// leave it unresolved elsewhere.
+		assertMeta(t, begin.Meta(), shape.ContractPartnerKey("tx", "commit"), "x.Repo.Commit")
+	})
+}
+
+// txContractWithParam is [txContract] plus one opaque param. Tests
+// use it when they need a meta name that sorts ahead of the whole
+// partner namespace: bag.Names() is sorted, and
+// `shape.contract.tx.param.…` precedes `shape.contract.tx.partner.…`.
+func txContractWithParam() shape.Contract {
+	c := txContract()
+	c.Params = []string{"mode"}
+	return c
+}
+
+// runSplitResolver drives the umbrella → resolver sequence with the
+// two halves configured asymmetrically: the umbrella registers
+// stamped, while the resolver is built from a second plugin
+// registering only resolved. This is the configuration error the
+// resolver's unregistered-contract diagnostic exists to report, and
+// the only way to hand the resolver a membership it cannot resolve.
+func runSplitResolver(t *testing.T, stamped, resolved []shape.Contract, pkg *node.Package) []diag.Diag {
+	t.Helper()
+	s := store.New()
+	if err := s.Nodes().AddPackage(pkg); err != nil {
+		t.Fatalf("AddPackage: %v", err)
+	}
+	frontendMarker.Set(pkg.Meta(), "golang", "test")
+
+	ctx := newAnnotatorContext(t, s)
+	if err := shape.New().Contracts(stamped...).Annotate(ctx); err != nil {
+		t.Fatalf("umbrella.Annotate: %v", err)
+	}
+	if err := shape.New().Contracts(resolved...).Resolver().Annotate(ctx); err != nil {
+		t.Fatalf("resolver.Annotate: %v", err)
+	}
+	return ctx.Diag.Diagnostics()
+}
+
+// assertErrorDiags fails the test unless the error-severity messages
+// in diags are exactly want, in order. Stronger than
+// [assertContainsDiag] on purpose: the cascade tests need to know
+// which entries were reported and which were silently dropped, and a
+// containment check cannot see a missing trailing diagnostic.
+func assertErrorDiags(t *testing.T, diags []diag.Diag, want ...string) {
+	t.Helper()
+	got := make([]string, 0, len(diags))
+	for _, d := range diags {
+		if d.Severity >= diag.Error {
+			got = append(got, d.Message)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("error diagnostics =\n\t%q\nwant\n\t%q", got, want)
+	}
 }
 
 // contractMethod builds a [node.Method] with the supplied

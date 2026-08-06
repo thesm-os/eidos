@@ -3,6 +3,13 @@
 
 package plugintest
 
+import (
+	"testing"
+
+	"go.thesmos.sh/eidos/plugin"
+	"go.thesmos.sh/eidos/store"
+)
+
 // Test-only aliases that expose the package's internal
 // assertion functions through the black-box `plugintest_test`
 // package so the rejection-path tests can drive each check
@@ -21,6 +28,8 @@ var (
 	AssertNodesOnlyStability          = assertNodesOnlyStability
 	AssertFilenameProviderStability   = assertFilenameProviderStability
 	AssertOutputsShape                = assertOutputsShape
+	AssertTemplateProviderStability   = assertTemplateProviderStability
+	AssertStableFuncMap               = assertStableFuncMap
 
 	// Annotator-suite assertions.
 	AssertAnnotateEmptyStoreDoesNotPanic   = assertAnnotateEmptyStoreDoesNotPanic
@@ -35,6 +44,8 @@ var (
 	AssertGenerateLeavesSourceNodesUnchanged = assertGenerateLeavesSourceNodesUnchanged
 	AssertGenerateIsDeterministic            = assertGenerateIsDeterministic
 	AssertGeneratorFixtureNamesUnique        = assertGeneratorFixtureNamesUnique
+	AssertEmittedTagsAreDeclared             = assertEmittedTagsAreDeclared
+	AssertOutputPackagesTolerateMissingTags  = assertOutputPackagesTolerateMissingTags
 
 	// Backend-suite assertions.
 	AssertRenderEmptyEmitDoesNotPanic = assertRenderEmptyEmitDoesNotPanic
@@ -55,3 +66,35 @@ var (
 	AssertSetOptionsAcceptsValid       = assertSetOptionsAcceptsValid
 	AssertSetOptionsRejectsUnknown     = assertSetOptionsRejectsUnknown
 )
+
+// CheckPair exposes one row of the framework check table to the
+// black-box meta-tests. The table itself is unexported because its
+// shape is an implementation detail; the pairing it encodes is not,
+// which is why the meta-tests assert against it.
+type CheckPair struct {
+	// Name is the subtest name RunSuite runs the check under.
+	Name string
+	// Violation names the fixture that must defeat Fn.
+	Violation Violation
+	// Fn is the assertion enforcing the contract.
+	Fn func(testing.TB, plugin.Plugin)
+}
+
+// FrameworkChecks returns the table [RunSuite] walks, in execution
+// order.
+func FrameworkChecks() []CheckPair {
+	cs := frameworkChecks()
+	out := make([]CheckPair, len(cs))
+	for i, c := range cs {
+		out[i] = CheckPair{Name: c.name, Violation: c.violation, Fn: c.fn}
+	}
+	return out
+}
+
+// AssertNodesOnlyIsTruthful exposes the per-role NodesOnly check to
+// the black-box meta-tests.
+var AssertNodesOnlyIsTruthful = assertNodesOnlyIsTruthful
+
+// EmptyStore returns a fresh store, so a meta-test can supply the two
+// independent stores the truthfulness check compares.
+func EmptyStore() *store.Store { return store.New() }

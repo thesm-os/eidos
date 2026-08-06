@@ -28,7 +28,7 @@ import (
 // process mutating the file system mid-run produces a real error
 // the caller surfaces as a positioned diagnostic rather than
 // silently corrupting the cache key.
-func packageCacheKey(pkg *packages.Package, opts Options) (string, error) {
+func packageCacheKey(pkg *packages.Package, opts Options, fingerprint string) (string, error) {
 	hash, err := hashPackageInputs(pkg, opts)
 	if err != nil {
 		return "", err
@@ -36,6 +36,8 @@ func packageCacheKey(pkg *packages.Package, opts Options) (string, error) {
 	return cache.NewKey(
 		"plugin", FrontendName,
 		"version", FrontendVersion,
+		"build", moduleVersion(),
+		"pipeline", fingerprint,
 		"pkg", pkg.PkgPath,
 		"inputs", hash,
 	), nil

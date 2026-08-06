@@ -8,7 +8,7 @@
 .PHONY: help bootstrap install fmt license generate build clean \
         lint lint-md tidy check-tidy \
         test test-race test-bench test-fuzz test-coverage \
-        bench-baseline bench-regression bench-profile \
+        bench-profile \
         check check-coverage check-uncovered check-mutation check-branch check-vuln \
         release
 
@@ -55,10 +55,6 @@ test-fuzz: ## Run every Fuzz target for the configured duration
 test-coverage: ## Render per-module coverage profiles to HTML
 	$(ERGON) test coverage
 
-bench-baseline: ## Pin the current benchmark numbers to bench/baseline.txt
-	$(ERGON) bench baseline
-bench-regression: ## Fail when a new run regresses against the pinned baseline
-	$(ERGON) bench regression
 bench-profile: ## Collect CPU+mem pprof artefacts (PATTERN=. PACKAGE=./... MODULE=.)
 	$(ERGON) bench profile $(PATTERN) \
 		$(if $(MODULE),--module=$(MODULE),) \

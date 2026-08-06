@@ -108,7 +108,7 @@ func loadPattern(ctx *plugin.FrontendContext, opts Options) error {
 // blocking the run.
 func convertPackageWithCache(ctx *plugin.FrontendContext, opts Options, pkg *packages.Package) error {
 	ps := ctx.Diag.For(FrontendName)
-	key, keyErr := packageCacheKey(pkg, opts)
+	key, keyErr := packageCacheKey(pkg, opts, ctx.Fingerprint)
 	if keyErr == nil {
 		if cached, ok := loadPackageFromCache(ctx.Cache, key); ok {
 			if err := ctx.Store.Nodes().AddPackage(cached); err != nil {

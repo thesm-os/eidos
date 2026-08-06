@@ -52,14 +52,19 @@ These are guarantees the library provides, tested in CI:
   authority ladder (plugin < directive < manual) resolves conflicting
   writes deterministically.
 - **Parallel safety.** Annotators with disjoint `Provides` may run
-  concurrently; backend per-file rendering is concurrency-safe; the
-  Store and emit graph are race-detector clean and enforce mutability
-  windows per phase.
-- **Caching.** Frontends cache their parsed source graph and skip
-  re-conversion on a hit. The pipeline additionally records a
-  per-plugin, per-input fingerprint (reads + routing + scope) that
-  tooling can consult to answer "did this plugin run against these
-  inputs"; it is not consulted to skip work.
+  concurrently; the Store and emit graph are race-detector clean and
+  enforce mutability windows per phase. The Go backend renders its
+  targets in a sequential loop, and each target gets its own template
+  clone and its own `ImportSet`; what the loop shares across targets
+  it only reads. No render step reaches into another's state.
+- **Caching.** The Go and protobuf frontends key their parsed node
+  graph on the frontend version plus a content hash over every input
+  file and the configured options, and skip re-conversion on a hit.
+  For annotators, generators, and the backend the pipeline records a
+  fingerprint only: a key over the plugin name, its declared version,
+  its read-set hash, its resolved layout policy, and the run's scope
+  filters. Nothing reads that key to skip work — it answers "did this
+  plugin run against these inputs" for tooling.
 - **Panic isolation.** A plugin that panics produces an `Error`
   diagnostic with a stack trace; subsequent plugins still run; the
   pipeline returns a structured error rather than a raw panic.
@@ -217,25 +222,44 @@ pipeline.New().
     WithParallel(phases ...pipeline.Phase).
     WithPluginOptions(name string, kv map[string]string).
     WithManifestPath(path string).
+    WithDryRun(dryRun bool).                                // runs every phase; skips the manifest write
+    WithBrand(brand string).                                // tool identifier in header, footer, manifest
+    WithPipelineID(id string).                              // manifest attribution across pipelines
+    WithCommand(cmd string).                                // literal text of the "Command:" header line
+    WithSourceRoot(root string).                            // prefix stripped from "Source:" header paths
     WithVerbose(v bool).
-    WithOutputLayout(layout string).         // alongside-source | centralised
-    WithOutputPackage(name string).          // pins Target.Package for every decl in scope
-    WithOutputDir(dir string).               // centralised-layout output directory
-    WithOutputFilename(filename string).     // pins Target.Filename for every decl in scope
-    WithTargetSymbol(name string).           // scope filter; matches Name or QName suffix .Name
+    WithOutputLayout(layout string).                        // alongside-source | centralised
+    WithOutputPackage(name string).                         // pins Target.Package for every decl in scope
+    WithOutputDir(dir string).                              // centralised-layout output directory
+    WithOutputFilename(filename string).                    // pins Target.Filename for every decl in scope
+    WithPluginOutputFilename(plugin, tag, path string).     // that pin, scoped to one plugin output
+    WithProjectOutput(layout, pkg, dir string).             // project-level layout / package / dir policy
+    WithPluginOutput(name, layout, pkg, dir string).        // per-plugin override of that policy
+    WithPluginTagOutput(name, tag, layout, pkg, dir string). // per-(plugin, tag) refinement of it
+    WithTargetSymbol(name string).                          // scope filter; matches Name or QName suffix .Name
     Build()           // (*Pipeline, error)
 ```
 
 `Build` returns sentinel errors callers compare with `errors.Is`:
-`ErrNoFrontend`, `ErrNoBackend`, `ErrMultipleBackends`, `ErrNoSink`,
+`ErrNoFrontend`, `ErrNoBackend`, `ErrMultipleBackends`,
 `ErrDuplicatePlugin`, `ErrDuplicateProvider`, `ErrCycle`,
 `ErrInvalidOptions`, `ErrDuplicateDirective`, `ErrIncompatibleEmitVersion`,
-`ErrInvalidDirectivePrefix`, `ErrTemplateFuncCollision`. The full list
-lives in `pipeline/errors.go`.
+`ErrInvalidDirectivePrefix`, `ErrTemplateFuncCollision`,
+`ErrInvalidOutputs`. The full list lives in `pipeline/errors.go`.
 
 `Pipeline.Run(ctx, patterns...)` runs the configured pipeline and
-returns `ErrRunHadErrors` when any plugin emitted an Error diagnostic.
+returns `ErrRunHadErrors` when any plugin emitted an Error diagnostic,
+or `ErrNoSink` without running a phase when no sink was configured.
 `Pipeline.DryRun(ctx)` returns the resolved `*Plan` without executing.
+
+Four sentinels belong to the Layout phase, which cannot fail a
+`Build`: `ErrMissingFilenameProvider`, `ErrUnknownOutputTag`,
+`ErrNoDefaultOutput`, and `ErrUnscopedMultiOutputOverride`. Layout
+reports each one twice — as a positioned Error diagnostic naming the
+offending decl and plugin, and as a retained wrapped error that `Run`
+joins onto `ErrRunHadErrors` in its return value. So a host classifies
+a routing failure with `errors.Is` on the `Run` error rather than
+substring-matching the diagnostic text.
 
 ### Plugin role interfaces
 

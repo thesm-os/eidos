@@ -206,3 +206,70 @@ func TestNewScopedReader(t *testing.T) {
 		}
 	})
 }
+
+// BenchmarkReader_Structs prices the read-tracking path against the
+// bucket it wraps, over a 500-struct store.
+//
+// Every plugin query in the framework goes through the Reader, and
+// the Reader is not free: it copies the bucket's item slice
+// (Bucket.Items), allocates a Query, and on the terminal call takes
+// the ReadSet mutex to record one tag. The three variants split that
+// cost so it can be attributed rather than guessed:
+//
+//   - "bucket" — Bucket.Items alone. The floor: one slice copy.
+//   - "reader" — the same items through Reader.Structs().Slice(),
+//     so the difference against "bucket" is exactly the Query
+//     allocation, the second copy Slice makes, and the ReadSet
+//     record. That delta is the tax cache-key tracking levies on
+//     every query in the system.
+//   - "scoped" — the same call on a reader carrying a scope
+//     predicate, which inserts a third pass and a third slice. This
+//     is what a `-target`-narrowed run pays per query.
+//
+// The ReadSet does not grow across iterations (Record is idempotent
+// on the tag) so the reader variant measures steady-state cost, not
+// a set filling up.
+func BenchmarkReader_Structs(b *testing.B) {
+	b.ReportAllocs()
+
+	s := store.New()
+	if err := s.Nodes().AddPackage(makeBenchPackage(500)); err != nil {
+		b.Fatalf("AddPackage: %v", err)
+	}
+	bucket := s.Nodes().Structs()
+	reader := store.NewReader(s)
+	scoped := store.NewScopedReader(s, func(node.Node) bool { return true })
+
+	b.Run("bucket", func(b *testing.B) {
+		b.ReportAllocs()
+		total := 0
+		for b.Loop() {
+			total += len(bucket.Items())
+		}
+		if total == 0 {
+			b.Fatalf("bucket yielded no structs: the benchmark measures nothing")
+		}
+	})
+
+	b.Run("reader", func(b *testing.B) {
+		b.ReportAllocs()
+		total := 0
+		for b.Loop() {
+			total += len(reader.Structs().Slice())
+		}
+		if total == 0 {
+			b.Fatalf("reader yielded no structs: the benchmark measures nothing")
+		}
+	})
+
+	b.Run("scoped", func(b *testing.B) {
+		b.ReportAllocs()
+		total := 0
+		for b.Loop() {
+			total += len(scoped.Structs().Slice())
+		}
+		if total == 0 {
+			b.Fatalf("scoped reader yielded no structs: the benchmark measures nothing")
+		}
+	})
+}

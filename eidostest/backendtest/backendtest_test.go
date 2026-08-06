@@ -100,3 +100,62 @@ func (b *writingBackend) Render(ctx *plugin.BackendContext) error {
 	}
 	return nil
 }
+
+// ExampleRun shows the shape a backend author's test assembles: a
+// pre-built emit graph with every [emit.Target] already resolved,
+// handed to [Run] alongside the backend under test, and the rendered
+// bytes read back off the returned Sink.
+//
+// The pre-populated Target is the contract that trips people up. The
+// harness skips the Layout phase entirely, so nothing derives a
+// target for a decl that arrives without one and the decl silently
+// renders nowhere. Tests that mean to exercise routing decisions
+// belong at the pipeline level; this harness is for backend-internal
+// contracts — template selection, import resolution, formatting,
+// slot composition.
+//
+// [Run] takes the enclosing test's `*testing.T` for its fatal path,
+// which an [Example] function is never given, so the body below is
+// written as the helper a backend author calls from their own
+// `func TestMyBackend(t *testing.T)` and is not invoked here. There is deliberately no `// Output:` block: without one Go
+// compiles and type-checks the example without running it, and the
+// compile check is what the package docblock's prose snippet cannot
+// offer. Execution is covered by TestRun_PassesEmitGraphToBackend
+// above, which drives the same call against the same fixture.
+func ExampleRun() {
+	assertRendersUserRepo := func(t *testing.T) {
+		t.Helper()
+
+		target := emit.Target{Dir: "users", Filename: "user_gen.go", Package: "users"}
+
+		// A real test passes its own backend here.
+		result := backendtest.Run(t, backendtest.RunOptions{
+			Backend: &writingBackend{lang: "golang"},
+			EmitPackages: []*emit.Package{{
+				Name: "users",
+				Path: "example.com/users",
+				Structs: []*emit.Struct{{
+					Name:    "UserRepo",
+					Package: "users",
+					Target:  target,
+				}},
+			}},
+		})
+
+		if result.Diag.HasErrors() {
+			t.Fatalf("render diagnostics: %+v", result.Diag.Diagnostics())
+		}
+		mem, ok := result.Sink.(*sink.Memory)
+		if !ok {
+			t.Fatalf("expected the default in-memory sink; got %T", result.Sink)
+		}
+		body, ok := mem.Get(target)
+		if !ok {
+			t.Fatalf("backend wrote nothing at %s; sink holds %v", target.JoinPath(), mem.Files())
+		}
+		t.Logf("%s:\n%s", target.JoinPath(), body)
+	}
+
+	// An Example has no *testing.T to hand over; see the docblock.
+	_ = assertRendersUserRepo
+}

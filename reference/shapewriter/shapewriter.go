@@ -1,19 +1,6 @@
 // Copyright Thesmos B.V. 2026
 // SPDX-License-Identifier: MIT
 
-// Package shapewriter detects structs that satisfy the io.Writer
-// shape — a method named `Write` taking a `[]byte` and returning
-// `(int, error)`. Downstream generators read the stamped metadata
-// (`shape.writer.detected`, `shape.writer.method`) to decide
-// whether their codegen path applies to a given struct.
-//
-// Detection is heuristic by default; directive overrides force or
-// suppress the detection regardless of the heuristic outcome:
-//
-//   - `+gen:writer` forces detection on the host struct, even
-//     when no method matches the canonical signature.
-//   - `-gen:writer` suppresses detection on the host struct, even
-//     when the method exists with the matching signature.
 package shapewriter
 
 import (

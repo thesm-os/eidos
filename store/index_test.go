@@ -6,12 +6,31 @@ package store_test
 import (
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"go.thesmos.sh/eidos/store"
 )
+
+// benchBucketSizes are the bucket populations the scaling benchmarks
+// sweep. 1 exposes fixed overhead, 1000 is above the size at which a
+// hidden linear scan inside a per-item operation stops hiding — a
+// real frontend run indexes low thousands of declarations.
+var benchBucketSizes = []int{1, 10, 100, 1000}
+
+// benchQNames builds n distinct qualified names shaped like the ones
+// the store really holds — a package path plus a type name — so the
+// map's hashing cost reflects realistic key lengths rather than the
+// single-byte keys a synthetic fixture would use.
+func benchQNames(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "github.com/example/bench.Entity" + strconv.Itoa(i)
+	}
+	return out
+}
 
 func TestNewBucket(t *testing.T) {
 	t.Parallel()
@@ -319,4 +338,85 @@ func TestMultiIndex_ConcurrentAccess(t *testing.T) {
 		}
 		wg.Wait()
 	})
+}
+
+// BenchmarkBucket_Add measures populating a bucket from empty to n
+// entries: per item one exclusive lock acquisition, one map-presence
+// check, one slice append, and one map insert.
+//
+// Add is the write half of every frontend and generator pass, so the
+// question the scaling sweep answers is whether insertion stays
+// linear. A plausible future rewrite — scanning items to detect
+// duplicates instead of consulting the map — is invisible at n=1 and
+// quadratic at n=1000; only the sweep catches it. Read per-op time
+// as "cost of building an n-entry bucket": it must grow by roughly
+// the same factor as n.
+//
+// The keys are generated above the loop. The timed region covers
+// NewBucket plus the n Adds, so the reported allocation deliberately
+// includes the map's growth — that growth is the cost being
+// questioned.
+func BenchmarkBucket_Add(b *testing.B) {
+	b.ReportAllocs()
+
+	for _, n := range benchBucketSizes {
+		keys := benchQNames(n)
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				bucket := store.NewBucket[int]()
+				for i, k := range keys {
+					if err := bucket.Add(k, i); err != nil {
+						b.Fatalf("Add(%q): %v", k, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkBucket_ByQName measures a single successful qualified-name
+// lookup against a bucket already holding n entries.
+//
+// ByQName is the cross-reference primitive — every plugin resolving
+// a type it did not declare lands here — and its contract is O(1).
+// The sweep is the assertion: per-op time must stay flat as n grows
+// by three orders of magnitude. A slope means the map lookup has
+// been replaced by a scan.
+//
+// Zero allocations is the correct result here and not a sign of an
+// eliminated loop body: ByQName takes a read lock and returns a
+// value already in the map. The accumulator below is what keeps the
+// call from being optimised away, and the final check makes the
+// accumulator load-bearing.
+func BenchmarkBucket_ByQName(b *testing.B) {
+	b.ReportAllocs()
+
+	for _, n := range benchBucketSizes {
+		keys := benchQNames(n)
+		bucket := store.NewBucket[int]()
+		for i, k := range keys {
+			if err := bucket.Add(k, i+1); err != nil {
+				b.Fatalf("Add(%q): %v", k, err)
+			}
+		}
+		// Probe the middle of the insertion order so the result is not
+		// biased by whichever entry the map happened to place first.
+		probe := keys[n/2]
+
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.ReportAllocs()
+			var found int
+			for b.Loop() {
+				v, ok := bucket.ByQName(probe)
+				if !ok {
+					b.Fatalf("ByQName(%q) missing from a bucket of %d", probe, n)
+				}
+				found += v
+			}
+			if found == 0 {
+				b.Fatalf("accumulator stayed zero: the timed loop did not run")
+			}
+		})
+	}
 }

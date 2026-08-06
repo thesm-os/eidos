@@ -21,7 +21,7 @@
 //
 //	store := storefixture.New().
 //	    Struct("User", func(s *storefixture.StructBuilder) {
-//	        s.Field("ID", storefixture.Named("string"))
+//	        s.Field("ID", storefixture.Named("string"), nil)
 //	        s.Method("Validate", func(m *storefixture.MethodBuilder) {
 //	            m.Param("ctx", storefixture.PkgNamed("context", "Context"))
 //	            m.Return(storefixture.Named("error"))
@@ -32,9 +32,9 @@
 // # Type-reference helpers
 //
 // The package-level constructors ([Named], [PkgNamed], [Pointer],
-// [Slice], [Array], [Map], [Chan], [Func], [WithArgs]) build
-// [node.TypeRef] values without manual struct-literal verbosity.
-// They are pure functions; callers may compose freely.
+// [Slice], [Array], [Map], [Func], [WithArgs]) build [node.TypeRef]
+// values without manual struct-literal verbosity. They are pure
+// functions; callers may compose freely.
 //
 // # Metadata and inspection
 //

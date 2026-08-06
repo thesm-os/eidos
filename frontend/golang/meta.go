@@ -131,7 +131,13 @@ var (
 	) //nolint:gochecknoglobals // typed registry-singleton key
 
 	// MetaUnderlyingKind records the kind of the underlying type
-	// for a [node.Alias] (e.g. "struct", "int", "func", "map").
+	// for a [node.Alias] — one of "basic", "func", "map", "slice",
+	// "array", "pointer", "chan". The value names the type's kind,
+	// not the type itself: an alias to `int` carries "basic", not
+	// "int". Struct and interface underlying types never reach this
+	// key because [convertTypeSpec] routes them to [node.Struct] /
+	// [node.Interface] instead of an alias; see [underlyingKindOf]
+	// for the empty-string fallback on shapes outside the set.
 	MetaUnderlyingKind = meta.NewKey(
 		"go.underlyingKind",
 		meta.StringParser,
@@ -165,8 +171,12 @@ var (
 		meta.StringParser,
 	) //nolint:gochecknoglobals // typed registry-singleton key
 
-	// MetaIotaValue stamps the typed-constant numeric value an
-	// iota-driven enum variant resolves to.
+	// MetaIotaValue stamps the numeric value a typed constant
+	// resolves to, and is forwarded onto the [node.EnumVariant] that
+	// [promoteAliasToEnum] builds from that constant. Named for the
+	// iota-driven enum case it exists to serve; [stampConstantMeta]
+	// stamps every constant whose value is an integer exactly
+	// representable as an int64, iota-derived or not.
 	MetaIotaValue = meta.NewKey(
 		"go.iotaValue",
 		meta.IntParser,

@@ -28,6 +28,15 @@ fuzz/
 # regression. Only ignore rapid/ at the repo root (build artifacts).
 !/testdata/rapid/
 !**/testdata/rapid/
+
+# Fuzz corpora under testdata/fuzz/ are committed for the same reason:
+# `go test -fuzz` writes each input it finds to
+# testdata/fuzz/<Target>/<hash>, and committing it replays that input as
+# an ordinary unit test on every subsequent run, forever. The bare
+# `fuzz/` rule above matches those directories too, so without these
+# every reproducer the fuzzer earns is discarded before it can be staged.
+!/testdata/fuzz/
+!**/testdata/fuzz/
 coverage.txt
 coverage.html
 profile.out

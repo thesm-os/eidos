@@ -4,8 +4,14 @@
 package plugintest_test
 
 import (
+	"fmt"
+	"io/fs"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"text/template"
 
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
@@ -283,6 +289,141 @@ func TestAssertOutputsShape(t *testing.T) {
 		// returns nil and is therefore skipped.
 		if fake.failed {
 			t.Fatalf("default fixture reported a failure: errs=%v fatals=%v", fake.errs, fake.fatals)
+		}
+	})
+}
+
+// TestAssertTemplateProviderStability covers every rejection path of
+// the [plugin.TemplateProvider] contract check plus the two shapes
+// that must stay silent.
+//
+// The four failures are separate subtests rather than one fixture
+// violating everything at once because the check reports through
+// `Errorf` and keeps going: a fixture breaking two rules would pass
+// a one-substring assertion even if only the other rule fired. One
+// violation per subtest is what makes "this specific diagnostic
+// fires" a claim the test can actually make.
+func TestAssertTemplateProviderStability(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a flapping ok flag is rejected", func(t *testing.T) {
+		t.Parallel()
+		var calls int
+		fake := newFakeT()
+		plugintest.AssertTemplateProviderStability(fake, &templateProviderPlugin{
+			name: "flapping-templates",
+			templates: func(string) (fs.FS, bool) {
+				// Odd call reports "yes, I contribute templates";
+				// even call reports "no". The backend queries once
+				// per render pass, so a flip makes rendered output
+				// depend on how many passes ran before it.
+				calls++
+				return fstest.MapFS{}, calls%2 == 1
+			},
+		})
+		assertFakeMentions(t, fake, "not stable: first ok=true second ok=false")
+	})
+
+	t.Run("a nil filesystem behind a true flag is rejected", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateProviderStability(fake, &templateProviderPlugin{
+			name:      "nil-fs-templates",
+			templates: func(string) (fs.FS, bool) { return nil, true },
+		})
+		assertFakeMentions(t, fake, "reported ok but returned a nil fs.FS")
+	})
+
+	t.Run("a filesystem behind a false flag is rejected", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateProviderStability(fake, &templateProviderPlugin{
+			name:      "disowned-fs-templates",
+			templates: func(string) (fs.FS, bool) { return fstest.MapFS{}, false },
+		})
+		assertFakeMentions(t, fake, "returned a filesystem while reporting ok=false")
+	})
+
+	t.Run("a name declared as both an extension and an override is rejected", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateProviderStability(fake, &templateProviderPlugin{
+			name:      "double-declared-func",
+			funcs:     func(string) template.FuncMap { return template.FuncMap{"shout": strings.ToUpper} },
+			overrides: func(string) template.FuncMap { return template.FuncMap{"shout": strings.ToLower} },
+		})
+		assertFakeMentions(t, fake, `declares "shout" in both TemplateFuncs and TemplateOverrides`)
+	})
+
+	t.Run("a well-formed provider passes silently", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateProviderStability(fake, &templateProviderPlugin{
+			name:      "well-formed-templates",
+			templates: func(string) (fs.FS, bool) { return fstest.MapFS{}, true },
+			funcs:     func(string) template.FuncMap { return template.FuncMap{"shout": strings.ToUpper} },
+			overrides: func(string) template.FuncMap { return template.FuncMap{"quiet": strings.ToLower} },
+		})
+		if fake.failed {
+			t.Fatalf("well-formed TemplateProvider reported a failure: errs=%v fatals=%v", fake.errs, fake.fatals)
+		}
+	})
+
+	t.Run("a plugin that implements no template surface passes silently", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateProviderStability(fake, plugintest.NewFixturePlugin())
+		if fake.failed {
+			t.Fatalf("non-implementer reported a failure: errs=%v fatals=%v", fake.errs, fake.fatals)
+		}
+	})
+}
+
+// TestAssertStableFuncMap covers the funcmap helper directly rather
+// than only through [plugintest.AssertTemplateProviderStability].
+//
+// The helper carries two responsibilities the caller depends on and
+// which the enclosing check cannot demonstrate on its own: it
+// rejects a shifting name set, and it returns the first lookup so
+// the caller can cross-check extensions against overrides. A helper
+// that reported failures correctly but returned nil would leave the
+// both-maps collision check silently inert — the failure mode this
+// test exists to foreclose.
+func TestAssertStableFuncMap(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a shifting name set is rejected", func(t *testing.T) {
+		t.Parallel()
+		var calls int
+		fake := newFakeT()
+		plugintest.AssertStableFuncMap(fake, "golang", "TemplateFuncs", func(string) template.FuncMap {
+			calls++
+			return template.FuncMap{fmt.Sprintf("shout%d", calls): strings.ToUpper}
+		})
+		assertFakeMentions(t, fake, `TemplateProvider.TemplateFuncs("golang") not stable`)
+	})
+
+	t.Run("the empty name is rejected", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertStableFuncMap(fake, "golang", "TemplateOverrides", func(string) template.FuncMap {
+			return template.FuncMap{"": strings.ToUpper}
+		})
+		assertFakeMentions(t, fake, `TemplateProvider.TemplateOverrides("golang") registers the empty name`)
+	})
+
+	t.Run("the first lookup is returned so callers can cross-check it", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		got := plugintest.AssertStableFuncMap(fake, "golang", "TemplateFuncs", func(string) template.FuncMap {
+			return template.FuncMap{"shout": strings.ToUpper, "quiet": strings.ToLower}
+		})
+		if fake.failed {
+			t.Fatalf("stable funcmap reported a failure: errs=%v fatals=%v", fake.errs, fake.fatals)
+		}
+		names := slices.Sorted(maps.Keys(got))
+		if want := []string{"quiet", "shout"}; !slices.Equal(names, want) {
+			t.Errorf("returned funcmap names = %v; want %v", names, want)
 		}
 	})
 }
