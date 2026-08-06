@@ -13,7 +13,7 @@ import (
 // [ast.GenDecl] carries any block-level doc / directive comments
 // that should be inherited when the spec itself has none.
 func (c *converter) convertTypeSpec(ts *ast.TypeSpec, owner *ast.GenDecl) {
-	docs, dirs := c.docsAndDirectives(ts.Doc, owner.Doc)
+	docs, dirs := c.docsAndDirectives(ts.Doc, owner.Doc, ts.Comment)
 
 	obj, ok := c.pkg.TypesInfo.Defs[ts.Name].(*types.TypeName)
 	if !ok || obj == nil {

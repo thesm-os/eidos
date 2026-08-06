@@ -113,3 +113,124 @@ func TestPreferred(t *testing.T) {
 		}
 	})
 }
+
+// TestDocsAndDirectives_TrailingComment covers the trailing position
+// on the AST nodes that have one — ValueSpec and TypeSpec.
+//
+// A struct field honoured a trailing directive; a const did not. The
+// gap mattered most on enums, where a const block is a table and the
+// override belongs on the row: `+gen:value` written the natural way
+// was silently ignored, the generator emitted the derived spelling,
+// the round-trip test passed against it, and the wrong value reached
+// the external protocol with nothing reported at any severity.
+//
+// Enum variants inherit their BaseNode from the Constant they were
+// coalesced from, so the const case carries them too.
+func TestDocsAndDirectives_TrailingComment(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a trailing directive on a const is attached", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\nconst Limit int = 10 //+gen:value ten\n",
+		})
+		c := pkg.ConstantByName("Limit")
+		if c == nil {
+			t.Fatalf("Limit missing")
+		}
+		if got := c.Directive("value"); got == nil {
+			t.Fatalf("trailing directive dropped; got %+v", c.DirectiveList)
+		}
+	})
+
+	t.Run("a trailing directive on an enum variant is attached", func(t *testing.T) {
+		t.Parallel()
+		// The reported shape: an override on the row rather than
+		// above it.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Pill int\n\nconst (\n" +
+				"\tPillAspirin Pill = iota // a trailing comment\n" +
+				"\tPillIbuprofen //+gen:value ibuprofen-200\n" +
+				")\n",
+		})
+		e := pkg.EnumByName("Pill")
+		if e == nil {
+			t.Fatalf("Pill not promoted to enum")
+		}
+		v := e.VariantByName("PillIbuprofen")
+		if v == nil {
+			t.Fatalf("PillIbuprofen missing; got %+v", e.Variants)
+		}
+		got := v.Directive("value")
+		if got == nil {
+			t.Fatalf("trailing directive dropped; got %+v", v.DirectiveList)
+		}
+		if len(got.Args) != 1 || got.Args[0] != "ibuprofen-200" {
+			t.Fatalf("directive args = %+v, want [ibuprofen-200]", got.Args)
+		}
+	})
+
+	t.Run("a plain trailing comment attaches no directive", func(t *testing.T) {
+		t.Parallel()
+		// Prose on the line must stay prose. Treating it as a value
+		// would mean a clarifying note silently changes what a type
+		// marshals to.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Pill int\n\nconst (\n" +
+				"\tPillAspirin Pill = iota // a trailing comment\n)\n",
+		})
+		v := pkg.EnumByName("Pill").VariantByName("PillAspirin")
+		if len(v.DirectiveList) != 0 {
+			t.Fatalf("prose must not become a directive; got %+v", v.DirectiveList)
+		}
+	})
+
+	t.Run("a trailing directive on a var is attached", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\nvar Registry map[string]int //+gen:value reg\n",
+		})
+		v := pkg.VariableByName("Registry")
+		if v == nil || v.Directive("value") == nil {
+			t.Fatalf("trailing directive dropped; got %+v", v)
+		}
+	})
+
+	t.Run("a trailing directive on a type spec is attached", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Box struct{} //+gen:value boxed\n",
+		})
+		s := pkg.StructByName("Box")
+		if s == nil || s.Directive("value") == nil {
+			t.Fatalf("trailing directive dropped; got %+v", s)
+		}
+	})
+
+	t.Run("leading and trailing directives both attach, in source order", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\n//+gen:value above\nconst Limit int = 10 //+gen:value beside\n",
+		})
+		c := pkg.ConstantByName("Limit")
+		if len(c.DirectiveList) != 2 {
+			t.Fatalf("expected both directives; got %+v", c.DirectiveList)
+		}
+		if c.DirectiveList[0].Args[0] != "above" || c.DirectiveList[1].Args[0] != "beside" {
+			t.Fatalf("order should follow the source; got %+v", c.DirectiveList)
+		}
+	})
+
+	t.Run("a trailing comment does not become a doc line", func(t *testing.T) {
+		t.Parallel()
+		// A trailing comment is a note on the line, not the entity's
+		// doc comment; folding it into Docs would put it in generated
+		// godoc where it does not belong.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\nconst Limit int = 10 // a trailing note\n",
+		})
+		if got := pkg.ConstantByName("Limit").DocLines; len(got) != 0 {
+			t.Fatalf("DocLines = %v, want none", got)
+		}
+	})
+}

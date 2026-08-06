@@ -16,16 +16,40 @@ import (
 // block-level group. Directives use the pipeline-supplied
 // [directive.Parser] from [plugin.FrontendContext.Parser] — the
 // frontend does no comment parsing of its own.
-func (c *converter) docsAndDirectives(specDoc, blockDoc *ast.CommentGroup) ([]string, []*directive.Directive) {
+//
+// trailing is the group on the same line as the declaration
+// ([ast.ValueSpec.Comment], [ast.TypeSpec.Comment]). Callers whose
+// AST node has no trailing group — a [ast.FuncDecl], a file — pass
+// nil.
+//
+// A trailing directive is unambiguously the declaration's own: there
+// is no adjacent node it could belong to instead. It is also where a
+// const block's per-row metadata conventionally goes, a const block
+// being a table, and the position an author reaches for first. Not
+// consulting it meant a `+gen:value` written the natural way was
+// silently ignored — the generator emitted the derived spelling, the
+// round-trip test passed against it, and the wrong value reached the
+// external protocol with nothing reported.
+//
+// Doc lines deliberately do not take the trailing group. A trailing
+// comment is a note on the line, not the entity's doc comment, and
+// folding it into Docs would put it in generated godoc where it does
+// not belong.
+func (c *converter) docsAndDirectives(
+	specDoc, blockDoc, trailing *ast.CommentGroup,
+) ([]string, []*directive.Directive) {
 	docSrc := preferred(specDoc, blockDoc)
 	docs := docLinesFromCommentGroup(docSrc)
 
 	var dirs []*directive.Directive
-	// Directives can appear in either the spec doc or the block
-	// doc; walk both rather than the preferred-only fallback used
-	// for doc lines, because a single block decl may carry block-
-	// level directives plus spec-level ones.
-	for _, g := range []*ast.CommentGroup{blockDoc, specDoc} {
+	// Directives can appear in the block doc, the spec doc, or the
+	// spec's trailing comment; walk all three rather than the
+	// preferred-only fallback used for doc lines, because a single
+	// block decl may carry block-level directives plus spec-level
+	// ones. Source order — least specific first, then leading, then
+	// trailing — so a consumer reading the list back sees them in
+	// the order they appear.
+	for _, g := range []*ast.CommentGroup{blockDoc, specDoc, trailing} {
 		if g == nil {
 			continue
 		}

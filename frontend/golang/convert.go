@@ -146,7 +146,7 @@ func (c *converter) collectPackageDoc() {
 		}
 		// go/parser guarantees a non-nil CommentGroup carries at
 		// least one Comment, so the docs slice is non-empty here.
-		docs, dirs := c.docsAndDirectives(syntax.Doc, nil)
+		docs, dirs := c.docsAndDirectives(syntax.Doc, nil, nil)
 		c.out.DocLines = docs
 		c.out.DirectiveList = dirs
 		return

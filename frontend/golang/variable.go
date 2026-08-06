@@ -19,7 +19,7 @@ import (
 // type — variables whose type was inferred from their initialiser
 // leave [node.Variable.Type] nil, per [node.Variable]'s contract.
 func (c *converter) convertVarSpec(vs *ast.ValueSpec, owner *ast.GenDecl) {
-	docs, dirs := c.docsAndDirectives(vs.Doc, owner.Doc)
+	docs, dirs := c.docsAndDirectives(vs.Doc, owner.Doc, vs.Comment)
 	for i, name := range vs.Names {
 		if name.Name == "_" {
 			// Blank-identifier declarations (`var _ = …`) are

@@ -19,7 +19,7 @@ import (
 // [node.Struct] or [node.Interface] once every type has been
 // declared.
 func (c *converter) convertFuncDecl(fd *ast.FuncDecl) {
-	docs, dirs := c.docsAndDirectives(fd.Doc, nil)
+	docs, dirs := c.docsAndDirectives(fd.Doc, nil, nil)
 	// go/types records a *types.Func for every func-decl name it
 	// accepts — but records nil for the losing side of a
 	// redeclaration, so the lookup is only total for a package that

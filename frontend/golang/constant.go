@@ -35,7 +35,7 @@ func (c *converter) convertConstBlock(d *ast.GenDecl) {
 // preserve the original literal accurately enough for downstream
 // generators.
 func (c *converter) convertConstSpec(vs *ast.ValueSpec, owner *ast.GenDecl) {
-	docs, dirs := c.docsAndDirectives(vs.Doc, owner.Doc)
+	docs, dirs := c.docsAndDirectives(vs.Doc, owner.Doc, vs.Comment)
 	for _, name := range vs.Names {
 		if name.Name == "_" {
 			// Blank-identifier consts (`const _ = …`) hold an iota
