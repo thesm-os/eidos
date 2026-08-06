@@ -332,8 +332,8 @@ func (s *renderState) renderComposite(r *emit.CompositeRef) (string, error) {
 		if !hasCompositeChild(r) {
 			return s.renderShallowComposite(r)
 		}
-	case emit.ShapeFunc, emit.ShapeUnion:
-		// Always buffered: both join several children, so both were
+	case emit.ShapeFunc, emit.ShapeUnion, emit.ShapeAnonStruct:
+		// Always buffered: each joins several children, so each was
 		// materialising every child and joining regardless of depth.
 	}
 	var scratch [64]byte
@@ -455,6 +455,8 @@ func (s *renderState) appendComposite(dst []byte, r *emit.CompositeRef) ([]byte,
 		return s.appendFuncShape(dst, r.FuncParams, r.FuncReturns)
 	case emit.ShapeUnion:
 		return s.appendUnion(dst, r.UnionTerms)
+	case emit.ShapeAnonStruct:
+		return s.appendAnonStruct(dst, r.StructFields, r.StructEmbeds)
 	default:
 		return nil, fmt.Errorf("%w: composite shape %s", ErrUnsupportedRef, r.Shape)
 	}
@@ -513,6 +515,71 @@ func (s *renderState) appendAnonReturns(dst []byte, types []emit.Ref) ([]byte, e
 		}
 	}
 	return append(dst, ')'), nil
+}
+
+// appendAnonStruct appends an inline anonymous struct type.
+//
+// Everything goes on one line, separated by semicolons, because
+// nothing here needs to decide otherwise: [finalise] runs
+// format.Source over the assembled file, and gofmt is what picks the
+// layout — it keeps a single-field inline struct on one line and
+// explodes a multi-field one onto its own lines. Emitting the
+// canonical form directly would mean reproducing that rule and
+// tracking the enclosing indentation, for output the formatter
+// rewrites anyway.
+//
+// Embeds follow fields rather than interleaving with them. Go accepts
+// either, source order between the two groups is not recoverable from
+// the emit shape, and the split matches how [emit.Struct] already
+// separates Fields from Embeds.
+//
+// Field types route back through [renderState.appendType], so an
+// inline `struct{ T time.Time }` registers `time` on the file's
+// import set exactly as a named field would. A string-shaped
+// workaround — rendering the whole struct into a builtin ref — is a
+// leaf and would register nothing, which is the same trap
+// [renderState.renderChan] documents.
+func (s *renderState) appendAnonStruct(dst []byte, fields []emit.AnonField, embeds []emit.Ref) ([]byte, error) {
+	if len(fields) == 0 && len(embeds) == 0 {
+		// The set idiom: `map[K]struct{}`. No space inside the braces
+		// — `struct{}` is what gofmt produces and what every Go
+		// programmer reads as empty.
+		return append(dst, "struct{}"...), nil
+	}
+	dst = append(dst, "struct{ "...)
+	first := true
+	for _, f := range fields {
+		if !first {
+			dst = append(dst, "; "...)
+		}
+		first = false
+		dst = append(dst, f.Name...)
+		dst = append(dst, ' ')
+		var err error
+		if dst, err = s.appendType(dst, f.Type); err != nil {
+			return nil, err
+		}
+		if f.Tag != "" {
+			// Backtick-quoted, matching the raw form Tag is documented
+			// to carry. A tag containing a backtick cannot be spelled
+			// this way in Go source at all, so there is no escaping to
+			// do — such a tag is unrepresentable, not mis-rendered.
+			dst = append(dst, " `"...)
+			dst = append(dst, f.Tag...)
+			dst = append(dst, '`')
+		}
+	}
+	for _, e := range embeds {
+		if !first {
+			dst = append(dst, "; "...)
+		}
+		first = false
+		var err error
+		if dst, err = s.appendType(dst, e); err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, " }"...), nil
 }
 
 // appendUnion appends a union constraint's terms, separated by

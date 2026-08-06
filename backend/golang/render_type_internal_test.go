@@ -398,6 +398,111 @@ func compositeCorpus() []*emit.CompositeRef {
 // produce identical text while silently swapping `users` and
 // `users2` in any file importing two packages that share a last
 // segment. No string comparison can see that.
+// TestAppendAnonStruct_Spelling pins the renderer's own output for an
+// inline anonymous struct, before format.Source sees it.
+//
+// The end-to-end tests in render_type_test.go assert on the finalised
+// body, which means gofmt has already normalised the spelling —
+// `struct{  }` and `struct{}` are indistinguishable there, and so is
+// any other whitespace slip. Everything this renderer decides that
+// the formatter would launder has to be pinned at this level or not
+// at all.
+//
+// The empty case is the one that matters most: `map[K]struct{}` is
+// how Go spells a set, which is what made this the most-hit of the
+// type-rendering gaps.
+func TestAppendAnonStruct_Spelling(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		fields []emit.AnonField
+		embeds []emit.Ref
+		want   string
+	}{
+		{
+			name: "empty renders with no interior space",
+			want: "struct{}",
+		},
+		{
+			name:   "one field",
+			fields: []emit.AnonField{{Name: "A", Type: emit.Builtin("int")}},
+			want:   "struct{ A int }",
+		},
+		{
+			name: "two fields are semicolon-separated",
+			fields: []emit.AnonField{
+				{Name: "A", Type: emit.Builtin("int")},
+				{Name: "B", Type: emit.Builtin("string")},
+			},
+			want: "struct{ A int; B string }",
+		},
+		{
+			name:   "a tag is backtick-quoted after the type",
+			fields: []emit.AnonField{{Name: "B", Type: emit.Builtin("string"), Tag: `json:"b"`}},
+			want:   "struct{ B string `json:\"b\"` }",
+		},
+		{
+			name:   "an embed carries no name",
+			embeds: []emit.Ref{emit.Builtin("error")},
+			want:   "struct{ error }",
+		},
+		{
+			name:   "embeds follow fields, separated",
+			fields: []emit.AnonField{{Name: "A", Type: emit.Builtin("int")}},
+			embeds: []emit.Ref{emit.Builtin("error")},
+			want:   "struct{ A int; error }",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := newRenderState(loadTemplates(), nil, nil, nil)
+			got, err := s.renderType(emit.AnonStructOf(tc.fields, tc.embeds))
+			if err != nil {
+				t.Fatalf("renderType: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("renderType = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("a field type registers its own import", func(t *testing.T) {
+		t.Parallel()
+		// The property a string-shaped workaround could not have — the
+		// same one renderChan documents. A builtin ref carrying the
+		// whole `struct{ T time.Time }` spelling is a leaf and would
+		// leave `time` unregistered, producing a file that does not
+		// compile.
+		s := newRenderState(loadTemplates(), nil, nil, nil)
+		got, err := s.renderType(emit.AnonStructOf(
+			[]emit.AnonField{{Name: "T", Type: emit.External("time", "Time")}}, nil))
+		if err != nil {
+			t.Fatalf("renderType: %v", err)
+		}
+		if got != "struct{ T time.Time }" {
+			t.Fatalf("renderType = %q, want struct{ T time.Time }", got)
+		}
+		if s.imports.Len() != 1 {
+			t.Fatalf("field-type import not registered; set holds %d", s.imports.Len())
+		}
+	})
+
+	t.Run("an embedded type registers its own import", func(t *testing.T) {
+		t.Parallel()
+		s := newRenderState(loadTemplates(), nil, nil, nil)
+		if _, err := s.renderType(emit.AnonStructOf(
+			nil, []emit.Ref{emit.External("io", "Reader")})); err != nil {
+			t.Fatalf("renderType: %v", err)
+		}
+		if s.imports.Len() != 1 {
+			t.Fatalf("embed import not registered; set holds %d", s.imports.Len())
+		}
+	})
+}
+
 func TestRenderComposite_MatchesConcatenation(t *testing.T) {
 	t.Parallel()
 

@@ -23,6 +23,7 @@ func TestCompositeShape_String(t *testing.T) {
 		{"Map", emit.ShapeMap, "map"},
 		{"Func", emit.ShapeFunc, "func"},
 		{"Union", emit.ShapeUnion, "union"},
+		{"AnonStruct", emit.ShapeAnonStruct, "anon_struct"},
 		{"unknown stringifies with a marker", emit.CompositeShape(99), "composite_shape(?)"},
 	}
 
@@ -172,6 +173,120 @@ func TestUnion(t *testing.T) {
 		t.Parallel()
 		var _ emit.Ref = emit.Union(emit.UnionTerm{Type: emit.Builtin("int")})
 	})
+}
+
+func TestAnonStructOf(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no fields and no embeds is the struct{} shape", func(t *testing.T) {
+		t.Parallel()
+		r := emit.AnonStructOf(nil, nil)
+		if r.Shape != emit.ShapeAnonStruct {
+			t.Fatalf("Shape = %s, want anon_struct", r.Shape)
+		}
+		if len(r.StructFields) != 0 || len(r.StructEmbeds) != 0 {
+			t.Fatalf("expected an empty shape; got %+v", r)
+		}
+	})
+
+	t.Run("nil slices are not normalised to empty ones", func(t *testing.T) {
+		t.Parallel()
+		// Unlike FuncOf: `struct{}` is the common case here, not an
+		// unset builder seed, so allocating two empty slices for every
+		// map[K]struct{} in a graph would be pure waste.
+		r := emit.AnonStructOf(nil, nil)
+		if r.StructFields != nil {
+			t.Fatalf("StructFields should stay nil; got %+v", r.StructFields)
+		}
+		if r.StructEmbeds != nil {
+			t.Fatalf("StructEmbeds should stay nil; got %+v", r.StructEmbeds)
+		}
+	})
+
+	t.Run("carries fields in order with names, types and tags", func(t *testing.T) {
+		t.Parallel()
+		r := emit.AnonStructOf([]emit.AnonField{
+			{Name: "A", Type: emit.Builtin("int")},
+			{Name: "B", Type: emit.Builtin("string"), Tag: `json:"b"`},
+		}, nil)
+		if len(r.StructFields) != 2 {
+			t.Fatalf("StructFields len = %d, want 2", len(r.StructFields))
+		}
+		if r.StructFields[0].Name != "A" || r.StructFields[1].Name != "B" {
+			t.Fatalf("field order not preserved; got %+v", r.StructFields)
+		}
+		if r.StructFields[0].Tag != "" {
+			t.Fatalf("first field should carry no tag; got %q", r.StructFields[0].Tag)
+		}
+		if r.StructFields[1].Tag != `json:"b"` {
+			t.Fatalf("second field tag = %q, want json:\"b\"", r.StructFields[1].Tag)
+		}
+		if r.StructFields[0].Type == nil || r.StructFields[1].Type == nil {
+			t.Fatalf("field Type refs must be populated")
+		}
+	})
+
+	t.Run("carries embeds in order", func(t *testing.T) {
+		t.Parallel()
+		r := emit.AnonStructOf(nil, []emit.Ref{
+			emit.Builtin("error"),
+			emit.External("io", "Reader"),
+		})
+		if len(r.StructEmbeds) != 2 {
+			t.Fatalf("StructEmbeds len = %d, want 2", len(r.StructEmbeds))
+		}
+		if got, ok := r.StructEmbeds[0].(*emit.BuiltinRef); !ok || got.Name != "error" {
+			t.Fatalf("embed order not preserved; got %+v", r.StructEmbeds)
+		}
+	})
+
+	t.Run("reports KindCompositeRef", func(t *testing.T) {
+		t.Parallel()
+		if got := emit.AnonStructOf(nil, nil).Kind(); got != emit.KindCompositeRef {
+			t.Fatalf("Kind = %s, want %s", got, emit.KindCompositeRef)
+		}
+	})
+
+	t.Run("satisfies the Ref interface", func(t *testing.T) {
+		t.Parallel()
+		var _ emit.Ref = emit.AnonStructOf(nil, nil)
+	})
+}
+
+// TestCompositeShape_SerialisedOrdinals pins the integer value of
+// every shape.
+//
+// [emit.CompositeRef.Shape] encodes as a bare int, so these ordinals
+// are the serialised contract: a variant inserted anywhere but the
+// end of the const block silently reinterprets every emit graph
+// already written to disk — a persisted 4 would stop meaning func.
+// New variants append, and this test is what says so out loud.
+func TestCompositeShape_SerialisedOrdinals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		s    emit.CompositeShape
+		want int
+	}{
+		{"Pointer", emit.ShapePointer, 0},
+		{"Slice", emit.ShapeSlice, 1},
+		{"Array", emit.ShapeArray, 2},
+		{"Map", emit.ShapeMap, 3},
+		{"Func", emit.ShapeFunc, 4},
+		{"Union", emit.ShapeUnion, 5},
+		{"AnonStruct", emit.ShapeAnonStruct, 6},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if int(tc.s) != tc.want {
+				t.Fatalf("%s = %d, want %d — reordering breaks every persisted graph",
+					tc.name, int(tc.s), tc.want)
+			}
+		})
+	}
 }
 
 func TestCompositeRef_Kind(t *testing.T) {

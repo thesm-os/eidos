@@ -212,3 +212,114 @@ func TestFromNode_FuncType(t *testing.T) {
 		}
 	})
 }
+
+// TestFromNode_AnonStruct covers the anonymous-struct arm.
+//
+// Without it the ref fell through to the named-reference fallback and
+// produced an ExternalRef with an empty Package, which the backend
+// rejects outright — `map[string]struct{}`, the idiomatic Go set,
+// aborted the whole render rather than degrading its output. The
+// assertions below are on the *lifted shape* rather than on rendered
+// text, so they fail for the original reason even if the backend
+// later spells the type differently.
+func TestFromNode_AnonStruct(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an empty anonymous struct lifts to a composite, not an external ref", func(t *testing.T) {
+		t.Parallel()
+		got := refconv.FromNode(&node.TypeRef{TypeKind: node.TypeRefAnonStruct})
+		comp, ok := got.(*emit.CompositeRef)
+		if !ok {
+			t.Fatalf("FromNode(struct{}) = %T, want *emit.CompositeRef", got)
+		}
+		if comp.Shape != emit.ShapeAnonStruct {
+			t.Fatalf("Shape = %v, want ShapeAnonStruct", comp.Shape)
+		}
+	})
+
+	t.Run("no arm means an empty import path, which is the bug", func(t *testing.T) {
+		t.Parallel()
+		// The fallback builds emit.External("", "") and the backend
+		// answers with writer.ErrEmptyPath. Pinning the negative keeps
+		// a future refactor from quietly restoring the fall-through.
+		got := refconv.FromNode(&node.TypeRef{TypeKind: node.TypeRefAnonStruct})
+		if ext, ok := got.(*emit.ExternalRef); ok {
+			t.Fatalf("anon struct must not lift to an ExternalRef; got package %q name %q",
+				ext.Package, ext.Name)
+		}
+	})
+
+	t.Run("inline fields carry name, type and tag in order", func(t *testing.T) {
+		t.Parallel()
+		src := &node.TypeRef{
+			TypeKind: node.TypeRefAnonStruct,
+			Fields: []*node.Field{
+				{Name: "A", Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"}},
+				{Name: "B", Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}, Tag: `json:"b"`},
+			},
+		}
+		got, ok := refconv.FromNode(src).(*emit.CompositeRef)
+		if !ok {
+			t.Fatalf("FromNode returned %T, want *emit.CompositeRef", refconv.FromNode(src))
+		}
+		if len(got.StructFields) != 2 {
+			t.Fatalf("StructFields len = %d, want 2", len(got.StructFields))
+		}
+		if got.StructFields[0].Name != "A" || got.StructFields[1].Name != "B" {
+			t.Fatalf("field order not preserved; got %+v", got.StructFields)
+		}
+		if got.StructFields[1].Tag != `json:"b"` {
+			// Tags are part of Go's struct type identity: dropping one
+			// makes two distinct types render identically.
+			t.Fatalf("tag = %q, want json:\"b\"", got.StructFields[1].Tag)
+		}
+		if got.StructFields[0].Type == nil || got.StructFields[1].Type == nil {
+			t.Fatalf("field types must be lifted, not dropped")
+		}
+	})
+
+	t.Run("embedded types are lifted in order", func(t *testing.T) {
+		t.Parallel()
+		src := &node.TypeRef{
+			TypeKind: node.TypeRefAnonStruct,
+			Embeds: []*node.Embed{
+				{Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "error"}},
+			},
+		}
+		got, ok := refconv.FromNode(src).(*emit.CompositeRef)
+		if !ok {
+			t.Fatalf("FromNode returned %T, want *emit.CompositeRef", refconv.FromNode(src))
+		}
+		if len(got.StructEmbeds) != 1 {
+			t.Fatalf("StructEmbeds len = %d, want 1", len(got.StructEmbeds))
+		}
+		if b, ok := got.StructEmbeds[0].(*emit.BuiltinRef); !ok || b.Name != "error" {
+			t.Fatalf("embed = %+v, want BuiltinRef{error}", got.StructEmbeds[0])
+		}
+	})
+
+	t.Run("a nested anonymous struct lifts recursively", func(t *testing.T) {
+		t.Parallel()
+		src := &node.TypeRef{
+			TypeKind: node.TypeRefMap,
+			MapKey:   &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"},
+			MapValue: &node.TypeRef{TypeKind: node.TypeRefAnonStruct},
+		}
+		got, ok := refconv.FromNode(src).(*emit.CompositeRef)
+		if !ok {
+			t.Fatalf("FromNode returned %T, want *emit.CompositeRef", refconv.FromNode(src))
+		}
+		val, ok := got.MapValue.(*emit.CompositeRef)
+		if !ok || val.Shape != emit.ShapeAnonStruct {
+			t.Fatalf("map value = %+v, want a ShapeAnonStruct composite", got.MapValue)
+		}
+	})
+
+	t.Run("the origin node is threaded onto the lifted ref", func(t *testing.T) {
+		t.Parallel()
+		src := &node.TypeRef{TypeKind: node.TypeRefAnonStruct}
+		if got := refconv.FromNode(src).Origin(); got != node.Node(src) {
+			t.Fatalf("Origin = %v, want the source ref", got)
+		}
+	})
+}

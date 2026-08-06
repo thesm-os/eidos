@@ -234,6 +234,140 @@ func TestRenderType_CompositeShapes(t *testing.T) {
 	}
 }
 
+// TestRenderType_AnonStruct covers the ShapeAnonStruct path.
+//
+// Before the shape existed, an anonymous struct reached renderType as
+// an external reference with an empty package and aborted the render
+// with `writer: empty import path` — the whole file was lost, not
+// just the field. `map[string]struct{}` is how Go spells a set, so
+// the empty case is the one ordinary code hits.
+//
+// Expectations are written post-gofmt, since renderSingleFieldStruct
+// returns the finalised body: gofmt keeps a single-field inline
+// struct on one line and explodes a multi-field one, which is why the
+// renderer emits one canonical single-line form and lets the
+// formatter decide the layout.
+func TestRenderType_AnonStruct(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the set idiom renders and no longer aborts the render", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "Set",
+			emit.MapOf(emit.Builtin("string"), emit.AnonStructOf(nil, nil)))
+		if !strings.Contains(body, "Set map[string]struct{}") {
+			t.Fatalf("body should contain 'Set map[string]struct{}'; got:\n%s", body)
+		}
+	})
+
+	t.Run("a bare empty anonymous struct renders as struct{}", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "E", emit.AnonStructOf(nil, nil))
+		if !strings.Contains(body, "E struct{}") {
+			t.Fatalf("body should contain 'E struct{}'; got:\n%s", body)
+		}
+	})
+
+	t.Run("a single inline field renders inline", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "One", emit.AnonStructOf(
+			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}}, nil))
+		if !strings.Contains(body, "One struct{ A int }") {
+			t.Fatalf("body should contain 'One struct{ A int }'; got:\n%s", body)
+		}
+	})
+
+	t.Run("a struct tag survives the round trip", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "Tagged", emit.AnonStructOf(
+			[]emit.AnonField{{Name: "B", Type: emit.Builtin("string"), Tag: `json:"b"`}}, nil))
+		// A tag forces gofmt to explode even a single-field inline
+		// struct, so the assertion is on the field line rather than
+		// the one-line form the renderer emitted.
+		if !strings.Contains(body, "B string `json:\"b\"`") {
+			t.Fatalf("body should carry the backtick-quoted tag; got:\n%s", body)
+		}
+	})
+
+	t.Run("several fields are separated so gofmt can split them", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "Two", emit.AnonStructOf([]emit.AnonField{
+			{Name: "A", Type: emit.Builtin("int")},
+			{Name: "B", Type: emit.Builtin("string")},
+		}, nil))
+		// gofmt explodes a multi-field inline struct onto its own
+		// lines; a missing separator would instead be a parse error
+		// and Render would have failed before returning a body.
+		for _, want := range []string{"Two struct {", "A int", "B string"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("body should contain %q; got:\n%s", want, body)
+			}
+		}
+	})
+
+	t.Run("an embedded type renders unqualified", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "Emb", emit.AnonStructOf(
+			nil, []emit.Ref{emit.Builtin("error")}))
+		if !strings.Contains(body, "Emb struct{ error }") {
+			t.Fatalf("body should contain 'Emb struct{ error }'; got:\n%s", body)
+		}
+	})
+
+	t.Run("fields and embeds together stay separated", func(t *testing.T) {
+		t.Parallel()
+		// The separator is tracked across both groups by one flag. Get
+		// it wrong and the output is `struct{ A int error }`, which
+		// does not parse — gofmt would reject the file and Render
+		// would fail rather than return a wrong body.
+		body := renderSingleFieldStruct(t, "Mixed", emit.AnonStructOf(
+			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}},
+			[]emit.Ref{emit.Builtin("error")}))
+		if !strings.Contains(body, "Mixed struct {") {
+			t.Fatalf("body should contain 'Mixed struct {'; got:\n%s", body)
+		}
+		for _, want := range []string{"A int", "error"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("body should contain %q; got:\n%s", want, body)
+			}
+		}
+	})
+
+	t.Run("an inner type registers its own import", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "Stamped", emit.AnonStructOf(
+			[]emit.AnonField{{Name: "T", Type: emit.External("time", "Time")}}, nil))
+		if !strings.Contains(body, `"time"`) {
+			t.Fatalf("inline field types must register imports; got:\n%s", body)
+		}
+		if !strings.Contains(body, "Stamped struct{ T time.Time }") {
+			t.Fatalf("body should contain 'Stamped struct{ T time.Time }'; got:\n%s", body)
+		}
+	})
+
+	t.Run("nested inside a slice reaches renderType by the other path", func(t *testing.T) {
+		t.Parallel()
+		body := renderSingleFieldStruct(t, "Nest", emit.SliceOf(emit.AnonStructOf(
+			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}}, nil)))
+		if !strings.Contains(body, "Nest []struct{ A int }") {
+			t.Fatalf("body should contain 'Nest []struct{ A int }'; got:\n%s", body)
+		}
+	})
+
+	t.Run("an unrenderable field type propagates its error", func(t *testing.T) {
+		t.Parallel()
+		ctx, _, d := newBackendContext(t)
+		target := emit.Target{Dir: "out", Filename: "x.go", Package: "x"}
+		addEmitPackage(t, ctx, emitPackage("x", &emit.Struct{
+			Name: "X", Package: "x", Target: target,
+			Fields: []*emit.Field{{Name: "F", Type: emit.AnonStructOf(
+				[]emit.AnonField{{Name: "A", Type: &emit.CompositeRef{Shape: emit.CompositeShape(99)}}}, nil)}},
+		}))
+		if err := mustNew(t).Render(ctx); err == nil && !d.HasErrors() {
+			t.Fatal("an unsupported inline field type must not render silently")
+		}
+	})
+}
+
 // TestRenderType_Union covers the ShapeUnion path: type-set
 // constraints (`A | B | ~C`) render via the union shape with `~`
 // prefixing approximation terms.

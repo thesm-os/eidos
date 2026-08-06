@@ -469,6 +469,39 @@ func TestWalk_CompositeRefVariants(t *testing.T) {
 			t.Fatalf("expected 3 visits (root + 2 terms); got %v", got)
 		}
 	})
+
+	// An inline struct's field and embed types are reachable only
+	// here. Anything that walks refs to collect imports — and that is
+	// how imports are collected — would miss the `time` in
+	// `struct{ T time.Time }` entirely if this descent were absent.
+	t.Run("AnonStruct visits every field type", func(t *testing.T) {
+		t.Parallel()
+		r := emit.AnonStructOf([]emit.AnonField{
+			{Name: "A", Type: builtinRef("int")},
+			{Name: "B", Type: builtinRef("string")},
+		}, nil)
+		got := recordWalk(r)
+		if len(got) != 3 {
+			t.Fatalf("expected 3 visits (root + 2 field types); got %v", got)
+		}
+	})
+
+	t.Run("AnonStruct visits every embed", func(t *testing.T) {
+		t.Parallel()
+		r := emit.AnonStructOf(nil, []emit.Ref{builtinRef("error")})
+		got := recordWalk(r)
+		if len(got) != 2 {
+			t.Fatalf("expected 2 visits (root + embed); got %v", got)
+		}
+	})
+
+	t.Run("an empty AnonStruct is a leaf", func(t *testing.T) {
+		t.Parallel()
+		got := recordWalk(emit.AnonStructOf(nil, nil))
+		if !slices.Equal(got, []kind.Kind{emit.KindCompositeRef}) {
+			t.Fatalf("struct{} has nothing below it; got %v", got)
+		}
+	})
 }
 
 func TestWalk_SlotItemsAreVisited(t *testing.T) {

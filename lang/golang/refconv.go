@@ -50,6 +50,14 @@ func liftFromNode(r *node.TypeRef) emit.Ref {
 		return emit.Builtin(r.Name)
 	case r.IsTypeParam():
 		return emit.Builtin(r.Name)
+	case r.IsAnonStruct():
+		// Structural, like a func type: it names no package, so the
+		// fall-through below would build an external reference with an
+		// empty import path and the backend would reject it (writer:
+		// empty import path), aborting the render. The empty case is
+		// the one real code hits constantly — `map[K]struct{}` is how
+		// Go spells a set.
+		return emit.AnonStructOf(anonFields(r.Fields), embedRefs(r.Embeds))
 	case r.IsAnonInterface():
 		// Anonymous interfaces sit in two practical buckets at the
 		// plugin tier: the empty interface (the constraint-fallback
@@ -64,6 +72,43 @@ func liftFromNode(r *node.TypeRef) emit.Ref {
 		return emit.Builtin("any")
 	}
 	return emit.External(r.Package, r.Name, refSlice(r.TypeArgs)...)
+}
+
+// anonFields lifts an anonymous struct's inline fields into their
+// emit carriers, preserving source order. Returns nil for no fields
+// so the `struct{}` shape costs no allocation — it is the common
+// case, not an edge one.
+//
+// Name, type and tag are the whole of an inline field: tags are part
+// of a Go struct's type identity, so dropping them would make two
+// structurally distinct types render identically.
+func anonFields(in []*node.Field) []emit.AnonField {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]emit.AnonField, 0, len(in))
+	for _, f := range in {
+		out = append(out, emit.AnonField{
+			Name: f.Name,
+			Type: FromNode(f.Type),
+			Tag:  f.Tag,
+		})
+	}
+	return out
+}
+
+// embedRefs lifts an anonymous struct's embedded types, preserving
+// source order and returning nil for none on the same reasoning as
+// [anonFields].
+func embedRefs(in []*node.Embed) []emit.Ref {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]emit.Ref, 0, len(in))
+	for _, e := range in {
+		out = append(out, FromNode(e.Type))
+	}
+	return out
 }
 
 // refSlice lifts a slice of source type references into emit form,

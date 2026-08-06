@@ -300,6 +300,16 @@ func walkCompositeRef(r *CompositeRef, v Visitor) {
 		for _, t := range r.UnionTerms {
 			Walk(t.Type, v)
 		}
+	case ShapeAnonStruct:
+		// Fields before embeds, matching the source order a backend
+		// renders them in. Anything that walks refs to collect imports
+		// sees an inline struct's field types here or not at all.
+		for _, f := range r.StructFields {
+			Walk(f.Type, v)
+		}
+		for _, e := range r.StructEmbeds {
+			Walk(e, v)
+		}
 	}
 }
 
