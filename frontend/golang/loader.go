@@ -6,6 +6,9 @@ package golang
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"strconv"
 	"strings"
@@ -58,6 +61,21 @@ func loadPattern(ctx *plugin.FrontendContext, opts Options) error {
 		Mode:  loadMode,
 		Tests: opts.IncludeTests,
 		Dir:   opts.Dir,
+		// Supplied so the parse skips ast.Object resolution.
+		// x/tools installs a default ParseFile that keeps doing it —
+		// its own comment says so — allocating an *ast.Scope per
+		// block and an *ast.Object per declared identifier to
+		// populate ast.Ident.Obj, a field nothing in this package
+		// reads. Every .Obj() call here resolves through go/types,
+		// not through the AST.
+		//
+		// AllErrors is load-bearing: parse diagnostics flow through
+		// pkg.Errors into reportPackageErrors. ParseComments is
+		// load-bearing for the entire doc and directive model.
+		ParseFile: func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
+			return parser.ParseFile(fset, filename, src,
+				parser.AllErrors|parser.ParseComments|parser.SkipObjectResolution)
+		},
 	}
 	if opts.IgnoreWorkspace {
 		// `GOWORK=off` makes packages.Load respect the loaded
@@ -107,22 +125,32 @@ func loadPattern(ctx *plugin.FrontendContext, opts Options) error {
 // Warn diagnostics so cache-disk problems are visible without
 // blocking the run.
 func convertPackageWithCache(ctx *plugin.FrontendContext, opts Options, pkg *packages.Package) error {
-	ps := ctx.Diag.For(FrontendName)
-	key, keyErr := packageCacheKey(pkg, opts, ctx.Fingerprint)
-	if keyErr == nil {
-		if cached, ok := loadPackageFromCache(ctx.Cache, key); ok {
-			if err := ctx.Store.Nodes().AddPackage(cached); err != nil {
-				return fmt.Errorf("add cached package: %w", err)
+	// The key hash and the node-graph marshal are skipped together
+	// when the cache cannot retain either. Both are pure waste under
+	// a None: the lookup could never hit and the write could never
+	// be read back.
+	usable := cacheUsable(ctx.Cache)
+	var (
+		key    string
+		keyErr = errCacheDisabled
+	)
+	if usable {
+		key, keyErr = packageCacheKey(pkg, opts, ctx.Fingerprint)
+		if keyErr == nil {
+			if cached, ok := loadPackageFromCache(ctx.Cache, key); ok {
+				if err := ctx.Store.Nodes().AddPackage(cached); err != nil {
+					return fmt.Errorf("add cached package: %w", err)
+				}
+				return nil
 			}
-			return nil
 		}
 	}
 	out := buildPackage(ctx, opts, pkg)
 	if err := ctx.Store.Nodes().AddPackage(out); err != nil {
 		return fmt.Errorf("add package: %w", err)
 	}
-	if keyErr == nil {
-		storePackageInCache(ctx.Cache, key, out, ps)
+	if usable && keyErr == nil {
+		storePackageInCache(ctx.Cache, key, out, ctx.Diag.For(FrontendName))
 	}
 	return nil
 }

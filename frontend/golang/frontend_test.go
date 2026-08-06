@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.thesmos.sh/eidos/cache"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/opt"
@@ -353,4 +354,46 @@ func ExampleFrontend_Load() {
 	// errors: false
 	// package: fixture
 	// field: string
+}
+
+// BenchmarkFrontend_Load_NoCache measures the configuration
+// `--no-cache` actually runs.
+//
+// Every other benchmark here builds its FrontendContext without a
+// Cache field, so ctx.Cache is nil and the cache write path is
+// skipped by the nil guard that has always been there. A real run
+// never passes nil: Builder.Build substitutes cache.NewNone when none
+// was supplied, and the CLI returns the same type for the explicit
+// off switch. The path that hashes every source file and marshals the
+// whole node graph before handing it to something that discards it
+// was therefore worth exactly zero in every recorded number.
+//
+// Recorded per size so a reintroduced marshal shows up as a slope
+// against the nil-cache benchmark above rather than as an absolute
+// nobody has a reference for.
+func BenchmarkFrontend_Load_NoCache(b *testing.B) {
+	b.ReportAllocs()
+
+	parser := directive.DefaultParser()
+	for _, decls := range []int{1, 100, 1000} {
+		b.Run(strconv.Itoa(decls), func(b *testing.B) {
+			b.ReportAllocs()
+
+			dir := writeBenchmarkModule(b, benchmarkDeclSource(b, decls))
+			fe := benchmarkFrontend(b, dir, true)
+			assertBenchmarkLoadConverts(b, fe, parser, decls)
+
+			for b.Loop() {
+				if err := fe.Load(&plugin.FrontendContext{
+					Store:   store.New(),
+					Diag:    diag.New(),
+					Parser:  parser,
+					Cache:   cache.NewNone(),
+					Pattern: "./...",
+				}); err != nil {
+					b.Fatalf("Load: %v", err)
+				}
+			}
+		})
+	}
 }

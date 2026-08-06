@@ -472,3 +472,57 @@ func TestProvenance(t *testing.T) {
 		}
 	})
 }
+
+// TestStampTypeRefMeta_PointerReceiverStringer pins the branch the
+// stringer probe must not short-circuit.
+//
+// implementsStringer asks twice: once for T, once for *T. The second
+// probe allocated a pointer type on every TypeRef the converter
+// builds, so it is now skipped for basic and pointer types, whose
+// method sets cannot grow by taking a pointer.
+//
+// A named type's can. `func (l *Label) String() string` makes Label
+// a Stringer only through *Label, so widening that guard by one case
+// would silently stop recognising the most common way the interface
+// is satisfied — and no golden fixture covers it: the corpus
+// declares only value-receiver String methods, where the first probe
+// always answers.
+func TestStampTypeRefMeta_PointerReceiverStringer(t *testing.T) {
+	t.Parallel()
+
+	const src = "package a\n\n" +
+		"type Label int\n\n" +
+		"func (l *Label) String() string { return \"\" }\n\n" +
+		"type Holder struct {\n\tByValue Label\n\tByPointer *Label\n\tPlain int\n}\n"
+
+	pkg := requirePackage(t, map[string]string{"a.go": src})
+	holder := pkg.StructByName("Holder")
+
+	t.Run("a value field of a pointer-receiver Stringer is stamped", func(t *testing.T) {
+		t.Parallel()
+		// The case the second probe exists for. Label itself does
+		// not implement Stringer; *Label does.
+		f := holder.FieldByName("ByValue")
+		if got, _ := golang.MetaIsStringer.Get(f.Type.Meta()); !got {
+			t.Fatalf("value field of a pointer-receiver Stringer not stamped")
+		}
+	})
+
+	t.Run("a pointer field is stamped by the first probe", func(t *testing.T) {
+		t.Parallel()
+		f := holder.FieldByName("ByPointer")
+		if got, _ := golang.MetaIsStringer.Get(f.Type.Meta()); !got {
+			t.Fatalf("pointer field of a pointer-receiver Stringer not stamped")
+		}
+	})
+
+	t.Run("a basic type is not stamped", func(t *testing.T) {
+		t.Parallel()
+		// The short-circuit's own case: *int has an empty method
+		// set, so the skipped probe was already decided.
+		f := holder.FieldByName("Plain")
+		if golang.MetaIsStringer.Has(f.Type.Meta()) {
+			t.Fatalf("int stamped as a Stringer")
+		}
+	})
+}

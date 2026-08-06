@@ -148,8 +148,21 @@ func newStringerInterface() *types.Interface {
 // the value or pointer form. The caller ([stampTypeRefMeta]) has
 // already filtered nil types, so t is always non-nil here.
 func implementsStringer(t types.Type) bool {
-	return types.Implements(t, stringerInterface) ||
-		types.Implements(types.NewPointer(t), stringerInterface)
+	if types.Implements(t, stringerInterface) {
+		return true
+	}
+	switch t.(type) {
+	case *types.Basic, *types.Pointer:
+		// Neither can gain a method by having a pointer taken to it:
+		// *T for T a pointer or a basic type has an empty method
+		// set, so the second probe is decided before it runs. This
+		// is called for every TypeRef the converter builds — every
+		// field, embed, parameter, result, receiver and type
+		// argument — and allocated a pointer type each time to ask a
+		// question already answered.
+		return false
+	}
+	return types.Implements(types.NewPointer(t), stringerInterface)
 }
 
 // stampStructMeta records struct-level Go facts on s with full

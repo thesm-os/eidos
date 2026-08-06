@@ -5,6 +5,7 @@ package golang
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -104,6 +105,27 @@ func loadPackageFromCache(c cache.Cache, key string) (*node.Package, bool) {
 // reachable field has a JSON-encodable type and back-pointer cycles
 // are broken by [json:"-"] on Owner fields — so the marshal error
 // is dropped and treated as an unreachable contract violation.
+// cacheUsable reports whether c can return a hit or retain a write.
+//
+// A nil cache and a [cache.None] can do neither: None.Get always
+// misses and None.Put discards. Both guards downstream test only for
+// nil, so a run with the cache switched off still hashed every source
+// file and marshalled the entire node graph before handing the result
+// to something that threw it away — disabling the cache cost more
+// than leaving it on.
+//
+// Deliberately conservative: an unrecognised implementation is
+// assumed usable, which costs only the status quo. A type switch
+// rather than a third method on [cache.Cache], because that interface
+// is exported and implemented outside this repository.
+func cacheUsable(c cache.Cache) bool {
+	if c == nil {
+		return false
+	}
+	_, none := c.(*cache.None)
+	return !none
+}
+
 func storePackageInCache(c cache.Cache, key string, pkg *node.Package, sink *diag.PluginSink) {
 	if c == nil || pkg == nil {
 		return
@@ -113,3 +135,9 @@ func storePackageInCache(c cache.Cache, key string, pkg *node.Package, sink *dia
 		sink.Warnf(position.Pos{}, "cache put failed: %v", err)
 	}
 }
+
+// errCacheDisabled marks the key as uncomputed because the cache
+// cannot use it. It is never returned to a caller or reported — the
+// key-error path emits no diagnostic — and exists so the write guard
+// reads as one condition rather than two booleans.
+var errCacheDisabled = errors.New("golang: cache disabled")
