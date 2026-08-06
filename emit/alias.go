@@ -102,8 +102,27 @@ func (a *Alias) MethodsWith(pred func(*Method) bool) []*Method {
 // injection. Mirrors [Struct.MethodsSlot] / [Interface.MethodsSlot]
 // so generators can inject methods onto any host that owns a
 // method set.
-func (a *Alias) MethodsSlot() *Slot { return a.slot(a, "methods", KindMethod) }
+func (a *Alias) MethodsSlot() *Slot { return a.Slot(slotMethods) }
 
 // Slot returns the named slot, creating it lazily without an
 // element-kind constraint.
-func (a *Alias) Slot(name string) *Slot { return a.slot(a, name, "") }
+func (a *Alias) Slot(name string) *Slot { return a.slot(a, name, aliasSlotKind(name)) }
+
+// aliasSlotKind returns the element kind the named slot carries on a
+// Alias, or "" for a name this kind does not reserve.
+//
+// The kind is a property of the NAME, not of which accessor created
+// the slot. Without this, Alias.Slot(name) created an unconstrained
+// slot while the typed accessor created a constrained one, and since
+// creation is lookup-or-create the surviving constraint was decided by
+// whichever plugin ran first — so two contributors to one host got
+// different validation depending on registration order, and the
+// permissive path was reachable by accident.
+func aliasSlotKind(name string) kind.Kind {
+	switch name {
+	case slotMethods:
+		return KindMethod
+	default:
+		return ""
+	}
+}

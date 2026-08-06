@@ -65,15 +65,15 @@ func (i *Interface) OwnerQName() string { return i.QName() }
 
 // MethodsSlot returns the "methods" slot for cross-cutting method
 // injection.
-func (i *Interface) MethodsSlot() *Slot { return i.slot(i, "methods", KindMethod) }
+func (i *Interface) MethodsSlot() *Slot { return i.Slot(slotMethods) }
 
 // EmbedsSlot returns the "embeds" slot for cross-cutting embed
 // injection.
-func (i *Interface) EmbedsSlot() *Slot { return i.slot(i, "embeds", KindEmbed) }
+func (i *Interface) EmbedsSlot() *Slot { return i.Slot(slotEmbeds) }
 
 // Slot returns the named slot, creating it lazily without an
 // element-kind constraint.
-func (i *Interface) Slot(name string) *Slot { return i.slot(i, name, "") }
+func (i *Interface) Slot(name string) *Slot { return i.slot(i, name, interfaceSlotKind(name)) }
 
 // IsGeneric reports whether the interface declares generic type
 // parameters.
@@ -99,4 +99,25 @@ func (i *Interface) MethodsWith(pred func(*Method) bool) []*Method {
 		}
 	}
 	return out
+}
+
+// interfaceSlotKind returns the element kind the named slot carries on a
+// Interface, or "" for a name this kind does not reserve.
+//
+// The kind is a property of the NAME, not of which accessor created
+// the slot. Without this, Interface.Slot(name) created an unconstrained
+// slot while the typed accessor created a constrained one, and since
+// creation is lookup-or-create the surviving constraint was decided by
+// whichever plugin ran first — so two contributors to one host got
+// different validation depending on registration order, and the
+// permissive path was reachable by accident.
+func interfaceSlotKind(name string) kind.Kind {
+	switch name {
+	case slotMethods:
+		return KindMethod
+	case slotEmbeds:
+		return KindEmbed
+	default:
+		return ""
+	}
 }

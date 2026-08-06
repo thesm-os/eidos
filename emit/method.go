@@ -143,28 +143,28 @@ func (m *Method) QName() string {
 
 // Prebody returns the "prebody" slot for cross-cutting contributions
 // that run before [Method.Body].
-func (m *Method) Prebody() *Slot { return m.slot(m, "prebody", KindStmt) }
+func (m *Method) Prebody() *Slot { return m.Slot(slotPrebody) }
 
 // Postbody returns the "postbody" slot for cross-cutting
 // contributions that run after [Method.Body] returns.
-func (m *Method) Postbody() *Slot { return m.slot(m, "postbody", KindStmt) }
+func (m *Method) Postbody() *Slot { return m.Slot(slotPostbody) }
 
 // ParamsSlot returns the "params" slot for cross-cutting parameter
 // injection. Distinct from [Method.Params] (the typed field for the
 // owning generator's direct content).
-func (m *Method) ParamsSlot() *Slot { return m.slot(m, "params", KindParam) }
+func (m *Method) ParamsSlot() *Slot { return m.Slot(slotParams) }
 
 // ReturnsSlot returns the "returns" slot for cross-cutting
 // return-type injection. The slot's element kind is [KindReturn],
 // so contributions are typed [*Return] values; the backend merges
 // the typed [Method.Returns] slice with slot contributions in
 // capability-topo + append order.
-func (m *Method) ReturnsSlot() *Slot { return m.slot(m, "returns", KindReturn) }
+func (m *Method) ReturnsSlot() *Slot { return m.Slot(slotReturns) }
 
 // Slot returns the named slot, creating it lazily without an
 // element-kind constraint. Used for custom slot names a plugin
 // declares alongside its emit kinds.
-func (m *Method) Slot(name string) *Slot { return m.slot(m, name, "") }
+func (m *Method) Slot(name string) *Slot { return m.slot(m, name, methodSlotKind(name)) }
 
 // HasReceiver reports whether the method has an explicit receiver.
 func (m *Method) HasReceiver() bool { return m.Receiver != nil }
@@ -216,4 +216,27 @@ func (m *Method) ReturnAt(i int) *Return {
 		return nil
 	}
 	return m.Returns[i]
+}
+
+// methodSlotKind returns the element kind the named slot carries on a
+// Method, or "" for a name this kind does not reserve.
+//
+// The kind is a property of the NAME, not of which accessor created
+// the slot. Without this, Method.Slot(name) created an unconstrained
+// slot while the typed accessor created a constrained one, and since
+// creation is lookup-or-create the surviving constraint was decided by
+// whichever plugin ran first — so two contributors to one host got
+// different validation depending on registration order, and the
+// permissive path was reachable by accident.
+func methodSlotKind(name string) kind.Kind {
+	switch name {
+	case slotPrebody, slotPostbody:
+		return KindStmt
+	case slotParams:
+		return KindParam
+	case slotReturns:
+		return KindReturn
+	default:
+		return ""
+	}
 }

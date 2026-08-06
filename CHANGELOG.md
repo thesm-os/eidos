@@ -62,6 +62,30 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **`emit`: a reserved slot's element kind depended on which accessor reached
+  it first.** Slot creation is lookup-or-create, and only the typed accessors
+  passed a kind: `Method.Prebody()` minted a slot constrained to `emit.stmt`,
+  while `Method.Slot("prebody")` minted the same slot unconstrained. Whichever
+  ran first won, so two plugins contributing to one method got different
+  validation depending on registration order — and the unchecked path was
+  reachable by accident, letting a foreign node reach the renderer and fail as
+  malformed output instead of at append time with the offending plugin named.
+
+  The element kind is now a property of the slot name, identical through both
+  accessors, for every reserved slot: `imports` on `File`; `fields` / `methods`
+  / `embeds` on `Struct`; `methods` / `embeds` on `Interface`; `methods` on
+  `Alias`; `variants` on `Enum`; and `prebody` / `postbody` / `params` /
+  `returns` on `Method` and `Function`. `File`'s `top` / `bottom` / `init`,
+  `Field`'s `tags`, every `Package` slot, and all custom names stay
+  unconstrained as before.
+
+  This is a defect fix that changes behaviour, so it ships without a
+  deprecation cycle. A plugin that reached a reserved slot by string and
+  appended a foreign kind was already producing output the backend could not
+  render; it now fails at `Append` with `ErrSlotElementType` naming the slot.
+  Plugins that want to contribute a node of their own kind should have the host
+  declare a custom slot — see `docs/plugin/composition.md`.
+
 - **`pipeline`: a `+gen:out` directive could write outside the source tree.**
   `splitOutDirectivePath` stripped a leading separator but left `..` segments
   intact, and `composeTarget` applies `filepath.Join(originDir, dir)` — which

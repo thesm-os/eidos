@@ -56,25 +56,25 @@ func (f *Function) QName() string {
 
 // Prebody returns the "prebody" slot for cross-cutting contributions
 // that run before [Function.Body].
-func (f *Function) Prebody() *Slot { return f.slot(f, "prebody", KindStmt) }
+func (f *Function) Prebody() *Slot { return f.Slot(slotPrebody) }
 
 // Postbody returns the "postbody" slot for cross-cutting
 // contributions that run after [Function.Body] returns.
-func (f *Function) Postbody() *Slot { return f.slot(f, "postbody", KindStmt) }
+func (f *Function) Postbody() *Slot { return f.Slot(slotPostbody) }
 
 // ParamsSlot returns the "params" slot for cross-cutting parameter
 // injection.
-func (f *Function) ParamsSlot() *Slot { return f.slot(f, "params", KindParam) }
+func (f *Function) ParamsSlot() *Slot { return f.Slot(slotParams) }
 
 // ReturnsSlot returns the "returns" slot for cross-cutting
 // return-type injection. The slot's element kind is [KindReturn],
 // so contributions are typed [*Return] values; the backend merges
 // the typed [Function.Returns] slice with slot contributions in
 // capability-topo + append order.
-func (f *Function) ReturnsSlot() *Slot { return f.slot(f, "returns", KindReturn) }
+func (f *Function) ReturnsSlot() *Slot { return f.Slot(slotReturns) }
 
 // Slot returns the named slot, creating it lazily.
-func (f *Function) Slot(name string) *Slot { return f.slot(f, name, "") }
+func (f *Function) Slot(name string) *Slot { return f.slot(f, name, functionSlotKind(name)) }
 
 // IsVariadic reports whether the function's last positional
 // parameter is variadic.
@@ -123,4 +123,27 @@ func (f *Function) ReturnAt(i int) *Return {
 		return nil
 	}
 	return f.Returns[i]
+}
+
+// functionSlotKind returns the element kind the named slot carries on a
+// Function, or "" for a name this kind does not reserve.
+//
+// The kind is a property of the NAME, not of which accessor created
+// the slot. Without this, Function.Slot(name) created an unconstrained
+// slot while the typed accessor created a constrained one, and since
+// creation is lookup-or-create the surviving constraint was decided by
+// whichever plugin ran first — so two contributors to one host got
+// different validation depending on registration order, and the
+// permissive path was reachable by accident.
+func functionSlotKind(name string) kind.Kind {
+	switch name {
+	case slotPrebody, slotPostbody:
+		return KindStmt
+	case slotParams:
+		return KindParam
+	case slotReturns:
+		return KindReturn
+	default:
+		return ""
+	}
 }

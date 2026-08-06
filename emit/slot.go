@@ -35,20 +35,32 @@ var ErrProvenanceNotFound = errors.New("emit: provenance ID not found in slot")
 // Backends render slot contributions in append order alongside the
 // host's typed content.
 //
-// Standard slot names by host kind (informational; the host's typed
-// field model is the source of truth for direct content; slots are
-// for cross-cutting injection):
+// Reserved slot names carry a fixed element kind, listed below. The
+// kind is a property of the NAME: reaching a reserved slot through the
+// host's typed accessor and through [Slot] by string yields one slot
+// with one constraint, whichever a plugin calls first. Slot creation is
+// lookup-or-create, so without that rule the surviving constraint would
+// be decided by plugin registration order, and a contributor could land
+// an unvalidated node purely by running early.
 //
-//   - [File]:        "top", "bottom", "init"
-//   - [Struct]:      "fields", "methods", "embeds"
-//   - [Interface]:   "methods", "embeds"
-//   - [Method]:      "prebody", "postbody", "params", "returns"
-//   - [Function]:    "prebody", "postbody", "params", "returns"
-//   - [Enum]:        "variants"
-//   - [Field]:       "tags"
+//   - [File]:        "imports" ([KindImport])
+//   - [Struct]:      "fields" ([KindField]), "methods" ([KindMethod]),
+//     "embeds" ([KindEmbed])
+//   - [Interface]:   "methods" ([KindMethod]), "embeds" ([KindEmbed])
+//   - [Alias]:       "methods" ([KindMethod])
+//   - [Method]:      "prebody", "postbody" ([KindStmt]),
+//     "params" ([KindParam]), "returns" ([KindReturn])
+//   - [Function]:    "prebody", "postbody" ([KindStmt]),
+//     "params" ([KindParam]), "returns" ([KindReturn])
+//   - [Enum]:        "variants" ([KindEnumVariant])
 //
-// Custom slot names are valid too — plugin-defined emit kinds may
-// declare their own slot conventions.
+// The host's typed field model remains the source of truth for direct
+// content; these slots are for cross-cutting injection.
+//
+// [File]'s "top", "bottom" and "init", [Field]'s "tags", and every
+// [Package] slot are deliberately unconstrained, as are all custom
+// names — plugin-defined emit kinds declare their own conventions and
+// append their own kinds.
 //
 // Slots are append-only by default. Insertion helpers
 // ([Slot.Prepend], [Slot.InsertAt]) provide positioning when needed.
@@ -208,11 +220,61 @@ type SlotHost interface {
 	Slot(name string) *Slot
 }
 
+// Reserved slot names, spelled once.
+//
+// The name is the key the per-host kind tables and the typed accessors
+// both look up, so a typo in either would silently mint a second,
+// unconstrained slot under a near-miss name rather than fail — the
+// same class of defect as the call-order dependence these tables
+// exist to remove.
+const (
+	slotImports  = "imports"
+	slotFields   = "fields"
+	slotMethods  = "methods"
+	slotEmbeds   = "embeds"
+	slotVariants = "variants"
+	slotPrebody  = "prebody"
+	slotPostbody = "postbody"
+	slotParams   = "params"
+	slotReturns  = "returns"
+)
+
 // slotMap is a small reusable type carrying a lazily-allocated map
 // of slots; embedded by every host kind that exposes slots. The
 // map's key is the slot name.
 type slotMap struct {
 	slots map[string]*Slot
+}
+
+// NewSlot returns a slot named name that accepts items whose Kind
+// matches elemKind. An empty elemKind accepts any kind.
+//
+// Built-in emit kinds get their slots from an embedded slot map and
+// never call this. It exists for a plugin that declares its own emit
+// kind and wants to expose a slot other plugins contribute into — the
+// composition pattern where a plugin depends on a plugin rather than
+// on a core kind. Without it the machinery is unreachable from
+// outside this package: the lazy-creation helper is unexported, so an
+// author's only option was a struct literal that silently permits a
+// missing SlotName.
+//
+// Owner is deliberately not a parameter. A host assigns it when it
+// hands the slot out, which is the only point at which the back
+// pointer is knowable, and leaving it nil until then keeps a
+// half-constructed slot from claiming an owner it does not have:
+//
+//	func (s *Stack) Chain() *Slot {
+//		if s.chain == nil {
+//			s.chain = NewSlot("chain", KindExpr)
+//			s.chain.Owner = s
+//		}
+//		return s.chain
+//	}
+//
+// The host must also satisfy [SlotHost] so the backend's `slot`
+// template helper can reach the slot by name.
+func NewSlot(name string, elemKind kind.Kind) *Slot {
+	return &Slot{SlotName: name, ElemKind: elemKind}
 }
 
 // slot returns the named slot, creating it lazily with the supplied

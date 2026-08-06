@@ -75,6 +75,91 @@ func TestSlot_Append(t *testing.T) {
 	})
 }
 
+// TestSlotReservedName_KindIsIndependentOfCallOrder pins the element
+// kind of a reserved slot to the slot's NAME.
+//
+// Slot creation is lookup-or-create, so before this was pinned the
+// constraint belonged to whichever accessor touched the host first:
+// Prebody() minted an emit.stmt-constrained slot, Slot("prebody")
+// minted an unconstrained one, and the loser silently inherited the
+// winner's rules. Two plugins contributing to one method therefore got
+// different validation depending on registration order, and the
+// unchecked path was reachable by accident rather than by choice.
+func TestSlotReservedName_KindIsIndependentOfCallOrder(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range slotKindCases() {
+		t.Run(tc.label(), func(t *testing.T) {
+			t.Parallel()
+
+			typedFirst := tc.newHost()
+			viaTyped := tc.typed(typedFirst)
+			thenGeneric := typedFirst.Slot(tc.slotName)
+
+			genericFirst := tc.newHost()
+			viaGeneric := genericFirst.Slot(tc.slotName)
+			thenTyped := tc.typed(genericFirst)
+
+			for label, got := range map[string]*emit.Slot{
+				"typed accessor, called first":  viaTyped,
+				"Slot(name), called second":     thenGeneric,
+				"Slot(name), called first":      viaGeneric,
+				"typed accessor, called second": thenTyped,
+			} {
+				if got.ElemKind != tc.want {
+					t.Errorf("%s: ElemKind = %q, want %q", label, got.ElemKind, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestSlotReservedName_BothAccessorsReturnOneSlot asserts the typed
+// accessor and Slot(name) address the same slot rather than two that
+// happen to share a name. Distinct slots would split a host's
+// contributions in two, and only one of them would reach the renderer.
+func TestSlotReservedName_BothAccessorsReturnOneSlot(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range slotKindCases() {
+		t.Run(tc.label(), func(t *testing.T) {
+			t.Parallel()
+
+			host := tc.newHost()
+			if typed, generic := tc.typed(host), host.Slot(tc.slotName); typed != generic {
+				t.Fatalf("typed accessor and Slot(%q) returned different slots (%p vs %p)",
+					tc.slotName, typed, generic)
+			}
+		})
+	}
+}
+
+// TestSlotReservedName_RejectsForeignKindViaEitherAccessor drives the
+// behaviour the kind constraint exists for, through the accessor that
+// used to escape it. Reaching a reserved slot by string is the path a
+// template-driven plugin takes, so an unconstrained slot there meant a
+// foreign node reached the renderer and failed as malformed output
+// instead of as a named plugin at append time.
+func TestSlotReservedName_RejectsForeignKindViaEitherAccessor(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range slotKindCases() {
+		t.Run(tc.label(), func(t *testing.T) {
+			t.Parallel()
+
+			generic := tc.newHost().Slot(tc.slotName)
+			err := generic.Append(tc.foreign(), emit.Provenance{SetBy: "foreign-plugin"})
+			if !errors.Is(err, emit.ErrSlotElementType) {
+				t.Fatalf("Slot(%q).Append(foreign) = %v, want ErrSlotElementType",
+					tc.slotName, err)
+			}
+			if !strings.Contains(err.Error(), tc.slotName) {
+				t.Errorf("error should name the slot; got %q", err.Error())
+			}
+		})
+	}
+}
+
 func TestSlot_Prepend(t *testing.T) {
 	t.Parallel()
 

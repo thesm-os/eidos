@@ -90,11 +90,11 @@ func (f *File) Path() string {
 // declarations (file header comments, build tags, top-level
 // directives). Element kind is unconstrained — top content is
 // intentionally heterogeneous.
-func (f *File) Top() *Slot { return f.slot(f, "top", "") }
+func (f *File) Top() *Slot { return f.Slot("top") }
 
 // Bottom returns the "bottom" slot for content rendered after the
 // file's declarations.
-func (f *File) Bottom() *Slot { return f.slot(f, "bottom", "") }
+func (f *File) Bottom() *Slot { return f.Slot("bottom") }
 
 // Init returns the "init" slot for items rendered inside an
 // `init()` function in this file. The slot accepts [emit.Stmt]
@@ -102,18 +102,18 @@ func (f *File) Bottom() *Slot { return f.slot(f, "bottom", "") }
 // template renders a single-statement form (e.g. a registry's
 // `Register(...)` call). The slot itself carries no [Slot.ElemKind]
 // constraint so plugin-defined kinds reach the renderer.
-func (f *File) Init() *Slot { return f.slot(f, "init", "") }
+func (f *File) Init() *Slot { return f.Slot("init") }
 
 // ImportsSlot returns the "imports" slot for cross-cutting import
 // injection. Distinct from [File.Imports]: the typed field is for
 // the owning generator's direct content; the slot accepts contributions
 // from other generators.
-func (f *File) ImportsSlot() *Slot { return f.slot(f, "imports", KindImport) }
+func (f *File) ImportsSlot() *Slot { return f.Slot(slotImports) }
 
 // Slot returns the named slot, creating it lazily without an
 // element-kind constraint. Used for custom slot names that
 // plugin-defined emit kinds declare.
-func (f *File) Slot(name string) *Slot { return f.slot(f, name, "") }
+func (f *File) Slot(name string) *Slot { return f.slot(f, name, fileSlotKind(name)) }
 
 // ImportByPath returns the import with the given path, or nil when
 // absent. Empty input returns nil.
@@ -143,4 +143,23 @@ func (f *File) ImportByAlias(alias string) *Import {
 		}
 	}
 	return nil
+}
+
+// fileSlotKind returns the element kind the named slot carries on a
+// File, or "" for a name this kind does not reserve.
+//
+// The kind is a property of the NAME, not of which accessor created
+// the slot. Without this, File.Slot(name) created an unconstrained
+// slot while the typed accessor created a constrained one, and since
+// creation is lookup-or-create the surviving constraint was decided by
+// whichever plugin ran first — so two contributors to one host got
+// different validation depending on registration order, and the
+// permissive path was reachable by accident.
+func fileSlotKind(name string) kind.Kind {
+	switch name {
+	case slotImports:
+		return KindImport
+	default:
+		return ""
+	}
 }
