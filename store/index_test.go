@@ -357,6 +357,11 @@ func TestMultiIndex_ConcurrentAccess(t *testing.T) {
 // NewBucket plus the n Adds, so the reported allocation deliberately
 // includes the map's growth — that growth is the cost being
 // questioned.
+//
+// Quote the slope, never a row. Because construction is inside the
+// timed region, no single arm is a per-Add figure — the /1 arm is
+// dominated by NewBucket. The honest per-Add cost is the difference
+// between two arms divided by the difference in n.
 func BenchmarkBucket_Add(b *testing.B) {
 	b.ReportAllocs()
 

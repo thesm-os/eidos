@@ -663,16 +663,22 @@ func BenchmarkSlot_Append(b *testing.B) {
 }
 
 // BenchmarkSlot_InsertBefore measures a single anchored insert into a
-// slot that already holds n contributions.
+// slot that already holds n contributions, at both anchor positions.
 //
-// [emit.Slot.InsertBefore] resolves its anchor with a linear scan of
-// the provenance list. The anchor is deliberately the last-appended
-// contribution, so the scan runs its worst case while the subsequent
-// shift moves exactly one element: the measurement isolates the scan.
-// That is the number that matters, because k plugins each anchoring
-// into the same slot pay it k times over a slot that is itself
-// growing — the accidental quadratic this scaling axis exists to
-// expose.
+// [emit.Slot.InsertBefore] does two things: a linear scan to resolve
+// the anchor, and a shift to open the gap. Anchoring on the
+// last-appended contribution runs the scan's worst case while the
+// shift moves exactly one element; anchoring on the first runs the
+// shift's worst case while the scan stops immediately. Only the
+// first of those was ever measured, and it reported a flat 176 B at
+// every n — which reads as "insertion is allocation-flat" and is
+// false. At n=1000 the front-anchored case moves 90 kB.
+//
+// Both arms matter for different reasons. anchor_last is the number
+// for k plugins each anchoring into the same growing slot, the
+// accidental quadratic this scaling axis exists to expose.
+// anchor_first is what [emit.Slot.Prepend] pays, unconditionally, on
+// every call.
 //
 // Deliberately outside the timed region: building the n-item fixture,
 // and the inserted statement and provenance values.
@@ -681,42 +687,65 @@ func BenchmarkSlot_Append(b *testing.B) {
 // statements that truncate the slot back to n items. The fixture is
 // allocated with capacity n+1 so the truncation never triggers a
 // reallocation, which keeps the reset at two slice-header writes —
-// negligible against an n-element scan, and the only alternative to
-// stopping the timer on every iteration. The inserted contribution
+// negligible against an n-element scan or shift, and the only
+// alternative to stopping the timer on every iteration.
+//
+// The two arms are iteration-invariant for different reasons, and
+// the difference is worth stating because the obvious shared
+// explanation is wrong. Under anchor_last the inserted contribution
 // reuses the anchor's own id, so the truncated slot is structurally
-// identical at the head of every iteration.
+// identical at the head of every iteration. Under anchor_first the
+// truncation drops one real tail element per pass and leaves an
+// extra copy of the anchor at the front, so after k iterations the
+// list reads [anchor × (k+1), "1"…"n-k-2"]. The measurement still
+// does not drift — the anchor always resolves at index 0 and the
+// shift always moves n elements — but the slot is not the same slot.
 func BenchmarkSlot_InsertBefore(b *testing.B) {
 	const anchor = "host.anchor"
 
-	for _, n := range []int{1, 10, 100, 1000} {
-		b.Run(strconv.Itoa(n), func(b *testing.B) {
-			b.ReportAllocs()
+	for _, pos := range []struct {
+		name  string
+		index func(n int) int
+	}{
+		{"anchor_last", func(n int) int { return n - 1 }},
+		{"anchor_first", func(int) int { return 0 }},
+	} {
+		b.Run(pos.name, func(b *testing.B) {
+			for _, n := range []int{1, 10, 100, 1000} {
+				b.Run(strconv.Itoa(n), func(b *testing.B) {
+					b.ReportAllocs()
 
-			slot := &emit.Slot{
-				SlotName:       "prebody",
-				ElemKind:       emit.KindStmt,
-				Items:          make([]emit.Node, 0, n+1),
-				ProvenanceList: make([]emit.Provenance, 0, n+1),
-			}
-			for i := range n {
-				id := strconv.Itoa(i)
-				if i == n-1 {
-					id = anchor
-				}
-				if err := slot.Append(emit.NewRawStmt(id), emit.Provenance{SetBy: "host", ID: id}); err != nil {
-					b.Fatalf("fixture Append: %v", err)
-				}
-			}
+					slot := &emit.Slot{
+						SlotName:       "prebody",
+						ElemKind:       emit.KindStmt,
+						Items:          make([]emit.Node, 0, n+1),
+						ProvenanceList: make([]emit.Provenance, 0, n+1),
+					}
+					anchorAt := pos.index(n)
+					for i := range n {
+						id := strconv.Itoa(i)
+						if i == anchorAt {
+							id = anchor
+						}
+						if err := slot.Append(
+							emit.NewRawStmt(id),
+							emit.Provenance{SetBy: "host", ID: id},
+						); err != nil {
+							b.Fatalf("fixture Append: %v", err)
+						}
+					}
 
-			stmt := emit.NewRawStmt("start := time.Now()")
-			prov := emit.Provenance{SetBy: "metrics", ID: anchor}
+					stmt := emit.NewRawStmt("start := time.Now()")
+					prov := emit.Provenance{SetBy: "metrics", ID: anchor}
 
-			for b.Loop() {
-				slot.Items = slot.Items[:n]
-				slot.ProvenanceList = slot.ProvenanceList[:n]
-				if err := slot.InsertBefore(anchor, stmt, prov); err != nil {
-					b.Fatalf("InsertBefore: %v", err)
-				}
+					for b.Loop() {
+						slot.Items = slot.Items[:n]
+						slot.ProvenanceList = slot.ProvenanceList[:n]
+						if err := slot.InsertBefore(anchor, stmt, prov); err != nil {
+							b.Fatalf("InsertBefore: %v", err)
+						}
+					}
+				})
 			}
 		})
 	}

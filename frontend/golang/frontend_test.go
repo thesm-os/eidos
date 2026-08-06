@@ -356,8 +356,8 @@ func ExampleFrontend_Load() {
 	// field: string
 }
 
-// BenchmarkFrontend_Load_NoCache measures the configuration
-// `--no-cache` actually runs.
+// BenchmarkFrontend_Load_Cached measures the two cache
+// configurations production actually runs.
 //
 // Every other benchmark here builds its FrontendContext without a
 // Cache field, so ctx.Cache is nil and the cache write path is
@@ -370,29 +370,50 @@ func ExampleFrontend_Load() {
 //
 // Recorded per size so a reintroduced marshal shows up as a slope
 // against the nil-cache benchmark above rather than as an absolute
-// nobody has a reference for.
-func BenchmarkFrontend_Load_NoCache(b *testing.B) {
+// nobody has a reference for. The disk arm is the other half: the hit
+// and write paths had no benchmark at all, so the cache could get
+// slower than not caching and nothing would say so.
+func BenchmarkFrontend_Load_Cached(b *testing.B) {
 	b.ReportAllocs()
 
 	parser := directive.DefaultParser()
-	for _, decls := range []int{1, 100, 1000} {
-		b.Run(strconv.Itoa(decls), func(b *testing.B) {
-			b.ReportAllocs()
+	for _, tc := range []struct {
+		name  string
+		cache func(b *testing.B) cache.Cache
+	}{
+		// The configuration --no-cache runs: a store that misses on
+		// every Get and discards every Put.
+		{"none", func(*testing.B) cache.Cache { return cache.NewNone() }},
+		// The configuration a default run uses. After the first
+		// iteration every Load is a hit, so this measures the path
+		// the cache exists for — which no benchmark covered.
+		{"disk", func(b *testing.B) cache.Cache {
+			b.Helper()
+			return cache.NewDisk(b.TempDir())
+		}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			for _, decls := range []int{1, 100, 1000} {
+				b.Run(strconv.Itoa(decls), func(b *testing.B) {
+					b.ReportAllocs()
 
-			dir := writeBenchmarkModule(b, benchmarkDeclSource(b, decls))
-			fe := benchmarkFrontend(b, dir, true)
-			assertBenchmarkLoadConverts(b, fe, parser, decls)
+					dir := writeBenchmarkModule(b, benchmarkDeclSource(b, decls))
+					fe := benchmarkFrontend(b, dir, true)
+					assertBenchmarkLoadConverts(b, fe, parser, decls)
+					c := tc.cache(b)
 
-			for b.Loop() {
-				if err := fe.Load(&plugin.FrontendContext{
-					Store:   store.New(),
-					Diag:    diag.New(),
-					Parser:  parser,
-					Cache:   cache.NewNone(),
-					Pattern: "./...",
-				}); err != nil {
-					b.Fatalf("Load: %v", err)
-				}
+					for b.Loop() {
+						if err := fe.Load(&plugin.FrontendContext{
+							Store:   store.New(),
+							Diag:    diag.New(),
+							Parser:  parser,
+							Cache:   c,
+							Pattern: "./...",
+						}); err != nil {
+							b.Fatalf("Load: %v", err)
+						}
+					}
+				})
 			}
 		})
 	}

@@ -656,3 +656,56 @@ func benchStyle(b *testing.B, convert func(string) string) {
 		})
 	}
 }
+
+// BenchmarkCaser_Title covers the fifth production-reachable style.
+//
+// backend/golang publishes pascal, camel, snake, screaming and title
+// to every plugin template, so five styles are reachable and only
+// some had a baseline. Kebab, ScreamingKebab and Dot are not
+// published and need none.
+func BenchmarkCaser_Title(b *testing.B) {
+	benchStyle(b, naming.Default().Title)
+}
+
+// BenchmarkCaser_Realistic measures the unit production actually
+// converts.
+//
+// The sibling benchmarks run a 24-word identifier because per-word
+// cost is flat, which makes them the right isolation instrument for
+// the per-word work. They are the wrong instrument for "what does one
+// call cost": production input is one to three words — stubgen passes
+// a Go parameter or return name, core/opt passes a struct field name
+// — so the 24-word headline overstates the per-call unit by roughly
+// its word count.
+//
+// Fixed vocabulary rather than generated, so the arm is stable across
+// runs and comparable across revisions.
+func BenchmarkCaser_Realistic(b *testing.B) {
+	b.ReportAllocs()
+
+	c := naming.Default()
+	names := []string{
+		"ctx", "err", "id", "req", "resp", "name",
+		"value", "userID", "http_client", "parse_url", "MaxRetries", "db",
+	}
+	for _, tc := range []struct {
+		name    string
+		convert func(string) string
+	}{
+		{"Pascal", c.Pascal},
+		{"Camel", c.Camel},
+		{"Snake", c.Snake},
+		{"Title", c.Title},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				for _, n := range names {
+					if tc.convert(n) == "" {
+						b.Fatalf("convert(%q) returned empty", n)
+					}
+				}
+			}
+		})
+	}
+}

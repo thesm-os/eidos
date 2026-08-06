@@ -340,6 +340,16 @@ func containsNUL(keys []string) bool {
 // must be non-zero — Hash builds a fresh sorted slice and a hex
 // string every call, and a zero here would mean the call was
 // optimised out.
+//
+// Read the sizes for what they are. store/query.go is the only
+// non-test Record caller in the workspace and its tag is one of the
+// 26 compile-time literals in store/reader.go, so 26 is the
+// reachable ceiling today and the /100 and /1000 arms are
+// forward-looking headroom for per-declaration read tracking. Do not
+// price a change off them: the fixture's keys are 45-47 bytes while
+// the longest production tag is 18, under the runtime's stack
+// buffer, so the per-key allocation those arms report does not occur
+// in production at all.
 func BenchmarkReadSet_Hash(b *testing.B) {
 	b.ReportAllocs()
 

@@ -899,10 +899,11 @@ func TestConformance(t *testing.T) {
 func BenchmarkBackend_Render(b *testing.B) {
 	b.ReportAllocs()
 
-	ctx, _, _ := newBenchmarkContext(b, 24)
+	ctx, _, _ := newBenchmarkContext(b, 24, sameImportPath)
+	be := golang.New()
 
 	for b.Loop() {
-		if err := golang.New().Render(ctx); err != nil {
+		if err := be.Render(ctx); err != nil {
 			b.Fatalf("Render: %v", err)
 		}
 	}
@@ -930,36 +931,82 @@ func BenchmarkBackend_Render(b *testing.B) {
 // the in-memory sink is reused across iterations and overwrites by
 // target, so it does not grow with b.N.
 //
-// A fresh [golang.Backend] per iteration is deliberate and matches
-// BenchmarkBackend_Render: [golang.New] parses the embedded
-// template set, which is a real part of what a caller pays, and
-// hoisting it would report a cost no production path enjoys.
+// The Backend is hoisted too. It used to be constructed inside the
+// loop, defended as a real part of what a caller pays — but
+// [golang.New] parses the whole embedded template set, the type doc
+// states Render holds no state across calls, and the pipeline builds
+// exactly one Backend at Build time. It is paid once per process,
+// not once per Render. Inside the loop it was 47% of the objects at
+// one target and 1.25% at a thousand, so a fixed cost varying 40×
+// across the sweep flattened the very per-target slope this
+// benchmark exists to measure. [BenchmarkBackend_New] measures the
+// construction on its own.
+//
+// The importPaths axis exists because a single shared import path
+// hides [applySelfAliases], which rescans every output package of
+// the run for every target. With one path that rescan is O(targets);
+// with distinct paths it is O(targets × packages), which is the
+// shape a real multi-package run has.
 func BenchmarkBackend_Render_Targets(b *testing.B) {
 	b.ReportAllocs()
 
-	for _, targets := range []int{1, 10, 100, 1000} {
-		b.Run(strconv.Itoa(targets), func(b *testing.B) {
+	for _, paths := range []benchImportPaths{sameImportPath, distinctImportPaths} {
+		b.Run(string(paths), func(b *testing.B) {
 			b.ReportAllocs()
-			ctx, mem, _ := newBenchmarkContext(b, targets)
-			for b.Loop() {
-				if err := golang.New().Render(ctx); err != nil {
-					b.Fatalf("Render: %v", err)
-				}
-			}
-			// A render that silently produced nothing would report a
-			// flattering number for no work; the sink must hold one
-			// file per target.
-			if got := mem.Len(); got != targets {
-				b.Fatalf("sink holds %d files, want %d", got, targets)
+			for _, targets := range []int{1, 10, 100, 1000} {
+				b.Run(strconv.Itoa(targets), func(b *testing.B) {
+					b.ReportAllocs()
+					ctx, mem, _ := newBenchmarkContext(b, targets, paths)
+					be := golang.New()
+					for b.Loop() {
+						if err := be.Render(ctx); err != nil {
+							b.Fatalf("Render: %v", err)
+						}
+					}
+					// A render that silently produced nothing would
+					// report a flattering number for no work; the
+					// sink must hold one file per target.
+					if got := mem.Len(); got != targets {
+						b.Fatalf("sink holds %d files, want %d", got, targets)
+					}
+				})
 			}
 		})
 	}
 }
 
+// BenchmarkBackend_New measures what constructing a Backend costs:
+// parsing the embedded template set, once per process.
+//
+// It has its own benchmark because it used to be smeared across
+// BenchmarkBackend_Render_Targets' scaling curve, where it was a
+// fixed cost pretending to be a per-target one.
+func BenchmarkBackend_New(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if golang.New() == nil {
+			b.Fatal("New returned nil")
+		}
+	}
+}
+
+// benchImportPaths selects whether the fixture routes every target
+// into one output package or into a distinct one per target.
+type benchImportPaths string
+
+const (
+	sameImportPath      benchImportPaths = "same_import_path"
+	distinctImportPaths benchImportPaths = "distinct_import_paths"
+)
+
 // newBenchmarkContext builds a [plugin.BackendContext] whose store
 // holds targets structs, each routed to its own file so the render
 // loop iterates a realistic number of targets.
-func newBenchmarkContext(b *testing.B, targets int) (*plugin.BackendContext, *sink.Memory, *diag.Sink) {
+func newBenchmarkContext(
+	b *testing.B,
+	targets int,
+	paths benchImportPaths,
+) (*plugin.BackendContext, *sink.Memory, *diag.Sink) {
 	b.Helper()
 	s := store.New()
 	mem := sink.NewMemory()
@@ -973,14 +1020,19 @@ func newBenchmarkContext(b *testing.B, targets int) (*plugin.BackendContext, *si
 	pkg := &emit.Package{Name: "bench", Path: "example.com/bench"}
 	for i := range targets {
 		name := fmt.Sprintf("Entity%d", i)
+		dir, importPath := "bench", "example.com/bench"
+		if paths == distinctImportPaths {
+			dir = fmt.Sprintf("bench%d", i)
+			importPath = fmt.Sprintf("example.com/bench%d", i)
+		}
 		pkg.Structs = append(pkg.Structs, &emit.Struct{
 			Name:    name,
-			Package: "example.com/bench",
+			Package: importPath,
 			Target: emit.Target{
-				Dir:        "bench",
+				Dir:        dir,
 				Filename:   fmt.Sprintf("entity%d.go", i),
 				Package:    "bench",
-				ImportPath: "example.com/bench",
+				ImportPath: importPath,
 			},
 			Fields: []*emit.Field{
 				{Name: "ID", Type: emit.Builtin("string")},
