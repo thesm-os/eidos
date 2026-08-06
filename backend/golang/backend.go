@@ -132,6 +132,12 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 		},
 	)
 
+	// The package union is the first thing this loop needs and the
+	// last thing the render pass can supply: a qualifier is only
+	// unresolved once every target that might declare it has
+	// rendered.
+	declared := unionTopLevel(keys, results)
+
 	// Replay and write in key order. Rendering is what parallelises;
 	// the observable sequence stays exactly what the sequential loop
 	// produced, so Stdout ordering, diagnostic ordering and the
@@ -142,6 +148,11 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 		}
 		if res.skip {
 			continue
+		}
+		for _, q := range unresolvedAfterPackage(res.candidates, declared[keyFor(keys[i])]) {
+			ps.Warnf(position.Pos{},
+				"%s: unresolved qualifier %q: no import binds it, the generated file will not compile",
+				keys[i].JoinPath(), q)
 		}
 		if err := ctx.Sink.Write(keys[i], res.out); err != nil {
 			return fmt.Errorf("%s: sink write %s: %w", Name, keys[i].JoinPath(), err)
@@ -168,6 +179,18 @@ type renderResult struct {
 	// reaches no sink; a failure has already recorded its
 	// diagnostic.
 	skip bool
+
+	// candidates are the qualifiers this target's body names that
+	// no import binds and the file itself does not declare, sorted.
+	// Not yet a verdict — a sibling target in the same package may
+	// declare the name, which [Backend.Render] subtracts before
+	// reporting.
+	candidates []string
+
+	// topLevel are the package-scope names this target declares.
+	// Held per result rather than merged during render because the
+	// merge spans targets and the render pass is concurrent.
+	topLevel map[string]struct{}
 }
 
 // renderTargets fills results by invoking render for every index,
@@ -304,6 +327,8 @@ func renderTarget(
 			ps.Warnf(position.Pos{}, "%s: import %q is unused but kept: %q is also declared in this file",
 				target.JoinPath(), imp.Path, imp.Alias)
 		}
+		res.candidates = unresolvedCandidates(refs, tracked)
+		res.topLevel = refs.topLevel
 		body = finaliseBody(body, target, ps, tracked)
 		res.out = composeFile(ctx, entities, body)
 		res.skip = false

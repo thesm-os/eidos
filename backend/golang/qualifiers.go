@@ -7,7 +7,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"slices"
 
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/writer"
 )
 
@@ -253,6 +255,120 @@ func shadowedImports(kept []writer.Import, refs fileRefs) []writer.Import {
 		if _, shadowed := refs.declared[imp.Alias]; shadowed {
 			out = append(out, imp)
 		}
+	}
+	return out
+}
+
+// packageKey identifies the Go package a target renders into. Two
+// targets sharing one are two files of the same package, so a
+// package-scope name either declares can satisfy a selector in the
+// other without any import.
+type packageKey struct {
+	dir string
+	pkg string
+}
+
+// keyFor returns the [packageKey] of a target.
+func keyFor(t emit.Target) packageKey {
+	return packageKey{dir: t.Dir, pkg: t.Package}
+}
+
+// boundNames returns the local names the surviving imports bind.
+//
+// The blank alias binds nothing, and the dot alias binds an unknown
+// set — see [unresolvedCandidates], which refuses to judge a file
+// carrying one at all.
+func boundNames(imports []writer.Import) map[string]struct{} {
+	out := make(map[string]struct{}, len(imports))
+	for _, imp := range imports {
+		if imp.Alias == writer.BlankAlias || imp.Alias == writer.DotAlias {
+			continue
+		}
+		out[imp.Alias] = struct{}{}
+	}
+	return out
+}
+
+// unresolvedCandidates returns the qualifiers this file names that
+// nothing in it can bind: not an import, and not a name the file
+// declares. The result is sorted, because map iteration order would
+// otherwise make `-diag-format json` output differ between runs of
+// the same input.
+//
+// Candidates are not yet a verdict. A sibling target rendered into
+// the same package may declare the name at package scope, which is
+// reachable without an import and is exactly the shape multi-output
+// routing produces — [Backend.Render] subtracts that union before
+// reporting.
+//
+// A dot import suspends the check entirely. It merges an unknown
+// set of exported names into file scope, so any qualifier could
+// legitimately come from it and every report would be a guess. The
+// one-sided direction holds: a missed report costs a `go build`
+// error the developer already gets.
+func unresolvedCandidates(refs fileRefs, tracked []writer.Import) []string {
+	if !refs.parsed {
+		return nil
+	}
+	for _, imp := range tracked {
+		if imp.Alias == writer.DotAlias {
+			return nil
+		}
+	}
+	bound := boundNames(tracked)
+	var out []string
+	for q := range refs.qualifiers {
+		if _, declared := refs.declared[q]; declared {
+			continue
+		}
+		if _, imported := bound[q]; imported {
+			continue
+		}
+		out = append(out, q)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// unionTopLevel groups the package-scope names every rendered target
+// declares by the package it renders into.
+//
+// Computed across the whole run because that is the smallest scope
+// at which the question is answerable: a target selecting on a name
+// its sibling declares is correct Go, and no per-target view can
+// tell that from a missing import. Skipped targets contribute
+// nothing — they produced no file.
+func unionTopLevel(keys []emit.Target, results []renderResult) map[packageKey]map[string]struct{} {
+	out := map[packageKey]map[string]struct{}{}
+	for i, res := range results {
+		if res.skip || len(res.topLevel) == 0 {
+			continue
+		}
+		k := keyFor(keys[i])
+		names, ok := out[k]
+		if !ok {
+			names = map[string]struct{}{}
+			out[k] = names
+		}
+		for n := range res.topLevel {
+			names[n] = struct{}{}
+		}
+	}
+	return out
+}
+
+// unresolvedAfterPackage returns the candidates no sibling in the
+// same package declares — the reportable set.
+func unresolvedAfterPackage(candidates []string, declared map[string]struct{}) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	out := candidates[:0:0]
+	for _, q := range candidates {
+		if _, ok := declared[q]; ok {
+			continue
+		}
+		out = append(out, q)
 	}
 	return out
 }

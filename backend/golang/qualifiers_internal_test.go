@@ -445,3 +445,149 @@ func TestPruneImports_MatchesResolverDeletion(t *testing.T) {
 		}
 	})
 }
+
+// TestUnresolvedCandidates covers the subtraction directly.
+// candidates = qualifiers − declared − bound.
+func TestUnresolvedCandidates(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a qualifier with no import and no binding is a candidate", func(t *testing.T) {
+		t.Parallel()
+		refs := refsOf(t, "package p\n\nfunc f() { _ = missing.Symbol }\n")
+		got := unresolvedCandidates(refs, nil)
+		if !slices.Equal(got, []string{"missing"}) {
+			t.Fatalf("expected [missing]; got %v", got)
+		}
+	})
+
+	t.Run("an imported qualifier is not a candidate", func(t *testing.T) {
+		t.Parallel()
+		refs := refsOf(t, "package p\n\nfunc f() { _ = ctx.Symbol }\n")
+		got := unresolvedCandidates(refs, []writer.Import{{Path: "context", Alias: "ctx"}})
+		if len(got) != 0 {
+			t.Fatalf("expected no candidates; got %v", got)
+		}
+	})
+
+	t.Run("a locally declared name is not a candidate", func(t *testing.T) {
+		t.Parallel()
+		refs := refsOf(t, "package p\n\nfunc f() { local := g(); _ = local.Field }\n")
+		if got := unresolvedCandidates(refs, nil); len(got) != 0 {
+			t.Fatalf("expected no candidates; got %v", got)
+		}
+	})
+
+	t.Run("candidates come out sorted", func(t *testing.T) {
+		t.Parallel()
+		refs := refsOf(t, "package p\n\nfunc f() { _ = zulu.A; _ = alpha.B; _ = mike.C }\n")
+		got := unresolvedCandidates(refs, nil)
+		if !slices.Equal(got, []string{"alpha", "mike", "zulu"}) {
+			t.Fatalf("expected sorted candidates; got %v", got)
+		}
+	})
+
+	t.Run("a dot import suspends the check entirely", func(t *testing.T) {
+		t.Parallel()
+		// A dot import merges an unknown set of exported names into
+		// file scope, so any qualifier could legitimately come from
+		// it and every report would be a guess.
+		refs := refsOf(t, "package p\n\nfunc f() { _ = anything.Symbol }\n")
+		in := []writer.Import{{Path: "example.com/dot", Alias: writer.DotAlias}}
+		if got := unresolvedCandidates(refs, in); got != nil {
+			t.Fatalf("expected the check suspended under a dot import; got %v", got)
+		}
+	})
+
+	t.Run("a blank import binds no name and shields nothing", func(t *testing.T) {
+		t.Parallel()
+		refs := refsOf(t, "package p\n\nfunc f() { _ = missing.Symbol }\n")
+		in := []writer.Import{{Path: "embed", Alias: writer.BlankAlias}}
+		if got := unresolvedCandidates(refs, in); !slices.Equal(got, []string{"missing"}) {
+			t.Fatalf("expected [missing]; got %v", got)
+		}
+	})
+
+	t.Run("an unparsed walk yields no candidates", func(t *testing.T) {
+		t.Parallel()
+		// Reporting off an empty qualifier set would be silent; the
+		// risk is the reverse — inventing reports from a set that was
+		// never populated.
+		if got := unresolvedCandidates(fileRefs{}, nil); got != nil {
+			t.Fatalf("expected no candidates from an unparsed walk; got %v", got)
+		}
+	})
+}
+
+// TestUnionTopLevel covers the grouping that makes the check
+// package-scoped. Targets sharing a (Dir, Package) are one Go
+// package; anything else is a different one.
+func TestUnionTopLevel(t *testing.T) {
+	t.Parallel()
+
+	keys := []emit.Target{
+		{Dir: "x", Filename: "a.go", Package: "x"},
+		{Dir: "x", Filename: "b.go", Package: "x"},
+		{Dir: "y", Filename: "c.go", Package: "y"},
+	}
+	results := []renderResult{
+		{topLevel: map[string]struct{}{"Alpha": {}}},
+		{topLevel: map[string]struct{}{"Beta": {}}},
+		{topLevel: map[string]struct{}{"Gamma": {}}},
+	}
+
+	t.Run("names merge across targets in one package", func(t *testing.T) {
+		t.Parallel()
+		got := unionTopLevel(keys, results)
+		assertHas(t, got[packageKey{dir: "x", pkg: "x"}], "Alpha", "Beta")
+	})
+
+	t.Run("a different package does not contribute", func(t *testing.T) {
+		t.Parallel()
+		got := unionTopLevel(keys, results)
+		assertLacks(t, got[packageKey{dir: "x", pkg: "x"}], "Gamma")
+	})
+
+	t.Run("a skipped target contributes nothing", func(t *testing.T) {
+		t.Parallel()
+		// It produced no file, so its declarations do not exist.
+		skipped := []renderResult{
+			{topLevel: map[string]struct{}{"Alpha": {}}, skip: true},
+			{topLevel: map[string]struct{}{"Beta": {}}},
+			{},
+		}
+		got := unionTopLevel(keys, skipped)
+		assertLacks(t, got[packageKey{dir: "x", pkg: "x"}], "Alpha")
+		assertHas(t, got[packageKey{dir: "x", pkg: "x"}], "Beta")
+	})
+}
+
+// TestUnresolvedAfterPackage covers the final subtraction.
+func TestUnresolvedAfterPackage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a name the package declares is removed", func(t *testing.T) {
+		t.Parallel()
+		got := unresolvedAfterPackage([]string{"Sibling", "Missing"},
+			map[string]struct{}{"Sibling": {}})
+		if !slices.Equal(got, []string{"Missing"}) {
+			t.Fatalf("expected [Missing]; got %v", got)
+		}
+	})
+
+	t.Run("order survives the subtraction", func(t *testing.T) {
+		t.Parallel()
+		got := unresolvedAfterPackage([]string{"alpha", "mike", "zulu"}, nil)
+		if !slices.Equal(got, []string{"alpha", "mike", "zulu"}) {
+			t.Fatalf("expected the sorted order preserved; got %v", got)
+		}
+	})
+
+	t.Run("the input slice is not modified in place", func(t *testing.T) {
+		t.Parallel()
+		in := []string{"Sibling", "Missing"}
+		_ = unresolvedAfterPackage(in, map[string]struct{}{"Sibling": {}})
+		if !slices.Equal(in, []string{"Sibling", "Missing"}) {
+			t.Fatalf("subtraction modified its input: %v", in)
+		}
+	})
+}

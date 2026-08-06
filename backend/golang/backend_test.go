@@ -1074,3 +1074,243 @@ func TestRender_ConcurrencyPreservesOrder(t *testing.T) {
 		}
 	})
 }
+
+// TestRender_UnresolvedQualifierWarns covers the diagnostic that
+// replaces the resolver's repair.
+//
+// The fixture is the one shape that reaches it through core render
+// paths: a BuiltinRef whose name is a qualified type. renderType
+// emits it verbatim without calling `imp`, so the body names `time`
+// and nothing binds it. Today goimports guesses an import from the
+// developer's module cache and reports the guess after the fact;
+// the Warn names the qualifier a template actually wrote, which is
+// what a reader needs, and fires whether or not a guess is
+// available.
+func TestRender_UnresolvedQualifierWarns(t *testing.T) {
+	t.Parallel()
+
+	target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
+
+	build := func(t *testing.T) (*sink.Memory, *diag.Sink) {
+		t.Helper()
+		ctx, mem, d := newBackendContext(t)
+		addEmitPackage(t, ctx, emitPackage("x", &emit.Struct{
+			Name: "X", Package: "x", Target: target,
+			Fields: []*emit.Field{{Name: "When", Type: emit.Builtin("time.Time")}},
+		}))
+		if err := mustNew(t).Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		return mem, d
+	}
+
+	t.Run("the Warn names the qualifier, not a guessed path", func(t *testing.T) {
+		t.Parallel()
+		_, d := build(t)
+		if !diagnosticsContain(d, diag.Warn, `unresolved qualifier "time"`) {
+			t.Fatalf("expected an unresolved-qualifier Warn; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("the file is still written", func(t *testing.T) {
+		t.Parallel()
+		// Matching the runGoFormat precedent: broken output reaches
+		// the sink so it can be read. Withholding it would leave the
+		// reader with a diagnostic and no way to see what produced it.
+		mem, _ := build(t)
+		if _, ok := mem.Get(target); !ok {
+			t.Fatalf("file must reach the sink even with an unresolved qualifier")
+		}
+	})
+
+	t.Run("the run does not fail", func(t *testing.T) {
+		t.Parallel()
+		// Warn, not Error: the check cannot prove its verdict, and
+		// the failure it describes is attributed downstream by
+		// `go build` at the exact line.
+		_, d := build(t)
+		if d.HasErrors() {
+			t.Fatalf("unresolved qualifier must not fail the run; got %+v", d.Diagnostics())
+		}
+	})
+}
+
+// TestRender_SiblingTargetSatisfiesQualifier is the assertion the
+// whole design exists for. Two targets rendering into one package,
+// one declaring a package-scope name and the other selecting on it,
+// is correct Go that needs no import — and it is exactly what
+// multi-output routing produces.
+//
+// This fails first if the package union is dropped or computed per
+// target, which is the mistake the per-target prune invites.
+func TestRender_SiblingTargetSatisfiesQualifier(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a name a sibling declares raises no diagnostic", func(t *testing.T) {
+		t.Parallel()
+		ctx, _, d := newBackendContext(t)
+		decl := emit.Target{Dir: "x", Filename: "decl.go", Package: "x"}
+		use := emit.Target{Dir: "x", Filename: "use.go", Package: "x"}
+		addEmitPackage(t, ctx, &emit.Package{
+			Name: "x", Path: "x",
+			// Registry is package scope in decl.go; use.go selects on
+			// it. Nothing imports anything.
+			Variables: []*emit.Variable{{
+				Name: "Registry", Package: "x", Target: decl,
+				Init: &emit.Expr{ExprKind: emit.ExprLiteral, LitKind: emit.LitInt, RawText: "0"},
+			}},
+			Functions: []*emit.Function{{
+				Name: "Use", Package: "x", Target: use,
+				Body: []*emit.Stmt{emit.NewRawStmt("_ = Registry.Field")},
+			}},
+		})
+		if err := mustNew(t).Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		if diagnosticsContain(d, diag.Warn, "unresolved qualifier") {
+			t.Fatalf("a sibling-declared name must not be reported; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("a name declared in a different package is still reported", func(t *testing.T) {
+		t.Parallel()
+		// The union must be keyed by package, not merged across the
+		// run. A name declared in package y is not in scope in
+		// package x, so collapsing the two would silently suppress a
+		// genuine report — the failure direction a per-target check
+		// cannot see and a run-wide one invites.
+		ctx, _, d := newBackendContext(t)
+		elsewhere := emit.Target{Dir: "y", Filename: "decl.go", Package: "y"}
+		use := emit.Target{Dir: "x", Filename: "use.go", Package: "x"}
+		addEmitPackage(t, ctx, &emit.Package{
+			Name: "x", Path: "x",
+			Variables: []*emit.Variable{{
+				Name: "Registry", Package: "y", Target: elsewhere,
+				Init: &emit.Expr{ExprKind: emit.ExprLiteral, LitKind: emit.LitInt, RawText: "0"},
+			}},
+			Functions: []*emit.Function{{
+				Name: "Use", Package: "x", Target: use,
+				Body: []*emit.Stmt{emit.NewRawStmt("_ = Registry.Field")},
+			}},
+		})
+		if err := mustNew(t).Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		if !diagnosticsContain(d, diag.Warn, `unresolved qualifier "Registry"`) {
+			t.Fatalf("a name from another package must still be reported; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("a name no sibling declares is still reported", func(t *testing.T) {
+		t.Parallel()
+		// The negative's control: without it, a union that swallowed
+		// everything would pass the test above for the wrong reason.
+		ctx, _, d := newBackendContext(t)
+		use := emit.Target{Dir: "x", Filename: "use.go", Package: "x"}
+		addEmitPackage(t, ctx, &emit.Package{
+			Name: "x", Path: "x",
+			Functions: []*emit.Function{{
+				Name: "Use", Package: "x", Target: use,
+				Body: []*emit.Stmt{emit.NewRawStmt("_ = Missing.Field")},
+			}},
+		})
+		if err := mustNew(t).Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		if !diagnosticsContain(d, diag.Warn, `unresolved qualifier "Missing"`) {
+			t.Fatalf("expected a report for an undeclared name; got %+v", d.Diagnostics())
+		}
+	})
+}
+
+// TestRender_UnresolvedQualifierOrderIsStable pins the emission
+// order. The candidates come out of a map, and `-diag-format json`
+// makes the sequence observable, so an unsorted emission would make
+// two runs of the same input produce different output.
+func TestRender_UnresolvedQualifierOrderIsStable(t *testing.T) {
+	t.Parallel()
+
+	messages := func(t *testing.T) []string {
+		t.Helper()
+		ctx, _, d := newBackendContext(t)
+		target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
+		addEmitPackage(t, ctx, &emit.Package{
+			Name: "x", Path: "x",
+			Functions: []*emit.Function{{
+				Name: "Use", Package: "x", Target: target,
+				Body: []*emit.Stmt{
+					emit.NewRawStmt("_ = zulu.A"),
+					emit.NewRawStmt("_ = alpha.B"),
+					emit.NewRawStmt("_ = mike.C"),
+				},
+			}},
+		})
+		if err := mustNew(t).Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		var out []string
+		for _, dg := range d.Diagnostics() {
+			if dg.Severity == diag.Warn && strings.Contains(dg.Message, "unresolved qualifier") {
+				out = append(out, dg.Message)
+			}
+		}
+		return out
+	}
+
+	t.Run("every unresolved qualifier is reported once", func(t *testing.T) {
+		t.Parallel()
+		if got := messages(t); len(got) != 3 {
+			t.Fatalf("expected 3 reports; got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("reports arrive sorted, not in body order", func(t *testing.T) {
+		t.Parallel()
+		got := messages(t)
+		if !slices.IsSortedFunc(got, strings.Compare) {
+			t.Fatalf("expected sorted reports; got %v", got)
+		}
+	})
+
+	t.Run("two runs of the same input agree", func(t *testing.T) {
+		t.Parallel()
+		if first, second := messages(t), messages(t); !slices.Equal(first, second) {
+			t.Fatalf("report order differed between runs:\n%v\n%v", first, second)
+		}
+	})
+}
+
+// TestRender_ShadowedNameSuppressesReport pins the documented false
+// negative. A local sharing a package's name suppresses a genuine
+// report elsewhere in the file, because `declared` is scope-blind.
+//
+// It is written down so a later "improvement" to the declared set
+// has to argue with a test rather than with prose. The asymmetry is
+// the point: a missed report costs a `go build` error the developer
+// already gets, an invented one costs a maintainer an afternoon.
+func TestRender_ShadowedNameSuppressesReport(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a local named like a package suppresses its report", func(t *testing.T) {
+		t.Parallel()
+		ctx, _, d := newBackendContext(t)
+		target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
+		addEmitPackage(t, ctx, &emit.Package{
+			Name: "x", Path: "x",
+			Functions: []*emit.Function{{
+				Name: "Use", Package: "x", Target: target,
+				Body: []*emit.Stmt{
+					emit.NewRawStmt("time := 1"),
+					emit.NewRawStmt("_ = time"),
+					emit.NewRawStmt("_ = time.Now()"),
+				},
+			}},
+		})
+		if err := mustNew(t).Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		if diagnosticsContain(d, diag.Warn, `unresolved qualifier "time"`) {
+			t.Fatalf("expected the shadowed name to suppress the report; got %+v", d.Diagnostics())
+		}
+	})
+}
