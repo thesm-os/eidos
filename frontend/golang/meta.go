@@ -37,17 +37,25 @@ var (
 
 	// MetaIsChannel reports whether a [node.TypeRef] models a Go
 	// channel.
-	MetaIsChannel = meta.NewKey(
+	//
+	// Registered with [meta.EnsureKey] rather than [meta.NewKey]
+	// because the Go backend reads it too — depguard forbids a
+	// backend importing a frontend, so both sides resolve the same
+	// registry singleton by name. NewKey panics on a duplicate
+	// registration, so whichever package's init ran second would
+	// take the process down once both were linked into one binary.
+	MetaIsChannel = meta.EnsureKey(
 		"go.isChannel",
 		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
+	) //nolint:gochecknoglobals // shared registry-singleton key
 
 	// MetaChanDir carries the channel's directionality ("both",
-	// "send", or "recv").
-	MetaChanDir = meta.NewKey(
+	// "send", or "recv"). Shared with the Go backend on the same
+	// terms as [MetaIsChannel].
+	MetaChanDir = meta.EnsureKey(
 		"go.chanDir",
 		meta.StringParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
+	) //nolint:gochecknoglobals // shared registry-singleton key
 
 	// MetaChanElem stamps the printed source form of a channel's
 	// element type ("int", "context.Context", "*pkg.Type"). The

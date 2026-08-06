@@ -45,6 +45,9 @@ func (s *renderState) renderType(r emit.Ref) (string, error) {
 		}
 		return got, nil
 	}
+	if got, ok, err := s.renderChan(r); ok || err != nil {
+		return got, err
+	}
 	switch typed := r.(type) {
 	case *emit.BuiltinRef:
 		return typed.Name, nil
@@ -152,6 +155,87 @@ func bridgeTypeOverride(r emit.Ref) (string, bool) {
 	}
 	return got, true
 }
+
+// renderChan renders a Go channel type when r's source-side origin
+// is marked as one, reporting ok=false for everything else.
+//
+// The Go frontend models a channel as a *named* reference in a
+// synthetic package — `go`.`chan` with the element as its single
+// type argument — and stamps the real facts as meta: `go.isChannel`
+// and `go.chanDir`. Without this arm the named reference falls
+// through to the ExternalRef path, which emits `import "go"` (a path
+// that resolves against the standard library and fails) and
+// qualifies as `go.chan[T]`, which does not parse.
+//
+// Rendering here rather than modelling a channel shape in [emit]
+// keeps a Go concurrency primitive out of the language-agnostic
+// layer. A channel has no counterpart in most targets — Rust's is a
+// library type, not a type form — so a backend that does not
+// understand `go.isChannel` simply never asks, instead of being
+// handed a shape it must implement or explicitly refuse.
+//
+// The element renders through [renderState.renderType], so its own
+// import registers exactly as it would anywhere else. That is the
+// property a string-shaped workaround could not have: a builtin ref
+// carrying "<-chan pkg.T" is a leaf and registers nothing.
+func (s *renderState) renderChan(r emit.Ref) (string, bool, error) {
+	if r == nil {
+		return "", false, nil
+	}
+	origin, ok := r.Origin().(*node.TypeRef)
+	if !ok {
+		return "", false, nil
+	}
+	if isChan, ok := goIsChannelKey.Get(origin.Meta()); !ok || !isChan {
+		return "", false, nil
+	}
+	elem, err := s.chanElem(r, origin)
+	if err != nil {
+		return "", true, err
+	}
+	dir, _ := goChanDirKey.Get(origin.Meta())
+	switch dir {
+	case "send":
+		return "chan<- " + elem, true, nil
+	case "recv":
+		return "<-chan " + elem, true, nil
+	default:
+		// Unset or "both". Bidirectional is the permissive form: it
+		// satisfies neither directed one, so a missing stamp fails at
+		// compile time rather than silently narrowing a signature.
+		return "chan " + elem, true, nil
+	}
+}
+
+// chanElem renders a channel's element type, which the frontend
+// carries as the reference's single type argument.
+//
+// An element is always present for a channel the frontend produced.
+// A missing one means the ref was hand-built by a plugin claiming
+// `go.isChannel` without the structure to back it, which is a plugin
+// bug worth naming rather than rendering `chan ` and letting the
+// formatter report a syntax error with no attribution.
+func (s *renderState) chanElem(r emit.Ref, origin *node.TypeRef) (string, error) {
+	if ext, ok := r.(*emit.ExternalRef); ok && len(ext.TypeArgs) == 1 {
+		return s.renderType(ext.TypeArgs[0])
+	}
+	return "", fmt.Errorf("%w: channel ref %q carries no element type",
+		ErrUnsupportedRef, origin.Name)
+}
+
+// goIsChannelKey is the Go frontend's `go.isChannel` marker.
+// [meta.EnsureKey] resolves to the same registry singleton as the
+// frontend's declaration, so the backend reads the fact without
+// importing the frontend — which depguard forbids outright.
+//
+//nolint:gochecknoglobals // cross-package registry-singleton key
+var goIsChannelKey = meta.EnsureKey("go.isChannel", meta.BoolParser)
+
+// goChanDirKey is the Go frontend's `go.chanDir` stamp, carrying
+// "both", "send" or "recv".
+//
+//nolint:gochecknoglobals // cross-package registry-singleton key
+var goChanDirKey = meta.EnsureKey("go.chanDir", meta.StringParser)
 
 // goTypeKey is the bridge-stamped `go.type` meta key shared
 // across every cross-language Go-targeting bridge. [meta.EnsureKey]

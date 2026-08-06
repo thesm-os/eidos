@@ -12,10 +12,13 @@
 package golang
 
 import (
+	"errors"
 	"strconv"
 	"testing"
 
+	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/emit"
+	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/writer"
 )
 
@@ -183,4 +186,91 @@ func pointerChain(depth int) emit.Ref {
 		ref = emit.Ptr(ref)
 	}
 	return ref
+}
+
+// chanRef builds the reference shape the Go frontend produces for a
+// channel: a named ref in the synthetic `go` package with the
+// element as its single type argument, and the real facts stamped as
+// meta.
+func chanRef(t *testing.T, dir string, elem emit.Ref) emit.Ref {
+	t.Helper()
+	origin := &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "go", Name: "chan"}
+	goIsChannelKey.SetAt(origin.Meta(), true, meta.AuthorityPlugin, "golang", origin.Pos())
+	if dir != "" {
+		goChanDirKey.SetAt(origin.Meta(), dir, meta.AuthorityPlugin, "golang", origin.Pos())
+	}
+	ref := emit.External("go", "chan", elem)
+	ref.OriginNode = origin
+	return ref
+}
+
+// TestRenderType_Channel pins channel rendering.
+//
+// The frontend models a channel as a named ref in a package called
+// `go`, with direction in meta. Unhandled, that fell through to the
+// external-reference path and produced `import "go"` — a path that
+// resolves against the standard library — plus a `go.chan[T]`
+// qualifier that does not parse. The direction was lost too, so even
+// with the import fixed a receive-only channel became bidirectional
+// and the generated type no longer satisfied the interface.
+func TestRenderType_Channel(t *testing.T) {
+	t.Parallel()
+
+	render := func(t *testing.T, dir string, elem emit.Ref) (string, error) {
+		t.Helper()
+		s := newRenderState(loadTemplates(), nil, nil, nil)
+		return s.renderType(chanRef(t, dir, elem))
+	}
+
+	for name, tc := range map[string]struct{ dir, want string }{
+		"bidirectional":                      {"both", "chan string"},
+		"send-only":                          {"send", "chan<- string"},
+		"receive-only":                       {"recv", "<-chan string"},
+		"missing direction is bidirectional": {"", "chan string"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := render(t, tc.dir, emit.Builtin("string"))
+			if err != nil {
+				t.Fatalf("renderType: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("renderType = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("the element registers its own import", func(t *testing.T) {
+		t.Parallel()
+		// The property a string-shaped workaround could not have: a
+		// builtin ref carrying "<-chan pkg.T" is a leaf and would
+		// leave the import unregistered.
+		s := newRenderState(loadTemplates(), nil, nil, nil)
+		got, err := s.renderType(chanRef(t, "recv", emit.External("example.com/w", "Value")))
+		if err != nil {
+			t.Fatalf("renderType: %v", err)
+		}
+		if got != "<-chan w.Value" {
+			t.Fatalf("renderType = %q, want <-chan w.Value", got)
+		}
+		if s.imports.Len() != 1 {
+			t.Fatalf("element import not registered; set holds %d", s.imports.Len())
+		}
+	})
+
+	t.Run("a channel with no element is reported", func(t *testing.T) {
+		t.Parallel()
+		// A ref claiming go.isChannel without the structure is a
+		// plugin bug; naming it beats rendering "chan " and letting
+		// the formatter report a syntax error with no attribution.
+		origin := &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "go", Name: "chan"}
+		goIsChannelKey.SetAt(origin.Meta(), true, meta.AuthorityPlugin, "golang", origin.Pos())
+		ref := emit.External("go", "chan")
+		ref.OriginNode = origin
+
+		s := newRenderState(loadTemplates(), nil, nil, nil)
+		if _, err := s.renderType(ref); !errors.Is(err, ErrUnsupportedRef) {
+			t.Fatalf("err = %v, want ErrUnsupportedRef", err)
+		}
+	})
 }
