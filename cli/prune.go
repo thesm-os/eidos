@@ -158,7 +158,8 @@ func (c *PruneCommand) classify(env *Env, p *pipeline.Pipeline) []manifest.Outpu
 			// rested on.
 			env.Diag.For("pipeline.prune").Infof(
 				position.Pos{File: filepath.Join(o.Target.Dir, o.Target.Filename)},
-				"source package %q no longer exists in the module", o.Target.ImportPath)
+				"source package %q no longer exists in the module", o.Target.ImportPath,
+			)
 		}
 		out = append(out, o.Output)
 	}

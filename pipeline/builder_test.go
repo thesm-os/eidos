@@ -44,9 +44,56 @@ func TestBuilder_With(t *testing.T) {
 			WithCache(cache.NewNone()).
 			WithDiag(diag.New()).
 			WithVerbose(true).
+			WithBrand("testkit").
 			WithPluginOptions("p", map[string]string{"k": "v"})
 		if out != b {
 			t.Fatalf("With* should return the receiver")
+		}
+	})
+}
+
+// TestPipeline_PipelineID pins the identifier the manifest stamps on
+// every Output. The scope-aware merge and the prune subcommand both
+// key on it to stay inside one pipeline's entries in a
+// multi-pipeline workdir, so an empty or unstable value lets one
+// pipeline delete another's files.
+func TestPipeline_PipelineID(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, id string) *pipeline.Pipeline {
+		t.Helper()
+		b := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory())
+		if id != "" {
+			b = b.WithPipelineID(id)
+		}
+		p, err := b.Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		return p
+	}
+
+	t.Run("returns the explicitly configured id", func(t *testing.T) {
+		t.Parallel()
+		if got := build(t, "pid-explicit").PipelineID(); got != "pid-explicit" {
+			t.Fatalf("PipelineID = %q, want pid-explicit", got)
+		}
+	})
+
+	t.Run("derives a non-empty id when none is configured", func(t *testing.T) {
+		t.Parallel()
+		if got := build(t, "").PipelineID(); got == "" {
+			t.Fatalf("PipelineID is empty; the manifest cannot scope its entries")
+		}
+	})
+
+	t.Run("derives the same id for the same plugin set", func(t *testing.T) {
+		t.Parallel()
+		if a, b := build(t, "").PipelineID(), build(t, "").PipelineID(); a != b {
+			t.Fatalf("derived PipelineID is unstable: %q vs %q", a, b)
 		}
 	})
 }

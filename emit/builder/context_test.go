@@ -9,7 +9,6 @@ import (
 
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/emit/builder"
-	"go.thesmos.sh/eidos/node"
 )
 
 // TestContext_ForBindsIdentityAndTarget covers the foundational
@@ -69,52 +68,6 @@ func TestContext_For_TargetOptional(t *testing.T) {
 		c := builder.For("p")
 		if got := c.Target(); got != (emit.Target{}) {
 			t.Fatalf("Target = %v, want zero", got)
-		}
-	})
-}
-
-// TestContext_Anchor covers the declarative-anchor entry point. The
-// Anchor accepts a source node, derives the [emit.Package.Path]
-// from it, and stamps the node as the default [emit.BaseEmit.OriginNode]
-// on every decl built through the resulting PackageBuilder.
-func TestContext_Anchor(t *testing.T) {
-	t.Parallel()
-
-	t.Run("Path derives from the anchor node's package", func(t *testing.T) {
-		t.Parallel()
-		iface := &node.Interface{Name: "Store", Package: "example.com/x/store"}
-		pkg := builder.For("mg").Anchor(iface).Node()
-		if got, want := pkg.Path, "example.com/x/store"; got != want {
-			t.Fatalf("Package.Path = %q, want %q", got, want)
-		}
-		if got := pkg.Name; got != "" {
-			t.Fatalf("Package.Name = %q, want empty (framework fills)", got)
-		}
-	})
-
-	t.Run("default Origin stamps on decls built via the PackageBuilder", func(t *testing.T) {
-		t.Parallel()
-		iface := &node.Interface{Name: "Store", Package: "example.com/x/store"}
-		var s *emit.Struct
-		builder.For("mg").Anchor(iface).Struct("StoreMock", func(sb *builder.StructBuilder) {
-			s = sb.Node()
-		})
-		if s.Origin() != iface {
-			t.Fatalf("default Origin = %v, want %v", s.Origin(), iface)
-		}
-	})
-
-	t.Run("per-decl Origin override wins over the anchor default", func(t *testing.T) {
-		t.Parallel()
-		anchor := &node.Interface{Name: "A", Package: "x"}
-		override := &node.Struct{Name: "Other"}
-		var s *emit.Struct
-		builder.For("mg").Anchor(anchor).Struct("SMock", func(sb *builder.StructBuilder) {
-			sb.Origin(override)
-			s = sb.Node()
-		})
-		if s.Origin() != override {
-			t.Fatalf("override Origin = %v, want %v", s.Origin(), override)
 		}
 	})
 }

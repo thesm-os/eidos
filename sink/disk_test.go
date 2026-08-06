@@ -146,6 +146,32 @@ func TestDisk_Write(t *testing.T) {
 		}
 	})
 
+	t.Run("rewrites when the incoming body carries no provenance trailer", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		d := sink.NewDisk(root)
+		// First write: a normal generated file, trailer intact and
+		// at the tail, so the on-disk side of the comparison offers
+		// a hash.
+		assertNoError(t, d.Write(targetAt("a", "b.go"), generatedBlob("eidos run", "package x\n", "deadbeef")))
+		path := filepath.Join(root, "a", "b.go")
+		// Second write: an untrailered body. This is the shape a
+		// plugin produces when it writes through the sink without
+		// going via the Go backend's envelope. With no hash to
+		// compare against, the sink has no evidence the contents
+		// agree and must not skip.
+		plain := []byte("package x\n\n// hand-rolled, no envelope\n")
+		assertNoError(t, d.Write(targetAt("a", "b.go"), plain))
+		got, err := os.ReadFile(path)
+		assertNoError(t, err)
+		if !bytes.Equal(got, plain) {
+			t.Fatalf(
+				"an untrailered body must overwrite a trailered file; got %q, want %q",
+				got, plain,
+			)
+		}
+	})
+
 	t.Run("does not leave temporary files behind on success", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()

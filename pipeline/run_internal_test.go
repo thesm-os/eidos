@@ -523,3 +523,231 @@ func hasInternal(d *diag.Sink, substr string) bool {
 	}
 	return false
 }
+
+// TestManifestContentEqual pins the gate on the manifest-write
+// skip at the whole-document level. RunID is deliberately excluded
+// from the comparison — it is a per-run timestamp, so counting it
+// would rewrite the manifest on every run and dirty it in version
+// control, which is exactly what the skip exists to prevent.
+func TestManifestContentEqual(t *testing.T) {
+	t.Parallel()
+
+	// pair returns two manifests describing the same single output,
+	// so each case perturbs exactly one field away from equality.
+	pair := func() (*manifest.Manifest, *manifest.Manifest) {
+		a, b := manifest.New("run-a"), manifest.New("run-b")
+		a.Brand, b.Brand = "eidos", "eidos"
+		a.Add(baseManifestOutput())
+		b.Add(baseManifestOutput())
+		return a, b
+	}
+
+	t.Run("identical content compares equal despite differing RunID", func(t *testing.T) {
+		t.Parallel()
+		a, b := pair()
+		if !manifestContentEqual(a, b) {
+			t.Fatalf("RunID must not participate in the comparison")
+		}
+	})
+
+	t.Run("a nil previous manifest compares unequal", func(t *testing.T) {
+		t.Parallel()
+		_, b := pair()
+		if manifestContentEqual(nil, b) {
+			t.Fatalf("nil prev must force a write, not skip it")
+		}
+	})
+
+	t.Run("a nil current manifest compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, _ := pair()
+		if manifestContentEqual(a, nil) {
+			t.Fatalf("nil current must force a write, not skip it")
+		}
+	})
+
+	t.Run("a differing schema version compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, b := pair()
+		b.Version = a.Version + 1
+		if manifestContentEqual(a, b) {
+			t.Fatalf("a schema-version change must force a rewrite")
+		}
+	})
+
+	t.Run("a differing brand compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, b := pair()
+		b.Brand = "testkit"
+		if manifestContentEqual(a, b) {
+			t.Fatalf("a brand change must force a rewrite")
+		}
+	})
+
+	t.Run("a differing output count compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, b := pair()
+		extra := baseManifestOutput()
+		extra.Target.Filename = "other_gen.go"
+		b.Add(extra)
+		if manifestContentEqual(a, b) {
+			t.Fatalf("an added output must force a rewrite")
+		}
+	})
+
+	t.Run("a differing output compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, b := pair()
+		b.Outputs[0].Hash = "sha256:changed"
+		if manifestContentEqual(a, b) {
+			t.Fatalf("a changed body hash must force a rewrite")
+		}
+	})
+}
+
+// TestManifestOutputEqual_Plugins pins the contributing-plugin arm
+// of [manifestOutputEqual]. Attribution is what the `explain` and
+// prune commands read to answer "who wrote this file", so a change
+// of contributor with an unchanged body still has to rewrite the
+// manifest — the bytes are the same but the provenance is not.
+func TestManifestOutputEqual_Plugins(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the same attribution compares equal", func(t *testing.T) {
+		t.Parallel()
+		if !manifestOutputEqual(baseManifestOutput(), baseManifestOutput()) {
+			t.Fatalf("identical attribution must compare equal")
+		}
+	})
+
+	t.Run("a differing attribution count compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, b := baseManifestOutput(), baseManifestOutput()
+		b.Plugins = append(b.Plugins, manifest.PluginAttribution{Name: "tracer"})
+		if manifestOutputEqual(a, b) {
+			t.Fatalf("an added contributor must compare unequal")
+		}
+	})
+
+	t.Run("a differing attribution name compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, b := baseManifestOutput(), baseManifestOutput()
+		b.Plugins[0] = manifest.PluginAttribution{Name: "mockgen"}
+		if manifestOutputEqual(a, b) {
+			t.Fatalf("a changed contributor must compare unequal")
+		}
+	})
+
+	t.Run("a differing body hash compares unequal", func(t *testing.T) {
+		t.Parallel()
+		a, b := baseManifestOutput(), baseManifestOutput()
+		b.Hash = "sha256:changed"
+		if manifestOutputEqual(a, b) {
+			t.Fatalf("a changed body hash must compare unequal")
+		}
+	})
+}
+
+// TestMergeManifestPreservingOutOfScope pins the merge's ordering
+// contract. The manifest is a git-committed artefact, so its entry
+// order has to be a total function of the entries themselves —
+// otherwise two runs over the same inputs produce different bytes
+// and the file churns in version control. The comparator therefore
+// breaks ties down four Target fields and then PipelineID.
+func TestMergeManifestPreservingOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	// at builds an output varying only the fields the comparator
+	// consults, so each case isolates one tiebreaker.
+	at := func(dir, file, pkg, importPath, pid string) manifest.Output {
+		o := baseManifestOutput()
+		o.Target = emit.Target{Dir: dir, Filename: file, Package: pkg, ImportPath: importPath}
+		o.PipelineID = pid
+		return o
+	}
+	// merged runs the merge over a current manifest holding the
+	// supplied outputs in the given order and returns the result.
+	merged := func(outs ...manifest.Output) *manifest.Manifest {
+		prev := manifest.New("run-prev")
+		cur := manifest.New("run-cur")
+		for _, o := range outs {
+			cur.Add(o)
+		}
+		return mergeManifestPreservingOutOfScope(prev, cur)
+	}
+
+	t.Run("a nil previous manifest yields the current one unchanged", func(t *testing.T) {
+		t.Parallel()
+		cur := manifest.New("run-cur")
+		cur.Add(baseManifestOutput())
+		if got := mergeManifestPreservingOutOfScope(nil, cur); got != cur {
+			t.Fatalf("nil prev must pass the current manifest through")
+		}
+	})
+
+	t.Run("orders by directory first", func(t *testing.T) {
+		t.Parallel()
+		m := merged(at("b", "f.go", "p", "i", "x"), at("a", "f.go", "p", "i", "x"))
+		if m.Outputs[0].Target.Dir != "a" {
+			t.Fatalf("Dir order = %q first, want a", m.Outputs[0].Target.Dir)
+		}
+	})
+
+	t.Run("breaks a directory tie on filename", func(t *testing.T) {
+		t.Parallel()
+		m := merged(at("d", "z.go", "p", "i", "x"), at("d", "a.go", "p", "i", "x"))
+		if m.Outputs[0].Target.Filename != "a.go" {
+			t.Fatalf("Filename order = %q first, want a.go", m.Outputs[0].Target.Filename)
+		}
+	})
+
+	t.Run("breaks a filename tie on package", func(t *testing.T) {
+		t.Parallel()
+		m := merged(at("d", "f.go", "zed", "i", "x"), at("d", "f.go", "alpha", "i", "x"))
+		if m.Outputs[0].Target.Package != "alpha" {
+			t.Fatalf("Package order = %q first, want alpha", m.Outputs[0].Target.Package)
+		}
+	})
+
+	t.Run("breaks a package tie on import path", func(t *testing.T) {
+		t.Parallel()
+		m := merged(at("d", "f.go", "p", "z/i", "x"), at("d", "f.go", "p", "a/i", "x"))
+		if m.Outputs[0].Target.ImportPath != "a/i" {
+			t.Fatalf("ImportPath order = %q first, want a/i", m.Outputs[0].Target.ImportPath)
+		}
+	})
+
+	t.Run("breaks a target tie on pipeline id", func(t *testing.T) {
+		t.Parallel()
+		m := merged(at("d", "f.go", "p", "i", "zulu"), at("d", "f.go", "p", "i", "alpha"))
+		if m.Outputs[0].PipelineID != "alpha" {
+			t.Fatalf("PipelineID order = %q first, want alpha", m.Outputs[0].PipelineID)
+		}
+	})
+
+	t.Run("keeps a previous entry the current run did not replace", func(t *testing.T) {
+		t.Parallel()
+		prev := manifest.New("run-prev")
+		prev.Add(at("other", "kept.go", "p", "i", "other-pid"))
+		cur := manifest.New("run-cur")
+		cur.Add(at("d", "f.go", "p", "i", "x"))
+		m := mergeManifestPreservingOutOfScope(prev, cur)
+		if len(m.Outputs) != 2 {
+			t.Fatalf("out-of-scope entry dropped; got %d outputs", len(m.Outputs))
+		}
+	})
+
+	t.Run("replaces a previous entry the current run re-emitted", func(t *testing.T) {
+		t.Parallel()
+		prev := manifest.New("run-prev")
+		stale := at("d", "f.go", "p", "i", "x")
+		stale.Hash = "sha256:stale"
+		prev.Add(stale)
+		cur := manifest.New("run-cur")
+		cur.Add(at("d", "f.go", "p", "i", "x"))
+		m := mergeManifestPreservingOutOfScope(prev, cur)
+		if len(m.Outputs) != 1 || m.Outputs[0].Hash == "sha256:stale" {
+			t.Fatalf("re-emitted target must replace the previous entry; got %+v", m.Outputs)
+		}
+	})
+}

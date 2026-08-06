@@ -297,6 +297,18 @@ func TestMethod_QName(t *testing.T) {
 		}
 	})
 
+	t.Run("returns Package.Name for a top-level method with no Owner", func(t *testing.T) {
+		t.Parallel()
+		// The routing layer composes a top-level method's store key
+		// from the package rather than an owner type, so an ownerless
+		// method still has to qualify — bare "String" would collide
+		// across every package in the run.
+		m := &emit.Method{Name: "String", Package: "example.com/store"}
+		if got, want := m.QName(), "example.com/store.String"; got != want {
+			t.Fatalf("QName = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("returns just Name when Owner is nil and Package is empty", func(t *testing.T) {
 		t.Parallel()
 		m := &emit.Method{Name: "String"}

@@ -27,6 +27,13 @@ func TestGoFieldName_Initialisms(t *testing.T) {
 		{"id", "ID"},
 		{"created_at", "CreatedAt"},
 		{"", ""},
+		// Degenerate separators. protoc accepts these field names,
+		// so the converter has to drop the empty segments rather
+		// than emit an empty PascalCase run for each one.
+		{"user__id", "UserID"},
+		{"_user_id", "UserID"},
+		{"user_id_", "UserID"},
+		{"_", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in+" → "+tc.want, func(t *testing.T) {

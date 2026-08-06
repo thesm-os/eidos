@@ -1,0 +1,581 @@
+{
+  "docs": [
+    "Package fixture exercises the constraint shapes the converter",
+    "resolves through a different arm than a plain named bound.",
+    "",
+    "`generic_struct` already covers the common case — a type",
+    "parameter bound by a named interface that declares methods. That",
+    "interface embeds nothing, so the converter's embedded-type walk",
+    "never runs for it. The declarations here reach the remaining",
+    "arms: an embedded named interface, an approximation term written",
+    "directly on the parameter, an inline union, and the bare `any`",
+    "bound."
+  ],
+  "files": [
+    {
+      "docs": [
+        "Package fixture exercises the constraint shapes the converter",
+        "resolves through a different arm than a plain named bound.",
+        "",
+        "`generic_struct` already covers the common case — a type",
+        "parameter bound by a named interface that declares methods. That",
+        "interface embeds nothing, so the converter's embedded-type walk",
+        "never runs for it. The declarations here reach the remaining",
+        "arms: an embedded named interface, an approximation term written",
+        "directly on the parameter, an inline union, and the bare `any`",
+        "bound."
+      ],
+      "name": "source.go",
+      "path": "source.go",
+      "pos": {
+        "column": 1,
+        "file": "source.go",
+        "line": 14,
+        "offset": 599
+      }
+    }
+  ],
+  "interfaces": [
+    {
+      "docs": [
+        "Stringer is the bound the embedding constraint below reuses."
+      ],
+      "meta": {
+        "entries": []
+      },
+      "methods": [
+        {
+          "name": "String",
+          "pos": {
+            "column": 2,
+            "file": "source.go",
+            "line": 18,
+            "offset": 707
+          },
+          "returns": [
+            {
+              "type": {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "string",
+                "pos": {
+                  "column": 11,
+                  "file": "source.go",
+                  "line": 18,
+                  "offset": 716
+                },
+                "type_kind": 0
+              }
+            }
+          ]
+        }
+      ],
+      "name": "Stringer",
+      "package": "example.com/golangtest",
+      "pos": {
+        "column": 6,
+        "file": "source.go",
+        "line": 17,
+        "offset": 685
+      }
+    },
+    {
+      "docs": [
+        "Printable is a constraint interface whose only content is an",
+        "embedded named interface — the shape that drives the converter's",
+        "embedded-type-ref arm."
+      ],
+      "embeds": [
+        {
+          "pos": {
+            "column": 2,
+            "file": "source.go",
+            "line": 25,
+            "offset": 914
+          },
+          "type": {
+            "meta": {
+              "entries": [
+                {
+                  "authority": 0,
+                  "name": "go.isComparable",
+                  "pos": {
+                    "column": 6,
+                    "file": "source.go",
+                    "line": 17,
+                    "offset": 685
+                  },
+                  "set_by": "golang",
+                  "value": true
+                },
+                {
+                  "authority": 0,
+                  "name": "go.isInterface",
+                  "pos": {
+                    "column": 6,
+                    "file": "source.go",
+                    "line": 17,
+                    "offset": 685
+                  },
+                  "set_by": "golang",
+                  "value": true
+                },
+                {
+                  "authority": 0,
+                  "name": "go.isStringer",
+                  "pos": {
+                    "column": 6,
+                    "file": "source.go",
+                    "line": 17,
+                    "offset": 685
+                  },
+                  "set_by": "golang",
+                  "value": true
+                }
+              ]
+            },
+            "name": "Stringer",
+            "package": "example.com/golangtest",
+            "pos": {
+              "column": 2,
+              "file": "source.go",
+              "line": 25,
+              "offset": 914
+            },
+            "type_kind": 0
+          }
+        }
+      ],
+      "meta": {
+        "entries": []
+      },
+      "name": "Printable",
+      "package": "example.com/golangtest",
+      "pos": {
+        "column": 6,
+        "file": "source.go",
+        "line": 24,
+        "offset": 891
+      }
+    }
+  ],
+  "meta": {
+    "entries": [
+      {
+        "authority": 0,
+        "name": "frontend",
+        "set_by": "golang",
+        "value": "golang"
+      }
+    ]
+  },
+  "name": "fixture",
+  "path": "example.com/golangtest",
+  "structs": [
+    {
+      "docs": [
+        "Boxed is bound by a constraint that embeds another interface",
+        "rather than declaring methods of its own."
+      ],
+      "fields": [
+        {
+          "name": "Value",
+          "pos": {
+            "column": 2,
+            "file": "source.go",
+            "line": 31,
+            "offset": 1069
+          },
+          "type": {
+            "meta": {
+              "entries": [
+                {
+                  "authority": 0,
+                  "name": "go.isStringer",
+                  "pos": {
+                    "column": 12,
+                    "file": "source.go",
+                    "line": 30,
+                    "offset": 1046
+                  },
+                  "set_by": "golang",
+                  "value": true
+                }
+              ]
+            },
+            "name": "T",
+            "pos": {
+              "column": 8,
+              "file": "source.go",
+              "line": 31,
+              "offset": 1075
+            },
+            "type_kind": 6
+          }
+        }
+      ],
+      "name": "Boxed",
+      "package": "example.com/golangtest",
+      "pos": {
+        "column": 6,
+        "file": "source.go",
+        "line": 30,
+        "offset": 1040
+      },
+      "type_params": [
+        {
+          "constraint": {
+            "embedded": [
+              {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "pos": {
+                        "column": 6,
+                        "file": "source.go",
+                        "line": 17,
+                        "offset": 685
+                      },
+                      "set_by": "golang",
+                      "value": true
+                    },
+                    {
+                      "authority": 0,
+                      "name": "go.isInterface",
+                      "pos": {
+                        "column": 6,
+                        "file": "source.go",
+                        "line": 17,
+                        "offset": 685
+                      },
+                      "set_by": "golang",
+                      "value": true
+                    },
+                    {
+                      "authority": 0,
+                      "name": "go.isStringer",
+                      "pos": {
+                        "column": 6,
+                        "file": "source.go",
+                        "line": 17,
+                        "offset": 685
+                      },
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "name": "Stringer",
+                "package": "example.com/golangtest",
+                "type_kind": 0
+              }
+            ],
+            "raw": "Printable"
+          },
+          "name": "T",
+          "pos": {
+            "column": 12,
+            "file": "source.go",
+            "line": 30,
+            "offset": 1046
+          }
+        }
+      ]
+    },
+    {
+      "docs": [
+        "Approx writes an approximation term directly on the type",
+        "parameter rather than behind a named constraint interface."
+      ],
+      "fields": [
+        {
+          "name": "Value",
+          "pos": {
+            "column": 2,
+            "file": "source.go",
+            "line": 37,
+            "offset": 1232
+          },
+          "type": {
+            "meta": {
+              "entries": [
+                {
+                  "authority": 0,
+                  "name": "go.isComparable",
+                  "pos": {
+                    "column": 13,
+                    "file": "source.go",
+                    "line": 36,
+                    "offset": 1214
+                  },
+                  "set_by": "golang",
+                  "value": true
+                }
+              ]
+            },
+            "name": "T",
+            "pos": {
+              "column": 8,
+              "file": "source.go",
+              "line": 37,
+              "offset": 1238
+            },
+            "type_kind": 6
+          }
+        }
+      ],
+      "name": "Approx",
+      "package": "example.com/golangtest",
+      "pos": {
+        "column": 6,
+        "file": "source.go",
+        "line": 36,
+        "offset": 1207
+      },
+      "type_params": [
+        {
+          "constraint": {
+            "raw": "~int"
+          },
+          "meta": {
+            "entries": [
+              {
+                "authority": 0,
+                "name": "go.constraintTerms",
+                "pos": {
+                  "column": 13,
+                  "file": "source.go",
+                  "line": 36,
+                  "offset": 1214
+                },
+                "set_by": "golang",
+                "value": [
+                  {
+                    "approximate": true,
+                    "type": {
+                      "meta": {
+                        "entries": [
+                          {
+                            "authority": 0,
+                            "name": "go.isComparable",
+                            "set_by": "golang",
+                            "value": true
+                          }
+                        ]
+                      },
+                      "name": "int",
+                      "type_kind": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "T",
+          "pos": {
+            "column": 13,
+            "file": "source.go",
+            "line": 36,
+            "offset": 1214
+          }
+        }
+      ]
+    },
+    {
+      "docs": [
+        "Unioned writes a union directly on the type parameter."
+      ],
+      "fields": [
+        {
+          "name": "Value",
+          "pos": {
+            "column": 2,
+            "file": "source.go",
+            "line": 42,
+            "offset": 1340
+          },
+          "type": {
+            "meta": {
+              "entries": [
+                {
+                  "authority": 0,
+                  "name": "go.isComparable",
+                  "pos": {
+                    "column": 14,
+                    "file": "source.go",
+                    "line": 41,
+                    "offset": 1314
+                  },
+                  "set_by": "golang",
+                  "value": true
+                }
+              ]
+            },
+            "name": "T",
+            "pos": {
+              "column": 8,
+              "file": "source.go",
+              "line": 42,
+              "offset": 1346
+            },
+            "type_kind": 6
+          }
+        }
+      ],
+      "name": "Unioned",
+      "package": "example.com/golangtest",
+      "pos": {
+        "column": 6,
+        "file": "source.go",
+        "line": 41,
+        "offset": 1306
+      },
+      "type_params": [
+        {
+          "constraint": {
+            "raw": "int | string"
+          },
+          "meta": {
+            "entries": [
+              {
+                "authority": 0,
+                "name": "go.constraintTerms",
+                "pos": {
+                  "column": 14,
+                  "file": "source.go",
+                  "line": 41,
+                  "offset": 1314
+                },
+                "set_by": "golang",
+                "value": [
+                  {
+                    "type": {
+                      "meta": {
+                        "entries": [
+                          {
+                            "authority": 0,
+                            "name": "go.isComparable",
+                            "set_by": "golang",
+                            "value": true
+                          }
+                        ]
+                      },
+                      "name": "int",
+                      "type_kind": 0
+                    }
+                  },
+                  {
+                    "type": {
+                      "meta": {
+                        "entries": [
+                          {
+                            "authority": 0,
+                            "name": "go.isComparable",
+                            "set_by": "golang",
+                            "value": true
+                          }
+                        ]
+                      },
+                      "name": "string",
+                      "type_kind": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "T",
+          "pos": {
+            "column": 14,
+            "file": "source.go",
+            "line": 41,
+            "offset": 1314
+          }
+        }
+      ]
+    },
+    {
+      "docs": [
+        "Anything uses the predeclared `any` bound, which resolves to an",
+        "empty constraint carrying no terms."
+      ],
+      "fields": [
+        {
+          "name": "Value",
+          "pos": {
+            "column": 2,
+            "file": "source.go",
+            "line": 48,
+            "offset": 1488
+          },
+          "type": {
+            "meta": {
+              "entries": []
+            },
+            "name": "T",
+            "pos": {
+              "column": 8,
+              "file": "source.go",
+              "line": 48,
+              "offset": 1494
+            },
+            "type_kind": 6
+          }
+        }
+      ],
+      "name": "Anything",
+      "package": "example.com/golangtest",
+      "pos": {
+        "column": 6,
+        "file": "source.go",
+        "line": 47,
+        "offset": 1462
+      },
+      "type_params": [
+        {
+          "constraint": {
+            "embedded": [
+              {
+                "meta": {
+                  "entries": [
+                    {
+                      "authority": 0,
+                      "name": "go.isComparable",
+                      "set_by": "golang",
+                      "value": true
+                    },
+                    {
+                      "authority": 0,
+                      "name": "go.isInterface",
+                      "set_by": "golang",
+                      "value": true
+                    }
+                  ]
+                },
+                "type_kind": 8
+              }
+            ],
+            "raw": "any"
+          },
+          "name": "T",
+          "pos": {
+            "column": 15,
+            "file": "source.go",
+            "line": 47,
+            "offset": 1471
+          }
+        }
+      ]
+    }
+  ]
+}

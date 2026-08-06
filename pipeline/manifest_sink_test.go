@@ -5,6 +5,7 @@ package pipeline_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -973,6 +974,76 @@ func TestManifest_OutputOrderTiebreaks(t *testing.T) {
 			if got := manifestOrder(t); !slices.Equal(got, want) {
 				t.Fatalf("run %d ordered the manifest as\n  %+v\nwant\n  %+v", i, got, want)
 			}
+		}
+	})
+}
+
+// TestManifest_RecordsBrand pins the tool identity the manifest
+// carries. The prune subcommand matches a file's header marker
+// against the brand before deleting anything it claims, so a brand
+// that does not survive into the manifest means a re-branded binary
+// stops recognising its own output — and prune either refuses to
+// clean up or, worse, walks past files it should have claimed.
+func TestManifest_RecordsBrand(t *testing.T) {
+	t.Parallel()
+
+	// writeManifest runs a minimal pipeline configured with the
+	// supplied brand and returns the decoded manifest.
+	writeManifest := func(t *testing.T, brand string) *manifest.Manifest {
+		t.Helper()
+		root := t.TempDir()
+		path := filepath.Join(root, ".eidos", "manifest.json")
+		src := &node.Struct{
+			BaseNode: node.BaseNode{SourcePos: position.Pos{File: "a/x.go"}},
+			Name:     "X", Package: "example.com/a",
+		}
+		fe := &nodePackageFE{name: "fe", pkg: &node.Package{
+			Name: "a", Path: "example.com/a", Structs: []*node.Struct{src},
+		}}
+		gen := &recGen{name: "gen", suffix: "_gen.go", generate: func(ctx *plugin.GeneratorContext) {
+			_ = ctx.Store.Emit().AddPackage(&emit.Package{
+				Name: "a", Path: "example.com/a",
+				Structs: []*emit.Struct{
+					{BaseEmit: emit.BaseEmit{OriginNode: src, SetByName: "gen"}, Name: "X", Package: "a"},
+				},
+			})
+		}}
+		be := &recBE{name: "be", lang: "stub", render: func(ctx *plugin.BackendContext) {
+			ctx.Reader.EmitStructs().Each(func(s *emit.Struct) {
+				_ = ctx.Sink.Write(s.Target, []byte("hello-"+s.Name))
+			})
+		}}
+		b := pipeline.New().
+			WithFrontend(fe).
+			WithGenerator(gen).
+			WithBackend(be).
+			WithSink(sink.NewMemory()).
+			WithManifestPath(path)
+		if brand != "" {
+			b = b.WithBrand(brand)
+		}
+		p, err := b.Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "a"))
+
+		body, err := os.ReadFile(path)
+		assertNoError(t, err)
+		var m manifest.Manifest
+		assertNoError(t, json.Unmarshal(body, &m))
+		return &m
+	}
+
+	t.Run("the configured brand reaches the written manifest", func(t *testing.T) {
+		t.Parallel()
+		if got := writeManifest(t, "testkit").Brand; got != "testkit" {
+			t.Fatalf("manifest Brand = %q, want testkit", got)
+		}
+	})
+
+	t.Run("a differently branded run records its own brand", func(t *testing.T) {
+		t.Parallel()
+		if got := writeManifest(t, "eidos-reference").Brand; got != "eidos-reference" {
+			t.Fatalf("manifest Brand = %q, want eidos-reference", got)
 		}
 	})
 }

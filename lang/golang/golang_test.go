@@ -6,6 +6,7 @@ package golang_test
 import (
 	"testing"
 
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
@@ -210,6 +211,236 @@ func TestTypeArgs(t *testing.T) {
 		}
 		if got := golang.TypeArgs(s); got != "[T, K]" {
 			t.Errorf("TypeArgs = %q, want [T, K]", got)
+		}
+	})
+}
+
+// TestFieldType pins the field-type lifter templates feed to the
+// backend's renderType entry. It is a thin delegation to FromNode,
+// so the contract worth pinning is that it delegates the field's
+// declared type rather than the field itself.
+func TestFieldType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lifts the field's declared type", func(t *testing.T) {
+		t.Parallel()
+		f := &node.Field{Name: "ID", Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}}
+		b, ok := golang.FieldType(f).(*emit.BuiltinRef)
+		if !ok || b.Name != "string" {
+			t.Fatalf("FieldType = %#v, want BuiltinRef{string}", golang.FieldType(f))
+		}
+	})
+
+	t.Run("threads the source ref as the lifted ref's origin", func(t *testing.T) {
+		t.Parallel()
+		typ := &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}
+		b, _ := golang.FieldType(&node.Field{Name: "ID", Type: typ}).(*emit.BuiltinRef)
+		if b.OriginNode != typ {
+			t.Fatalf("OriginNode = %#v, want the source TypeRef", b.OriginNode)
+		}
+	})
+}
+
+// TestElemType and its map siblings pin the composite-projection
+// lifters. Each reaches into one sub-ref of a composite type, so
+// each also has to answer what happens when that sub-ref is absent
+// — templates call these on whatever the model holds.
+func TestElemType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lifts the slice element type", func(t *testing.T) {
+		t.Parallel()
+		b, ok := golang.ElemType(sliceRef(&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"})).(*emit.BuiltinRef)
+		if !ok || b.Name != "int" {
+			t.Fatalf("ElemType = %#v, want BuiltinRef{int}", b)
+		}
+	})
+
+	t.Run("threads the element ref as the lifted ref's origin", func(t *testing.T) {
+		t.Parallel()
+		elem := &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"}
+		b, _ := golang.ElemType(sliceRef(elem)).(*emit.BuiltinRef)
+		if b.OriginNode != elem {
+			t.Fatalf("OriginNode = %#v, want the element TypeRef", b.OriginNode)
+		}
+	})
+}
+
+func TestMapKeyType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lifts the map key type", func(t *testing.T) {
+		t.Parallel()
+		m := mapRef(
+			&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"},
+			&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"},
+		)
+		b, ok := golang.MapKeyType(m).(*emit.BuiltinRef)
+		if !ok || b.Name != "string" {
+			t.Fatalf("MapKeyType = %#v, want BuiltinRef{string}", b)
+		}
+	})
+
+	t.Run("an external key type lifts to an ExternalRef", func(t *testing.T) {
+		t.Parallel()
+		m := mapRef(
+			&node.TypeRef{TypeKind: node.TypeRefNamed, Package: "time", Name: "Time"},
+			&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"},
+		)
+		e, ok := golang.MapKeyType(m).(*emit.ExternalRef)
+		if !ok || e.Package != "time" || e.Name != "Time" {
+			t.Fatalf("MapKeyType = %#v, want ExternalRef{time, Time}", golang.MapKeyType(m))
+		}
+	})
+}
+
+func TestMapValType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lifts the map value type", func(t *testing.T) {
+		t.Parallel()
+		m := mapRef(
+			&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"},
+			&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"},
+		)
+		b, ok := golang.MapValType(m).(*emit.BuiltinRef)
+		if !ok || b.Name != "int" {
+			t.Fatalf("MapValType = %#v, want BuiltinRef{int}", b)
+		}
+	})
+
+	t.Run("a composite value type lifts to a CompositeRef", func(t *testing.T) {
+		t.Parallel()
+		m := mapRef(
+			&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"},
+			sliceRef(&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "byte"}),
+		)
+		c, ok := golang.MapValType(m).(*emit.CompositeRef)
+		if !ok || c.Shape != emit.ShapeSlice {
+			t.Fatalf("MapValType = %#v, want slice CompositeRef", golang.MapValType(m))
+		}
+	})
+}
+
+// TestTypeParams pins the generic-parameter lifter. The nil return
+// for a non-generic struct is load-bearing: the template's
+// renderTypeParams call emits no bracket list at all for nil, and
+// an empty-but-non-nil slice would render `[]`.
+func TestTypeParams(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a non-generic struct lifts to nil", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.TypeParams(&node.Struct{Name: "Container"}); got != nil {
+			t.Fatalf("TypeParams(non-generic) = %#v, want nil", got)
+		}
+	})
+
+	t.Run("lifts each parameter name in declaration order", func(t *testing.T) {
+		t.Parallel()
+		s := &node.Struct{Name: "Container", TypeParams: []*node.TypeParam{{Name: "T"}, {Name: "K"}}}
+		got := golang.TypeParams(s)
+		if len(got) != 2 || got[0].Name != "T" || got[1].Name != "K" {
+			t.Fatalf("TypeParams = %#v, want [T K]", got)
+		}
+	})
+
+	t.Run("lifts the constraint alongside the name", func(t *testing.T) {
+		t.Parallel()
+		s := &node.Struct{
+			Name: "Container",
+			TypeParams: []*node.TypeParam{{
+				Name: "T",
+				Constraint: &node.Constraint{
+					Embedded: []*node.TypeRef{{TypeKind: node.TypeRefNamed, Name: "comparable"}},
+				},
+			}},
+		}
+		got := golang.TypeParams(s)
+		if len(got) != 1 || got[0].Constraint == nil {
+			t.Fatalf("TypeParams dropped the constraint: %#v", got)
+		}
+	})
+}
+
+// TestSelfType pins the struct's own-type instantiation. The
+// generic arm threads the parameter names back in as type args so
+// an emitted helper referring to its host renders `Container[T]`
+// rather than the uninstantiated `Container`, which would not
+// compile.
+func TestSelfType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a non-generic struct is its bare external ref", func(t *testing.T) {
+		t.Parallel()
+		got, ok := golang.SelfType(&node.Struct{Name: "Container", Package: "example.com/c"}).(*emit.ExternalRef)
+		if !ok || got.Name != "Container" || got.Package != "example.com/c" {
+			t.Fatalf("SelfType = %#v, want ExternalRef{example.com/c, Container}", got)
+		}
+	})
+
+	t.Run("a non-generic struct carries no type args", func(t *testing.T) {
+		t.Parallel()
+		got, _ := golang.SelfType(&node.Struct{Name: "Container", Package: "example.com/c"}).(*emit.ExternalRef)
+		if len(got.TypeArgs) != 0 {
+			t.Fatalf("SelfType TypeArgs = %#v, want none", got.TypeArgs)
+		}
+	})
+
+	t.Run("a generic struct threads its parameter names as type args", func(t *testing.T) {
+		t.Parallel()
+		s := &node.Struct{
+			Name: "Container", Package: "example.com/c",
+			TypeParams: []*node.TypeParam{{Name: "T"}, {Name: "K"}},
+		}
+		got, ok := golang.SelfType(s).(*emit.ExternalRef)
+		if !ok || len(got.TypeArgs) != 2 {
+			t.Fatalf("SelfType = %#v, want two type args", got)
+		}
+		a, ok := got.TypeArgs[0].(*emit.BuiltinRef)
+		if !ok || a.Name != "T" {
+			t.Fatalf("SelfType first type arg = %#v, want BuiltinRef{T}", got.TypeArgs[0])
+		}
+	})
+}
+
+// TestFuncMap pins the funcmap plugins compose with their own
+// entries. The keys are a published contract — a template in a
+// downstream plugin references them by string, so a rename here
+// breaks that template at render time rather than at build time.
+func TestFuncMap(t *testing.T) {
+	t.Parallel()
+
+	t.Run("registers every documented key", func(t *testing.T) {
+		t.Parallel()
+		fm := golang.FuncMap()
+		for _, key := range []string{
+			"isExported", "exportedFields", "isSlice", "isMap", "isByteSlice",
+			"fieldType", "elemType", "mapKeyType", "mapValType",
+			"typeParams", "typeArgs", "selfType",
+		} {
+			if _, ok := fm[key]; !ok {
+				t.Errorf("FuncMap missing documented key %q", key)
+			}
+		}
+	})
+
+	t.Run("registers no key beyond the documented set", func(t *testing.T) {
+		t.Parallel()
+		if got := len(golang.FuncMap()); got != 12 {
+			t.Fatalf("FuncMap holds %d keys, want the 12 documented ones", got)
+		}
+	})
+
+	t.Run("returns a fresh map per call", func(t *testing.T) {
+		t.Parallel()
+		// Callers merge this into their own funcmap and some
+		// delete from it; a shared map would leak that edit into
+		// every later plugin.
+		first := golang.FuncMap()
+		delete(first, "isExported")
+		if _, ok := golang.FuncMap()["isExported"]; !ok {
+			t.Fatalf("FuncMap returned a shared map; a caller's delete leaked")
 		}
 	})
 }

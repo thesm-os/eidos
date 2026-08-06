@@ -8,6 +8,7 @@ import (
 
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/emit/builder"
+	"go.thesmos.sh/eidos/node"
 )
 
 // TestMethodBuilder_ParamCallbackAndNamedReturn covers the
@@ -76,6 +77,105 @@ func TestMethodBuilder_Accessors(t *testing.T) {
 		}
 		if n.Origin() != origin {
 			t.Fatalf("Origin not threaded; got %v, want %v", n.Origin(), origin)
+		}
+	})
+}
+
+// TestPackageBuilder_Method covers the top-level Method
+// constructor. The decl lands on [emit.Package.Methods] (not
+// nested under a Struct/Interface/Alias); the Anchor's default
+// origin is stamped as the method's Owner so the framework's
+// downstream routing and rewire passes can resolve the receiver
+// type. OwnerRef is populated in lock-step.
+func TestPackageBuilder_Method(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Method appends to Package.Methods", func(t *testing.T) {
+		t.Parallel()
+		anchor := &node.Enum{Name: "Status", Package: "example.com/store"}
+		pkg, err := builder.For("enum").Anchor(anchor).
+			Method("String", nil).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if got := len(pkg.Methods); got != 1 {
+			t.Fatalf("Methods len = %d, want 1", got)
+		}
+		if got := pkg.Methods[0].Name; got != "String" {
+			t.Fatalf("Methods[0].Name = %q, want %q", got, "String")
+		}
+	})
+
+	t.Run("Method stamps Owner from Anchor's default origin", func(t *testing.T) {
+		t.Parallel()
+		anchor := &node.Enum{Name: "Status", Package: "example.com/store"}
+		pkg, err := builder.For("enum").Anchor(anchor).
+			Method("String", nil).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		m := pkg.Methods[0]
+		if m.Owner == nil {
+			t.Fatalf("Owner not stamped")
+		}
+		if got, want := m.Owner.OwnerName(), "Status"; got != want {
+			t.Fatalf("Owner.OwnerName = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("Method stamps OwnerRef in lock-step with Owner", func(t *testing.T) {
+		t.Parallel()
+		anchor := &node.Enum{Name: "Status", Package: "example.com/store"}
+		pkg, err := builder.For("enum").Anchor(anchor).
+			Method("String", nil).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		m := pkg.Methods[0]
+		if m.OwnerRef.IsZero() {
+			t.Fatalf("OwnerRef not stamped")
+		}
+		if got, want := m.OwnerRef.QName, "example.com/store.Status"; got != want {
+			t.Fatalf("OwnerRef.QName = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("Method sets Package to the anchored package path", func(t *testing.T) {
+		t.Parallel()
+		anchor := &node.Enum{Name: "Status", Package: "example.com/store"}
+		pkg, err := builder.For("enum").Anchor(anchor).
+			Method("String", nil).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if got, want := pkg.Methods[0].Package, "example.com/store"; got != want {
+			t.Fatalf("Method.Package = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("MethodBuilder Receiver / Body / Returns flow through", func(t *testing.T) {
+		t.Parallel()
+		anchor := &node.Enum{Name: "Status", Package: "example.com/store"}
+		pkg, err := builder.For("enum").Anchor(anchor).
+			Method("String", func(m *builder.MethodBuilder) {
+				m.Receiver("e", emit.External("example.com/store", "Status"))
+				m.Return(emit.Builtin("string"))
+				m.Body(emit.NewReturn(emit.NewLiteralString("active")))
+			}).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		m := pkg.Methods[0]
+		if m.ReceiverName != "e" || m.Receiver == nil {
+			t.Fatalf("receiver not threaded; name=%q type=%v", m.ReceiverName, m.Receiver)
+		}
+		if len(m.Returns) != 1 || len(m.Body) != 1 {
+			t.Fatalf("returns/body not threaded: returns=%d body=%d", len(m.Returns), len(m.Body))
 		}
 	})
 }

@@ -259,6 +259,40 @@ func TestNodeView_AddPackage_DuplicateDetection(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects duplicate method qnames on one enum", func(t *testing.T) {
+		t.Parallel()
+		// An enum carries its own methods since the typed-iota
+		// coalescing subsumed the alias that used to hold them, so
+		// the method bucket has to reject collisions here on the
+		// same terms it does for a struct.
+		s := store.New()
+		dup := &node.Package{
+			Name: "x", Path: "x",
+			Enums: []*node.Enum{{
+				Name: "E", Package: "x",
+				Methods: []*node.Method{{Name: "String"}, {Name: "String"}},
+			}},
+		}
+		if err := s.Nodes().AddPackage(dup); !errors.Is(err, store.ErrDuplicateQName) {
+			t.Fatalf("got %v, want ErrDuplicateQName", err)
+		}
+	})
+
+	t.Run("rejects duplicate method qnames on one alias", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		dup := &node.Package{
+			Name: "x", Path: "x",
+			Aliases: []*node.Alias{{
+				Name: "A", Package: "x",
+				Methods: []*node.Method{{Name: "String"}, {Name: "String"}},
+			}},
+		}
+		if err := s.Nodes().AddPackage(dup); !errors.Is(err, store.ErrDuplicateQName) {
+			t.Fatalf("got %v, want ErrDuplicateQName", err)
+		}
+	})
+
 	t.Run("rejects duplicate enum variant qnames", func(t *testing.T) {
 		t.Parallel()
 		s := store.New()

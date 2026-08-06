@@ -8,6 +8,7 @@ import (
 
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/emit/builder"
+	"go.thesmos.sh/eidos/node"
 )
 
 // TestFieldBuilder_Accessors covers Pos / Docs / Directive plus
@@ -34,6 +35,45 @@ func TestFieldBuilder_Accessors(t *testing.T) {
 		}
 		if node.LineComment != "hi" {
 			t.Fatalf("LineComment override failed; got %q", node.LineComment)
+		}
+	})
+}
+
+// TestFieldBuilder_Origin pins the source back-pointer a field
+// carries. Downstream consumers — the backend's render-site
+// lookups and the `explain` command — reach the source-side meta
+// bag through it, so a field built without one is invisible to
+// both.
+func TestFieldBuilder_Origin(t *testing.T) {
+	t.Parallel()
+
+	t.Run("records the source node on the built field", func(t *testing.T) {
+		t.Parallel()
+		src := &node.Field{Name: "ID"}
+		var f *emit.Field
+		builder.For("mg").Package("x", "example.com/x").
+			Struct("S", func(sb *builder.StructBuilder) {
+				sb.Field("ID", emit.Builtin("string"), func(fb *builder.FieldBuilder) {
+					fb.Origin(src)
+					f = fb.Node()
+				})
+			})
+		if f.Origin() != src {
+			t.Fatalf("Origin = %v, want %v", f.Origin(), src)
+		}
+	})
+
+	t.Run("returns the builder so the chain continues", func(t *testing.T) {
+		t.Parallel()
+		var same bool
+		builder.For("mg").Package("x", "example.com/x").
+			Struct("S", func(sb *builder.StructBuilder) {
+				sb.Field("ID", emit.Builtin("string"), func(fb *builder.FieldBuilder) {
+					same = fb.Origin(&node.Field{Name: "ID"}) == fb
+				})
+			})
+		if !same {
+			t.Fatalf("Origin must return the same FieldBuilder for chaining")
 		}
 	})
 }

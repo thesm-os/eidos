@@ -264,6 +264,74 @@ func TestPruneAll_SourceGone(t *testing.T) {
 	})
 }
 
+func TestPruneAll_NotAnOrphan(t *testing.T) {
+	t.Parallel()
+
+	// entryAt builds a manifest holding one unclaimed entry at the
+	// supplied import path, so each case below differs only in the
+	// path and the options it is classified against.
+	entryAt := func(importPath string) (*manifest.Manifest, map[emit.Target]struct{}) {
+		prev := manifest.New("run-3")
+		prev.Add(manifest.Output{
+			Target:     targetAtPath("c", "out.go", importPath),
+			PipelineID: "p",
+		})
+		return prev, map[emit.Target]struct{}{}
+	}
+
+	t.Run("an out-of-scope path absent from GoneSources is not an orphan", func(t *testing.T) {
+		t.Parallel()
+		// Distinct from the nil-GoneSources case: here the caller
+		// did establish which packages are gone, and this is not
+		// one of them. Absence from a populated set must read as
+		// "still exists", not as "unknown".
+		prev, emitted := entryAt("example.com/c")
+		got := manifest.PruneAll(prev, manifest.PruneOptions{
+			Emitted:     emitted,
+			Scope:       map[string]struct{}{"example.com/a": {}},
+			PipelineID:  "p",
+			GoneSources: map[string]struct{}{"example.com/b": {}},
+		})
+		if len(got) != 0 {
+			t.Fatalf("a package absent from GoneSources still exists; got %+v", got)
+		}
+	})
+
+	t.Run("an entry carrying no import path is not an orphan", func(t *testing.T) {
+		t.Parallel()
+		// An output the router never bound to a source package
+		// cannot be attributed to one, so neither scope nor
+		// gone-ness can claim it.
+		prev, emitted := entryAt("")
+		got := manifest.PruneAll(prev, manifest.PruneOptions{
+			Emitted:     emitted,
+			Scope:       map[string]struct{}{"example.com/a": {}},
+			PipelineID:  "p",
+			GoneSources: map[string]struct{}{"example.com/b": {}},
+		})
+		if len(got) != 0 {
+			t.Fatalf("a pathless entry is unattributable; got %+v", got)
+		}
+	})
+
+	t.Run("an empty scope entry is not claimed by an empty scope set", func(t *testing.T) {
+		t.Parallel()
+		// Guards the pairing of the two empty-path guards: an
+		// empty path must not match an empty-string key were one
+		// ever to enter the scope set.
+		prev, emitted := entryAt("")
+		got := manifest.PruneAll(prev, manifest.PruneOptions{
+			Emitted:     emitted,
+			Scope:       map[string]struct{}{"": {}},
+			PipelineID:  "p",
+			GoneSources: map[string]struct{}{"": {}},
+		})
+		if len(got) != 0 {
+			t.Fatalf("the empty path must never match; got %+v", got)
+		}
+	})
+}
+
 func TestOrphanReason_String(t *testing.T) {
 	t.Parallel()
 
