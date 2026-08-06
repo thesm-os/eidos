@@ -7,7 +7,15 @@ func (v {{ .TypeName }}) String() string {
 		return {{ printf "%q" .StringValue }}
 {{- end }}
 	}
+{{- if eq .Underlying "string" }}
+	{{- /* A string enum's value is already its textual form, so an
+	       undeclared one renders as itself: compilable, and the
+	       string that failed to match is exactly what a caller
+	       needs to see. int(v) does not compile here at all. */}}
+	return string(v)
+{{- else }}
 	return {{ renderExpr (external "fmt" "Sprintf") }}({{ printf "%q" (printf "%s(%%d)" .TypeName) }}, int(v))
+{{- end }}
 }
 
 // {{ .SentinelName }} is returned by {{ .ParseName }} when the

@@ -69,6 +69,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -290,6 +291,20 @@ type API struct {
 	// (`ErrUnknownStatus`).
 	SentinelName string
 
+	// Underlying is the enum's underlying type name as the
+	// frontend recorded it (`int`, `string`, `int64`, …), or
+	// empty when the source model declares none.
+	//
+	// The rendered API is not uniform across underlying types:
+	// the `String` fallback converts the value, and a numeric
+	// conversion applied to a string-valued enum produces a file
+	// that does not compile. Carried as the source fact rather
+	// than a pre-rendered expression or a bool so the
+	// per-language template decides what a given underlying type
+	// means for its output — which is where the framework already
+	// puts language interpretation.
+	Underlying string
+
 	// Variants is the ordered variant list — declaration
 	// order in the source enum, so iota-based numeric
 	// values stay aligned with the rendered switch cases.
@@ -382,7 +397,8 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			ctx.Diag.Errorf(e.Pos(), "%s: enum %q", ErrEnumHasNoVariants.Error(), e.QName())
 			continue
 		}
-		variants := p.collectVariants(e)
+		underlying := underlyingName(e)
+		variants := p.collectVariants(e, underlying)
 		parseName := p.parsePrefix() + e.Name
 		sentinelName := p.sentinelPrefix() + e.Name
 
@@ -395,6 +411,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			TypeName:     e.Name,
 			ParseName:    parseName,
 			SentinelName: sentinelName,
+			Underlying:   underlying,
 			Variants:     variants,
 		}
 		if err := ctx.Store.Emit().AppendOriginSlot(e, SlotName, api, c.Provenance("enum.api."+e.Name)); err != nil {
@@ -428,35 +445,86 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	return nil
 }
 
+// underlyingName returns the enum's underlying type name, or the
+// empty string when the source model declares none. Frontends that
+// produce typeless enums leave [node.Enum.Underlying] nil, and an
+// enum with no stated underlying type is treated as numeric —
+// the historical behaviour, and the only one a Go const group
+// without an explicit type can have.
+func underlyingName(e *node.Enum) string {
+	if !e.HasUnderlying() {
+		return ""
+	}
+	return e.Underlying.Name
+}
+
 // collectVariants returns the variant list for e with each
-// variant's StringValue resolved through the two-layer
-// rule: `+gen:value <override>` wins; otherwise the
-// variant's name with the enum's type-name prefix stripped
-// when [Options.StripPrefix] is true.
-func (p *Plugin) collectVariants(e *node.Enum) []Variant {
+// variant's StringValue resolved through the three-layer rule
+// documented on [Plugin.resolveStringValue].
+func (p *Plugin) collectVariants(e *node.Enum, underlying string) []Variant {
 	out := make([]Variant, 0, len(e.Variants))
 	for _, v := range e.Variants {
 		out = append(out, Variant{
 			ConstName:   v.Name,
-			StringValue: p.resolveStringValue(e.Name, v),
+			StringValue: p.resolveStringValue(e.Name, underlying, v),
 		})
 	}
 	return out
 }
 
-// resolveStringValue applies the two-layer rule: a
-// per-variant `+gen:value` override wins outright;
-// otherwise the variant's Name is returned with the enum's
-// typeName prefix stripped when [Options.StripPrefix] is
-// true.
-func (p *Plugin) resolveStringValue(typeName string, v *node.EnumVariant) string {
+// resolveStringValue applies the three-layer rule, highest
+// precedence first:
+//
+//  1. A per-variant `+gen:value <override>` wins outright — it is
+//     the author saying explicitly what the textual form is.
+//  2. For a string-valued enum, the declared constant value.
+//  3. Otherwise the variant's Name, with the enum's typeName prefix
+//     stripped when [Options.StripPrefix] is true.
+//
+// Layer 2 exists because for a string enum the textual form is
+// already written down. Deriving a different one from the
+// identifier loses the only thing the declaration said: a `Region`
+// declared `US Region = "us-east"` rendered its textual form as
+// `"US"`, so a value read from JSON, a database column or an HTTP
+// parameter did not parse, and one written through MarshalJSON
+// emitted `"US"` rather than the declared value.
+//
+// It is gated on the underlying type rather than on Value being
+// present. Every variant has a Value; for a numeric enum it is `1`,
+// and rendering `String()` as `"1"` would be worse than the
+// identifier. For a numeric enum the identifier is the only sensible
+// textual form.
+func (p *Plugin) resolveStringValue(typeName, underlying string, v *node.EnumVariant) string {
 	if override := v.Directive(sdk.ValueDirective); override != nil && len(override.Args) > 0 {
 		return override.Args[0]
+	}
+	if declared, ok := declaredStringValue(underlying, v); ok {
+		return declared
 	}
 	if p.stripPrefix() && strings.HasPrefix(v.Name, typeName) {
 		return strings.TrimPrefix(v.Name, typeName)
 	}
 	return v.Name
+}
+
+// declaredStringValue returns the unquoted constant value of a
+// string-valued enum variant, reporting false for every other case.
+//
+// [node.EnumVariant.Value] holds the verbatim source form — go/types'
+// ExactString — so a string constant arrives quoted (`"us-east"`,
+// eight characters) while an integer arrives bare (`1`). Using the
+// value unquoted would render `return "\"us-east\""`, which compiles
+// and is wrong, so an unquote failure falls back to the identifier
+// rather than emitting a literal nobody wrote.
+func declaredStringValue(underlying string, v *node.EnumVariant) (string, bool) {
+	if underlying != "string" || v.Value == "" {
+		return "", false
+	}
+	unquoted, err := strconv.Unquote(v.Value)
+	if err != nil {
+		return "", false
+	}
+	return unquoted, true
 }
 
 // stripPrefix returns the configured StripPrefix value, or

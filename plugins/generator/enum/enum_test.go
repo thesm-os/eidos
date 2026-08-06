@@ -4,8 +4,13 @@
 package enum_test
 
 import (
+	"bytes"
+	"fmt"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
+	"text/template"
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
@@ -212,5 +217,285 @@ func withOverride(eb *storefixture.EnumBuilder) {
 	pending.DirectiveList = append(pending.DirectiveList, &directive.Directive{
 		Name: "value",
 		Args: []string{"pending_review"},
+	})
+}
+
+// TestStringValuedEnum covers the string-underlying path.
+//
+// The rendered API is not uniform across underlying types. A string
+// enum's declared value *is* its textual form and is already written
+// down; deriving one from the identifier instead loses the only thing
+// the declaration said, so a value read from JSON, a database column
+// or an HTTP parameter did not parse and MarshalJSON emitted the
+// identifier. The `String` fallback compounded it: `int(v)` applied to
+// a string-valued type does not compile at all, so every generated
+// file for a string enum failed the consumer's build.
+func TestStringValuedEnum(t *testing.T) {
+	t.Parallel()
+
+	// apiFor drives Generate over one enum and returns the queued
+	// production-API contribution.
+	apiFor := func(t *testing.T, underlying string, configure func(*storefixture.EnumBuilder)) *enumplugin.API {
+		t.Helper()
+		s := storefixture.New().
+			Package("region", "example.com/region").
+			Enum("Region", func(eb *storefixture.EnumBuilder) {
+				eb.Pos(position.At("region/region.go", 1, 1))
+				eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
+				eb.Underlying(storefixture.Named(underlying))
+				configure(eb)
+			}).
+			Build()
+		d := diag.Capture()
+		if err := enumplugin.New().Generate(&plugin.GeneratorContext{
+			Store: s, Reader: store.NewReader(s), Diag: d,
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		if d.HasErrors() {
+			t.Fatalf("unexpected diagnostics: %+v", d.Diagnostics())
+		}
+		for _, slot := range s.Emit().PendingOriginSlots() {
+			if api, ok := slot.Item.(*enumplugin.API); ok {
+				return api
+			}
+		}
+		t.Fatalf("plugin queued no API contribution")
+		return nil
+	}
+
+	// stringVariants declares the reported fixture: values that
+	// differ from their identifiers in both case and content.
+	stringVariants := func(eb *storefixture.EnumBuilder) {
+		eb.Variant("US", `"us-east"`)
+		eb.Variant("EU", `"eu-west"`)
+	}
+
+	t.Run("the underlying type reaches the template data", func(t *testing.T) {
+		t.Parallel()
+		// Without this the template cannot branch, and the numeric
+		// fallback is emitted for every enum regardless of type.
+		if got := apiFor(t, "string", stringVariants).Underlying; got != "string" {
+			t.Fatalf("API.Underlying = %q, want string", got)
+		}
+	})
+
+	t.Run("a string variant renders its declared value", func(t *testing.T) {
+		t.Parallel()
+		api := apiFor(t, "string", stringVariants)
+		if got := api.Variants[0].StringValue; got != "us-east" {
+			t.Fatalf("StringValue = %q, want us-east (the declared value, not the identifier)", got)
+		}
+		if got := api.Variants[1].StringValue; got != "eu-west" {
+			t.Fatalf("StringValue = %q, want eu-west", got)
+		}
+	})
+
+	t.Run("the declared value is unquoted", func(t *testing.T) {
+		t.Parallel()
+		// EnumVariant.Value is go/types' ExactString, so a string
+		// constant arrives quoted. Passing it through raw renders
+		// `return "\"us-east\""` — compilable and wrong.
+		got := apiFor(t, "string", stringVariants).Variants[0].StringValue
+		if strings.Contains(got, `"`) {
+			t.Fatalf("StringValue = %q still carries its source quotes", got)
+		}
+	})
+
+	t.Run("an explicit +gen:value still wins over the declared value", func(t *testing.T) {
+		t.Parallel()
+		api := apiFor(t, "string", func(eb *storefixture.EnumBuilder) {
+			eb.Variant("US", `"us-east"`)
+			pending := eb.Node().Variants[0]
+			pending.DirectiveList = append(pending.DirectiveList, &directive.Directive{
+				Name: "value", Args: []string{"americas"},
+			})
+		})
+		if got := api.Variants[0].StringValue; got != "americas" {
+			t.Fatalf("StringValue = %q, want the explicit override americas", got)
+		}
+	})
+
+	t.Run("an unquotable value falls back to the identifier", func(t *testing.T) {
+		t.Parallel()
+		// A frontend that records something other than a Go literal
+		// must not produce a broken string literal in the output.
+		api := apiFor(t, "string", func(eb *storefixture.EnumBuilder) {
+			eb.Variant("US", "not-a-quoted-literal")
+		})
+		if got := api.Variants[0].StringValue; got != "US" {
+			t.Fatalf("StringValue = %q, want the identifier US", got)
+		}
+	})
+
+	t.Run("a numeric enum keeps the identifier as its textual form", func(t *testing.T) {
+		t.Parallel()
+		// Every variant has a Value; for a numeric enum it is `1`,
+		// and rendering String() as "1" would be worse than the name.
+		api := apiFor(t, "int", func(eb *storefixture.EnumBuilder) {
+			eb.Variant("RegionNorth", "0")
+		})
+		if got := api.Underlying; got != "int" {
+			t.Fatalf("API.Underlying = %q, want int", got)
+		}
+		if got := api.Variants[0].StringValue; got != "North" {
+			t.Fatalf("StringValue = %q, want the prefix-stripped identifier North", got)
+		}
+	})
+
+	t.Run("a rune-valued enum keeps the identifier", func(t *testing.T) {
+		t.Parallel()
+		// The gate is on the underlying type, not on whether the
+		// value happens to unquote. An integer never unquotes, so
+		// that case falls through either way — but a rune constant
+		// records `'a'`, which strconv.Unquote accepts, and without
+		// the gate String() would silently become "a" instead of the
+		// identifier.
+		api := apiFor(t, "rune", func(eb *storefixture.EnumBuilder) {
+			eb.Variant("RegionA", "'a'")
+		})
+		if got := api.Variants[0].StringValue; got != "A" {
+			t.Fatalf("StringValue = %q, want the prefix-stripped identifier A", got)
+		}
+	})
+
+	t.Run("an enum with no underlying type reports none", func(t *testing.T) {
+		t.Parallel()
+		// Frontends producing typeless enums leave Underlying nil;
+		// the template then takes the numeric branch, as before.
+		s := storefixture.New().
+			Package("region", "example.com/region").
+			Enum("Region", func(eb *storefixture.EnumBuilder) {
+				eb.Pos(position.At("region/region.go", 1, 1))
+				eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
+				eb.Variant("RegionNorth", "0")
+			}).
+			Build()
+		d := diag.Capture()
+		if err := enumplugin.New().Generate(&plugin.GeneratorContext{
+			Store: s, Reader: store.NewReader(s), Diag: d,
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		for _, slot := range s.Emit().PendingOriginSlots() {
+			if api, ok := slot.Item.(*enumplugin.API); ok {
+				if api.Underlying != "" {
+					t.Fatalf("API.Underlying = %q, want empty", api.Underlying)
+				}
+				return
+			}
+		}
+		t.Fatalf("plugin queued no API contribution")
+	})
+}
+
+// renderAPITemplate executes the `enum.api` template against api and
+// returns the rendered Go source.
+//
+// The funcmap entries the template reaches — `renderExpr` and
+// `external` — are supplied by the Go backend, which a plugin package
+// cannot import. They are stubbed here to something syntactically
+// inert: this test is about which branch the template takes, and the
+// backend's own tests own what those entries render.
+func renderAPITemplate(t *testing.T, api *enumplugin.API) string {
+	t.Helper()
+	tmplFS, ok := enumplugin.GoTemplates()
+	if !ok {
+		t.Fatalf("plugin exposes no Go template tree")
+	}
+	tmpl, err := template.New("enum").Funcs(template.FuncMap{
+		"external":   func(pkg, name string) string { return pkg + "." + name },
+		"renderExpr": func(v any) string { return fmt.Sprint(v) },
+	}).ParseFS(tmplFS, "*.tmpl")
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "enum.api", api); err != nil {
+		t.Fatalf("execute enum.api: %v", err)
+	}
+	return buf.String()
+}
+
+// TestAPITemplate_FallbackConversion pins the `String` fallback the
+// template emits per underlying type.
+//
+// This is the defect that reached the consumer's build: `int(v)` was
+// unconditional, so every generated file for a string-valued enum
+// failed to compile with "cannot convert v (variable of string type
+// Region) to type int". The data-side tests above cannot see it —
+// the conversion is chosen in the template, not in the emit value.
+func TestAPITemplate_FallbackConversion(t *testing.T) {
+	t.Parallel()
+
+	api := func(underlying string) *enumplugin.API {
+		return &enumplugin.API{
+			TypeName:     "Region",
+			ParseName:    "ParseRegion",
+			SentinelName: "ErrUnknownRegion",
+			Underlying:   underlying,
+			Variants: []enumplugin.Variant{
+				{ConstName: "US", StringValue: "us-east"},
+			},
+		}
+	}
+
+	t.Run("a string enum converts with string(v)", func(t *testing.T) {
+		t.Parallel()
+		got := renderAPITemplate(t, api("string"))
+		if !strings.Contains(got, "return string(v)") {
+			t.Fatalf("string enum must fall back through string(v); got:\n%s", got)
+		}
+	})
+
+	t.Run("a string enum never emits the numeric conversion", func(t *testing.T) {
+		t.Parallel()
+		// The exact expression that did not compile.
+		got := renderAPITemplate(t, api("string"))
+		if strings.Contains(got, "int(v)") {
+			t.Fatalf("string enum must not emit int(v); got:\n%s", got)
+		}
+	})
+
+	t.Run("a numeric enum keeps the Sprintf fallback", func(t *testing.T) {
+		t.Parallel()
+		got := renderAPITemplate(t, api("int"))
+		if !strings.Contains(got, "int(v)") {
+			t.Fatalf("numeric enum must keep int(v); got:\n%s", got)
+		}
+		if !strings.Contains(got, `"Region(%d)"`) {
+			t.Fatalf("numeric enum must keep the Region(%%d) form; got:\n%s", got)
+		}
+	})
+
+	t.Run("an enum with no underlying type takes the numeric branch", func(t *testing.T) {
+		t.Parallel()
+		// Historical behaviour for typeless enums; the only form a Go
+		// const group without an explicit type can have.
+		got := renderAPITemplate(t, api(""))
+		if !strings.Contains(got, "int(v)") {
+			t.Fatalf("typeless enum must take the numeric branch; got:\n%s", got)
+		}
+	})
+
+	t.Run("the declared value reaches the switch arm", func(t *testing.T) {
+		t.Parallel()
+		got := renderAPITemplate(t, api("string"))
+		if !strings.Contains(got, `case US:`) || !strings.Contains(got, `return "us-east"`) {
+			t.Fatalf("switch arm should map US to its declared value; got:\n%s", got)
+		}
+	})
+
+	t.Run("both branches parse as Go", func(t *testing.T) {
+		t.Parallel()
+		// A branch that renders but does not parse is the same class
+		// of failure as the original bug, one step earlier.
+		for _, u := range []string{"string", "int", ""} {
+			src := "package p\n\ntype Region string\n\nconst US Region = \"us-east\"\n\n" +
+				renderAPITemplate(t, api(u))
+			if _, err := parser.ParseFile(token.NewFileSet(), "p.go", src, 0); err != nil {
+				t.Fatalf("underlying %q rendered unparseable Go: %v\n%s", u, err, src)
+			}
+		}
 	})
 }
