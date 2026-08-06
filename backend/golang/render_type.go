@@ -302,14 +302,66 @@ func fieldNameFor(f *emit.Field) string {
 	return f.Name
 }
 
-// renderComposite dispatches on the [emit.CompositeRef.Shape] and
-// returns the Go source spelling for the composite. All documented
-// shapes are wired: Pointer (`*T`), Slice (`[]T`), Array (`[N]T`),
-// Map (`map[K]V`), Func (`func(P) R`), and Union (`A | ~B | C`).
-// Unknown shape values surface as [ErrUnsupportedRef] wrapped with
-// the offending shape — a future variant added to the discriminator
-// would land here.
+// renderComposite produces the source spelling of a composite type,
+// choosing between two strategies.
+//
+// A composite whose children are not themselves composites — *T,
+// []T, map[K]V for concrete K and V, the overwhelming majority of
+// what real code declares — takes one concatenation, which is one
+// allocation and is already the floor.
+//
+// Anything deeper goes through an append buffer. Concatenating each
+// level onto the fully rendered string below it allocates once per
+// level and memmoves the whole subtree each time: depth n costs n
+// allocations and O(n²) bytes, and a thousand-deep chain produced a
+// 1003-byte string at a cost of 533 kB in 1000 allocations. Through
+// the buffer that is 4.3 kB in 7.
+//
+// The buffer is not free — it cannot avoid a second allocation,
+// because it escapes through the recursive calls and the result
+// string copies out of it — so applying it to shallow shapes would
+// trade one allocation for two on the common path. Splitting here
+// keeps every existing shape at or below what it cost before.
+//
+// Func and union shapes always buffer: both join several children,
+// so both were paying strings.Join over already-materialised parts
+// regardless of depth.
 func (s *renderState) renderComposite(r *emit.CompositeRef) (string, error) {
+	switch r.Shape {
+	case emit.ShapePointer, emit.ShapeSlice, emit.ShapeArray, emit.ShapeMap:
+		if !hasCompositeChild(r) {
+			return s.renderShallowComposite(r)
+		}
+	case emit.ShapeFunc, emit.ShapeUnion:
+		// Always buffered: both join several children, so both were
+		// materialising every child and joining regardless of depth.
+	}
+	var scratch [64]byte
+	buf, err := s.appendComposite(scratch[:0], r)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
+}
+
+// hasCompositeChild reports whether r nests another composite, which
+// is exactly where the quadratic concatenation begins.
+func hasCompositeChild(r *emit.CompositeRef) bool {
+	isComposite := func(x emit.Ref) bool {
+		_, ok := x.(*emit.CompositeRef)
+		return ok
+	}
+	switch r.Shape {
+	case emit.ShapeMap:
+		return isComposite(r.MapKey) || isComposite(r.MapValue)
+	default:
+		return isComposite(r.Elem)
+	}
+}
+
+// renderShallowComposite is the single-concatenation path for a
+// composite with no composite child.
+func (s *renderState) renderShallowComposite(r *emit.CompositeRef) (string, error) {
 	switch r.Shape {
 	case emit.ShapePointer:
 		elem, err := s.renderType(r.Elem)
@@ -339,59 +391,146 @@ func (s *renderState) renderComposite(r *emit.CompositeRef) (string, error) {
 			return "", err
 		}
 		return "map[" + key + "]" + val, nil
-	case emit.ShapeFunc:
-		return s.renderFuncShape(r.FuncParams, r.FuncReturns)
-	case emit.ShapeUnion:
-		return s.renderUnion(r.UnionTerms)
 	default:
 		return "", fmt.Errorf("%w: composite shape %s", ErrUnsupportedRef, r.Shape)
 	}
 }
 
-// renderFuncShape returns the Go source spelling of a function
-// type: `func(P1, P2) R`, `func()`, `func(P) (R1, R2)`. Parameter
-// and return types render through [renderState.renderType]; both
-// lists are unnamed (the type-only form Go allows in field /
-// variable / parameter declarations of function type).
-func (s *renderState) renderFuncShape(params, returns []emit.Ref) (string, error) {
-	paramParts := make([]string, 0, len(params))
-	for _, p := range params {
-		r, err := s.renderType(p)
-		if err != nil {
-			return "", err
-		}
-		paramParts = append(paramParts, r)
+// appendType appends r's Go source spelling to dst.
+//
+// It dispatches on exactly one thing: a composite recurses into
+// [renderState.appendComposite] and writes its prefixes straight into
+// dst; everything else routes back through [renderState.renderType]
+// and appends the string it returns.
+//
+// Routing leaves back through renderType is what keeps this small.
+// The bridge-override and channel arms that run before renderType's
+// type switch are reached without being duplicated, the zero-copy
+// fast paths for builtins and same-package refs survive untouched,
+// and — the part that matters most — the arms that call
+// [writer.ImportSet.Imp] stay in one place. Collision suffixes are
+// assigned in first-import order, so a traversal that visited a map
+// value before its key would silently change generated aliases in
+// any file importing two packages that share a last segment.
+func (s *renderState) appendType(dst []byte, r emit.Ref) ([]byte, error) {
+	if c, ok := r.(*emit.CompositeRef); ok {
+		return s.appendComposite(dst, c)
 	}
-	retText, err := s.renderReturns(emit.AnonReturns(returns...))
+	text, err := s.renderType(r)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	out := "func(" + strings.Join(paramParts, ", ") + ")"
-	if retText != "" {
-		out += " " + retText
-	}
-	return out, nil
+	return append(dst, text...), nil
 }
 
-// renderUnion produces the Go union-constraint spelling for a
-// `T1 | T2 | ~T3` sequence: terms joined by " | ", with the
-// approximation marker `~` prefixing terms whose Approx flag is
-// set. Empty term slices yield the empty string — the caller
-// (typically [renderState.renderTypeParams]) is responsible for
-// treating an empty constraint as a programming error if relevant.
-func (s *renderState) renderUnion(terms []emit.UnionTerm) (string, error) {
-	parts := make([]string, 0, len(terms))
-	for _, t := range terms {
-		rendered, err := s.renderType(t.Type)
+// appendComposite appends r's spelling to dst.
+//
+// Each arm used to concatenate its prefix onto the fully rendered
+// string below it, allocating a fresh string per level and
+// memmoving the whole subtree into it. Depth n cost n allocations
+// and O(n²) bytes — a thousand-deep pointer chain produced a
+// 1003-byte string at a cost of 533 kB.
+//
+// The visit order reproduces the concatenation order exactly,
+// including strconv for the array length, the union separator and
+// the approximation prefix, so both the bytes and the Imp call
+// sequence are unchanged.
+func (s *renderState) appendComposite(dst []byte, r *emit.CompositeRef) ([]byte, error) {
+	switch r.Shape {
+	case emit.ShapePointer:
+		return s.appendType(append(dst, '*'), r.Elem)
+	case emit.ShapeSlice:
+		return s.appendType(append(dst, "[]"...), r.Elem)
+	case emit.ShapeArray:
+		dst = append(dst, '[')
+		dst = strconv.AppendInt(dst, int64(r.ArrayLen), 10)
+		return s.appendType(append(dst, ']'), r.Elem)
+	case emit.ShapeMap:
+		keyed, err := s.appendType(append(dst, "map["...), r.MapKey)
 		if err != nil {
-			return "", err
+			return nil, err
+		}
+		return s.appendType(append(keyed, ']'), r.MapValue)
+	case emit.ShapeFunc:
+		return s.appendFuncShape(dst, r.FuncParams, r.FuncReturns)
+	case emit.ShapeUnion:
+		return s.appendUnion(dst, r.UnionTerms)
+	default:
+		return nil, fmt.Errorf("%w: composite shape %s", ErrUnsupportedRef, r.Shape)
+	}
+}
+
+// appendFuncShape appends the source spelling of a function type.
+//
+// The return list goes through [renderState.appendAnonReturns]
+// rather than through renderReturns: a func type has no return names
+// by construction, and reaching renderReturns meant wrapping every
+// return type in an emit.Return purely to match its signature — 176
+// bytes of provenance scaffolding written, read once for .Type, and
+// discarded, which was 77% of what rendering a func type cost.
+func (s *renderState) appendFuncShape(dst []byte, params, returns []emit.Ref) ([]byte, error) {
+	dst = append(dst, "func("...)
+	for i, p := range params {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		var err error
+		if dst, err = s.appendType(dst, p); err != nil {
+			return nil, err
+		}
+	}
+	dst = append(dst, ')')
+	if len(returns) == 0 {
+		return dst, nil
+	}
+	return s.appendAnonReturns(append(dst, ' '), returns)
+}
+
+// appendAnonReturns appends an anonymous return list, implementing
+// the same truth table as [renderState.renderReturns] without
+// wrapping anything: nothing for zero returns, a bare spelling for
+// one, a parenthesised comma-joined list for more.
+//
+// The single-return case is bare — `error`, not `(error)` — which is
+// the branch a careless port loses. Anonymous types cannot reach the
+// mixed-named branch, so ErrMixedNamedReturns is unreachable here;
+// it stays live in renderReturns, where named returns still reach it.
+func (s *renderState) appendAnonReturns(dst []byte, types []emit.Ref) ([]byte, error) {
+	switch len(types) {
+	case 0:
+		return dst, nil
+	case 1:
+		return s.appendType(dst, types[0])
+	}
+	dst = append(dst, '(')
+	for i, t := range types {
+		if i > 0 {
+			dst = append(dst, ", "...)
+		}
+		var err error
+		if dst, err = s.appendType(dst, t); err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, ')'), nil
+}
+
+// appendUnion appends a union constraint's terms, separated by
+// " | " and each optionally prefixed with the approximation tilde.
+func (s *renderState) appendUnion(dst []byte, terms []emit.UnionTerm) ([]byte, error) {
+	for i, t := range terms {
+		if i > 0 {
+			dst = append(dst, " | "...)
 		}
 		if t.Approx {
-			rendered = "~" + rendered
+			dst = append(dst, '~')
 		}
-		parts = append(parts, rendered)
+		var err error
+		if dst, err = s.appendType(dst, t.Type); err != nil {
+			return nil, err
+		}
 	}
-	return strings.Join(parts, " | "), nil
+	return dst, nil
 }
 
 // targetImportPath returns the resolved import path on the routing

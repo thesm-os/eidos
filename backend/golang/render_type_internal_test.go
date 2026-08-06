@@ -13,7 +13,10 @@ package golang
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/meta"
@@ -273,4 +276,216 @@ func TestRenderType_Channel(t *testing.T) {
 			t.Fatalf("err = %v, want ErrUnsupportedRef", err)
 		}
 	})
+}
+
+// refRenderComposite is a concatenating reference implementation of
+// the composite spelling — the shape every arm had before the append
+// pass landed.
+//
+// Kept so the buffered path can be checked against the behaviour it
+// claims to preserve rather than against a restatement of its own
+// rules. Do not tidy it; its value is that it is the old code.
+func refRenderComposite(s *renderState, r *emit.CompositeRef) (string, error) {
+	switch r.Shape {
+	case emit.ShapePointer:
+		elem, err := s.renderType(r.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "*" + elem, nil
+	case emit.ShapeSlice:
+		elem, err := s.renderType(r.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "[]" + elem, nil
+	case emit.ShapeArray:
+		elem, err := s.renderType(r.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "[" + strconv.Itoa(r.ArrayLen) + "]" + elem, nil
+	case emit.ShapeMap:
+		key, err := s.renderType(r.MapKey)
+		if err != nil {
+			return "", err
+		}
+		val, err := s.renderType(r.MapValue)
+		if err != nil {
+			return "", err
+		}
+		return "map[" + key + "]" + val, nil
+	case emit.ShapeFunc:
+		paramParts := make([]string, 0, len(r.FuncParams))
+		for _, p := range r.FuncParams {
+			t, err := s.renderType(p)
+			if err != nil {
+				return "", err
+			}
+			paramParts = append(paramParts, t)
+		}
+		retText, err := s.renderReturns(emit.AnonReturns(r.FuncReturns...))
+		if err != nil {
+			return "", err
+		}
+		out := "func(" + strings.Join(paramParts, ", ") + ")"
+		if retText != "" {
+			out += " " + retText
+		}
+		return out, nil
+	case emit.ShapeUnion:
+		parts := make([]string, 0, len(r.UnionTerms))
+		for _, t := range r.UnionTerms {
+			rendered, err := s.renderType(t.Type)
+			if err != nil {
+				return "", err
+			}
+			if t.Approx {
+				rendered = "~" + rendered
+			}
+			parts = append(parts, rendered)
+		}
+		return strings.Join(parts, " | "), nil
+	default:
+		return "", fmt.Errorf("%w: composite shape %s", ErrUnsupportedRef, r.Shape)
+	}
+}
+
+// compositeCorpus returns the refs the differential covers: every
+// shape, nested past the depth at which the buffered path engages,
+// with external refs in positions whose visit order decides import
+// aliasing.
+func compositeCorpus() []*emit.CompositeRef {
+	ext := func(path, name string) emit.Ref { return emit.External(path, name) }
+	// Two packages sharing a last segment, so the second to be
+	// imported takes a collision suffix. Which one that is depends
+	// entirely on visit order.
+	a, b := ext("example.com/one/users", "A"), ext("example.com/two/users", "B")
+
+	return []*emit.CompositeRef{
+		emit.Ptr(emit.Builtin("int")),
+		emit.SliceOf(emit.Ptr(a)),
+		emit.ArrayOf(emit.Ptr(emit.Builtin("byte")), 16),
+		emit.MapOf(a, b),
+		// Non-colliding last segments, nested so the buffered path
+		// is the one taken: both sides render with their own derived
+		// alias regardless of visit order, so the spelling is
+		// identical either way and only the import set's order can
+		// reveal a transposed traversal.
+		emit.MapOf(emit.Ptr(ext("example.com/alpha", "A")), emit.Ptr(ext("example.com/beta", "B"))),
+		emit.MapOf(emit.Ptr(a), emit.SliceOf(emit.Ptr(b))),
+		emit.MapOf(emit.Builtin("string"), emit.SliceOf(emit.Ptr(emit.MapOf(a, b)))),
+		emit.FuncOf([]emit.Ref{a, emit.Builtin("string")}, []emit.Ref{b, emit.Builtin("error")}),
+		emit.FuncOf(nil, nil),
+		emit.FuncOf([]emit.Ref{emit.Builtin("int")}, []emit.Ref{emit.Builtin("error")}),
+		emit.SliceOf(emit.FuncOf([]emit.Ref{a}, []emit.Ref{b})),
+		emit.Union(
+			emit.UnionTerm{Type: emit.Builtin("int")},
+			emit.UnionTerm{Type: emit.Builtin("int64"), Approx: true},
+			emit.UnionTerm{Type: a},
+		),
+	}
+}
+
+// TestRenderComposite_MatchesConcatenation is the differential on the
+// append pass.
+//
+// Two assertions, and the second is the one that matters. Equal
+// strings prove the bytes did not move. Equal import sets prove the
+// traversal order did not: the external and cross-package arms call
+// ImportSet.Imp, collision suffixes are handed out in first-import
+// order, and a path that visited a map value before its key would
+// produce identical text while silently swapping `users` and
+// `users2` in any file importing two packages that share a last
+// segment. No string comparison can see that.
+func TestRenderComposite_MatchesConcatenation(t *testing.T) {
+	t.Parallel()
+
+	for i, ref := range compositeCorpus() {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
+
+			got := newRenderState(loadTemplates(), nil, nil, nil)
+			gotText, gotErr := got.renderComposite(ref)
+
+			want := newRenderState(loadTemplates(), nil, nil, nil)
+			wantText, wantErr := refRenderComposite(want, ref)
+
+			if (gotErr == nil) != (wantErr == nil) {
+				t.Fatalf("error disagreement: got %v, reference %v", gotErr, wantErr)
+			}
+			if gotText != wantText {
+				t.Fatalf("spelling = %q, reference = %q", gotText, wantText)
+			}
+			if g, w := got.imports.Imports(), want.imports.Imports(); !slices.Equal(g, w) {
+				t.Fatalf("import set diverged:\ngot  %+v\nwant %+v", g, w)
+			}
+		})
+	}
+}
+
+// TestRenderType_AllocationBudget enforces what
+// BenchmarkRenderType_Depth records.
+//
+// The defect was allocations linear in nesting depth. The budget is
+// therefore stated as a relationship, not an absolute: a
+// thousand-deep chain must stay within a small constant of a
+// hundred-deep one. Linear growth is the quadratic returning.
+//
+//nolint:paralleltest // testing.AllocsPerRun panics in a parallel test.
+func TestRenderType_AllocationBudget(t *testing.T) {
+	chain := func(depth int) emit.Ref {
+		var r emit.Ref = emit.Builtin("int")
+		for range depth {
+			r = emit.Ptr(r)
+		}
+		return r
+	}
+
+	measure := func(depth int) float64 {
+		s := newRenderState(loadTemplates(), nil, nil, nil)
+		r := chain(depth)
+		return testing.AllocsPerRun(20, func() {
+			if _, err := s.renderType(r); err != nil {
+				t.Fatalf("renderType: %v", err)
+			}
+		})
+	}
+
+	at100, at1000 := measure(100), measure(1000)
+	if at1000 > at100+8 {
+		t.Fatalf("depth 1000 allocated %v against depth 100's %v; "+
+			"growth with depth means the per-level concatenation is back", at1000, at100)
+	}
+
+	// The shallow case's budget. A composite whose children are not
+	// composites takes one concatenation, which is one allocation
+	// and is the floor; routing it through the buffer costs two,
+	// because the buffer escapes and the result copies out of it.
+	// *T, []T and map[K]V are most of what real code declares, so a
+	// split that stopped applying would be a regression on the
+	// common path in exchange for a win on a pathological one.
+	shallow := newRenderState(loadTemplates(), nil, nil, nil)
+	ptr := emit.Ptr(emit.Builtin("int"))
+	if got := testing.AllocsPerRun(20, func() {
+		if _, err := shallow.renderType(ptr); err != nil {
+			t.Fatalf("renderType: %v", err)
+		}
+	}); got > 1 {
+		t.Fatalf("shallow composite allocated %v times, budget 1", got)
+	}
+
+	// The func shape's own budget: reaching renderReturns wrapped
+	// every return type in a 176-byte emit.Return to match a
+	// signature, which no budget of three can absorb.
+	s := newRenderState(loadTemplates(), nil, nil, nil)
+	fn := emit.FuncOf([]emit.Ref{emit.Builtin("int"), emit.Builtin("string")},
+		[]emit.Ref{emit.Builtin("int"), emit.Builtin("error")})
+	if got := testing.AllocsPerRun(20, func() {
+		if _, err := s.renderType(fn); err != nil {
+			t.Fatalf("renderType: %v", err)
+		}
+	}); got > 3 {
+		t.Fatalf("func-type render allocated %v times, budget 3", got)
+	}
 }
