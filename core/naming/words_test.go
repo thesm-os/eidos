@@ -4,9 +4,11 @@
 package naming_test
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"go.thesmos.sh/eidos/core/naming"
 )
@@ -183,4 +185,161 @@ func benchIdentifier(n int) string {
 		b.WriteString(vocab[i%len(vocab)])
 	}
 	return b.String()
+}
+
+// wordsReference is a frozen copy of the rune-accumulating splitter
+// that [naming.Caser.Words] replaced.
+//
+// It exists so the rewrite can be checked against the behaviour it
+// claims to preserve, rather than against a re-statement of the new
+// rules. Kept verbatim — including the []rune conversion, which is the
+// source of the one behavioural subtlety the substring splitter has to
+// reproduce by hand: it folds every invalid byte to U+FFFD, where
+// slicing the input would preserve the raw byte.
+//
+// Do not "tidy" this function. Its value is that it is the old code.
+func wordsReference(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var words []string
+	var current []rune
+	flush := func() {
+		if len(current) > 0 {
+			words = append(words, string(current))
+			current = nil
+		}
+	}
+	runes := []rune(s)
+	for i, r := range runes {
+		if refIsSeparator(r) {
+			flush()
+			continue
+		}
+		if i > 0 && refShouldBreakBefore(runes, i) {
+			flush()
+		}
+		current = append(current, r)
+	}
+	flush()
+	return words
+}
+
+// refShouldBreakBefore is the frozen boundary rule.
+func refShouldBreakBefore(runes []rune, i int) bool {
+	cur := runes[i]
+	prev := runes[i-1]
+	if unicode.IsLower(prev) && unicode.IsUpper(cur) {
+		return true
+	}
+	if unicode.IsUpper(prev) && unicode.IsUpper(cur) && i+1 < len(runes) && unicode.IsLower(runes[i+1]) {
+		return true
+	}
+	return false
+}
+
+// refIsSeparator is the frozen separator set.
+func refIsSeparator(r rune) bool {
+	switch r {
+	case '_', '-', '.', ' ', '\t', '/':
+		return true
+	default:
+		return false
+	}
+}
+
+// FuzzCaser_WordsMatchesReference is the differential barrier on the
+// byte-offset rewrite.
+//
+// The conservation oracle in [FuzzCaser_Words] catches a naive
+// substring split — it compares against a helper that also iterates
+// runes, so a preserved invalid byte fails it — but it only proves the
+// concatenation is right. This proves the split is, word for word,
+// against the implementation that defined the behaviour.
+//
+// The seeds carry the two shapes that separate the implementations:
+// invalid UTF-8, where the rune conversion substitutes and slicing
+// does not, and acronym runs, where the boundary needs a lookahead the
+// substring form has to do by decoding rather than by indexing.
+func FuzzCaser_WordsMatchesReference(f *testing.F) {
+	for _, seed := range []string{
+		"", "a", "hello", "helloWorld", "HelloWorld", "HTTPServer",
+		"URLPath", "Version2", "a_b-c.d e/f\tg", "___", "ÉclairÖvre",
+		"\xbe", "\xff\xfe", "a\xffb", "A\xffB", "HTTP\xffServer",
+		"aB", "AB", "ABc", "aBc", "ßeta", "ΩΩmega",
+	} {
+		f.Add(seed)
+	}
+
+	c := naming.Default()
+
+	f.Fuzz(func(t *testing.T, s string) {
+		got, want := c.Words(s), wordsReference(s)
+		if !slices.Equal(got, want) {
+			t.Fatalf("Words(%q) = %q, reference = %q", s, got, want)
+		}
+	})
+}
+
+// TestCaser_WordsInvalidUTF8 pins the substitution the rewrite has to
+// perform by hand.
+//
+// Without it the splitter would return the raw byte, which is a
+// different string, fails the package's conservation oracle, and
+// silently changes every identifier a generator derives from
+// mis-encoded source. A table case rather than fuzz-only coverage so
+// deleting the branch fails a named test instead of a seed corpus.
+func TestCaser_WordsInvalidUTF8(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"a lone invalid byte becomes the replacement rune", "\xbe", []string{"�"}},
+		{"consecutive invalid bytes each substitute", "\xff\xfe", []string{"��"}},
+		{"an invalid byte inside a word substitutes in place", "a\xffb", []string{"a�b"}},
+		{"a valid word beside an invalid one is still sliced", "ok_a\xffb", []string{"ok", "a�b"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := naming.Default().Words(tc.in); !slices.Equal(got, tc.want) {
+				t.Fatalf("Words(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCaser_WordsAllocations is the host-independent regression
+// barrier. The nanosecond figures for this function moved by as much
+// as 28% between machines; the allocation count did not move at all.
+//
+// One allocation is the floor: Words returns a non-empty slice and is
+// far too large to inline, so the slice header is a heap allocation no
+// caller can elide. What the rewrite removed was everything else — the
+// []rune conversion, a growth ladder restarted per word, and a string
+// copy per word, which together came to 3.6 allocations per word, flat
+// at every input size.
+//
+//nolint:paralleltest // testing.AllocsPerRun panics in a parallel test.
+func TestCaser_WordsAllocations(t *testing.T) {
+	c := naming.Default()
+
+	for _, tc := range []struct {
+		words int
+		want  float64
+	}{
+		{1, 1},
+		{24, 1},
+		{1000, 1},
+	} {
+		in := benchIdentifier(tc.words)
+		got := testing.AllocsPerRun(50, func() { _ = c.Words(in) })
+		if got > tc.want {
+			t.Fatalf("Words over %d words allocated %v times, want at most %v", tc.words, got, tc.want)
+		}
+	}
 }

@@ -3,7 +3,11 @@
 
 package naming
 
-import "unicode"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 // Words splits s into its component words.
 //
@@ -25,44 +29,148 @@ import "unicode"
 // is used by the case converters that build on top of Words, not by
 // the splitter itself. The method is defined on Caser purely for API
 // symmetry with the converters.
+//
+// # Aliasing
+//
+// The returned words are substrings of s and share its backing array,
+// so holding one word retains all of s. That is the right trade at
+// generator lifetimes — a word is consumed into a rendered identifier
+// immediately — but a caller stashing a single word out of a very
+// large input for a long time should copy it.
+//
+// The one exception is a word containing invalid UTF-8: it is rebuilt
+// with U+FFFD substituted per invalid byte, so it owns its bytes. See
+// [Caser.Words]'s implementation note on wordAt.
 func (*Caser) Words(s string) []string {
 	if s == "" {
 		return nil
 	}
-	var words []string
-	var current []rune
-	flush := func() {
-		if len(current) > 0 {
-			words = append(words, string(current))
-			current = nil
+
+	out := make([]string, 0, countWordStarts(s))
+	// start is the byte offset the current word began at, or -1 when
+	// the scan is between words. dirty records whether the current
+	// word contains an invalid byte, which decides whether it can be
+	// sliced or has to be rebuilt.
+	start, dirty := -1, false
+	// prev is the immediately preceding rune, separators included —
+	// mirroring the original rune-indexed form, which read runes[i-1]
+	// without regard for whether a flush had just happened. "a_B"
+	// therefore sees prev='_' at 'B' and takes no case boundary,
+	// having already broken on the separator.
+	var prev rune
+	first := true
+
+	for i := 0; i < len(s); {
+		r, sz := decodeRuneAt(s, i)
+		switch {
+		case isSeparator(r):
+			if start >= 0 {
+				out = append(out, wordAt(s, start, i, dirty))
+				start, dirty = -1, false
+			}
+		case !first && breaksBefore(prev, r, s, i+sz):
+			if start >= 0 {
+				out = append(out, wordAt(s, start, i, dirty))
+				dirty = false
+			}
+			start = i
+		case start < 0:
+			start = i
 		}
+		if start >= 0 && r == utf8.RuneError && sz == 1 {
+			dirty = true
+		}
+		prev, first = r, false
+		i += sz
 	}
-	runes := []rune(s)
-	for i, r := range runes {
-		if isSeparator(r) {
-			flush()
-			continue
-		}
-		if i > 0 && shouldBreakBefore(runes, i) {
-			flush()
-		}
-		current = append(current, r)
+	if start >= 0 {
+		out = append(out, wordAt(s, start, len(s), dirty))
 	}
-	flush()
-	return words
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
-// shouldBreakBefore returns true when a word boundary should be
-// inserted before runes[i]. The caller has already established that
-// i > 0 and runes[i] is not a separator.
-func shouldBreakBefore(runes []rune, i int) bool {
-	cur := runes[i]
-	prev := runes[i-1]
+// wordAt returns the word spanning [start, end) of s.
+//
+// The common case is a substring header — no copy, no allocation,
+// which is the whole point of scanning byte offsets rather than
+// accumulating runes.
+//
+// A word carrying invalid UTF-8 is rebuilt instead. The previous
+// implementation went through []rune(s), and that conversion folds
+// every invalid byte to U+FFFD; slicing preserves the raw byte. The
+// difference is observable — Words("\xbe") is ["�"], not
+// ["\xbe"] — and the package's own conservation oracle depends on it,
+// because the test helper it compares against also iterates runes.
+// Ranging a string yields utf8.RuneError for an invalid byte and
+// WriteRune encodes that as U+FFFD, so this reproduces the old
+// spelling exactly.
+func wordAt(s string, start, end int, dirty bool) string {
+	if !dirty {
+		return s[start:end]
+	}
+	var b strings.Builder
+	b.Grow(end - start)
+	for _, r := range s[start:end] {
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// decodeRuneAt returns the rune at byte offset i and its width, with
+// an ASCII fast path that skips the decoder entirely for the bytes
+// that make up almost every identifier this package sees.
+func decodeRuneAt(s string, i int) (rune, int) {
+	if s[i] < utf8.RuneSelf {
+		return rune(s[i]), 1
+	}
+	return utf8.DecodeRuneInString(s[i:])
+}
+
+// countWordStarts returns a capacity estimate for the words slice: one
+// for the first word, plus one per separator, plus one per ASCII
+// lower-to-upper transition.
+//
+// A cheap over-estimate is fine and an under-estimate merely costs a
+// growth step, so the scan stays on the ASCII fast path and does not
+// decode. It deliberately does not model the acronym boundary
+// ("HTTPServer" counts as one), which under-counts by one per
+// acronym — rare in identifiers, and cheaper to absorb than a second
+// lookahead pass.
+//
+// Sizing on separators alone would not work: the case-boundary styles
+// this package exists to serve routinely pass PascalCase input with no
+// separator in it at all, where that estimate is 1 for any number of
+// words and the doubling ladder runs in full.
+func countWordStarts(s string) int {
+	n := 1
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case c == '_' || c == '-' || c == '.' || c == ' ' || c == '\t' || c == '/':
+			n++
+		case i > 0 && c >= 'A' && c <= 'Z' && s[i-1] >= 'a' && s[i-1] <= 'z':
+			n++
+		}
+	}
+	return n
+}
+
+// breaksBefore reports whether a word boundary falls immediately
+// before cur. prev is the preceding rune; next is the byte offset just
+// past cur, used for the acronym lookahead.
+//
+// Same two rules the rune-indexed form applied, with the lookahead
+// decoding one rune out of the string rather than indexing a slice.
+func breaksBefore(prev, cur rune, s string, next int) bool {
 	if unicode.IsLower(prev) && unicode.IsUpper(cur) {
 		return true
 	}
-	if unicode.IsUpper(prev) && unicode.IsUpper(cur) && i+1 < len(runes) && unicode.IsLower(runes[i+1]) {
-		return true
+	if unicode.IsUpper(prev) && unicode.IsUpper(cur) && next < len(s) {
+		r, _ := decodeRuneAt(s, next)
+		return unicode.IsLower(r)
 	}
 	return false
 }
