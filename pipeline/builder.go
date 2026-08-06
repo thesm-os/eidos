@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -1007,7 +1008,7 @@ func allPlugins(
 	for _, p := range backends {
 		out = append(out, p)
 	}
-	return out
+	return dedupePlugins(out)
 }
 
 // validateNoDuplicateNames returns one error per duplicate plugin
@@ -1027,7 +1028,7 @@ func (b *Builder) validateNoDuplicateNames() []error {
 		if name == "" {
 			return
 		}
-		if prior, dup := seen[name]; dup && prior != p {
+		if prior, dup := seen[name]; dup && !samePlugin(prior, p) {
 			errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicatePlugin, name))
 			return
 		}
@@ -1052,22 +1053,89 @@ func (b *Builder) validateNoDuplicateNames() []error {
 			check(p)
 		}
 	}
-	checkSlice(asPlugins(b.frontends))
-	checkSlice(asPlugins(b.annotators))
-	checkSlice(asPlugins(b.generators))
-	checkSlice(asPlugins(b.backends))
+	checkSlice(widenRoles(b.frontends))
+	checkSlice(widenRoles(b.annotators))
+	checkSlice(widenRoles(b.generators))
+	checkSlice(widenRoles(b.backends))
 	return errs
 }
 
-// asPlugins widens a role slice to [plugin.Plugin] so the duplicate
+// samePlugin reports whether a and b are the same registered
+// instance.
+//
+// Guarded rather than a bare == because a plugin whose dynamic type
+// is not comparable panics on comparison. Two such values are
+// reported as different, which is the conservative answer: the
+// duplicate-name check then fires, and a genuine name collision is
+// reported rather than silently permitted.
+func samePlugin(a, b plugin.Plugin) bool {
+	if !comparablePlugin(a) || !comparablePlugin(b) {
+		return false
+	}
+	return a == b
+}
+
+// widenRoles widens a role slice to [plugin.Plugin] so the duplicate
 // check can compare instances across roles. Every role interface
 // embeds Plugin, so the conversion is total.
-func asPlugins[T plugin.Plugin](in []T) []plugin.Plugin {
+func widenRoles[T plugin.Plugin](in []T) []plugin.Plugin {
 	out := make([]plugin.Plugin, len(in))
 	for i, p := range in {
 		out[i] = p
 	}
 	return out
+}
+
+// dedupePlugins returns plugins with repeat instances removed,
+// keeping first appearance.
+//
+// A plugin implementing several roles is registered once per role
+// (see [plugin] for why roles are registered rather than asserted),
+// so it appears once per role slice in any flattened list. Every
+// consumer of such a list wants the plugin, not its registrations:
+// counting it twice makes it collide with itself in the directive
+// registry and the funcmap merge, lists it twice in a generated
+// file's `Plugins:` header, and doubles its entry in the backend's
+// ordering table.
+//
+// A plugin whose dynamic type is not comparable — a struct value
+// holding a slice or a map, which several test fixtures are — cannot
+// be a map key or an == operand without panicking, so it is passed
+// through untouched. That is the safe default: the duplicate this
+// exists to collapse is one *instance* registered under two roles,
+// and a non-pointer plugin registered twice is two copies rather
+// than one instance, so keeping both changes nothing a consumer sees
+// beyond what the caller already asked for.
+func dedupePlugins(plugins []plugin.Plugin) []plugin.Plugin {
+	seen := make(map[plugin.Plugin]struct{}, len(plugins))
+	out := make([]plugin.Plugin, 0, len(plugins))
+	for _, p := range plugins {
+		if !comparablePlugin(p) {
+			out = append(out, p)
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+// comparablePlugin reports whether p's dynamic type can be compared
+// with == or used as a map key.
+//
+// Go panics at run time on either operation for a struct value
+// carrying a slice, map or function field. Every plugin that needs
+// identity semantics is pointer-typed and so always comparable; the
+// guard exists so a value-typed plugin degrades to "not deduplicated"
+// instead of taking the run down.
+func comparablePlugin(p plugin.Plugin) bool {
+	if p == nil {
+		return true
+	}
+	return reflect.ValueOf(p).Comparable()
 }
 
 // validateRoleCounts returns errors when the frontend / backend

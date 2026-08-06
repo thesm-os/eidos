@@ -734,7 +734,7 @@ func (p *Pipeline) registeredPlugins() []plugin.Plugin {
 		out = append(out, x)
 	}
 	out = append(out, p.backend)
-	return out
+	return dedupePlugins(out)
 }
 
 // orderedPlugins returns the full plugin list in plan-execution
@@ -755,5 +755,5 @@ func (p *Pipeline) orderedPlugins() []plugin.Plugin {
 		out = append(out, x)
 	}
 	out = append(out, p.plan.Backend)
-	return out
+	return dedupePlugins(out)
 }

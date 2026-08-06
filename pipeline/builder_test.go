@@ -5,7 +5,10 @@ package pipeline_test
 
 import (
 	"errors"
+	"io/fs"
 	"testing"
+	"testing/fstest"
+	"text/template"
 
 	"go.thesmos.sh/eidos/cache"
 	"go.thesmos.sh/eidos/core/diag"
@@ -824,6 +827,156 @@ func TestBuilder_DuplicatePluginNames(t *testing.T) {
 		err := build(t, func(b *pipeline.Builder) {
 			b.WithGenerator(d).WithGenerator(d)
 		})
+		if !errors.Is(err, pipeline.ErrDuplicatePlugin) {
+			t.Fatalf("Build error = %v, want ErrDuplicatePlugin", err)
+		}
+	})
+}
+
+// dualRoleProvider is the realistic dual-role shape: a plugin is
+// dual-role precisely because it owns a directive and generates from
+// its own stamp, so it also implements DirectiveProvider and
+// TemplateProvider. Neither path is reachable from a role-only
+// fixture, and both were where the second registration surfaced.
+type dualRoleProvider struct{ name string }
+
+// Name returns the configured plugin identifier.
+func (p *dualRoleProvider) Name() string { return p.name }
+
+// Annotate satisfies [plugin.Annotator].
+func (*dualRoleProvider) Annotate(*plugin.AnnotatorContext) error { return nil }
+
+// Generate satisfies [plugin.Generator].
+func (*dualRoleProvider) Generate(*plugin.GeneratorContext) error { return nil }
+
+// Directives declares one schema, which a second registration of the
+// same instance would reject as already registered.
+func (p *dualRoleProvider) Directives() []directive.Schema {
+	return []directive.Schema{directive.NewSchema(directive.Name(p.name)).Build()}
+}
+
+// Templates ships one template tree.
+func (*dualRoleProvider) Templates(string) (fs.FS, bool) {
+	return fstest.MapFS{
+		"dual.x.tmpl": &fstest.MapFile{Data: []byte(`{{define "dual.x"}}{{end}}`)},
+	}, true
+}
+
+// TemplateFuncs contributes one helper, which a second registration
+// of the same instance would reject as colliding with itself.
+func (*dualRoleProvider) TemplateFuncs(string) template.FuncMap {
+	return template.FuncMap{"dualHelper": func() string { return "" }}
+}
+
+// TemplateOverrides replaces nothing.
+func (*dualRoleProvider) TemplateOverrides(string) template.FuncMap { return nil }
+
+// TestBuilder_DualRoleProviderBuilds pins that a plugin registered
+// under two roles is counted once by every consumer of a flattened
+// plugin list, not once per registration.
+//
+// Fixing the duplicate-name check alone was not enough: three other
+// sites flatten the role slices, and two turn the second appearance
+// into a Build error. Both name the plugin as colliding with itself,
+// which is the tell.
+func TestBuilder_DualRoleProviderBuilds(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T) error {
+		t.Helper()
+		d := &dualRoleProvider{name: "dualprov"}
+		_, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithAnnotator(d).
+			WithGenerator(d).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		return err
+	}
+
+	t.Run("the directive registry accepts a single registration", func(t *testing.T) {
+		t.Parallel()
+		if err := build(t); errors.Is(err, pipeline.ErrDuplicateDirective) {
+			t.Fatalf("directive registered twice for one plugin: %v", err)
+		}
+	})
+
+	t.Run("the funcmap merge accepts a single registration", func(t *testing.T) {
+		t.Parallel()
+		if err := build(t); errors.Is(err, pipeline.ErrTemplateFuncCollision) {
+			t.Fatalf("funcmap entry collided with its own plugin: %v", err)
+		}
+	})
+
+	t.Run("Build succeeds", func(t *testing.T) {
+		t.Parallel()
+		// The two checks above name the specific failures; this one
+		// catches any other site that learns the same wrong
+		// assumption later.
+		if err := build(t); err != nil {
+			t.Fatalf("dual-role provider failed Build: %v", err)
+		}
+	})
+}
+
+// unhashablePlugin is a value-typed plugin carrying a slice, so its
+// dynamic type is neither a valid map key nor an == operand. Several
+// in-tree cli fixtures have exactly this shape.
+type unhashablePlugin struct {
+	name string
+	body []byte
+}
+
+// Name returns the configured plugin identifier.
+func (p unhashablePlugin) Name() string { return p.name }
+
+// Generate satisfies [plugin.Generator].
+func (unhashablePlugin) Generate(*plugin.GeneratorContext) error { return nil }
+
+// Annotate satisfies [plugin.Annotator], so two instances of this
+// type can occupy different role slices under one name — the shape
+// that forces an identity comparison between two values Go cannot
+// compare.
+func (unhashablePlugin) Annotate(*plugin.AnnotatorContext) error { return nil }
+
+// TestBuilder_UnhashablePluginDoesNotPanic pins that plugin identity
+// comparison degrades rather than crashing.
+//
+// Deduplicating a flattened plugin list by instance needs a map key
+// or an == operand, and Go panics at run time on either for a struct
+// value holding a slice. A recovered panic surfaces as
+// ExitInternalError from the CLI, which reads as a framework bug for
+// a plugin shape the framework never said was illegal.
+func TestBuilder_UnhashablePluginDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a value-typed plugin carrying a slice builds", func(t *testing.T) {
+		t.Parallel()
+		_, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithGenerator(unhashablePlugin{name: "unhashable", body: []byte("x")}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+	})
+
+	t.Run("two unhashable plugins sharing a name are still rejected", func(t *testing.T) {
+		t.Parallel()
+		// Two distinct values of the same non-comparable type, one
+		// per role. Go compares interface types before values, so
+		// only a matching type reaches the value comparison that
+		// panics — a differing-type fixture proves nothing here.
+		_, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithAnnotator(unhashablePlugin{name: "same", body: []byte("a")}).
+			WithGenerator(unhashablePlugin{name: "same", body: []byte("b")}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
 		if !errors.Is(err, pipeline.ErrDuplicatePlugin) {
 			t.Fatalf("Build error = %v, want ErrDuplicatePlugin", err)
 		}

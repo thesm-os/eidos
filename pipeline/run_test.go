@@ -1548,3 +1548,83 @@ func (*benchRunBE) Render(ctx *plugin.BackendContext) error {
 // package-level constant so the sink write measures the sink rather
 // than a per-iteration allocation.
 var benchRenderedBody = []byte("package bench\n\ntype Generated struct{}\n")
+
+// capturingBE records the plugin lists the pipeline hands the
+// backend, so a test can assert what BackendContext actually
+// carries rather than inferring it from rendered output.
+type capturingBE struct {
+	name    string
+	plugins []plugin.Plugin
+	ordered []plugin.Plugin
+}
+
+// Name returns the configured plugin identifier.
+func (b *capturingBE) Name() string { return b.name }
+
+// Language reports the stub backend language.
+func (*capturingBE) Language() string { return "stub" }
+
+// Render captures the context's plugin lists and writes nothing.
+func (b *capturingBE) Render(ctx *plugin.BackendContext) error {
+	b.plugins = ctx.Plugins
+	b.ordered = ctx.Ordered
+	return nil
+}
+
+// TestRun_BackendContextCountsPluginsOnce pins that a dual-role
+// plugin reaches the backend once, not once per role it was
+// registered under.
+//
+// These two lists are the quiet half of the dual-role defect: unlike
+// the directive registry and the funcmap merge they fail nothing, so
+// a repeat shows up only in output — pluginsFor composes a generated
+// file's `Plugins:` header from ctx.Plugins, and orderByPlugin builds
+// its rank table from ctx.Ordered.
+func TestRun_BackendContextCountsPluginsOnce(t *testing.T) {
+	t.Parallel()
+
+	run := func(t *testing.T) *capturingBE {
+		t.Helper()
+		d := &dualRolePlugin{name: "dual"}
+		be := &capturingBE{name: "be"}
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithAnnotator(d).
+			WithGenerator(d).
+			WithBackend(be).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		return be
+	}
+
+	countNamed := func(ps []plugin.Plugin, name string) int {
+		n := 0
+		for _, p := range ps {
+			if p.Name() == name {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("Plugins lists a dual-role plugin once", func(t *testing.T) {
+		t.Parallel()
+		// A repeat here is what would render as
+		// `Plugins: dual, dual` in every generated file's header.
+		if got := countNamed(run(t).plugins, "dual"); got != 1 {
+			t.Fatalf("ctx.Plugins holds %d entries for the dual-role plugin, want 1", got)
+		}
+	})
+
+	t.Run("Ordered lists a dual-role plugin once", func(t *testing.T) {
+		t.Parallel()
+		// orderByPlugin builds rank[name] = i from this list; a
+		// repeat is survivable only because last-write-wins happens
+		// to land on the generator position.
+		if got := countNamed(run(t).ordered, "dual"); got != 1 {
+			t.Fatalf("ctx.Ordered holds %d entries for the dual-role plugin, want 1", got)
+		}
+	})
+}
