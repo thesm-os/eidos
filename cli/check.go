@@ -16,6 +16,7 @@ import (
 	"sort"
 
 	"go.thesmos.sh/eidos/emit"
+	"go.thesmos.sh/eidos/manifest"
 	"go.thesmos.sh/eidos/pipeline"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/sink"
@@ -93,14 +94,56 @@ func (c *CheckCommand) Execute(ctx context.Context, env *Env) (exit int) {
 	if errors.Is(runErr, pipeline.ErrRunHadErrors) {
 		return ExitPipelineError
 	}
-	return c.reportDrift(env, memSink.Files())
+	return c.reportDrift(env, memSink.Files(), orphanedOutputs(env, p))
+}
+
+// orphanedOutputs returns prior manifest entries this run no longer
+// claims because their source package has been deleted.
+//
+// check always probes, where `prune` requires an opt-in flag. The
+// asymmetry is the point: reporting costs the operator nothing and
+// deleting costs them a file, so the inference earns its way into the
+// report immediately and into the destructive path only when asked.
+// Reporting is also the half that fixes the original complaint —
+// before this, deleting a source package left an entry no command
+// mentioned, so the manifest looked wrong for reasons nothing
+// surfaced.
+func orphanedOutputs(env *Env, p *pipeline.Pipeline) []manifest.Orphan {
+	prev := p.LastManifest()
+	scope := p.ScopeImportPaths()
+	pipelineID := p.PipelineID()
+	gone := goneSources(env.Workdir, pruneCandidates(prev, scope, pipelineID))
+	if len(gone) == 0 {
+		return nil
+	}
+	var out []manifest.Orphan
+	for _, o := range manifest.PruneAll(prev, manifest.PruneOptions{
+		Emitted:     p.EmittedTargets(),
+		Scope:       scope,
+		PipelineID:  pipelineID,
+		GoneSources: gone,
+	}) {
+		if o.Reason == manifest.ReasonSourceGone {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 // reportDrift compares every (target, body) pair the in-memory
 // sink captured against the corresponding file on disk under
 // env.Workdir. Differences print to env.Stdout in sorted target
 // order so the report is deterministic across runs.
-func (*CheckCommand) reportDrift(env *Env, current map[emit.Target][]byte) int {
+//
+// orphans are prior outputs whose source package is gone. They are
+// counted as drift because they are drift — a file on disk that the
+// generator will never write again and no longer has a source to
+// justify it — but they are reported separately, since the remedy
+// differs: a content difference is fixed by re-running, an orphan
+// only by deleting.
+func (*CheckCommand) reportDrift(
+	env *Env, current map[emit.Target][]byte, orphans []manifest.Orphan,
+) int {
 	targets := make([]emit.Target, 0, len(current))
 	for t := range current {
 		targets = append(targets, t)
@@ -128,6 +171,17 @@ func (*CheckCommand) reportDrift(env *Env, current map[emit.Target][]byte) int {
 			drifted++
 		}
 	}
+	sort.Slice(orphans, func(i, j int) bool {
+		return joinTarget(orphans[i].Target) < joinTarget(orphans[j].Target)
+	})
+	for _, o := range orphans {
+		fmt.Fprintf(env.Stdout,
+			"drift: %s (orphaned: source package %q no longer exists; "+
+				"remove it with `prune -%s`)\n",
+			resolveTargetPath(env.Workdir, o.Target), o.Target.ImportPath, FlagDeletedSources)
+		drifted++
+	}
+
 	if drifted == 0 {
 		fmt.Fprintf(env.Stdout, "check: no drift detected across %d output(s)\n", len(targets))
 		return ExitOK

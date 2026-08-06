@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/mod/modfile"
+
 	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/manifest"
@@ -36,6 +38,17 @@ type PruneConfig struct {
 	// Useful for CI gates that want to surface "this would have
 	// deleted N files" before the destructive run.
 	DryRun bool
+
+	// DeletedSources also deletes outputs whose source package no
+	// longer exists in the module.
+	//
+	// Off by default because it is the one class of deletion driven
+	// by inference rather than by observation: an unclaimed output
+	// was seen not to be re-emitted, whereas a source-gone output is
+	// deduced from a directory that is not there. `eidos check`
+	// reports the class either way, so the drift is never silent —
+	// this flag only governs whether prune acts on it unasked.
+	DeletedSources bool
 
 	// DiagFormat selects the diagnostic rendering format used for
 	// pipeline diagnostics.
@@ -66,6 +79,7 @@ func (c *PruneCommand) RegisterFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&c.Config.Verbose, FlagVerbose, false, UsageVerbose)
 	fs.BoolVar(&c.Config.Quiet, FlagQuiet, false, UsageQuiet)
 	fs.BoolVar(&c.Config.DryRun, FlagDryRun, false, UsageDryRun)
+	fs.BoolVar(&c.Config.DeletedSources, FlagDeletedSources, false, UsageDeletedSources)
 	c.Config.Routing.Register(fs)
 }
 
@@ -111,8 +125,44 @@ func (c *PruneCommand) Execute(ctx context.Context, env *Env) (exit int) {
 		return ExitPipelineError
 	}
 
-	stale := manifest.Prune(p.LastManifest(), p.EmittedTargets(), p.ScopeImportPaths(), p.PipelineID())
-	return c.applyPrune(env, p, stale, runErr)
+	return c.applyPrune(env, p, c.classify(env, p), runErr)
+}
+
+// classify resolves the prior manifest's unclaimed entries into the
+// outputs this invocation is willing to delete.
+//
+// The source-gone probe runs only when [PruneConfig.DeletedSources]
+// is set: without the flag the set stays empty, which reduces
+// [manifest.PruneAll] to exactly the classification `prune` performed
+// before the flag existed. Skipping the probe also means the
+// filesystem is not walked at all on the default path.
+func (c *PruneCommand) classify(env *Env, p *pipeline.Pipeline) []manifest.Output {
+	prev := p.LastManifest()
+	scope := p.ScopeImportPaths()
+	opts := manifest.PruneOptions{
+		Emitted:    p.EmittedTargets(),
+		Scope:      scope,
+		PipelineID: p.PipelineID(),
+	}
+	if c.Config.DeletedSources {
+		opts.GoneSources = goneSources(env.Workdir, pruneCandidates(prev, scope, opts.PipelineID))
+	}
+	orphans := manifest.PruneAll(prev, opts)
+	out := make([]manifest.Output, 0, len(orphans))
+	for _, o := range orphans {
+		if o.Reason == manifest.ReasonSourceGone && env.Diag != nil {
+			// Named at Info rather than folded silently into the
+			// count: this is the class deduced from an absent
+			// directory rather than observed from a run, so the
+			// operator gets to see which inference the deletion
+			// rested on.
+			env.Diag.For("pipeline.prune").Infof(
+				position.Pos{File: filepath.Join(o.Target.Dir, o.Target.Filename)},
+				"source package %q no longer exists in the module", o.Target.ImportPath)
+		}
+		out = append(out, o.Output)
+	}
+	return out
 }
 
 // applyPrune walks the stale outputs, guards each delete on the
@@ -270,4 +320,139 @@ func hasGeneratedMarker(path, brand string) (bool, error) {
 		return false, fmt.Errorf("cli: scan marker line %s: %w", path, err)
 	}
 	return false, nil
+}
+
+// goneSources returns the subset of candidate import paths whose
+// source package no longer exists on disk inside the current module.
+//
+// This is the filesystem half of the orphan classification
+// [manifest.PruneAll] performs; the manifest package stays pure and
+// receives the answer as a set. See [manifest.PruneOptions.GoneSources]
+// for why the split falls here.
+//
+// # Why a directory probe rather than the run's patterns
+//
+// The alternative is to decide scope from the invocation — treat an
+// entry as prunable when its import path falls under `./...`. That
+// requires reimplementing Go's pattern semantics (relative vs
+// absolute, `...` placement, multiple patterns, `all`) on a path that
+// ends in os.Remove. A directory probe is local, needs no pattern
+// algebra, and answers the question actually being asked: is the
+// source still there.
+//
+// # Failure direction
+//
+// Every uncertain case resolves to "not gone", so the effect of being
+// wrong is an entry that survives a prune it could have been included
+// in — recoverable by running prune again — rather than a deleted
+// file. Specifically: no go.mod found, an unparseable go.mod, an
+// import path outside the module, and a directory that exists but
+// holds no buildable Go (empty, or entirely excluded by build tags)
+// all report not-gone. The last is deliberate: a package that fails
+// to load is not a package that was deleted, and the two are
+// indistinguishable from the loader's silence alone.
+func goneSources(workdir string, candidates []string) map[string]struct{} {
+	modRoot, modPath, ok := moduleIdentity(workdir)
+	if !ok {
+		return nil
+	}
+	gone := map[string]struct{}{}
+	for _, ip := range candidates {
+		rel, inside := moduleRelative(ip, modPath)
+		if !inside {
+			// Outside this module. Its lifecycle is not ours to
+			// decide, and we cannot see its files to decide it.
+			continue
+		}
+		if !dirExists(filepath.Join(modRoot, filepath.FromSlash(rel))) {
+			gone[ip] = struct{}{}
+		}
+	}
+	if len(gone) == 0 {
+		return nil
+	}
+	return gone
+}
+
+// moduleIdentity locates the enclosing module's root directory and
+// declared module path. Reports ok=false when no go.mod is found or
+// its module directive is unreadable.
+func moduleIdentity(workdir string) (root, modPath string, ok bool) {
+	root, found := findUp(workdir, "go.mod")
+	if !found {
+		return "", "", false
+	}
+	body, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return "", "", false
+	}
+	modPath = modfile.ModulePath(body)
+	if modPath == "" {
+		return "", "", false
+	}
+	return root, modPath, true
+}
+
+// moduleRelative converts an import path into a path relative to the
+// module root, reporting whether it lies inside the module at all.
+//
+// The boundary check is on a path segment, not a string prefix:
+// `example.com/foo` must not swallow `example.com/foobar`, which
+// shares its first twelve characters and is a different module. A
+// prefix test would classify an unrelated module's package as living
+// inside this one and probe a directory that was never its.
+func moduleRelative(importPath, modPath string) (string, bool) {
+	if importPath == modPath {
+		return ".", true
+	}
+	rest, ok := strings.CutPrefix(importPath, modPath+"/")
+	if !ok {
+		return "", false
+	}
+	return rest, true
+}
+
+// dirExists reports whether path is an existing directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// pruneCandidates returns the import paths of prior entries that
+// belong to this pipeline and were not re-emitted or examined — the
+// only entries for which "did the source go away?" is worth asking.
+//
+// Restricting the probe to these keeps the filesystem work
+// proportional to the drift rather than to the manifest, and keeps
+// [goneSources] from stat-ing a path for every output on every prune.
+func pruneCandidates(
+	prev *manifest.Manifest, scope map[string]struct{}, pipelineID string,
+) []string {
+	if prev == nil || pipelineID == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, o := range prev.Outputs {
+		if o.PipelineID != pipelineID {
+			continue
+		}
+		ip := o.Target.ImportPath
+		if ip == "" {
+			continue
+		}
+		if _, dup := seen[ip]; dup {
+			continue
+		}
+		if _, examined := scope[ip]; examined {
+			continue
+		}
+		seen[ip] = struct{}{}
+		// The framework routes test outputs into a sibling `_test`
+		// import path that never had a directory of its own, so probe
+		// the real package instead; manifest.PruneAll applies the same
+		// shift when matching.
+		out = append(out, strings.TrimSuffix(ip, "_test"))
+	}
+	return out
 }

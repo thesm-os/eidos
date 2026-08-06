@@ -68,6 +68,10 @@ const (
 	// FlagDryRun reports planned actions without performing them
 	// (currently used by `prune`).
 	FlagDryRun = "dry-run"
+
+	// FlagDeletedSources widens `prune` to outputs whose source
+	// package no longer exists in the module.
+	FlagDeletedSources = "deleted-sources"
 )
 
 // Usage strings. Centralised so the wording stays consistent
@@ -85,4 +89,8 @@ const (
 	UsageLayout     = "Override the project-default layout policy (alongside-source or centralised)."
 	UsageOutputDir  = "Output directory under -layout=centralised. Ignored under alongside-source."
 	UsageDryRun     = "Report planned actions without performing them."
+
+	UsageDeletedSources = "Also delete outputs whose source package no longer exists in the module. " +
+		"Without this, prune only removes outputs a loaded package stopped claiming, " +
+		"so deleting a source package strands its output until you re-run with this flag."
 )
