@@ -65,6 +65,14 @@ func declEntities(entities []emit.Node) []emit.Node {
 // diagnostics — the alias retries with the suffix discipline. Imp
 // errors (e.g. empty path) surface to the caller; the per-Target
 // render loop converts them into Error diagnostics.
+//
+// Registration is not emission. Every entry drained here is
+// unconditional and completes before a single body byte is written,
+// so nothing ties an entry to a reference — which makes this the
+// main path capable of stranding an import. [pruneImports] drops
+// the ones the rendered body never names, so an entry reaching the
+// set is necessary for it to reach the import block and not
+// sufficient.
 func (s *renderState) preRenderImports(file *emit.File) error {
 	if file == nil {
 		return nil

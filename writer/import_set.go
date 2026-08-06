@@ -12,6 +12,21 @@ import (
 	"unicode/utf8"
 )
 
+// BlankAlias and DotAlias are the two import aliases that are not
+// identifiers. Go binds neither to a name — `_` imports a package
+// for its initialisation side-effects only, `.` merges its exported
+// names into the file scope — so neither collides with anything and
+// neither can be renamed by suffixing.
+//
+// They are exported because the rule outlives this package: any
+// consumer deciding whether an import is referenced has to treat
+// both as referenced by construction, since no body text can name
+// them.
+const (
+	BlankAlias = "_"
+	DotAlias   = "."
+)
+
 // AliasFunc derives the default local alias for an import path
 // when the caller has not registered an explicit one. The default
 // implementation [DefaultAlias] returns the last "/"-delimited
@@ -234,6 +249,20 @@ func (i *ImportSet) Imp(path string) (string, error) {
 	// [DefaultAlias] so a caller-supplied derive cannot bypass it.
 	if desired == "" {
 		return "", fmt.Errorf("%w: %q has no derivable alias", ErrEmptyPath, path)
+	}
+
+	// The blank and dot aliases are not names and do not collide.
+	// Go permits any number of `_` and `.` imports in one file, so
+	// suffixing the second one is wrong on its own terms: `_2` binds
+	// the package to an ordinary identifier nothing references,
+	// turning a side-effect import into an "imported and not used"
+	// compile error. Registering the path without touching `used`
+	// also keeps the suffix mark clean for a real identifier that
+	// later derives to the same base.
+	if desired == BlankAlias || desired == DotAlias {
+		i.order = append(i.order, path)
+		i.aliases[path] = desired
+		return desired, nil
 	}
 
 	// Collision resolution resumes from the highest suffix already

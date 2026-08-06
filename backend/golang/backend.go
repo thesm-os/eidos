@@ -287,13 +287,22 @@ func renderTarget(
 		// declared name diverges from its directory, so a cross-package
 		// reference into a `pkg=`-renamed output resolves.
 		state.applySelfAliases(selfPath)
-		body, tracked, err := renderFile(state, target, entities, packageDocsFor(ctx, target))
+		body, tracked, refs, err := renderFile(state, target, entities, packageDocsFor(ctx, target))
 		if err != nil {
 			if errors.Is(err, ErrEmptyTarget) {
 				return res
 			}
 			ps.Errorf(position.Pos{}, "%s: %v", target.JoinPath(), err)
 			return res
+		}
+		// An import whose alias is also a local name survives the
+		// prune on that local's own selectors. Naming it is the only
+		// signal the run gives: the check declines to drop the
+		// import, so the file reaches the compiler with an "imported
+		// and not used" error and nothing pointing back here.
+		for _, imp := range shadowedImports(tracked, refs) {
+			ps.Warnf(position.Pos{}, "%s: import %q is unused but kept: %q is also declared in this file",
+				target.JoinPath(), imp.Path, imp.Alias)
 		}
 		body = finaliseBody(body, target, ps, tracked)
 		res.out = composeFile(ctx, entities, body)
@@ -377,18 +386,20 @@ func packageDocsFor(ctx *plugin.BackendContext, target emit.Target) []string {
 //
 // The returned bytes are unformatted — [finaliseBody] runs them
 // through [go/format.Source] and the goimports library pass. The
-// tracked-imports slice carries every recorded import so the
-// finalisation pass can flag any path goimports added beyond what
-// the templates declared.
+// tracked-imports slice carries every import that survived the
+// prune, so the finalisation pass can flag any path goimports added
+// beyond what the body actually references. refs carries the
+// reference sets the prune walk produced, for the callers that need
+// to reason about the file's names after it returns.
 func renderFile(
 	state *renderState,
 	target emit.Target,
 	entities []emit.Node,
 	packageDocs []string,
-) ([]byte, []writer.Import, error) {
+) ([]byte, []writer.Import, fileRefs, error) {
 	file := fileFor(entities, target)
 	if err := state.preRenderImports(file); err != nil {
-		return nil, nil, err
+		return nil, nil, fileRefs{}, err
 	}
 
 	decls := declEntities(entities)
@@ -396,7 +407,7 @@ func renderFile(
 	for _, n := range decls {
 		rendered, err := state.render(n)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fileRefs{}, err
 		}
 		declsBuf.WriteString(rendered)
 		declsBuf.WriteString("\n\n")
@@ -404,14 +415,32 @@ func renderFile(
 
 	top, initBlock, bottom, err := state.renderFileSlots(file)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fileRefs{}, err
 	}
 
 	if len(decls) == 0 && top == "" && initBlock == "" && bottom == "" {
-		return nil, nil, ErrEmptyTarget
+		return nil, nil, fileRefs{}, ErrEmptyTarget
 	}
 
-	tracked := state.imports.Imports()
+	// The body is assembled and walked before the import block is
+	// written, because the walk's whole purpose is to decide what
+	// goes in that block. Prefixing the package clause is what makes
+	// the fragment parse as a file; the doc comment above it is left
+	// out deliberately, so a `pkg.Symbol` mentioned in prose cannot
+	// hold an import alive.
+	var bodyBuf bytes.Buffer
+	fmt.Fprintf(&bodyBuf, "package %s\n\n", target.Package)
+	bodyBuf.WriteString(top)
+	bodyBuf.Write(declsBuf.Bytes())
+	if initBlock != "" {
+		bodyBuf.WriteString(initBlock)
+		bodyBuf.WriteByte('\n')
+	}
+	bodyBuf.WriteString(bottom)
+
+	refs := collectRefs(bodyBuf.Bytes(), target.JoinPath())
+	tracked := pruneImports(state.imports.Imports(), refs)
+
 	var fileBuf bytes.Buffer
 	fileBuf.WriteString(renderDocs(packageDocs))
 	fmt.Fprintf(&fileBuf, "package %s\n", target.Package)
@@ -429,15 +458,20 @@ func renderFile(
 		fileBuf.WriteString(bottom)
 	}
 
-	return fileBuf.Bytes(), tracked, nil
+	return fileBuf.Bytes(), tracked, refs, nil
 }
 
 // writeImportBlock emits the canonical `import ( … )` block for
 // every import in imports. Empty slices emit nothing. Aliases
 // matching the default-derived alias for their path are omitted
 // from the line; explicit aliases (or collision-resolved variants
-// like "context2") render as `<alias> "<path>"`. The goimports
-// post-pass regroups stdlib vs external imports per Go convention.
+// like "context2") render as `<alias> "<path>"`.
+//
+// imports has already been through [pruneImports], so every entry
+// here is one the rendered body references or one no body text
+// could reference (`_`, `.`). The goimports post-pass regroups
+// stdlib vs external imports per Go convention; owning that
+// grouping is what retires the pass.
 func writeImportBlock(buf *bytes.Buffer, imports []writer.Import) {
 	if len(imports) == 0 {
 		return
