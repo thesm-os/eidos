@@ -157,7 +157,7 @@ type Pipeline struct {
 	// Layout completes; the mutex protects post-Run reads from
 	// parallel test invocations that share a Pipeline.
 	resolvedLayoutsMu sync.Mutex
-	resolvedLayouts   map[emit.Target]manifest.ResolvedLayout
+	resolvedLayouts   map[emit.Target]resolvedEntry
 
 	// fingerprint, scopeHash, routingHashes and pluginVersions are
 	// the cache-key and composition inputs Build pins.
@@ -198,7 +198,7 @@ type Pipeline struct {
 // resolvedLayouts was allocated lazily and never cleared, which made
 // two ordinary cross-run differences look like framework bugs:
 //
-//   - recordResolvedLayout compares an incoming decision against the
+//   - the Layout phase compares an incoming decision against the
 //     retained entry for the same Target and reports divergence as
 //     an Internal diagnostic. Routing that legitimately differs
 //     between runs — an edited directive, a different pattern set —
@@ -438,54 +438,57 @@ func (p *Pipeline) Scope() store.ScopePredicate { return p.scope }
 // enumerate registered directives for documentation.
 func (p *Pipeline) DirectiveRegistry() *directive.Registry { return p.registry }
 
-// recordResolvedLayout stores the routing decision the Layout phase
-// composed for one Target. The Layout phase is single-threaded; the
-// mutex serialises post-Run reads from concurrent test invocations
-// that share a Pipeline.
+// The keys the Layout phase writes into
+// [manifest.ResolvedLayout.ResolvedFrom], one per composed Target
+// field. They are a wire contract — `eidos explain` and drift tooling
+// read them out of the manifest — so they are named once rather than
+// spelled as literals at the point of assembly.
+const (
+	resolvedFromLayout   = "layout"
+	resolvedFromPackage  = "package"
+	resolvedFromDir      = "dir"
+	resolvedFromFilename = "filename"
+)
+
+// layerSet is the four manifest layers composeTarget resolves, as a
+// comparable value.
 //
-// Composition is deterministic per (plugin, origin), so two
-// decls routing to the same Target must produce equal
-// [manifest.ResolvedLayout] values. The invariant is enforced
-// at record time: a second call with a different ResolvedLayout
-// for an existing Target emits an Internal diagnostic and keeps
-// the first entry — surfacing the regression at the
-// composition site instead of letting the manifest's
-// observability block flip-flop across runs.
-func (p *Pipeline) recordResolvedLayout(target emit.Target, rl manifest.ResolvedLayout) {
-	p.resolvedLayoutsMu.Lock()
-	defer p.resolvedLayoutsMu.Unlock()
-	if p.resolvedLayouts == nil {
-		p.resolvedLayouts = map[emit.Target]manifest.ResolvedLayout{}
-	}
-	if existing, ok := p.resolvedLayouts[target]; ok {
-		if !sameResolvedLayout(existing, rl) {
-			p.diag.Internalf(position.Pos{},
-				"pipeline.layout: divergent ResolvedLayout for target %+v: existing=%+v new=%+v",
-				target, existing, rl)
-		}
-		return
-	}
-	p.resolvedLayouts[target] = rl
+// The same information used to travel as a map[string]manifest.Layer
+// built per routed declaration. As a struct it costs nothing to
+// carry, compares in one instruction instead of a ranged lookup, and
+// is what makes the record path's memo sound: memoising on Target
+// alone would suppress the divergence diagnostic this function exists
+// to emit.
+type layerSet struct {
+	Filename manifest.Layer
+	Layout   manifest.Layer
+	Dir      manifest.Layer
+	Package  manifest.Layer
 }
 
-// sameResolvedLayout reports whether two [manifest.ResolvedLayout]
-// values agree on per-field precedence-layer attribution. Target
-// equality (the keying invariant the caller maintains) already pins
-// every value-bearing field — Layout, Package, Dir, Filename — so
-// only the ResolvedFrom map can legitimately diverge between two
-// compositions for the same Target. composeTarget always populates
-// the same four keys (layout, package, dir, filename), so the
-// comparison degenerates to a four-entry value check; an extra or
-// missing key implies the caller bypassed composeTarget, which is
-// a framework bug surfaced via the Internal diagnostic the divergence
-// path emits.
-func sameResolvedLayout(a, b manifest.ResolvedLayout) bool {
-	for k, v := range a.ResolvedFrom {
-		if b.ResolvedFrom[k] != v {
-			return false
-		}
+// resolvedEntry is what the phase stores per Target: the manifest
+// value plus the comparable layers it was composed from.
+type resolvedEntry struct {
+	rl     manifest.ResolvedLayout
+	layers layerSet
+}
+
+// resolved returns the manifest form, materialising ResolvedFrom.
+//
+// Built here rather than in composeTarget so the four-entry map is
+// allocated once per output file instead of once per declaration
+// routed into it. The keys are a wire contract — `eidos explain` and
+// drift tooling read them out of manifest.json — so they are spelled
+// out rather than derived.
+func (e resolvedEntry) resolved() manifest.ResolvedLayout {
+	out := e.rl
+	out.ResolvedFrom = map[string]manifest.Layer{
+		resolvedFromFilename: e.layers.Filename,
+		resolvedFromLayout:   e.layers.Layout,
+		resolvedFromDir:      e.layers.Dir,
+		resolvedFromPackage:  e.layers.Package,
 	}
-	return true
+	return out
 }
 
 // resolvedLayoutFor returns the routing decision the Layout phase
@@ -495,8 +498,11 @@ func sameResolvedLayout(a, b manifest.ResolvedLayout) bool {
 func (p *Pipeline) resolvedLayoutFor(target emit.Target) (manifest.ResolvedLayout, bool) {
 	p.resolvedLayoutsMu.Lock()
 	defer p.resolvedLayoutsMu.Unlock()
-	rl, ok := p.resolvedLayouts[target]
-	return rl, ok
+	e, ok := p.resolvedLayouts[target]
+	if !ok {
+		return manifest.ResolvedLayout{}, false
+	}
+	return e.resolved(), true
 }
 
 // hasLayoutActivity reports whether the Layout phase composed at
@@ -509,4 +515,56 @@ func (p *Pipeline) hasLayoutActivity() bool {
 	p.resolvedLayoutsMu.Lock()
 	defer p.resolvedLayoutsMu.Unlock()
 	return len(p.resolvedLayouts) > 0
+}
+
+// resolvedRecorder accumulates the Layout phase's per-Target routing
+// decisions for the duration of the phase.
+//
+// It replaces a mutex-guarded write to the Pipeline taken once per
+// routed declaration. runLayout is a straight-line sequence on one
+// goroutine, so no Layout writer is ever concurrent with another and
+// the lock defended against nothing; the Pipeline's mutex still
+// guards the publish and every post-Run read, which is the job its
+// docblock always described.
+type resolvedRecorder struct {
+	diag    *diag.Sink
+	entries map[emit.Target]resolvedEntry
+
+	// last memoises the previous (Target, layers) pair. routeDecls
+	// walks each bucket in insertion order, so declarations composing
+	// into one file arrive adjacently and a repeat is the common
+	// case for any generator emitting more than one decl per file.
+	//
+	// Memoising on Target alone would be wrong: it would skip the
+	// map and therefore suppress the divergence diagnostic, which is
+	// the one thing this path exists to emit. Comparing the layers
+	// too is what makes the skip sound, and is only possible because
+	// they are a comparable value rather than a map.
+	last    emit.Target
+	lastSet layerSet
+	lastOK  bool
+}
+
+// record notes the routing decision composed for target.
+//
+// The first decl routed to a Target stores it; later decls composing
+// the same Target verify agreement and drop their value. A
+// disagreement is a framework bug — two plugins resolving one output
+// file under different policies — and surfaces as an Internal
+// diagnostic, which counts toward HasErrors and fails the run.
+func (r *resolvedRecorder) record(target emit.Target, rl manifest.ResolvedLayout, layers layerSet) {
+	if r.lastOK && r.last == target && r.lastSet == layers {
+		return
+	}
+	if existing, ok := r.entries[target]; ok {
+		if existing.layers != layers || existing.rl.Layout != rl.Layout {
+			r.diag.Internalf(position.Pos{},
+				"pipeline.layout: divergent ResolvedLayout for target %+v: existing=%+v new=%+v",
+				target, existing.resolved(), rl)
+		}
+		r.last, r.lastSet, r.lastOK = target, layers, true
+		return
+	}
+	r.entries[target] = resolvedEntry{rl: rl, layers: layers}
+	r.last, r.lastSet, r.lastOK = target, layers, true
 }

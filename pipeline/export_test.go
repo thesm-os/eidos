@@ -15,8 +15,18 @@ import (
 // The state is unexported because nothing outside the package has
 // any business writing it; the leak it caused was invisible for the
 // same reason.
+// Writes the map directly rather than through the phase's recorder:
+// the recorder is phase-scoped and publishes at the end of runLayout,
+// so it cannot seed a Pipeline that is not running. The seeding tests
+// care that an entry exists and that Run clears it, not what it was
+// composed from.
 func (p *Pipeline) RecordResolvedLayoutForTest(t emit.Target, rl manifest.ResolvedLayout) {
-	p.recordResolvedLayout(t, rl)
+	p.resolvedLayoutsMu.Lock()
+	defer p.resolvedLayoutsMu.Unlock()
+	if p.resolvedLayouts == nil {
+		p.resolvedLayouts = map[emit.Target]resolvedEntry{}
+	}
+	p.resolvedLayouts[t] = resolvedEntry{rl: rl}
 }
 
 // HasLayoutActivityForTest exposes hasLayoutActivity — the length

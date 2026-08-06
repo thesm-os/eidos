@@ -563,11 +563,12 @@ func (*layoutBenchBE) Render(_ *plugin.BackendContext) error { return nil }
 func TestRunLayout_AllocationBudget(t *testing.T) {
 	const (
 		decls = 100
-		// 11.08 per decl before this work, of which 1.03 is the
-		// store's byTarget rebuild and out of scope here. The
-		// ceiling sits just above what the phase measures so a
-		// single construct coming back is visible.
-		perDecl = 4.5
+		// 11.08 per decl before this work; 3.57 after, of which
+		// 1.03 is the store's byTarget rebuild and out of scope
+		// here. The smallest construct removed was worth 1.00 per
+		// decl, so a ceiling of 4.0 fails on any single one of them
+		// returning rather than letting the others absorb it.
+		perDecl = 4.0
 	)
 
 	for _, tc := range []struct {

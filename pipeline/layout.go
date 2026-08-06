@@ -81,9 +81,26 @@ func (p *Pipeline) runLayout(s *store.Store) {
 	v := s.Emit()
 	outputs := p.collectPluginOutputs()
 
+	// The phase owns the resolved-layout map for its duration and
+	// publishes it once, rather than taking a mutex per routed
+	// declaration to defend against writers that do not exist.
+	// runLayout is a straight-line sequence on one goroutine; the
+	// mutex is there for post-Run readers, which is what the
+	// deferred publish still serialises against.
+	//
+	// Deferred rather than published at the end of the body so the
+	// RecoverAs guard above still leaves the partial map behind: a
+	// panic mid-phase should not also erase what routed before it.
+	rec := resolvedRecorder{diag: p.diag, entries: map[emit.Target]resolvedEntry{}}
+	defer func() {
+		p.resolvedLayoutsMu.Lock()
+		p.resolvedLayouts = rec.entries
+		p.resolvedLayoutsMu.Unlock()
+	}()
+
 	loc := map[originOutputs]outputPaths{}
-	routeDecls(s, v, ps, outputs, p, loc)
-	materialiseOriginSlots(s, v, ps, outputs, p, loc)
+	routeDecls(s, v, ps, outputs, p, &rec, loc)
+	materialiseOriginSlots(s, v, ps, outputs, p, &rec, loc)
 	// Dispatch before the conflict pass: a plugin's reference to its
 	// own output describes where that output was routed, and the
 	// conflict pass clears Targets rather than re-routing them.
@@ -113,6 +130,7 @@ func routeDecls(
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
 	p *Pipeline,
+	rec *resolvedRecorder,
 	loc map[originOutputs]outputPaths,
 ) {
 	v.Structs().Range(func(e *emit.Struct) bool {
@@ -127,6 +145,7 @@ func routeDecls(
 			e.Package,
 			"struct",
 			e,
+			rec,
 			loc,
 		)
 		return true
@@ -143,6 +162,7 @@ func routeDecls(
 			e.Package,
 			"interface",
 			e,
+			rec,
 			loc,
 		)
 		return true
@@ -159,6 +179,7 @@ func routeDecls(
 			e.Package,
 			"function",
 			e,
+			rec,
 			loc,
 		)
 		return true
@@ -175,6 +196,7 @@ func routeDecls(
 			e.Package,
 			"variable",
 			e,
+			rec,
 			loc,
 		)
 		return true
@@ -191,6 +213,7 @@ func routeDecls(
 			e.Package,
 			"constant",
 			e,
+			rec,
 			loc,
 		)
 		return true
@@ -207,6 +230,7 @@ func routeDecls(
 			e.Package,
 			"enum",
 			e,
+			rec,
 			loc,
 		)
 		return true
@@ -229,6 +253,7 @@ func routeDecls(
 				pkg.Path,
 				"method",
 				m,
+				rec,
 				loc,
 			)
 		}
@@ -246,6 +271,7 @@ func routeDecls(
 			e.Package,
 			"alias",
 			e,
+			rec,
 			loc,
 		)
 		return true
@@ -274,6 +300,7 @@ func composeOrZero(
 	emitPkgPath string,
 	kind string,
 	named qnamer,
+	rec *resolvedRecorder,
 	loc map[originOutputs]outputPaths,
 ) emit.Target {
 	if origin == nil {
@@ -286,7 +313,7 @@ func composeOrZero(
 		return emit.Target{}
 	}
 	multiOutput := len(outputs[setBy]) > 1
-	t, rl, ok := composeTarget(
+	t, rl, layers, ok := composeTarget(
 		s,
 		p,
 		ps,
@@ -302,7 +329,7 @@ func composeOrZero(
 	if !ok {
 		return emit.Target{}
 	}
-	p.recordResolvedLayout(t, rl)
+	rec.record(t, rl, layers)
 	recordOutputPath(loc, origin, setBy, outputTag, t.ImportPath)
 	return t
 }
@@ -404,17 +431,22 @@ func composeTarget(
 	emitPkgPath string,
 	kind string,
 	named qnamer,
-) (emit.Target, manifest.ResolvedLayout, bool) {
+) (emit.Target, manifest.ResolvedLayout, layerSet, bool) {
 	policy := p.LayoutPolicyForTag(pluginName, outputTag)
 	srcPkg := originSourcePackage(s, origin)
 	emitPkg := emitPackageByPath(s, emitPkgPath)
 	srcDir, basename := originSourceDirBasename(origin, p.sourceRoot)
 
 	var t emit.Target
-	rl := manifest.ResolvedLayout{
-		Layout:       policy.Layout,
-		ResolvedFrom: map[string]manifest.Layer{},
-	}
+	// ResolvedFrom is left nil here and materialised by
+	// recordResolvedLayout on the insert path. The map held exactly
+	// four keys and was built once per routed declaration, but the
+	// record path keys by Target and discards the value whenever the
+	// Target is already present — so for a file receiving d decls,
+	// d-1 of these were built, populated, compared key by key and
+	// thrown away.
+	rl := manifest.ResolvedLayout{Layout: policy.Layout}
+	var layers layerSet
 
 	// Filename: framework basename + plugin-declared suffix. The
 	// suffix is guaranteed non-empty here because composeOrZero /
@@ -422,8 +454,8 @@ func composeTarget(
 	// FilenameProvider lookup table; reaching this point with an
 	// empty suffix is a framework bug.
 	t.Filename = basename + suffix
-	rl.ResolvedFrom["filename"] = manifest.LayerPluginSuffix
-	rl.ResolvedFrom["layout"] = policy.LayoutFrom
+	layers.Filename = manifest.LayerPluginSuffix
+	layers.Layout = policy.LayoutFrom
 
 	// Dir + Package + ImportPath per resolved policy. The switch
 	// is exhaustive: an unrecognised Layout value is a framework
@@ -432,23 +464,23 @@ func composeTarget(
 	switch policy.Layout {
 	case LayoutCentralised:
 		t.Dir = policy.Dir
-		rl.ResolvedFrom["dir"] = policy.DirFrom
+		layers.Dir = policy.DirFrom
 		if t.Dir == "" {
 			// Dir defaults from Package when unset. The
 			// attribution follows the Package source since that
 			// is what supplied the directory's final value.
 			t.Dir = policy.Package
-			rl.ResolvedFrom["dir"] = policy.PackageFrom
+			layers.Dir = policy.PackageFrom
 		}
 		t.Package = policy.Package
-		rl.ResolvedFrom["package"] = policy.PackageFrom
+		layers.Package = policy.PackageFrom
 		// Centralised ImportPath is not derivable without a module
 		// root; left empty so the renderer's same-package elision
 		// stays inert under centralised layout until config carries
 		// the value forward.
 	case LayoutAlongsideSource:
 		t.Dir = srcDir
-		rl.ResolvedFrom["dir"] = manifest.LayerFramework
+		layers.Dir = manifest.LayerFramework
 		// Package / ImportPath: the upstream emit.Package the plugin
 		// chose wins over the origin's source package — this lets
 		// generators land output in sibling packages (mockgen's
@@ -471,7 +503,7 @@ func composeTarget(
 			t.Package = srcPkg.Name
 			t.ImportPath = srcPkg.Path
 		}
-		rl.ResolvedFrom["package"] = manifest.LayerFramework
+		layers.Package = manifest.LayerFramework
 		// A non-empty policy.Package under alongside-source pins
 		// the package without changing the directory. Attribution
 		// follows the layer that supplied the Package value.
@@ -488,7 +520,7 @@ func composeTarget(
 		// rendered file.
 		if policy.Package != "" {
 			t.Package = policy.Package
-			rl.ResolvedFrom["package"] = policy.PackageFrom
+			layers.Package = policy.PackageFrom
 			if srcPkg != nil {
 				t.ImportPath = srcPkg.Path
 			} else {
@@ -499,7 +531,7 @@ func composeTarget(
 		p.diag.Internalf(position.Pos{},
 			"pipeline.layout: unknown layout %q for plugin %q; cannot route",
 			policy.Layout, pluginName)
-		return emit.Target{}, manifest.ResolvedLayout{}, false
+		return emit.Target{}, manifest.ResolvedLayout{}, layerSet{}, false
 	}
 
 	// +gen:out directive on origin overrides per-decl Target
@@ -519,15 +551,15 @@ func composeTarget(
 		if multiOutput && filename != "" && spec.Tag == "" {
 			p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q with directive path %q",
 				ErrUnscopedMultiOutputOverride, kind, qnameOf(named), pluginName, spec.Path))
-			return emit.Target{}, manifest.ResolvedLayout{}, false
+			return emit.Target{}, manifest.ResolvedLayout{}, layerSet{}, false
 		}
 		if filename != "" {
 			t.Filename = filename
-			rl.ResolvedFrom["filename"] = manifest.LayerDirective
+			layers.Filename = manifest.LayerDirective
 		}
 		if dir != "" {
 			t.Dir = filepath.Join(t.Dir, dir)
-			rl.ResolvedFrom["dir"] = manifest.LayerDirective
+			layers.Dir = manifest.LayerDirective
 			// Derive Package + ImportPath from the resolved Dir's
 			// basename when the directive carries a dir but no
 			// explicit `pkg=` override. Attribution stays at
@@ -544,7 +576,7 @@ func composeTarget(
 		}
 		if spec.Package != "" {
 			t.Package = spec.Package
-			rl.ResolvedFrom["package"] = manifest.LayerDirective
+			layers.Package = manifest.LayerDirective
 			// ImportPath is a path, not a package name. Assigning
 			// spec.Package here put the clause name (`storetest`) where
 			// an import path (`example.com/x/testkit`) belongs, so the
@@ -584,11 +616,11 @@ func composeTarget(
 		dir, filename := splitOutDirectivePath(cli)
 		if filename != "" {
 			t.Filename = filename
-			rl.ResolvedFrom["filename"] = manifest.LayerCLI
+			layers.Filename = manifest.LayerCLI
 		}
 		if dir != "" {
 			t.Dir = filepath.Join(t.Dir, dir)
-			rl.ResolvedFrom["dir"] = manifest.LayerCLI
+			layers.Dir = manifest.LayerCLI
 		}
 	}
 
@@ -623,7 +655,7 @@ func composeTarget(
 	rl.Package = t.Package
 	rl.Dir = t.Dir
 	rl.Filename = t.Filename
-	return t, rl, true
+	return t, rl, layers, true
 }
 
 // materialiseOriginSlots drains the pending origin-anchored slot
@@ -644,6 +676,7 @@ func materialiseOriginSlots(
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
 	p *Pipeline,
+	rec *resolvedRecorder,
 	loc map[originOutputs]outputPaths,
 ) {
 	pending := v.PendingOriginSlots()
@@ -665,7 +698,7 @@ func materialiseOriginSlots(
 		// contribution becomes part of a file Layout creates
 		// during materialisation. Pass empty emitPkgPath so
 		// composeTarget falls back to source-package routing.
-		target, rl, ok := composeTarget(
+		target, rl, layers, ok := composeTarget(
 			s,
 			p,
 			ps,
@@ -681,7 +714,7 @@ func materialiseOriginSlots(
 		if !ok {
 			continue
 		}
-		p.recordResolvedLayout(target, rl)
+		rec.record(target, rl, layers)
 		recordOutputPath(loc, tup.Origin, setBy, outputTag, target.ImportPath)
 		// FileFor only errors when the view is frozen; Layout runs
 		// pre-freeze so the lookup-or-create cannot fail here.

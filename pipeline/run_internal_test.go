@@ -5,25 +5,15 @@ package pipeline
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/cache"
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/manifest"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/sink"
-)
-
-// The keys the Layout phase writes into
-// [manifest.ResolvedLayout.ResolvedFrom], one per composed Target
-// field. They are a wire contract — `eidos explain` and drift tooling
-// read them out of the manifest — so the table below names them once
-// instead of repeating the literals across cases.
-const (
-	resolvedFromLayout   = "layout"
-	resolvedFromPackage  = "package"
-	resolvedFromDir      = "dir"
-	resolvedFromFilename = "filename"
 )
 
 // baseManifestOutput returns a fully populated [manifest.Output] —
@@ -405,4 +395,131 @@ func TestCacheKeyFor_IsStable(t *testing.T) {
 	if got := p.cacheKeyFor("dual", "deadbeef"); got != want {
 		t.Fatalf("cache key changed:\ngot  %s\nwant %s", got, want)
 	}
+}
+
+// TestResolvedRecorder covers the phase-local recorder that replaced
+// a mutex-guarded write per routed declaration.
+//
+// Two properties matter and neither is visible from the Layout tests
+// that drive it end-to-end: that the memo cannot swallow a divergence,
+// and that comparison is symmetric where the map range it replaced
+// was one-directional.
+func TestResolvedRecorder(t *testing.T) {
+	t.Parallel()
+
+	target := emit.Target{Dir: "d", Filename: "f.go", Package: "p"}
+	base := manifest.ResolvedLayout{Layout: "alongside-source"}
+	layers := layerSet{
+		Filename: manifest.LayerPluginSuffix,
+		Layout:   manifest.LayerFramework,
+		Dir:      manifest.LayerFramework,
+		Package:  manifest.LayerFramework,
+	}
+
+	newRec := func() (*resolvedRecorder, *diag.Sink) {
+		d := diag.New()
+		return &resolvedRecorder{diag: d, entries: map[emit.Target]resolvedEntry{}}, d
+	}
+
+	t.Run("a repeated identical record is silent", func(t *testing.T) {
+		t.Parallel()
+		rec, d := newRec()
+		rec.record(target, base, layers)
+		rec.record(target, base, layers)
+		if got := len(d.Diagnostics()); got != 0 {
+			t.Fatalf("identical re-record produced %d diagnostics: %+v", got, d.Diagnostics())
+		}
+		if got := len(rec.entries); got != 1 {
+			t.Fatalf("entries = %d, want 1", got)
+		}
+	})
+
+	t.Run("the memo does not swallow a divergence", func(t *testing.T) {
+		t.Parallel()
+		// The memo skips the map entirely on a hit. Keyed on Target
+		// alone it would skip a differing composition too, and the
+		// diagnostic this path exists to emit would never fire.
+		rec, d := newRec()
+		rec.record(target, base, layers)
+		diverged := layers
+		diverged.Package = manifest.LayerCLI
+		rec.record(target, base, diverged)
+		if !hasInternal(d, "divergent ResolvedLayout") {
+			t.Fatalf("divergence not reported; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("a divergence after an unrelated Target still reports", func(t *testing.T) {
+		t.Parallel()
+		// Clears the memo between the two records, so the second
+		// takes the map path rather than the memo path.
+		rec, d := newRec()
+		rec.record(target, base, layers)
+		rec.record(emit.Target{Dir: "other", Filename: "o.go", Package: "p"}, base, layers)
+		diverged := layers
+		diverged.Dir = manifest.LayerDirective
+		rec.record(target, base, diverged)
+		if !hasInternal(d, "divergent ResolvedLayout") {
+			t.Fatalf("divergence not reported; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("comparison is symmetric", func(t *testing.T) {
+		t.Parallel()
+		// The map range this replaced walked only the first value's
+		// keys, so a layer set differing by a key absent from the
+		// first compared equal. Struct equality has no such blind
+		// side — this is a deliberate tightening.
+		rec, d := newRec()
+		rec.record(target, base, layerSet{Filename: manifest.LayerPluginSuffix})
+		rec.record(target, base, layers)
+		if !hasInternal(d, "divergent ResolvedLayout") {
+			t.Fatalf("asymmetric difference not reported; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("the first entry wins", func(t *testing.T) {
+		t.Parallel()
+		rec, _ := newRec()
+		rec.record(target, base, layers)
+		diverged := layers
+		diverged.Package = manifest.LayerCLI
+		rec.record(target, base, diverged)
+		if got := rec.entries[target].layers; got != layers {
+			t.Fatalf("stored layers = %+v, want the first recorded %+v", got, layers)
+		}
+	})
+
+	t.Run("the manifest form carries all four keys", func(t *testing.T) {
+		t.Parallel()
+		// The keys are a wire contract: eidos explain and drift
+		// tooling read them out of manifest.json.
+		rec, _ := newRec()
+		rec.record(target, base, layers)
+		got := rec.entries[target].resolved().ResolvedFrom
+		for k, want := range map[string]manifest.Layer{
+			"filename": manifest.LayerPluginSuffix,
+			"layout":   manifest.LayerFramework,
+			"dir":      manifest.LayerFramework,
+			"package":  manifest.LayerFramework,
+		} {
+			if got[k] != want {
+				t.Fatalf("ResolvedFrom[%q] = %q, want %q", k, got[k], want)
+			}
+		}
+		if len(got) != 4 {
+			t.Fatalf("ResolvedFrom has %d keys, want 4: %+v", len(got), got)
+		}
+	})
+}
+
+// hasInternal reports whether d carries an Internal diagnostic
+// mentioning substr.
+func hasInternal(d *diag.Sink, substr string) bool {
+	for _, dg := range d.Diagnostics() {
+		if dg.Severity == diag.Internal && strings.Contains(dg.Message, substr) {
+			return true
+		}
+	}
+	return false
 }
