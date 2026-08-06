@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/eidostest/plugintest"
+	"go.thesmos.sh/eidos/eidostest/storefixture"
 )
 
 // TestFrameworkChecks_EveryCheckNamesAKnownViolation pins that every
@@ -188,4 +189,211 @@ func TestFixturePlugin_PassesNodesOnlyTruthfulness(t *testing.T) {
 	if fake.failed {
 		t.Fatalf("the well-formed fixture failed the truthfulness check:\n%s", joinFake(fake))
 	}
+}
+
+// TestErroringPlugins_AreCaught proves each role's no-Error-severity
+// check can fail, against a plugin built to defeat it.
+//
+// Every one of these scored green before the checks existed: a plugin
+// reporting an Error on every input cleared 7/7 generator, 4/4
+// annotator and 3/3 frontend subtests, while the same shape handed to
+// the backend suite failed. A check for that which cannot be made to
+// fail would restore exactly that state.
+func TestErroringPlugins_AreCaught(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a generator that reports an Error diagnostic on every input fails its suite", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertGenerateCarriesNoErrors(fake, plugintest.ErroringGenerator(),
+				plugintest.GeneratorFixture{Name: "one struct"},
+				storefixture.New().Struct("User", nil).Build())
+		})
+
+		if !fake.failed {
+			t.Fatal("a generator reporting an Error-severity diagnostic on a fixture it claims to " +
+				"handle passed the diagnostic check")
+		}
+		assertFakeMentions(t, fake, plugintest.ErroringDiagnosticMessage)
+	})
+
+	t.Run("an annotator that reports an Error diagnostic on every input fails its suite", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertAnnotateCarriesNoErrors(fake, plugintest.ErroringAnnotator(),
+				plugintest.AnnotatorFixture{Name: "one struct"},
+				storefixture.New().Struct("User", nil).Build())
+		})
+
+		if !fake.failed {
+			t.Fatal("an annotator reporting an Error-severity diagnostic on a fixture it claims to " +
+				"handle passed the diagnostic check")
+		}
+		assertFakeMentions(t, fake, plugintest.ErroringDiagnosticMessage)
+	})
+
+	t.Run("a frontend that reports an Error diagnostic on every input fails its suite", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertLoadCarriesNoErrors(fake, plugintest.ErroringFrontend(),
+				plugintest.FrontendFixture{Name: "one package", Pattern: "./...", ExpectsEmpty: true})
+		})
+
+		if !fake.failed {
+			t.Fatal("a frontend reporting an Error-severity diagnostic on a fixture it claims to " +
+				"handle passed the diagnostic check")
+		}
+		assertFakeMentions(t, fake, plugintest.ErroringDiagnosticMessage)
+	})
+
+	t.Run("a generator that errors only on the empty store fails the empty-store probe", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertGenerateEmptyStoreCarriesNoErrors(fake, &emptyInputComplainer{name: "complainer"})
+		})
+
+		if !fake.failed {
+			t.Fatal("a generator that reports an Error only when there is nothing to generate from " +
+				"passed the empty-store probe; every project whose patterns expand to nothing exits " +
+				"non-zero against it")
+		}
+		assertFakeMentions(t, fake, "an empty store")
+	})
+
+	t.Run("an annotator that errors only on the empty store fails the empty-store probe", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertAnnotateEmptyStoreCarriesNoErrors(fake, &emptyInputComplainer{name: "complainer"})
+		})
+
+		if !fake.failed {
+			t.Fatal("an annotator that reports an Error only when there is nothing to stamp passed " +
+				"the empty-store probe")
+		}
+		assertFakeMentions(t, fake, "an empty store")
+	})
+
+	t.Run("a frontend emitting a diagnostic on an empty pattern still passes", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertLoadEmptyPatternDoesNotPanic(fake, plugintest.ErroringFrontend(),
+				plugintest.FrontendFixture{Name: "one package", Pattern: "./..."})
+		})
+
+		if fake.failed {
+			t.Fatalf("the empty-pattern probe read its sink and failed a frontend for rejecting an "+
+				"empty pattern, which is the conforming behaviour and what frontend/golang does:\n%s",
+				joinFake(fake))
+		}
+	})
+}
+
+// TestPositionlessDiagnostics_AreCaught covers the positioned-
+// diagnostic check in all three directions: a zero position is
+// rejected, the fixture's waiver silences it, and a real position
+// passes without one.
+//
+// The third subtest is what stops the first two being satisfiable by
+// an assertion that fires for any diagnostic at all — which would
+// make the waiver mandatory for every plugin that emits anything.
+func TestPositionlessDiagnostics_AreCaught(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a diagnostic carrying a zero Pos fails the check", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertGenerateDiagnosticsArePositioned(fake, plugintest.ErroringGenerator(),
+				plugintest.GeneratorFixture{Name: "one struct"},
+				storefixture.New().Struct("User", nil).Build())
+		})
+
+		if !fake.failed {
+			t.Fatal("a diagnostic carrying no source position passed the positioned-diagnostic check")
+		}
+		assertFakeMentions(t, fake, "no source position")
+	})
+
+	t.Run("a fixture allowing positionless diagnostics silences the check", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertGenerateDiagnosticsArePositioned(fake, plugintest.ErroringGenerator(),
+				plugintest.GeneratorFixture{Name: "one struct", AllowsPositionlessDiagnostics: true},
+				storefixture.New().Struct("User", nil).Build())
+		})
+
+		if fake.failed {
+			t.Fatalf("AllowsPositionlessDiagnostics did not waive the check:\n%s", joinFake(fake))
+		}
+	})
+
+	t.Run("a positioned diagnostic passes without the waiver", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertGenerateDiagnosticsArePositioned(fake, &positionedWarner{name: "warner"},
+				plugintest.GeneratorFixture{Name: "one struct"},
+				storefixture.New().Struct("User", nil).Build())
+		})
+
+		if fake.failed {
+			t.Fatalf("a diagnostic carrying a real position failed the positioned-diagnostic "+
+				"check:\n%s", joinFake(fake))
+		}
+	})
+}
+
+// TestFixturePlugin_PassesTheDiagnosticChecks pins the other side of
+// both: the well-formed fixture emits nothing, so every diagnostic
+// check must stay quiet. Without this the tests above are satisfiable
+// by assertions that fire for everything.
+func TestFixturePlugin_PassesTheDiagnosticChecks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the well-formed fixture surfaces no Error-severity diagnostics", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertGenerateEmptyStoreCarriesNoErrors(fake, plugintest.NewFixturePlugin())
+			plugintest.AssertGenerateCarriesNoErrors(fake, plugintest.NewFixturePlugin(),
+				plugintest.GeneratorFixture{Name: "one struct"},
+				storefixture.New().Struct("User", nil).Build())
+		})
+
+		if fake.failed {
+			t.Fatalf("the well-formed fixture failed a diagnostic check:\n%s", joinFake(fake))
+		}
+	})
+
+	t.Run("the well-formed fixture emits no positionless diagnostics", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertGenerateDiagnosticsArePositioned(fake, plugintest.NewFixturePlugin(),
+				plugintest.GeneratorFixture{Name: "one struct"},
+				storefixture.New().Struct("User", nil).Build())
+		})
+
+		if fake.failed {
+			t.Fatalf("the well-formed fixture failed the positioned-diagnostic check:\n%s", joinFake(fake))
+		}
+	})
 }

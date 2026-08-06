@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -41,19 +42,68 @@ import (
 // chasing one cascade at a time.
 func RunSuite(t *testing.T, p plugin.Plugin) {
 	t.Helper()
+	RunSuiteFor(t, p, ConformanceLanguage)
+}
+
+// RunSuiteFor is [RunSuite] driven against the caller's own backend
+// languages rather than the default Go one.
+//
+// Five of the framework checks are per-language lookups, and the
+// language they probe was a package-private constant. A plugin
+// targeting any other backend answered none of those probes: its
+// Outputs and Templates were validated as empty slices, and four
+// checks reported green having examined nothing. Passing the
+// languages the plugin actually claims makes those checks real.
+//
+// Each supplied language is probed alongside a name no backend claims,
+// so the negative path — "I contribute nothing here" — stays
+// exercised rather than assumed. Supplying none falls back to
+// [ConformanceLanguage], so RunSuiteFor(t, p) and RunSuite(t, p) agree.
+func RunSuiteFor(t *testing.T, p plugin.Plugin, languages ...string) {
+	t.Helper()
+	probes := probeLanguagesFor(languages...)
 	for _, c := range frameworkChecks() {
 		t.Run(c.name, func(t *testing.T) {
-			c.fn(t, p)
+			c.fn(t, p, probes...)
 		})
 	}
 }
 
-// probeLanguages are the language identifiers the framework suite
-// drives capability lookups with. "golang" is the only backend
-// language in tree; the second entry is deliberately a language no
-// backend claims, so a plugin's negative path ("I contribute
-// nothing here") is exercised rather than assumed.
-var probeLanguages = []string{ConformanceLanguage, "no-such-language"}
+// probeLanguagesFor returns the language set a run probes: the
+// caller's own, plus one no backend claims so the negative path is
+// covered. Falls back to [ConformanceLanguage] when the caller names
+// none.
+func probeLanguagesFor(languages ...string) []string {
+	if len(languages) == 0 {
+		languages = []string{ConformanceLanguage}
+	}
+	return append(slices.Clone(languages), unclaimedLanguage)
+}
+
+// unclaimedLanguage is a language no backend claims. Every probe set
+// carries it so a plugin's negative path ("I contribute nothing here")
+// is exercised rather than assumed.
+const unclaimedLanguage = "no-such-language"
+
+// probeLanguages is the default probe set — the Go conformance
+// language plus the unclaimed one. Retained for the meta-tests that
+// assert against the default without naming a language.
+var probeLanguages = probeLanguagesFor()
+
+// probeSet resolves a check's variadic language argument: the
+// caller's set when RunSuiteFor supplied one, the default otherwise.
+//
+// Variadic rather than a required parameter so every check keeps its
+// two-argument form for direct callers — the package's own
+// rejection-path tests drive each assertion individually, and making
+// the language set mandatory would have rewritten thirty call sites
+// to say what the default already says.
+func probeSet(languages []string) []string {
+	if len(languages) == 0 {
+		return probeLanguages
+	}
+	return languages
+}
 
 // check pairs one framework contract with the assertion that enforces
 // it and the [Violation] whose fixture must defeat that assertion.
@@ -70,7 +120,7 @@ var probeLanguages = []string{ConformanceLanguage, "no-such-language"}
 // key on the pairing, so renaming one is a visible change.
 type check struct {
 	name      string
-	fn        func(testing.TB, plugin.Plugin)
+	fn        func(tb testing.TB, p plugin.Plugin, languages ...string)
 	violation Violation
 }
 
@@ -119,6 +169,11 @@ func frameworkChecks() []check {
 			ViolationUnparsableTemplate,
 		},
 		{
+			"TemplateProvider funcmap entries avoid the backend's reserved names",
+			assertTemplateFuncsAvoidReservedNames,
+			ViolationReservedFuncName,
+		},
+		{
 			"declaration accessors return slices the caller may keep",
 			assertAccessorsReturnFreshSlices,
 			ViolationSharedSlice,
@@ -140,13 +195,14 @@ func frameworkChecks() []check {
 //
 // Plugins that do not implement the interface return early; this is
 // an optional capability.
-func assertTemplateProviderStability(tb testing.TB, p plugin.Plugin) {
+func assertTemplateProviderStability(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	provider, ok := any(p).(plugin.TemplateProvider)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.TemplateProvider")
 		return
 	}
-	for _, lang := range probeLanguages {
+	for _, lang := range probeSet(languages) {
 		firstFS, firstOK := provider.Templates(lang)
 		secondFS, secondOK := provider.Templates(lang)
 		if firstOK != secondOK {
@@ -198,7 +254,7 @@ func assertStableFuncMap(
 // contracts: every framework caller treats the result as the
 // plugin's identifier — diagnostic attribution, cache-key
 // composition, manifest entries all use it.
-func assertStableName(tb testing.TB, p plugin.Plugin) {
+func assertStableName(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	first := p.Name()
 	if first == "" {
@@ -215,25 +271,66 @@ func assertStableName(tb testing.TB, p plugin.Plugin) {
 // effectively dead code — the pipeline never invokes anything
 // on it. The check surfaces this as a contract failure rather
 // than a silent no-op at pipeline-Build time.
-func assertImplementsARole(tb testing.TB, p plugin.Plugin) {
+func assertImplementsARole(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
-	if _, ok := any(p).(plugin.Frontend); ok {
+
+	covered := detectedRoles(p)
+	if len(covered) == 0 {
+		tb.Errorf(
+			"plugin %T implements no role interface "+
+				"(Frontend / Annotator / Generator / Backend); pipeline would never invoke it",
+			p,
+		)
 		return
+	}
+
+	// Name the per-role suite for each role found. RunSuite checks
+	// declarations only — it cannot observe whether a sibling suite
+	// ran, and a plugin that runs RunSuite alone prints a full column
+	// of green indistinguishable from full conformance. Three shipped
+	// in-tree annotators were in exactly that state. Logs rather than
+	// errors: a partial or in-development plugin stays legal, but
+	// "I ran conformance" stops being ambiguous in the output.
+	for _, r := range covered {
+		tb.Logf(
+			"plugin implements %s; its per-role contracts (determinism, "+
+				"diagnostic discipline, idempotency) are covered by %s, which this call does not run",
+			r.iface, r.suite,
+		)
+	}
+	if _, ok := any(p).(plugin.OptionsProvider); ok {
+		tb.Logf(
+			"plugin implements plugin.OptionsProvider; its options contracts are covered by " +
+				"plugintest.RunOptionsSuite, which this call does not run",
+		)
+	}
+}
+
+// role pairs a role interface with the suite that checks its
+// behavioural contracts.
+type role struct{ iface, suite string }
+
+// detectedRoles returns every role interface p satisfies, in the order
+// the pipeline runs them.
+//
+// The type assertions were always here; only their answer was thrown
+// away once it had proved non-empty. Keeping it is what lets RunSuite
+// say which per-role suites a plugin still owes.
+func detectedRoles(p plugin.Plugin) []role {
+	var out []role
+	if _, ok := any(p).(plugin.Frontend); ok {
+		out = append(out, role{"plugin.Frontend", "plugintest.RunFrontendSuite"})
 	}
 	if _, ok := any(p).(plugin.Annotator); ok {
-		return
+		out = append(out, role{"plugin.Annotator", "plugintest.RunAnnotatorSuite"})
 	}
 	if _, ok := any(p).(plugin.Generator); ok {
-		return
+		out = append(out, role{"plugin.Generator", "plugintest.RunGeneratorSuite"})
 	}
 	if _, ok := any(p).(plugin.Backend); ok {
-		return
+		out = append(out, role{"plugin.Backend", "plugintest.RunBackendSuite"})
 	}
-	tb.Errorf(
-		"plugin %T implements no role interface "+
-			"(Frontend / Annotator / Generator / Backend); pipeline would never invoke it",
-		p,
-	)
+	return out
 }
 
 // assertCapabilityProviderIsComplete fails a plugin that declares
@@ -258,7 +355,7 @@ func assertImplementsARole(tb testing.TB, p plugin.Plugin) {
 //
 // Declaring none of the three is fine and common: ordering is then
 // the caller's registration order by design.
-func assertCapabilityProviderIsComplete(tb testing.TB, p plugin.Plugin) {
+func assertCapabilityProviderIsComplete(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	if _, ok := any(p).(plugin.CapabilityProvider); ok {
 		return
@@ -296,10 +393,11 @@ func missingCapabilityMethods(hasProvides, hasRequires bool) string {
 // ordering contract: the resolver depends on Provides / Requires
 // returning the same sequence across calls so capability-topo
 // ordering stays reproducible.
-func assertCapabilityProviderStability(tb testing.TB, p plugin.Plugin) {
+func assertCapabilityProviderStability(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	provider, ok := any(p).(plugin.CapabilityProvider)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.CapabilityProvider")
 		return
 	}
 	// Priority participates in bucket ordering on every pipeline
@@ -339,10 +437,11 @@ func assertCapabilityProviderStability(tb testing.TB, p plugin.Plugin) {
 // two schemas in the same plugin share a Name. Duplicates would
 // shadow each other at registration time; the framework's
 // directive registry rejects them.
-func assertDirectiveSchemaUniqueness(tb testing.TB, p plugin.Plugin) {
+func assertDirectiveSchemaUniqueness(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	provider, ok := any(p).(plugin.DirectiveProvider)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.DirectiveProvider")
 		return
 	}
 	seen := map[directive.Name]struct{}{}
@@ -367,10 +466,11 @@ func assertDirectiveSchemaUniqueness(tb testing.TB, p plugin.Plugin) {
 // the framework's cache machinery treats it as opt-out and
 // callers reading the value for header rendering already
 // branch on emptiness.
-func assertVersionedStability(tb testing.TB, p plugin.Plugin) {
+func assertVersionedStability(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	versioned, ok := any(p).(plugin.Versioned)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.Versioned")
 		return
 	}
 	first := versioned.Version()
@@ -387,10 +487,11 @@ func assertVersionedStability(tb testing.TB, p plugin.Plugin) {
 // that declared a list and then mutated it between calls would
 // admit or reject the run depending on call ordering — the
 // stability check forecloses that surprise.
-func assertEmitVersionedStability(tb testing.TB, p plugin.Plugin) {
+func assertEmitVersionedStability(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	ev, ok := any(p).(plugin.EmitVersioned)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.EmitVersioned")
 		return
 	}
 	first := ev.EmitVersions()
@@ -411,10 +512,11 @@ func assertEmitVersionedStability(tb testing.TB, p plugin.Plugin) {
 // generator phase's parallelisation at Build time. A plugin
 // whose NodesOnly toggles between calls would invalidate the
 // pipeline's scheduling decision.
-func assertNodesOnlyStability(tb testing.TB, p plugin.Plugin) {
+func assertNodesOnlyStability(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	no, ok := any(p).(plugin.NodesOnly)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.NodesOnly")
 		return
 	}
 	first := no.NodesOnly()
@@ -442,13 +544,14 @@ func assertNodesOnlyStability(tb testing.TB, p plugin.Plugin) {
 // unique tags, at-most-one empty-tag output at index 0) are
 // enforced by [assertOutputsShape] in addition to this
 // stability check — both run as part of [RunSuite].
-func assertFilenameProviderStability(tb testing.TB, p plugin.Plugin) {
+func assertFilenameProviderStability(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	fp, ok := any(p).(plugin.FilenameProvider)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.FilenameProvider")
 		return
 	}
-	for _, lang := range probeLanguages {
+	for _, lang := range probeSet(languages) {
 		first := fp.Outputs(lang)
 		second := fp.Outputs(lang)
 		if !slices.Equal(first, second) {
@@ -472,13 +575,14 @@ func assertFilenameProviderStability(tb testing.TB, p plugin.Plugin) {
 // [assertFilenameProviderStability] exercises so a plugin
 // shipping outputs for multiple backends gets the shape check
 // on each set.
-func assertOutputsShape(tb testing.TB, p plugin.Plugin) {
+func assertOutputsShape(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 	fp, ok := any(p).(plugin.FilenameProvider)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.FilenameProvider")
 		return
 	}
-	for _, lang := range probeLanguages {
+	for _, lang := range probeSet(languages) {
 		outputs := fp.Outputs(lang)
 		seenTags := make(map[string]int, len(outputs))
 		emptyTagCount := 0
@@ -526,6 +630,172 @@ func assertOutputsShape(tb testing.TB, p plugin.Plugin) {
 // rather than a render-time surprise.
 const reservedTemplatePrefix = "fragment."
 
+// skipAbsentCapability marks the calling check skipped, naming the
+// optional interface the plugin does not implement.
+//
+// The old shape was a bare `return`, which made "this plugin does not
+// implement the capability" and "this plugin implements it correctly"
+// print the identical green line. A plugin implementing one optional
+// interface and a plugin implementing ten produced the same output,
+// so an author had no way to tell which of the thirteen checks had
+// examined anything at all — and the suite had no way to tell them.
+//
+// Skipf rather than Logf because a skipped subtest is what `go test`
+// already has for "did not run", and it is greppable.
+func skipAbsentCapability(tb testing.TB, iface string) {
+	tb.Helper()
+	tb.Skipf("plugin does not implement %s; this check examined nothing", iface)
+}
+
+// logSubjectCount records how many subjects a collection-driven check
+// examined.
+//
+// A check whose body is a loop reports the same green over an empty
+// collection as over a full one, and the suite had no vocabulary for
+// the difference. This does not fail — a plugin legitimately declaring
+// nothing for a probed language is conformant — but it puts the count
+// in the output, so "validated 4 templates" and "validated 0" stop
+// being the same line.
+func logSubjectCount(tb testing.TB, label string, n int) {
+	tb.Helper()
+	tb.Logf("%s: examined %d subject(s)", label, n)
+}
+
+// reservedFuncNames mirrors the backend's reserved core funcmap
+// entries — its dispatch, slot-composition and import-collection
+// helpers. Duplicated rather than imported for the reason stated on
+// [reservedTemplatePrefix]; `backend/golang` owns a drift test that
+// fails when the two sets diverge, so the copy cannot rot in silence.
+//
+// The backend rejects a plugin that registers any of these through
+// [plugin.TemplateProvider.TemplateFuncs] and one that targets any of
+// them through [plugin.TemplateProvider.TemplateOverrides]. Both
+// rejections happen while merging plugin contributions, which returns
+// before a single file is rendered — so the run writes zero files for
+// *every* plugin in the composition, not only the one at fault. That
+// blast radius is why this is a conformance failure rather than a note.
+var reservedFuncNames = []string{
+	"external",
+	"imp",
+	"provenance",
+	"render",
+	"renderDocs",
+	"renderEnumVariants",
+	"renderExpr",
+	"renderFunctionBody",
+	"renderFunctionParams",
+	"renderFunctionReturns",
+	"renderInterfaceEmbeds",
+	"renderInterfaceMethods",
+	"renderMethodBody",
+	"renderMethodParams",
+	"renderMethodReturns",
+	"renderParams",
+	"renderReceiver",
+	"renderReturns",
+	"renderStmt",
+	"renderStructEmbeds",
+	"renderStructFields",
+	"renderStructMethods",
+	"renderType",
+	"renderTypeParams",
+	"slot",
+}
+
+// ReservedTemplateFuncNames returns the reserved funcmap names this
+// suite checks plugin contributions against, sorted.
+//
+// Exported so a backend can assert in its own tests that the mirror
+// above still matches the set it actually reserves. A backend whose
+// reserved set grows without this one growing leaves plugin authors a
+// name the suite calls legal and the backend rejects at merge time.
+func ReservedTemplateFuncNames() []string { return slices.Clone(reservedFuncNames) }
+
+// assertTemplateFuncsAvoidReservedNames pins that a
+// [plugin.TemplateProvider] neither registers nor overrides a name the
+// backend reserves for its own funcmap.
+//
+// Without this the collision surfaces from the backend's merge pass,
+// which returns before rendering anything: one plugin's misnamed
+// helper makes the entire run produce no output, and the plugin whose
+// build breaks is as likely to be an innocent bystander in the same
+// composition as the one that caused it.
+func assertTemplateFuncsAvoidReservedNames(tb testing.TB, p plugin.Plugin, languages ...string) {
+	tb.Helper()
+
+	tp, ok := any(p).(plugin.TemplateProvider)
+	if !ok {
+		skipAbsentCapability(tb, "plugin.TemplateProvider")
+		return
+	}
+
+	reserved := make(map[string]struct{}, len(reservedFuncNames))
+	for _, name := range reservedFuncNames {
+		reserved[name] = struct{}{}
+	}
+
+	for _, lang := range probeSet(languages) {
+		reportReservedFuncNames(tb, lang, "TemplateFuncs", tp.TemplateFuncs(lang), reserved)
+		reportReservedFuncNames(tb, lang, "TemplateOverrides", tp.TemplateOverrides(lang), reserved)
+	}
+}
+
+// reportReservedFuncNames fails tb once per entry in fm whose name is
+// reserved. Names are sorted before reporting so a plugin colliding on
+// several produces the same failure text on every run — funcmaps are
+// maps, and unsorted output would reorder per run.
+func reportReservedFuncNames(
+	tb testing.TB,
+	lang, accessor string,
+	fm template.FuncMap,
+	reserved map[string]struct{},
+) {
+	tb.Helper()
+	var bad []string
+	for name := range fm {
+		if _, clash := reserved[name]; clash {
+			bad = append(bad, name)
+		}
+	}
+	slices.Sort(bad)
+	for _, name := range bad {
+		tb.Errorf(
+			"TemplateProvider.%s(%q) claims %q, which the backend reserves for its own funcmap; "+
+				"the merge pass rejects it before rendering starts, so the run writes zero files for "+
+				"every plugin in the composition. Rename it — a plugin-specific prefix is the "+
+				"convention",
+			accessor, lang, name,
+		)
+	}
+}
+
+// collectTemplateFiles returns every `.tmpl` path in fsys at any
+// depth, mirroring the backend's own traversal.
+//
+// The depth is the point. A plugin embedding `templates/golang/*.tmpl`
+// without the matching [fs.Sub] hands over a filesystem whose root
+// holds only a directory — a root-only glob matches nothing there and
+// validates nothing, reporting the same green as a plugin whose
+// templates were all checked. The backend walks recursively and finds
+// the files, so the divergence surfaced only at render time.
+func collectTemplateFiles(fsys fs.FS) ([]string, error) {
+	var out []string
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || path.Ext(p) != ".tmpl" {
+			return nil
+		}
+		out = append(out, p)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugintest: walk template fs: %w", err)
+	}
+	return out, nil
+}
+
 // assertTemplatesParse pins that a [plugin.TemplateProvider] ships
 // templates the backend can actually parse, and that none of them
 // claims a reserved name.
@@ -541,25 +811,27 @@ const reservedTemplatePrefix = "fragment."
 // unresolved function names are tolerated: the plugin's own
 // TemplateFuncs and the backend's reserved set are merged later, and
 // rejecting a template here for calling `imp` would be wrong.
-func assertTemplatesParse(tb testing.TB, p plugin.Plugin) {
+func assertTemplatesParse(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 
 	tp, ok := any(p).(plugin.TemplateProvider)
 	if !ok {
+		skipAbsentCapability(tb, "plugin.TemplateProvider")
 		return
 	}
 
-	for _, lang := range probeLanguages {
+	for _, lang := range probeSet(languages) {
 		fsys, declared := tp.Templates(lang)
 		if !declared || fsys == nil {
 			continue
 		}
 
-		entries, err := fs.Glob(fsys, "*.tmpl")
+		entries, err := collectTemplateFiles(fsys)
 		if err != nil {
 			tb.Errorf("TemplateProvider.Templates(%q): walking the filesystem failed: %v", lang, err)
 			continue
 		}
+		logSubjectCount(tb, fmt.Sprintf("Templates(%q) parsed", lang), len(entries))
 
 		for _, name := range entries {
 			body, err := fs.ReadFile(fsys, name)
@@ -658,7 +930,7 @@ var undefinedFuncPattern = regexp.MustCompile(`function "([^"]+)" not defined`)
 // Aliasing is detected by backing-array identity rather than by
 // mutating and observing, so the check cannot itself corrupt a plugin
 // that does share state.
-func assertAccessorsReturnFreshSlices(tb testing.TB, p plugin.Plugin) {
+func assertAccessorsReturnFreshSlices(tb testing.TB, p plugin.Plugin, languages ...string) {
 	tb.Helper()
 
 	if cp, ok := any(p).(plugin.CapabilityProvider); ok {
@@ -669,7 +941,7 @@ func assertAccessorsReturnFreshSlices(tb testing.TB, p plugin.Plugin) {
 		assertNotAliased(tb, "DirectiveProvider.Directives", dp.Directives(), dp.Directives())
 	}
 	if fp, ok := any(p).(plugin.FilenameProvider); ok {
-		for _, lang := range probeLanguages {
+		for _, lang := range probeSet(languages) {
 			assertNotAliased(tb,
 				fmt.Sprintf("FilenameProvider.Outputs(%q)", lang),
 				fp.Outputs(lang), fp.Outputs(lang))

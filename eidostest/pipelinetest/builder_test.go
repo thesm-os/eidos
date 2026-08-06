@@ -220,7 +220,8 @@ func TestBuilder_OptionParity(t *testing.T) {
 			if _, ok := harness.MethodByName(name); !ok {
 				t.Errorf(
 					"pipelinetest.Builder has no counterpart for pipeline.Builder.%s; "+
-						"forward it or record an exemption reason in exemptOptions", name)
+						"forward it or record an exemption reason in exemptOptions", name,
+				)
 			}
 		}
 	})

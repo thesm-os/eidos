@@ -129,7 +129,7 @@ func assertRenderEmptyEmitDoesNotPanic(tb testing.TB, b plugin.Backend) {
 	s := store.New()
 	mem := sink.NewMemory()
 	if err := renderRecovering(b, BackendFixture{}, s, mem); err != nil {
-		tb.Errorf("Render panicked on empty emit graph: %v", err)
+		tb.Errorf("Render %s on an empty emit graph: %v", probeVerb(err), err)
 	}
 }
 
@@ -143,7 +143,7 @@ func assertRenderDoesNotPanic(tb testing.TB, b plugin.Backend, fx BackendFixture
 		tb.Fatalf("seed store from fixture %q emit packages: %v", fx.Name, err)
 	}
 	if err := renderRecovering(b, fx, s, sink.NewMemory()); err != nil {
-		tb.Errorf("Render panicked on fixture %q: %v", fx.Name, err)
+		tb.Errorf("Render %s on fixture %q: %v", probeVerb(err), fx.Name, err)
 	}
 }
 
@@ -159,10 +159,10 @@ func assertRenderCarriesNoErrors(tb testing.TB, b plugin.Backend, fx BackendFixt
 	if err != nil {
 		tb.Fatalf("seed store from fixture %q emit packages: %v", fx.Name, err)
 	}
-	d := diag.New()
+	d := diag.Capture()
 	mem := sink.NewMemory()
-	if err := renderWithSinkAndDiag(b, fx, s, mem, d); err != nil {
-		tb.Fatalf("Render returned error on fixture %q: %v", fx.Name, err)
+	if err := renderRecoveringWithDiag(b, fx, s, mem, d); err != nil {
+		tb.Fatalf("Render %s on fixture %q: %v", probeVerb(err), fx.Name, err)
 	}
 	if d.HasErrors() {
 		tb.Errorf(
@@ -206,7 +206,7 @@ func renderToMemory(b plugin.Backend, fx BackendFixture, pkgs []*emit.Package) (
 		return nil, fmt.Errorf("seed store: %w", err)
 	}
 	mem := sink.NewMemory()
-	if err := renderWithSinkAndDiag(b, fx, s, mem, diag.New()); err != nil {
+	if err := renderRecoveringWithDiag(b, fx, s, mem, diag.Discard()); err != nil {
 		return nil, fmt.Errorf("render: %w", err)
 	}
 	return mem, nil
@@ -215,13 +215,35 @@ func renderToMemory(b plugin.Backend, fx BackendFixture, pkgs []*emit.Package) (
 // renderRecovering invokes Render with the supplied store and
 // sink, recovering any panic into a returned error. Used by
 // the "does not panic" probes.
-func renderRecovering(b plugin.Backend, fx BackendFixture, s *store.Store, mem sink.Sink) (err error) {
+func renderRecovering(b plugin.Backend, fx BackendFixture, s *store.Store, mem sink.Sink) error {
+	return renderRecoveringWithDiag(b, fx, s, mem, diag.Discard())
+}
+
+// renderRecoveringWithDiag is [renderRecovering] with a
+// caller-supplied diagnostic sink, so a check that inspects what was
+// emitted still gets the panic containment.
+//
+// Every backend probe goes through here. Two of them used to call
+// [renderWithSinkAndDiag] directly, so a backend that panicked failed
+// one subtest through the recovering probe and then took the whole
+// test binary down on the next one — losing every sibling result the
+// author needed to see.
+func renderRecoveringWithDiag(
+	b plugin.Backend,
+	fx BackendFixture,
+	s *store.Store,
+	mem sink.Sink,
+	d *diag.Sink,
+) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("recovered panic: %v", r)
+			err = fmt.Errorf("%w: %v", ErrProbePanicked, r)
 		}
 	}()
-	return renderWithSinkAndDiag(b, fx, s, mem, diag.New())
+	if rerr := renderWithSinkAndDiag(b, fx, s, mem, d); rerr != nil {
+		return fmt.Errorf("%w: %w", ErrProbeReturnedError, rerr)
+	}
+	return nil
 }
 
 // renderWithSinkAndDiag drives Render with explicit sink and

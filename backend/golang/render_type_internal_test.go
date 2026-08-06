@@ -478,7 +478,8 @@ func TestAppendAnonStruct_Spelling(t *testing.T) {
 		// compile.
 		s := newRenderState(loadTemplates(), nil, nil, nil)
 		got, err := s.renderType(emit.AnonStructOf(
-			[]emit.AnonField{{Name: "T", Type: emit.External("time", "Time")}}, nil))
+			[]emit.AnonField{{Name: "T", Type: emit.External("time", "Time")}}, nil,
+		))
 		if err != nil {
 			t.Fatalf("renderType: %v", err)
 		}
@@ -494,7 +495,8 @@ func TestAppendAnonStruct_Spelling(t *testing.T) {
 		t.Parallel()
 		s := newRenderState(loadTemplates(), nil, nil, nil)
 		if _, err := s.renderType(emit.AnonStructOf(
-			nil, []emit.Ref{emit.External("io", "Reader")})); err != nil {
+			nil, []emit.Ref{emit.External("io", "Reader")},
+		)); err != nil {
 			t.Fatalf("renderType: %v", err)
 		}
 		if s.imports.Len() != 1 {

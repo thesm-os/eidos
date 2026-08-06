@@ -58,9 +58,13 @@ func TestRunSuite_PassesForWellFormedPlugin(t *testing.T) {
 		// tag (the "no default output" mode). The shape rules
 		// permit this — at most one empty-tag output, not
 		// exactly one.
+		// Keyed on ConformanceLanguage: under the old "go" key the
+		// suite probed a language this map has no entry for, so the
+		// every-output-tagged shape this subtest exists to bless was
+		// never actually presented to a single check.
 		p := plugintest.NewMultiOutputFixturePlugin()
 		p.OutputsByLang = map[string][]plugin.Output{
-			"go": {
+			plugintest.ConformanceLanguage: {
 				{Tag: "production", Suffix: "_fixture.go"},
 				{Tag: "test", Suffix: "_fixture_test.go"},
 			},
@@ -369,12 +373,27 @@ func TestAssertTemplateProviderStability(t *testing.T) {
 		}
 	})
 
-	t.Run("a plugin that implements no template surface passes silently", func(t *testing.T) {
+	t.Run("a plugin that implements no template surface reports the check as skipped", func(t *testing.T) {
 		t.Parallel()
+		// This subtest used to assert the check "passes silently",
+		// which was the defect rather than the contract: a silent pass
+		// is indistinguishable from a plugin whose templates were all
+		// validated, so an author could not tell which of the suite's
+		// checks had examined anything. A non-implementer must still
+		// not fail — it is not doing anything wrong — but it must say
+		// so.
 		fake := newFakeT()
-		plugintest.AssertTemplateProviderStability(fake, plugintest.NewFixturePlugin())
+		captureFatal(func() {
+			plugintest.AssertTemplateProviderStability(fake, plugintest.NewFixturePlugin())
+		})
 		if fake.failed {
 			t.Fatalf("non-implementer reported a failure: errs=%v fatals=%v", fake.errs, fake.fatals)
+		}
+		if len(fake.skips) == 0 {
+			t.Fatalf("non-implementer must report the check as skipped; recorded nothing")
+		}
+		if !strings.Contains(fake.skips[0], "plugin.TemplateProvider") {
+			t.Errorf("the skip must name the absent capability; got %q", fake.skips[0])
 		}
 	})
 }
@@ -436,4 +455,176 @@ func assertFakeMentions(t *testing.T, fake *fakeT, substr string) {
 	if !strings.Contains(joined, substr) {
 		t.Errorf("fake TB did not record a message mentioning %q; got:\n%s", substr, joined)
 	}
+}
+
+// nestedTemplateFS returns a Templates hook shipping body at a path
+// one directory below the filesystem root — the shape produced by
+// `//go:embed templates/golang/*.tmpl` without the matching
+// [fs.Sub]. It is the documented idiom's failure mode, and the only
+// reason no in-tree plugin exposes it is that every one of them
+// remembers the fs.Sub.
+func nestedTemplateFS(body string) func(string) (fs.FS, bool) {
+	return func(lang string) (fs.FS, bool) {
+		if lang != plugintest.ConformanceLanguage {
+			return nil, false
+		}
+		return fstest.MapFS{
+			"templates/golang/nested.tmpl": &fstest.MapFile{Data: []byte(body)},
+		}, true
+	}
+}
+
+// TestAssertTemplatesParse_WalksNestedDirectories pins that the
+// template check enumerates the filesystem the way the backend does.
+// The backend walks recursively; a root-only glob silently validated
+// nothing for any plugin that forgot an fs.Sub, and reported the same
+// green as one whose templates were all checked.
+func TestAssertTemplatesParse_WalksNestedDirectories(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an unparsable template below the filesystem root is reported", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplatesParse(fake, &templateProviderPlugin{
+			name:      "nested-unparsable",
+			templates: nestedTemplateFS(`{{ define "fixture.bad" }}{{ .Unclosed `),
+		})
+		assertFakeMentions(t, fake, "does not parse")
+	})
+
+	t.Run("a reserved-prefix definition below the filesystem root is reported", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplatesParse(fake, &templateProviderPlugin{
+			name:      "nested-reserved",
+			templates: nestedTemplateFS(`{{ define "fragment.hijack" }}x{{ end }}`),
+		})
+		assertFakeMentions(t, fake, "reserved")
+	})
+
+	t.Run("a well-formed template below the filesystem root is accepted", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplatesParse(fake, &templateProviderPlugin{
+			name:      "nested-ok",
+			templates: nestedTemplateFS(`{{ define "fixture.ok" }}ok{{ end }}`),
+		})
+		if fake.failed {
+			t.Errorf("a parsable nested template must clear the check; got: %v", fake.errs)
+		}
+	})
+}
+
+// TestAssertTemplateFuncsAvoidReservedNames pins the funcmap half of
+// the same divergence. The backend rejects a plugin funcmap entry
+// colliding with its own reserved set, and does so from
+// mergePluginContributions — which returns before renderTargets, so
+// the whole run writes zero files for every plugin in the
+// composition. Catching it at conformance time is the difference
+// between one author's failing test and a broken build for everyone
+// composing with them.
+func TestAssertTemplateFuncsAvoidReservedNames(t *testing.T) {
+	t.Parallel()
+
+	fixed := func(fm template.FuncMap) func(string) template.FuncMap {
+		return func(lang string) template.FuncMap {
+			if lang != plugintest.ConformanceLanguage {
+				return nil
+			}
+			return fm
+		}
+	}
+	noop := func(_ ...any) any { return nil }
+
+	t.Run("a TemplateFuncs entry claiming a reserved core name is reported", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateFuncsAvoidReservedNames(fake, &templateProviderPlugin{
+			name:  "reserved-extension",
+			funcs: fixed(template.FuncMap{"imp": noop}),
+		})
+		assertFakeMentions(t, fake, "imp")
+	})
+
+	t.Run("a TemplateOverrides entry targeting a reserved core name is reported", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateFuncsAvoidReservedNames(fake, &templateProviderPlugin{
+			name:      "reserved-override",
+			overrides: fixed(template.FuncMap{"render": noop}),
+		})
+		assertFakeMentions(t, fake, "render")
+	})
+
+	t.Run("a name outside the reserved set is accepted", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateFuncsAvoidReservedNames(fake, &templateProviderPlugin{
+			name:      "own-names",
+			funcs:     fixed(template.FuncMap{"myPluginHelper": noop}),
+			overrides: fixed(template.FuncMap{"lowerCamel": noop}),
+		})
+		if fake.failed {
+			t.Errorf("names outside the reserved set must clear the check; got: %v", fake.errs)
+		}
+	})
+}
+
+// rustOnlyPlugin declares a malformed Outputs slice for a non-Go
+// backend and nothing for the Go one — the shape any plugin targeting
+// a language this repository does not ship takes.
+type rustOnlyPlugin struct{ name string }
+
+// Name returns the configured identifier.
+func (p *rustOnlyPlugin) Name() string { return p.name }
+
+// Generate satisfies [plugin.Generator] so the role probe clears.
+func (*rustOnlyPlugin) Generate(_ *plugin.GeneratorContext) error { return nil }
+
+// Outputs declares a slice violating three shape rules at once — an
+// empty Suffix, a duplicate Tag, and the primary entry away from
+// index 0 — under a language the default probe set never asks about.
+func (*rustOnlyPlugin) Outputs(lang string) []plugin.Output {
+	if lang != "rust" {
+		return nil
+	}
+	return []plugin.Output{
+		{Tag: "dup", Suffix: "_a.rs"},
+		{Tag: "dup", Suffix: ""},
+		{Suffix: "_primary.rs"},
+	}
+}
+
+// TestRunSuiteFor_ProbesTheCallersLanguage pins that a plugin
+// targeting a non-Go backend gets its per-language checks actually
+// run.
+//
+// probeLanguages was a package-private constant pair, so every
+// per-language lookup asked a plugin about "golang" and nothing else.
+// A plugin keyed on any other spelling answered no probe: its Outputs
+// were validated as an empty slice and the checks reported green
+// having examined nothing, right up until Build rejected the same
+// slice in the author's own project.
+func TestRunSuiteFor_ProbesTheCallersLanguage(t *testing.T) {
+	t.Parallel()
+
+	p := &rustOnlyPlugin{name: "rust-only"}
+
+	t.Run("the default probe set validates an empty slice and reports nothing", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertOutputsShape(fake, p)
+		if fake.failed {
+			t.Fatalf("the Go-only probe set cannot see a rust plugin's outputs: %v", fake.errs)
+		}
+	})
+
+	t.Run("naming the plugin's own language surfaces the malformed slice", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertOutputsShape(fake, p, "rust")
+		if !fake.failed {
+			t.Fatalf("a malformed rust Outputs slice must fail once rust is probed")
+		}
+	})
 }

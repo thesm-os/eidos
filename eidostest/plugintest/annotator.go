@@ -36,15 +36,30 @@ type AnnotatorFixture struct {
 	// is invoked once per subtest; tests fail fast through `t` on
 	// builder errors rather than returning them.
 	BuildStore func(t *testing.T) *store.Store
+
+	// AllowsPositionlessDiagnostics waives the requirement that
+	// every diagnostic the annotator emits on this fixture carries
+	// a source position.
+	//
+	// The zero value is the strict one, because a positionless
+	// diagnostic renders as a dash where file and line belong and
+	// the reader cannot act on it. Set this only when the
+	// annotator's complaints on this input genuinely name no source
+	// construct. It does not waive the no-Error-severity contract;
+	// that one is not negotiable per fixture.
+	AllowsPositionlessDiagnostics bool
 }
 
 // RunAnnotatorSuite runs the conformance checks every
 // [plugin.Annotator] must satisfy: it must not panic on an
 // empty store, it must not add or remove nodes during the
 // annotate phase (the source-side store is structurally
-// frozen), and its meta-stamping must be idempotent — running
+// frozen), its meta-stamping must be idempotent — running
 // [plugin.Annotator.Annotate] twice on the same store must
-// produce identical meta state on the second pass.
+// produce identical meta state on the second pass — and it must
+// surface no Error-severity diagnostics on an input the fixture
+// declares it handles, with every diagnostic it does emit
+// carrying a source position.
 //
 // Fixtures supply realistic input scenarios. The suite drives
 // the annotator against each in a dedicated subtest so failure
@@ -60,11 +75,22 @@ func RunAnnotatorSuite(t *testing.T, a plugin.Annotator, fixtures []AnnotatorFix
 	t.Run("Annotate on empty store does not panic", func(t *testing.T) {
 		assertAnnotateEmptyStoreDoesNotPanic(t, a)
 	})
+	t.Run("Annotate on empty store produces no Error-severity diagnostics", func(t *testing.T) {
+		assertAnnotateEmptyStoreCarriesNoErrors(t, a)
+	})
 	assertAnnotatorFixtureNamesUnique(t, fixtures)
 	for _, fx := range fixtures {
 		t.Run("fixture="+fx.Name+"/Annotate does not panic", func(t *testing.T) {
 			s := buildAnnotatorStore(t, fx)
 			assertAnnotateDoesNotPanic(t, a, s)
+		})
+		t.Run("fixture="+fx.Name+"/Annotate produces no Error-severity diagnostics", func(t *testing.T) {
+			s := buildAnnotatorStore(t, fx)
+			assertAnnotateCarriesNoErrors(t, a, fx, s)
+		})
+		t.Run("fixture="+fx.Name+"/Annotate diagnostics carry a source position", func(t *testing.T) {
+			s := buildAnnotatorStore(t, fx)
+			assertAnnotateDiagnosticsArePositioned(t, a, fx, s)
 		})
 		t.Run("fixture="+fx.Name+"/node count unchanged by Annotate", func(t *testing.T) {
 			s := buildAnnotatorStore(t, fx)
@@ -73,6 +99,9 @@ func RunAnnotatorSuite(t *testing.T, a plugin.Annotator, fixtures []AnnotatorFix
 		t.Run("fixture="+fx.Name+"/Annotate is idempotent across two runs", func(t *testing.T) {
 			s := buildAnnotatorStore(t, fx)
 			assertAnnotateIsIdempotent(t, a, s)
+		})
+		t.Run("fixture="+fx.Name+"/Annotate is deterministic across two equivalent stores", func(t *testing.T) {
+			assertAnnotateIsDeterministic(t, a, buildAnnotatorStore(t, fx), buildAnnotatorStore(t, fx))
 		})
 	}
 }
@@ -102,7 +131,10 @@ func buildAnnotatorStore(t *testing.T, fx AnnotatorFixture) *store.Store {
 	if fx.BuildStore == nil {
 		t.Fatalf("RunAnnotatorSuite: fixture %q has nil BuildStore", fx.Name)
 	}
-	s := fx.BuildStore(t)
+	s, err := buildFixtureStoreRecovering(func() *store.Store { return fx.BuildStore(t) })
+	if err != nil {
+		t.Fatalf("RunAnnotatorSuite: fixture %q: %v", fx.Name, err)
+	}
 	if s == nil {
 		t.Fatalf("RunAnnotatorSuite: fixture %q BuildStore returned nil store", fx.Name)
 	}
@@ -117,9 +149,26 @@ func buildAnnotatorStore(t *testing.T, fx AnnotatorFixture) *store.Store {
 func assertAnnotateEmptyStoreDoesNotPanic(tb testing.TB, a plugin.Annotator) {
 	tb.Helper()
 	s := store.New()
-	if err := runAnnotateRecovering(a, s); err != nil {
-		tb.Errorf("Annotate panicked on empty store: %v", err)
+	if err := runAnnotateRecovering(a, s, diag.Discard()); err != nil {
+		tb.Errorf("Annotate %s on an empty store: %v", probeVerb(err), err)
 	}
+}
+
+// assertAnnotateEmptyStoreCarriesNoErrors drives the annotator
+// against a fresh empty store and fails when it complains about it.
+//
+// An annotator that reports an Error with nothing to stamp reports
+// one on every project whose patterns expand to no matches, and the
+// pipeline runs annotators unconditionally. The positioned-diagnostic
+// check has no counterpart here: the probe carries no fixture to hang
+// the waiver on, and an empty store has no source construct to name.
+func assertAnnotateEmptyStoreCarriesNoErrors(tb testing.TB, a plugin.Annotator) {
+	tb.Helper()
+	d := diag.Capture()
+	if err := runAnnotateRecovering(a, store.New(), d); err != nil {
+		tb.Fatalf("Annotate did not complete on an empty store: %v", err)
+	}
+	reportErrorDiagnostics(tb, roleAnnotator, emptyStoreSubject, d)
 }
 
 // assertAnnotateDoesNotPanic drives the annotator against the
@@ -129,9 +178,43 @@ func assertAnnotateEmptyStoreDoesNotPanic(tb testing.TB, a plugin.Annotator) {
 // diagnostic sink rather than panic.
 func assertAnnotateDoesNotPanic(tb testing.TB, a plugin.Annotator, s *store.Store) {
 	tb.Helper()
-	if err := runAnnotateRecovering(a, s); err != nil {
-		tb.Errorf("Annotate panicked on fixture store: %v", err)
+	if err := runAnnotateRecovering(a, s, diag.Discard()); err != nil {
+		tb.Errorf("Annotate %s on the fixture store: %v", probeVerb(err), err)
 	}
+}
+
+// assertAnnotateCarriesNoErrors drives the annotator against the
+// fixture's store and fails when the diagnostic sink records any
+// Error-severity entry. Mirrors [assertRenderCarriesNoErrors], whose
+// rationale transfers verbatim: the fixtures a plugin author supplies
+// represent inputs the plugin handles cleanly, and an Error
+// diagnostic on one of them reaches the user as a non-zero exit on
+// every run.
+func assertAnnotateCarriesNoErrors(tb testing.TB, a plugin.Annotator, fx AnnotatorFixture, s *store.Store) {
+	tb.Helper()
+	d := diag.Capture()
+	if err := runAnnotateRecovering(a, s, d); err != nil {
+		tb.Fatalf("Annotate did not complete on fixture %q: %v", fx.Name, err)
+	}
+	reportErrorDiagnostics(tb, roleAnnotator, fixtureSubject(fx.Name), d)
+}
+
+// assertAnnotateDiagnosticsArePositioned drives the annotator against
+// the fixture's store and fails when any diagnostic it emitted
+// carries a zero position, unless the fixture waived the check
+// through [AnnotatorFixture.AllowsPositionlessDiagnostics].
+func assertAnnotateDiagnosticsArePositioned(
+	tb testing.TB,
+	a plugin.Annotator,
+	fx AnnotatorFixture,
+	s *store.Store,
+) {
+	tb.Helper()
+	d := diag.Capture()
+	if err := runAnnotateRecovering(a, s, d); err != nil {
+		tb.Fatalf("Annotate did not complete on fixture %q: %v", fx.Name, err)
+	}
+	reportPositionlessDiagnostics(tb, roleAnnotator, fixtureSubject(fx.Name), d, fx.AllowsPositionlessDiagnostics)
 }
 
 // assertAnnotateLeavesNodeCountUnchanged pins the annotator's
@@ -142,8 +225,8 @@ func assertAnnotateDoesNotPanic(tb testing.TB, a plugin.Annotator, s *store.Stor
 func assertAnnotateLeavesNodeCountUnchanged(tb testing.TB, a plugin.Annotator, s *store.Store) {
 	tb.Helper()
 	before := snapshotNodeCounts(s)
-	if err := runAnnotateRecovering(a, s); err != nil {
-		tb.Fatalf("Annotate panicked during node-count check: %v", err)
+	if err := runAnnotateRecovering(a, s, diag.Discard()); err != nil {
+		tb.Fatalf("Annotate %s during the node-count check: %v", probeVerb(err), err)
 	}
 	after := snapshotNodeCounts(s)
 	if !nodeCountsEqual(before, after) {
@@ -169,15 +252,15 @@ func assertAnnotateLeavesNodeCountUnchanged(tb testing.TB, a plugin.Annotator, s
 // per-side projections for debugging.
 func assertAnnotateIsIdempotent(tb testing.TB, a plugin.Annotator, s *store.Store) {
 	tb.Helper()
-	if err := runAnnotateRecovering(a, s); err != nil {
-		tb.Fatalf("Annotate panicked on first idempotency pass: %v", err)
+	if err := runAnnotateRecovering(a, s, diag.Discard()); err != nil {
+		tb.Fatalf("Annotate %s on the first idempotency pass: %v", probeVerb(err), err)
 	}
 	first, err := snapshotMetaBags(s)
 	if err != nil {
 		tb.Fatalf("snapshotMetaBags after first pass: %v", err)
 	}
-	if rerr := runAnnotateRecovering(a, s); rerr != nil {
-		tb.Fatalf("Annotate panicked on second idempotency pass: %v", rerr)
+	if rerr := runAnnotateRecovering(a, s, diag.Discard()); rerr != nil {
+		tb.Fatalf("Annotate %s on the second idempotency pass: %v", probeVerb(rerr), rerr)
 	}
 	second, err := snapshotMetaBags(s)
 	if err != nil {
@@ -186,24 +269,64 @@ func assertAnnotateIsIdempotent(tb testing.TB, a plugin.Annotator, s *store.Stor
 	reportFirstDifference(tb, first, second)
 }
 
-// runAnnotateRecovering invokes Annotate with a discard
+// assertAnnotateIsDeterministic drives the annotator against two
+// independently built stores and fails when the resulting meta state
+// differs.
+//
+// This is not what [assertAnnotateIsIdempotent] checks, and the two
+// catch different defects. Idempotency runs twice over one store, so
+// the ubiquitous already-stamped guard — "if the key is set, return" —
+// makes the second pass a no-op and the comparison uninformative about
+// how the value was computed. Determinism gives the annotator a store
+// it has never seen, so a value derived from a counter, a map
+// iteration, a timestamp or the host environment differs between the
+// two and is caught.
+//
+// Generators and frontends have had the two-store check since they
+// were written; the annotator phase — whose metadata every downstream
+// generator keys on — had only the single-store one.
+func assertAnnotateIsDeterministic(tb testing.TB, a plugin.Annotator, s1, s2 *store.Store) {
+	tb.Helper()
+	if err := runAnnotateRecovering(a, s1, diag.Discard()); err != nil {
+		tb.Fatalf("Annotate %s on the first determinism pass: %v", probeVerb(err), err)
+	}
+	if err := runAnnotateRecovering(a, s2, diag.Discard()); err != nil {
+		tb.Fatalf("Annotate %s on the second determinism pass: %v", probeVerb(err), err)
+	}
+	first, err := snapshotMetaBags(s1)
+	if err != nil {
+		tb.Fatalf("snapshotMetaBags after the first determinism pass: %v", err)
+	}
+	second, err := snapshotMetaBags(s2)
+	if err != nil {
+		tb.Fatalf("snapshotMetaBags after the second determinism pass: %v", err)
+	}
+	reportFirstDifference(tb, first, second)
+}
+
+// runAnnotateRecovering invokes Annotate against the caller's
 // diagnostic sink and recovers any panic into a returned error.
 // The plain Annotate error is wrapped on the same path so
 // callers can distinguish "panicked" from "returned an error"
 // by inspecting the wrapping verb.
-func runAnnotateRecovering(a plugin.Annotator, s *store.Store) (err error) {
+//
+// The sink is a parameter rather than a local because a check that
+// cannot reach it cannot assert on it. Pass [diag.Capture] to inspect
+// what was emitted, [diag.Discard] when the check is about panics or
+// store state and the diagnostics belong to a sibling check.
+func runAnnotateRecovering(a plugin.Annotator, s *store.Store, d *diag.Sink) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("recovered panic: %v", r)
+			err = fmt.Errorf("%w: %v", ErrProbePanicked, r)
 		}
 	}()
 	ctx := &plugin.AnnotatorContext{
 		Store:  s,
 		Reader: store.NewReader(s),
-		Diag:   diag.New(),
+		Diag:   d,
 	}
 	if rerr := a.Annotate(ctx); rerr != nil {
-		return fmt.Errorf("annotate returned error: %w", rerr)
+		return fmt.Errorf("%w: %w", ErrProbeReturnedError, rerr)
 	}
 	return nil
 }

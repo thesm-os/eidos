@@ -4,6 +4,7 @@
 package plugintest
 
 import (
+	"slices"
 	"testing"
 
 	"go.thesmos.sh/eidos/plugin"
@@ -19,33 +20,43 @@ import (
 // the testing harness.
 var (
 	// Framework-level assertions.
-	AssertStableName                  = assertStableName
-	AssertImplementsARole             = assertImplementsARole
-	AssertCapabilityProviderStability = assertCapabilityProviderStability
-	AssertDirectiveSchemaUniqueness   = assertDirectiveSchemaUniqueness
-	AssertVersionedStability          = assertVersionedStability
-	AssertEmitVersionedStability      = assertEmitVersionedStability
-	AssertNodesOnlyStability          = assertNodesOnlyStability
-	AssertFilenameProviderStability   = assertFilenameProviderStability
-	AssertOutputsShape                = assertOutputsShape
-	AssertTemplateProviderStability   = assertTemplateProviderStability
-	AssertStableFuncMap               = assertStableFuncMap
+	AssertStableName                      = assertStableName
+	AssertImplementsARole                 = assertImplementsARole
+	AssertCapabilityProviderStability     = assertCapabilityProviderStability
+	AssertDirectiveSchemaUniqueness       = assertDirectiveSchemaUniqueness
+	AssertVersionedStability              = assertVersionedStability
+	AssertEmitVersionedStability          = assertEmitVersionedStability
+	AssertNodesOnlyStability              = assertNodesOnlyStability
+	AssertFilenameProviderStability       = assertFilenameProviderStability
+	AssertOutputsShape                    = assertOutputsShape
+	AssertTemplateProviderStability       = assertTemplateProviderStability
+	AssertTemplatesParse                  = assertTemplatesParse
+	AssertTemplateFuncsAvoidReservedNames = assertTemplateFuncsAvoidReservedNames
+	AssertStableFuncMap                   = assertStableFuncMap
 
 	// Annotator-suite assertions.
-	AssertAnnotateEmptyStoreDoesNotPanic   = assertAnnotateEmptyStoreDoesNotPanic
-	AssertAnnotateDoesNotPanic             = assertAnnotateDoesNotPanic
-	AssertAnnotateLeavesNodeCountUnchanged = assertAnnotateLeavesNodeCountUnchanged
-	AssertAnnotateIsIdempotent             = assertAnnotateIsIdempotent
-	AssertAnnotatorFixtureNamesUnique      = assertAnnotatorFixtureNamesUnique
+	AssertAnnotateEmptyStoreDoesNotPanic    = assertAnnotateEmptyStoreDoesNotPanic
+	AssertAnnotateEmptyStoreCarriesNoErrors = assertAnnotateEmptyStoreCarriesNoErrors
+	AssertAnnotateDoesNotPanic              = assertAnnotateDoesNotPanic
+	AssertAnnotateCarriesNoErrors           = assertAnnotateCarriesNoErrors
+	AssertAnnotateDiagnosticsArePositioned  = assertAnnotateDiagnosticsArePositioned
+	AssertAnnotateLeavesNodeCountUnchanged  = assertAnnotateLeavesNodeCountUnchanged
+	AssertAnnotateIsIdempotent              = assertAnnotateIsIdempotent
+	AssertAnnotateIsDeterministic           = assertAnnotateIsDeterministic
+	AssertAnnotatorFixtureNamesUnique       = assertAnnotatorFixtureNamesUnique
 
 	// Generator-suite assertions.
 	AssertGenerateEmptyStoreDoesNotPanic     = assertGenerateEmptyStoreDoesNotPanic
+	AssertGenerateEmptyStoreCarriesNoErrors  = assertGenerateEmptyStoreCarriesNoErrors
 	AssertGenerateDoesNotPanic               = assertGenerateDoesNotPanic
+	AssertGenerateCarriesNoErrors            = assertGenerateCarriesNoErrors
+	AssertGenerateDiagnosticsArePositioned   = assertGenerateDiagnosticsArePositioned
 	AssertGenerateLeavesSourceNodesUnchanged = assertGenerateLeavesSourceNodesUnchanged
 	AssertGenerateIsDeterministic            = assertGenerateIsDeterministic
 	AssertGeneratorFixtureNamesUnique        = assertGeneratorFixtureNamesUnique
 	AssertEmittedTagsAreDeclared             = assertEmittedTagsAreDeclared
 	AssertOutputPackagesTolerateMissingTags  = assertOutputPackagesTolerateMissingTags
+	AssertEmitValuesAreAttributed            = assertEmitValuesAreAttributed
 
 	// Backend-suite assertions.
 	AssertRenderEmptyEmitDoesNotPanic = assertRenderEmptyEmitDoesNotPanic
@@ -58,16 +69,31 @@ var (
 	AssertLoadEmptyPatternDoesNotPanic = assertLoadEmptyPatternDoesNotPanic
 	AssertLoadDoesNotPanic             = assertLoadDoesNotPanic
 	AssertLoadPopulatesStore           = assertLoadPopulatesStore
+	AssertLoadCarriesNoErrors          = assertLoadCarriesNoErrors
+	AssertLoadDiagnosticsArePositioned = assertLoadDiagnosticsArePositioned
 	AssertLoadIsDeterministic          = assertLoadIsDeterministic
 	AssertLoadIsFingerprintKeyed       = assertLoadIsFingerprintKeyed
 	AssertFrontendFixtureNamesUnique   = assertFrontendFixtureNamesUnique
 
 	// Options-suite assertions.
-	AssertOptionsSchemaStability       = assertOptionsSchemaStability
-	AssertOptionsFixtureCoversRequired = assertOptionsFixtureCoversRequired
-	AssertSetOptionsAcceptsValid       = assertSetOptionsAcceptsValid
-	AssertSetOptionsRejectsUnknown     = assertSetOptionsRejectsUnknown
+	AssertOptionsSchemaStability           = assertOptionsSchemaStability
+	AssertOptionsFixtureCoversRequired     = assertOptionsFixtureCoversRequired
+	AssertSetOptionsAcceptsValid           = assertSetOptionsAcceptsValid
+	AssertSetOptionsRejectsUnknown         = assertSetOptionsRejectsUnknown
+	AssertSetOptionsRejectsMissingRequired = assertSetOptionsRejectsMissingRequired
 )
+
+// Probe-outcome helpers, exposed so the black-box tests can assert
+// the recover and the verb without fabricating a testing.T.
+var (
+	BuildFixtureStoreRecovering = buildFixtureStoreRecovering
+	ProbeVerb                   = probeVerb
+)
+
+// ProbeLanguages returns the language identifiers the framework
+// suite drives capability lookups with, so a meta-test can assert
+// the shipped fixtures answer them.
+func ProbeLanguages() []string { return slices.Clone(probeLanguages) }
 
 // CheckPair exposes one row of the framework check table to the
 // black-box meta-tests. The table itself is unexported because its
@@ -79,7 +105,7 @@ type CheckPair struct {
 	// Violation names the fixture that must defeat Fn.
 	Violation Violation
 	// Fn is the assertion enforcing the contract.
-	Fn func(testing.TB, plugin.Plugin)
+	Fn func(testing.TB, plugin.Plugin, ...string)
 }
 
 // FrameworkChecks returns the table [RunSuite] walks, in execution
@@ -100,3 +126,10 @@ var AssertNodesOnlyIsTruthful = assertNodesOnlyIsTruthful
 // EmptyStore returns a fresh store, so a meta-test can supply the two
 // independent stores the truthfulness check compares.
 func EmptyStore() *store.Store { return store.New() }
+
+// ErroringDiagnosticMessage is the sentinel text every fixture
+// returned by [ErroringGenerator] / [ErroringAnnotator] /
+// [ErroringFrontend] emits, exposed so a meta-test can assert the
+// diagnostic reached the failure message rather than merely that
+// something failed.
+const ErroringDiagnosticMessage = erroringDiagnosticMessage

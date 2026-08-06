@@ -35,15 +35,31 @@ type GeneratorFixture struct {
 	// is invoked once per subtest; tests fail fast through `t` on
 	// builder errors rather than returning them.
 	BuildStore func(t *testing.T) *store.Store
+
+	// AllowsPositionlessDiagnostics waives the requirement that
+	// every diagnostic the generator emits on this fixture carries
+	// a source position.
+	//
+	// The zero value is the strict one, because a positionless
+	// diagnostic renders as a dash where file and line belong and
+	// the reader cannot act on it. Set this only when the
+	// generator's complaints on this input genuinely name no source
+	// construct — a run- or configuration-level failure with
+	// nothing to point at. It does not waive the no-Error-severity
+	// contract; that one is not negotiable per fixture.
+	AllowsPositionlessDiagnostics bool
 }
 
 // RunGeneratorSuite runs the conformance checks every
 // [plugin.Generator] must satisfy: it must not panic on an
 // empty store, it must not mutate source-side node counts
 // during the generator phase (which only writes to the emit
-// graph), and its emit production must be deterministic —
+// graph), its emit production must be deterministic —
 // driving Generate against two freshly-built stores produced
-// from the same fixture must yield identical emit projections.
+// from the same fixture must yield identical emit projections —
+// and it must surface no Error-severity diagnostics on an input
+// the fixture declares it handles, with every diagnostic it does
+// emit carrying a source position.
 //
 // Fixtures supply realistic input scenarios. The suite drives
 // the generator against each in a dedicated subtest so failure
@@ -59,11 +75,22 @@ func RunGeneratorSuite(t *testing.T, g plugin.Generator, fixtures []GeneratorFix
 	t.Run("Generate on empty store does not panic", func(t *testing.T) {
 		assertGenerateEmptyStoreDoesNotPanic(t, g)
 	})
+	t.Run("Generate on empty store produces no Error-severity diagnostics", func(t *testing.T) {
+		assertGenerateEmptyStoreCarriesNoErrors(t, g)
+	})
 	assertGeneratorFixtureNamesUnique(t, fixtures)
 	for _, fx := range fixtures {
 		t.Run("fixture="+fx.Name+"/Generate does not panic", func(t *testing.T) {
 			s := buildGeneratorStore(t, fx)
 			assertGenerateDoesNotPanic(t, g, s)
+		})
+		t.Run("fixture="+fx.Name+"/Generate produces no Error-severity diagnostics", func(t *testing.T) {
+			s := buildGeneratorStore(t, fx)
+			assertGenerateCarriesNoErrors(t, g, fx, s)
+		})
+		t.Run("fixture="+fx.Name+"/Generate diagnostics carry a source position", func(t *testing.T) {
+			s := buildGeneratorStore(t, fx)
+			assertGenerateDiagnosticsArePositioned(t, g, fx, s)
 		})
 		t.Run("fixture="+fx.Name+"/source-side node counts unchanged by Generate", func(t *testing.T) {
 			s := buildGeneratorStore(t, fx)
@@ -76,6 +103,10 @@ func RunGeneratorSuite(t *testing.T, g plugin.Generator, fixtures []GeneratorFix
 		})
 		t.Run("fixture="+fx.Name+"/NodesOnly declaration is truthful", func(t *testing.T) {
 			assertNodesOnlyIsTruthful(t, g, buildGeneratorStore(t, fx), buildGeneratorStore(t, fx))
+		})
+		t.Run("fixture="+fx.Name+"/emitted values carry the generator's own SetBy", func(t *testing.T) {
+			s := buildGeneratorStore(t, fx)
+			assertEmitValuesAreAttributed(t, g, s)
 		})
 		t.Run("fixture="+fx.Name+"/emitted output tags are declared", func(t *testing.T) {
 			s := buildGeneratorStore(t, fx)
@@ -114,8 +145,8 @@ func RunGeneratorSuite(t *testing.T, g plugin.Generator, fixtures []GeneratorFix
 func assertOutputPackagesTolerateMissingTags(tb testing.TB, g plugin.Generator, s *store.Store) {
 	tb.Helper()
 
-	if err := runGenerateRecovering(g, s); err != nil {
-		tb.Fatalf("Generate panicked: %v", err)
+	if err := runGenerateRecovering(g, s, diag.Discard()); err != nil {
+		tb.Fatalf("Generate %s: %v", probeVerb(err), err)
 	}
 
 	probes := []struct {
@@ -127,20 +158,53 @@ func assertOutputPackagesTolerateMissingTags(tb testing.TB, g plugin.Generator, 
 		{"primary routed without a derivable path", map[string]string{"": ""}},
 	}
 
-	for _, pending := range s.Emit().PendingOriginSlots() {
-		setter, ok := pending.Item.(emit.OutputPackageSetter)
+	// Every implementor in the graph, not only the queued slot
+	// contributions. Layout's own dispatch walks the emit graph from
+	// both roots, so a decl-level implementor is handed the same
+	// partial map — and until this walked the graph too, none of them
+	// was ever probed.
+	for _, n := range walkEmitNodes(s) {
+		setter, ok := n.(emit.OutputPackageSetter)
 		if !ok {
 			continue
 		}
 		for _, probe := range probes {
 			if err := callSetOutputPackagesRecovering(setter, probe.byTag); err != nil {
-				tb.Errorf("generator %q: SetOutputPackages panicked on a %s contribution "+
+				tb.Errorf("generator %q: SetOutputPackages panicked on a %s value "+
 					"when %s: %v; the map carries only tags that routed, so an "+
 					"implementor must not assume its own are present",
-					g.Name(), pending.Item.Kind(), probe.name, err)
+					g.Name(), n.Kind(), probe.name, err)
 			}
 		}
 	}
+}
+
+// walkEmitNodes returns every node reachable in s's emit graph plus
+// every queued origin-slot contribution, in traversal order.
+//
+// The roots mirror Layout's own dispatch — packages and files both —
+// so a check written against this list sees what routing sees. The
+// pending queue is appended because those contributions are not in the
+// graph until Layout materialises them, and a contract that only holds
+// after materialisation is one the suite could never have checked.
+func walkEmitNodes(s *store.Store) []emit.Node {
+	ev := s.Emit()
+	var out []emit.Node
+	var collect emit.VisitorFunc
+	collect = func(n emit.Node) emit.Visitor {
+		out = append(out, n)
+		return collect
+	}
+	for _, p := range ev.Packages().Items() {
+		emit.Walk(p, collect)
+	}
+	for _, f := range ev.Files().Items() {
+		emit.Walk(f, collect)
+	}
+	for _, pending := range ev.PendingOriginSlots() {
+		out = append(out, pending.Item)
+	}
+	return out
 }
 
 // callSetOutputPackagesRecovering invokes SetOutputPackages and
@@ -180,37 +244,42 @@ func assertEmittedTagsAreDeclared(tb testing.TB, g plugin.Generator, s *store.St
 		// pure slot weavers are the documented case.
 		return
 	}
-	if err := runGenerateRecovering(g, s); err != nil {
-		tb.Fatalf("Generate panicked: %v", err)
+	if err := runGenerateRecovering(g, s, diag.Discard()); err != nil {
+		tb.Fatalf("Generate %s: %v", probeVerb(err), err)
 	}
 
 	// The active language is not observable from the generator alone,
 	// so the declared set is the union across the probe languages. An
 	// empty union means the plugin declares nothing routable and the
 	// check has nothing to say.
-	declared := map[string]struct{}{"": {}}
-	var declaresAny bool
+	// Seeded from the declared Outputs alone. The empty tag used to be
+	// whitelisted unconditionally, which made the plugin's *primary*
+	// output — the one most decls carry — unfalsifiable: a generator
+	// declaring only tagged outputs still routes its untagged decls
+	// nowhere, and Layout reports ErrNoDefaultOutput for exactly that.
+	declared := map[string]struct{}{}
 	for _, lang := range probeLanguages {
 		for _, o := range provider.Outputs(lang) {
 			declared[o.Tag] = struct{}{}
-			declaresAny = true
 		}
 	}
-	if !declaresAny {
+	if len(declared) == 0 {
 		return
 	}
 
-	for _, pending := range s.Emit().PendingOriginSlots() {
-		tagged, ok := pending.Item.(interface{ OutputTag() string })
+	for _, n := range walkEmitNodes(s) {
+		tagged, ok := n.(interface{ OutputTag() string })
 		if !ok {
 			continue
 		}
 		tag := tagged.OutputTag()
-		if _, ok := declared[tag]; !ok {
-			tb.Errorf("generator %q stamped OutputTag %q on a %s contribution but declares no "+
-				"Output with that tag; the decl cannot route to the file the tag names",
-				g.Name(), tag, pending.Item.Kind())
+		if _, ok := declared[tag]; ok {
+			continue
 		}
+		tb.Errorf("generator %q stamped OutputTag %q on a %s value but declares no "+
+			"Output with that tag; Layout finds no matching Output and drops the decl, so "+
+			"it never reaches the file the tag names",
+			g.Name(), tag, n.Kind())
 	}
 }
 
@@ -239,7 +308,10 @@ func buildGeneratorStore(t *testing.T, fx GeneratorFixture) *store.Store {
 	if fx.BuildStore == nil {
 		t.Fatalf("RunGeneratorSuite: fixture %q has nil BuildStore", fx.Name)
 	}
-	s := fx.BuildStore(t)
+	s, err := buildFixtureStoreRecovering(func() *store.Store { return fx.BuildStore(t) })
+	if err != nil {
+		t.Fatalf("RunGeneratorSuite: fixture %q: %v", fx.Name, err)
+	}
 	if s == nil {
 		t.Fatalf("RunGeneratorSuite: fixture %q BuildStore returned nil store", fx.Name)
 	}
@@ -254,9 +326,28 @@ func buildGeneratorStore(t *testing.T, fx GeneratorFixture) *store.Store {
 func assertGenerateEmptyStoreDoesNotPanic(tb testing.TB, g plugin.Generator) {
 	tb.Helper()
 	s := store.New()
-	if err := runGenerateRecovering(g, s); err != nil {
-		tb.Errorf("Generate panicked on empty store: %v", err)
+	if err := runGenerateRecovering(g, s, diag.Discard()); err != nil {
+		tb.Errorf("Generate %s on an empty store: %v", probeVerb(err), err)
 	}
+}
+
+// assertGenerateEmptyStoreCarriesNoErrors drives the generator
+// against a fresh empty store and fails when it complains about it.
+//
+// A generator that reports an Error on an empty store reports one on
+// every project whose patterns expand to no matches — a first-run
+// experience of a non-zero exit and a diagnostic about input the user
+// never wrote. The positioned-diagnostic check has no counterpart
+// here: the probe carries no fixture, so there is nothing to hang the
+// waiver on, and an empty store has no source construct to name
+// anyway.
+func assertGenerateEmptyStoreCarriesNoErrors(tb testing.TB, g plugin.Generator) {
+	tb.Helper()
+	d := diag.Capture()
+	if err := runGenerateRecovering(g, store.New(), d); err != nil {
+		tb.Fatalf("Generate did not complete on an empty store: %v", err)
+	}
+	reportErrorDiagnostics(tb, roleGenerator, emptyStoreSubject, d)
 }
 
 // assertGenerateDoesNotPanic drives the generator against the
@@ -265,9 +356,43 @@ func assertGenerateEmptyStoreDoesNotPanic(tb testing.TB, g plugin.Generator) {
 // returned errors are reserved for catastrophic failures.
 func assertGenerateDoesNotPanic(tb testing.TB, g plugin.Generator, s *store.Store) {
 	tb.Helper()
-	if err := runGenerateRecovering(g, s); err != nil {
-		tb.Errorf("Generate panicked on fixture store: %v", err)
+	if err := runGenerateRecovering(g, s, diag.Discard()); err != nil {
+		tb.Errorf("Generate %s on the fixture store: %v", probeVerb(err), err)
 	}
+}
+
+// assertGenerateCarriesNoErrors drives the generator against the
+// fixture's store and fails when the diagnostic sink records any
+// Error-severity entry. Mirrors [assertRenderCarriesNoErrors], whose
+// rationale transfers verbatim: the fixtures a plugin author supplies
+// represent inputs the plugin handles cleanly, and an Error
+// diagnostic on one of them is a contract failure the author intends
+// to surface — to the user, on every run, as a non-zero exit.
+func assertGenerateCarriesNoErrors(tb testing.TB, g plugin.Generator, fx GeneratorFixture, s *store.Store) {
+	tb.Helper()
+	d := diag.Capture()
+	if err := runGenerateRecovering(g, s, d); err != nil {
+		tb.Fatalf("Generate did not complete on fixture %q: %v", fx.Name, err)
+	}
+	reportErrorDiagnostics(tb, roleGenerator, fixtureSubject(fx.Name), d)
+}
+
+// assertGenerateDiagnosticsArePositioned drives the generator against
+// the fixture's store and fails when any diagnostic it emitted
+// carries a zero position, unless the fixture waived the check
+// through [GeneratorFixture.AllowsPositionlessDiagnostics].
+func assertGenerateDiagnosticsArePositioned(
+	tb testing.TB,
+	g plugin.Generator,
+	fx GeneratorFixture,
+	s *store.Store,
+) {
+	tb.Helper()
+	d := diag.Capture()
+	if err := runGenerateRecovering(g, s, d); err != nil {
+		tb.Fatalf("Generate did not complete on fixture %q: %v", fx.Name, err)
+	}
+	reportPositionlessDiagnostics(tb, roleGenerator, fixtureSubject(fx.Name), d, fx.AllowsPositionlessDiagnostics)
 }
 
 // assertGenerateLeavesSourceNodesUnchanged pins the
@@ -278,7 +403,7 @@ func assertGenerateDoesNotPanic(tb testing.TB, g plugin.Generator, s *store.Stor
 func assertGenerateLeavesSourceNodesUnchanged(tb testing.TB, g plugin.Generator, s *store.Store) {
 	tb.Helper()
 	before := snapshotNodeCounts(s)
-	if err := runGenerateRecovering(g, s); err != nil {
+	if err := runGenerateRecovering(g, s, diag.Discard()); err != nil {
 		tb.Fatalf("Generate panicked during source-node check: %v", err)
 	}
 	after := snapshotNodeCounts(s)
@@ -309,43 +434,167 @@ func assertGenerateLeavesSourceNodesUnchanged(tb testing.TB, g plugin.Generator,
 // scheduling and caching layers rely on.
 func assertGenerateIsDeterministic(tb testing.TB, g plugin.Generator, s1, s2 *store.Store) {
 	tb.Helper()
-	if err := runGenerateRecovering(g, s1); err != nil {
-		tb.Fatalf("Generate panicked on first determinism pass: %v", err)
+	if err := runGenerateRecovering(g, s1, diag.Discard()); err != nil {
+		tb.Fatalf("Generate %s on the first determinism pass: %v", probeVerb(err), err)
 	}
-	if err := runGenerateRecovering(g, s2); err != nil {
-		tb.Fatalf("Generate panicked on second determinism pass: %v", err)
+	if err := runGenerateRecovering(g, s2, diag.Discard()); err != nil {
+		tb.Fatalf("Generate %s on the second determinism pass: %v", probeVerb(err), err)
 	}
-	first := emitProjection(s1)
-	second := emitProjection(s2)
-	if !slices.Equal(first, second) {
+	if first, second := emitDeepProjection(s1), emitDeepProjection(s2); !slices.Equal(first, second) {
 		tb.Errorf(
 			"emit projection differs across two equivalent inputs; generator is not deterministic\n"+
-				"  first run:  %s\n  second run: %s",
+				"  first run:  %s\n  second run: %s\n"+
+				"  identity-only diff (order and slots erased):\n    first:  %s\n    second: %s",
 			strings.Join(first, ", "), strings.Join(second, ", "),
+			strings.Join(emitProjection(s1), ", "), strings.Join(emitProjection(s2), ", "),
 		)
 	}
 }
 
-// runGenerateRecovering invokes Generate with a discard
+// emitDeepProjection returns an ordered projection of everything a
+// generator emitted: the walked emit graph in traversal order,
+// followed by the queued origin-slot contributions in registration
+// order.
+//
+// Three properties distinguish it from [emitProjection], and each
+// closes a class that projection could not see.
+//
+// It is ordered. [emitProjection] sorts, which is right for a
+// readable diff and wrong for an oracle: a generator that emits the
+// same set of declarations in a different order every run renders a
+// different file every run, and the sorted form calls the two equal.
+//
+// It walks rather than enumerating buckets. [emit.Walk] descends into
+// slots, so a contribution appended to a host's slot is visible; the
+// bucket enumeration never saw one. The roots mirror the production
+// traversal in Layout — packages and files both — so the suite reads
+// the graph the way the thing it stands in for does.
+//
+// It includes the pending origin-slot queue. Those contributions are
+// not in the graph until Layout materialises them, so nothing that
+// walks the graph alone can observe a generator whose entire output
+// goes through [store.EmitView.AppendOriginSlot] — the shape four
+// in-tree plugins ship, and the one the old oracle scored green
+// whatever it did.
+func emitDeepProjection(s *store.Store) []string {
+	ev := s.Emit()
+	var out []string
+
+	var record emit.VisitorFunc
+	record = func(n emit.Node) emit.Visitor {
+		out = append(out, fmt.Sprintf("%d:%s", len(out), emitNodeIdentity(n)))
+		return record
+	}
+	for _, p := range ev.Packages().Items() {
+		emit.Walk(p, record)
+	}
+	for _, f := range ev.Files().Items() {
+		emit.Walk(f, record)
+	}
+
+	// Registration order is load-bearing: Layout drains this queue in
+	// plugin-topo order across plugins and FIFO within each, so two
+	// runs that queue the same contributions in a different order
+	// render them in a different order.
+	for i, pending := range ev.PendingOriginSlots() {
+		out = append(out, fmt.Sprintf(
+			"pending:%d:slot=%s:origin=%s:setBy=%s:%s",
+			i, pending.SlotName, nodeOwnerName(pending.Origin),
+			pending.Prov.SetBy, emitNodeIdentity(pending.Item),
+		))
+	}
+	return out
+}
+
+// emitNodeIdentity renders one emit node's identity for the ordered
+// projection: its kind, its name where it has one, and the routing
+// fields a divergence would show up in.
+//
+// SetBy and OutputTag are included because both decide where the value
+// lands, so a run that changes either changes the output file even
+// when every name matches.
+func emitNodeIdentity(n emit.Node) string {
+	if n == nil {
+		return "<nil>"
+	}
+	name := unnamedSentinel
+	if named, ok := any(n).(interface{ QName() string }); ok {
+		name = named.QName()
+	} else if named, ok := any(n).(interface{ GetName() string }); ok {
+		name = named.GetName()
+	}
+	return fmt.Sprintf("%s:%s:setBy=%s:tag=%s", n.Kind(), name, n.SetBy(), n.OutputTag())
+}
+
+// assertEmitValuesAreAttributed pins that every value a generator
+// emits carries that generator's own [plugin.Plugin.Name] in SetBy.
+//
+// SetBy is the only cross-plugin identity key in the emit graph, and
+// three separate consumers look values up by it: Layout resolves the
+// declared Outputs of the plugin named there, slot rendering orders
+// contributions by it against the resolved plugin order, and the
+// rendered header attributes the file to it. A value carrying anything
+// else matches no entry in any of them — its declarations are dropped
+// at routing, and the diagnostic names a plugin string the author has
+// never seen.
+//
+// Nothing writes the field automatically. A generator that hand-builds
+// its emit values, or passes a literal to the emit builder rather than
+// its own Name, produces exactly this.
+func assertEmitValuesAreAttributed(tb testing.TB, g plugin.Generator, s *store.Store) {
+	tb.Helper()
+	if err := runGenerateRecovering(g, s, diag.Discard()); err != nil {
+		tb.Fatalf("Generate did not complete during the attribution check: %v", err)
+	}
+
+	want := g.Name()
+	report := func(where, got, identity string) {
+		tb.Errorf(
+			"%s carries SetBy %q, but the generator's Name is %q; Layout looks a plugin's declared "+
+				"Outputs up under SetBy, slot rendering orders by it and the file header attributes "+
+				"by it, so a foreign value drops the declaration at routing\n  value: %s",
+			where, got, want, identity,
+		)
+	}
+
+	ev := s.Emit()
+	var visit emit.VisitorFunc
+	visit = func(n emit.Node) emit.Visitor {
+		// The empty string is "unattributed", which the framework
+		// treats as legitimate for values no plugin claims; only a
+		// foreign non-empty name is a contract failure.
+		if got := n.SetBy(); got != "" && got != want {
+			report("an emitted value", got, emitNodeIdentity(n))
+		}
+		return visit
+	}
+	for _, p := range ev.Packages().Items() {
+		emit.Walk(p, visit)
+	}
+	for _, f := range ev.Files().Items() {
+		emit.Walk(f, visit)
+	}
+	for _, pending := range ev.PendingOriginSlots() {
+		if got := pending.Prov.SetBy; got != "" && got != want {
+			report("a queued slot contribution's Provenance", got, emitNodeIdentity(pending.Item))
+		}
+	}
+}
+
+// runGenerateRecovering invokes Generate against the caller's
 // diagnostic sink and recovers any panic into a returned error.
 // The plain Generate error is wrapped on the same path so
 // callers can distinguish "panicked" from "returned an error"
 // by inspecting the wrapping verb.
-func runGenerateRecovering(g plugin.Generator, s *store.Store) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("recovered panic: %v", r)
-		}
-	}()
-	ctx := &plugin.GeneratorContext{
-		Store:  s,
-		Reader: store.NewReader(s),
-		Diag:   diag.New(),
-	}
-	if rerr := g.Generate(ctx); rerr != nil {
-		return fmt.Errorf("generate returned error: %w", rerr)
-	}
-	return nil
+//
+// The sink is a parameter rather than a local because a check that
+// cannot reach it cannot assert on it — which is how three role
+// suites certified plugins that reported an Error on every input.
+// Pass [diag.Capture] to inspect what was emitted, [diag.Discard]
+// when the check is about panics or store state and the diagnostics
+// belong to a sibling check.
+func runGenerateRecovering(g plugin.Generator, s *store.Store, d *diag.Sink) error {
+	return runGenerateWithReader(g, s, store.NewReader(s), d)
 }
 
 // emitProjection returns a sorted slice of stable identity
@@ -491,7 +740,10 @@ func assertNodesOnlyIsTruthful(tb testing.TB, g plugin.Generator, clean, seeded 
 	}
 
 	reader := store.NewReader(clean)
-	if err := runGenerateWithReader(g, clean, reader); err != nil {
+	// Discard rather than Capture: this check reads the ReadSet and
+	// the emit projection, and whatever the generator says about the
+	// store is the diagnostic checks' business.
+	if err := runGenerateWithReader(g, clean, reader, diag.Discard()); err != nil {
 		return // panics and errors are the business of the other checks
 	}
 	for _, key := range reader.ReadSet().Keys() {
@@ -504,7 +756,7 @@ func assertNodesOnlyIsTruthful(tb testing.TB, g plugin.Generator, clean, seeded 
 
 	seedCanaryEmit(tb, seeded)
 	baseline := emitProjection(seeded)
-	if err := runGenerateRecovering(g, seeded); err != nil {
+	if err := runGenerateRecovering(g, seeded, diag.Discard()); err != nil {
 		return
 	}
 	contributed := withoutEntries(emitProjection(seeded), baseline)
@@ -546,16 +798,17 @@ func withoutEntries(all, remove []string) []string {
 
 // runGenerateWithReader is [runGenerateRecovering] with a
 // caller-supplied [store.Reader], so a check can inspect what the
-// generator read.
-func runGenerateWithReader(g plugin.Generator, s *store.Store, r *store.Reader) (err error) {
+// generator read. Both share this body; the reader is the only thing
+// the two forms disagree about.
+func runGenerateWithReader(g plugin.Generator, s *store.Store, r *store.Reader, d *diag.Sink) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("recovered panic: %v", rec)
+			err = fmt.Errorf("%w: %v", ErrProbePanicked, rec)
 		}
 	}()
-	ctx := &plugin.GeneratorContext{Store: s, Reader: r, Diag: diag.New()}
+	ctx := &plugin.GeneratorContext{Store: s, Reader: r, Diag: d}
 	if gerr := g.Generate(ctx); gerr != nil {
-		return fmt.Errorf("generate returned error: %w", gerr)
+		return fmt.Errorf("%w: %w", ErrProbeReturnedError, gerr)
 	}
 	return nil
 }

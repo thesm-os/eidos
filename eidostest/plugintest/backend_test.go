@@ -85,7 +85,7 @@ func TestRunBackendSuite_RejectsPanickingBackend(t *testing.T) {
 	b := &panickingBackend{name: "panicky", lang: "stub"}
 	fake := newFakeT()
 	plugintest.AssertRenderEmptyEmitDoesNotPanic(fake, b)
-	assertFakeMentions(t, fake, "Render panicked on empty emit graph")
+	assertFakeMentions(t, fake, "Render panicked on an empty emit graph")
 }
 
 // TestRunBackendSuite_RejectsErrorDiagnostic pins the

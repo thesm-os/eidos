@@ -73,10 +73,10 @@ func TestRunAnnotatorSuite_RejectsPanickingAnnotator(t *testing.T) {
 		// The panic is recovered into a t.Errorf, not a Fatalf;
 		// so we don't capture via captureFatal. Verify Errorf
 		// instead.
-		assertFakeMentions(t, fake, "Annotate panicked on empty store")
+		assertFakeMentions(t, fake, "Annotate panicked on an empty store")
 		return
 	}
-	assertFakeMentions(t, fake, "Annotate panicked on empty store")
+	assertFakeMentions(t, fake, "Annotate panicked on an empty store")
 }
 
 // TestRunAnnotatorSuite_RejectsNonIdempotentAnnotator pins the
@@ -239,4 +239,70 @@ func (a *erroringAnnotator) Name() string { return a.name }
 // Annotate returns the configured error.
 func (a *erroringAnnotator) Annotate(_ *plugin.AnnotatorContext) error {
 	return fmt.Errorf("erroringAnnotator: %w", a.err)
+}
+
+// countingAnnotator stamps a value derived from a per-instance call
+// counter rather than from the node it is handed.
+//
+// It defeats determinism and not idempotency, which is the whole
+// point: run twice over one store its already-stamped guard makes the
+// second pass a no-op and the meta state matches, so the single-store
+// check reports green. Given two equivalent stores it stamps "1" on
+// one and "2" on the other. The negative fixture lives here rather
+// than in broken.go because the completeness meta-test walks the
+// framework check table only, and this is a per-role contract.
+type countingAnnotator struct {
+	name  string
+	calls int
+}
+
+// Name returns the configured identifier.
+func (a *countingAnnotator) Name() string { return a.name }
+
+// Annotate stamps the current call count on every struct.
+func (a *countingAnnotator) Annotate(ctx *plugin.AnnotatorContext) error {
+	a.calls++
+	for _, s := range ctx.Store.Nodes().Structs().Items() {
+		if b := s.Meta(); b != nil && countingAnnotatorKey.Has(b) {
+			continue
+		}
+		countingAnnotatorKey.Set(s.EnsureMeta(), a.calls, a.name)
+	}
+	return nil
+}
+
+// countingAnnotatorKey is the bag key countingAnnotator stamps under.
+var countingAnnotatorKey = meta.EnsureKey("plugintest.counting", meta.IntParser)
+
+// TestRunAnnotatorSuite_RejectsCountDerivedStamp pins the annotator
+// determinism contract: a stamp derived from anything other than the
+// input differs across two equivalent stores.
+func TestRunAnnotatorSuite_RejectsCountDerivedStamp(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a count-derived stamp fails the two-store determinism check", func(t *testing.T) {
+		t.Parallel()
+		a := &countingAnnotator{name: "counting"}
+		fake := newFakeT()
+		plugintest.AssertAnnotateIsDeterministic(
+			fake, a,
+			storefixture.New().Struct("User", nil).Build(),
+			storefixture.New().Struct("User", nil).Build(),
+		)
+		assertFakeMentions(t, fake, "annotator is not idempotent")
+	})
+
+	t.Run("the same annotator still clears the single-store idempotency check", func(t *testing.T) {
+		t.Parallel()
+		// Demonstrates why the new check earns its place: the defect
+		// above is invisible to the check that already existed.
+		a := &countingAnnotator{name: "counting"}
+		fake := newFakeT()
+		captureFatal(func() {
+			plugintest.AssertAnnotateIsIdempotent(fake, a, storefixture.New().Struct("User", nil).Build())
+		})
+		if fake.failed {
+			t.Fatalf("idempotency was expected to pass a count-derived stamp: %v", fake.errs)
+		}
+	})
 }

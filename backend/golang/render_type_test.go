@@ -270,7 +270,8 @@ func TestRenderType_AnonStruct(t *testing.T) {
 	t.Run("a single inline field renders inline", func(t *testing.T) {
 		t.Parallel()
 		body := renderSingleFieldStruct(t, "One", emit.AnonStructOf(
-			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}}, nil))
+			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}}, nil,
+		))
 		if !strings.Contains(body, "One struct{ A int }") {
 			t.Fatalf("body should contain 'One struct{ A int }'; got:\n%s", body)
 		}
@@ -279,7 +280,8 @@ func TestRenderType_AnonStruct(t *testing.T) {
 	t.Run("a struct tag survives the round trip", func(t *testing.T) {
 		t.Parallel()
 		body := renderSingleFieldStruct(t, "Tagged", emit.AnonStructOf(
-			[]emit.AnonField{{Name: "B", Type: emit.Builtin("string"), Tag: `json:"b"`}}, nil))
+			[]emit.AnonField{{Name: "B", Type: emit.Builtin("string"), Tag: `json:"b"`}}, nil,
+		))
 		// A tag forces gofmt to explode even a single-field inline
 		// struct, so the assertion is on the field line rather than
 		// the one-line form the renderer emitted.
@@ -307,7 +309,8 @@ func TestRenderType_AnonStruct(t *testing.T) {
 	t.Run("an embedded type renders unqualified", func(t *testing.T) {
 		t.Parallel()
 		body := renderSingleFieldStruct(t, "Emb", emit.AnonStructOf(
-			nil, []emit.Ref{emit.Builtin("error")}))
+			nil, []emit.Ref{emit.Builtin("error")},
+		))
 		if !strings.Contains(body, "Emb struct{ error }") {
 			t.Fatalf("body should contain 'Emb struct{ error }'; got:\n%s", body)
 		}
@@ -321,7 +324,8 @@ func TestRenderType_AnonStruct(t *testing.T) {
 		// would fail rather than return a wrong body.
 		body := renderSingleFieldStruct(t, "Mixed", emit.AnonStructOf(
 			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}},
-			[]emit.Ref{emit.Builtin("error")}))
+			[]emit.Ref{emit.Builtin("error")},
+		))
 		if !strings.Contains(body, "Mixed struct {") {
 			t.Fatalf("body should contain 'Mixed struct {'; got:\n%s", body)
 		}
@@ -335,7 +339,8 @@ func TestRenderType_AnonStruct(t *testing.T) {
 	t.Run("an inner type registers its own import", func(t *testing.T) {
 		t.Parallel()
 		body := renderSingleFieldStruct(t, "Stamped", emit.AnonStructOf(
-			[]emit.AnonField{{Name: "T", Type: emit.External("time", "Time")}}, nil))
+			[]emit.AnonField{{Name: "T", Type: emit.External("time", "Time")}}, nil,
+		))
 		if !strings.Contains(body, `"time"`) {
 			t.Fatalf("inline field types must register imports; got:\n%s", body)
 		}
@@ -347,7 +352,8 @@ func TestRenderType_AnonStruct(t *testing.T) {
 	t.Run("nested inside a slice reaches renderType by the other path", func(t *testing.T) {
 		t.Parallel()
 		body := renderSingleFieldStruct(t, "Nest", emit.SliceOf(emit.AnonStructOf(
-			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}}, nil)))
+			[]emit.AnonField{{Name: "A", Type: emit.Builtin("int")}}, nil,
+		)))
 		if !strings.Contains(body, "Nest []struct{ A int }") {
 			t.Fatalf("body should contain 'Nest []struct{ A int }'; got:\n%s", body)
 		}
@@ -360,7 +366,8 @@ func TestRenderType_AnonStruct(t *testing.T) {
 		addEmitPackage(t, ctx, emitPackage("x", &emit.Struct{
 			Name: "X", Package: "x", Target: target,
 			Fields: []*emit.Field{{Name: "F", Type: emit.AnonStructOf(
-				[]emit.AnonField{{Name: "A", Type: &emit.CompositeRef{Shape: emit.CompositeShape(99)}}}, nil)}},
+				[]emit.AnonField{{Name: "A", Type: &emit.CompositeRef{Shape: emit.CompositeShape(99)}}}, nil,
+			)}},
 		}))
 		if err := mustNew(t).Render(ctx); err == nil && !d.HasErrors() {
 			t.Fatal("an unsupported inline field type must not render silently")

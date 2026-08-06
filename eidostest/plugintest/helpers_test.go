@@ -12,8 +12,11 @@ import (
 	"testing"
 	"text/template"
 
+	"go.thesmos.sh/eidos/core/diag"
+	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/priority"
+	"go.thesmos.sh/eidos/store"
 )
 
 // fakeT is a [testing.TB] adapter used by tests that need to
@@ -25,6 +28,8 @@ type fakeT struct {
 	testing.TB
 	errs   []string
 	fatals []string
+	skips  []string
+	logs   []string
 	failed bool
 }
 
@@ -62,6 +67,21 @@ func (f *fakeT) Fatalf(format string, args ...any) {
 
 // Helper is a no-op; fakeT does not adjust file:line reporting.
 func (*fakeT) Helper() {}
+
+// Skipf records the formatted message and panics with the sentinel
+// [fatalSentinel], mirroring how [testing.T.Skipf] short-circuits the
+// rest of the check. Recorded rather than ignored so a test can assert
+// that a check reported "examined nothing" instead of quietly passing.
+func (f *fakeT) Skipf(format string, args ...any) {
+	f.skips = append(f.skips, fmt.Sprintf(format, args...))
+	panic(fatalSentinel{})
+}
+
+// Logf records the formatted message. Recorded rather than discarded
+// so a test can assert a check reported how much it examined.
+func (f *fakeT) Logf(format string, args ...any) {
+	f.logs = append(f.logs, fmt.Sprintf(format, args...))
+}
 
 // Failed reports whether any error or fatal has been recorded.
 func (f *fakeT) Failed() bool { return f.failed }
@@ -279,6 +299,65 @@ func (p *templateProviderPlugin) TemplateOverrides(lang string) template.FuncMap
 		return nil
 	}
 	return p.overrides(lang)
+}
+
+// emptyInputComplainer reports one positioned Error-severity
+// diagnostic when — and only when — the store it is handed holds no
+// structs, and says nothing otherwise.
+//
+// It is the surgical fixture for the empty-store probes: a plugin
+// that complains about every input would fail the per-fixture
+// diagnostic check too, and could not distinguish a probe that reads
+// its own sink from one that inherited a fixture's. The position is
+// real so only the severity check can fire.
+//
+// One type serving both roles rather than two: the contract, the
+// failure and the rationale are identical on the generator and
+// annotator sides, and splitting them would only duplicate the
+// complaint.
+type emptyInputComplainer struct{ name string }
+
+// Name returns the configured identifier.
+func (p *emptyInputComplainer) Name() string { return p.name }
+
+// Generate complains when the store carries nothing to generate from.
+func (p *emptyInputComplainer) Generate(ctx *plugin.GeneratorContext) error {
+	p.complainWhenEmpty(ctx.Store, ctx.Diag)
+	return nil
+}
+
+// Annotate complains when the store carries nothing to stamp.
+func (p *emptyInputComplainer) Annotate(ctx *plugin.AnnotatorContext) error {
+	p.complainWhenEmpty(ctx.Store, ctx.Diag)
+	return nil
+}
+
+// complainWhenEmpty emits the sentinel diagnostic against an empty
+// store and nothing against a populated one.
+func (p *emptyInputComplainer) complainWhenEmpty(s *store.Store, d *diag.Sink) {
+	if s.Nodes().Structs().Len() > 0 {
+		return
+	}
+	d.For(p.name).Errorf(position.Synthetic("plugintest-test"), "plugintest test: nothing to work with")
+}
+
+// positionedWarner emits one positioned Warn-severity diagnostic per
+// invocation. It is the negative control for the positioned-
+// diagnostic check: a check that rejected any diagnostic rather than
+// any positionless one would make the fixture waiver mandatory for
+// every plugin that reports anything at all.
+type positionedWarner struct{ name string }
+
+// Name returns the configured identifier.
+func (p *positionedWarner) Name() string { return p.name }
+
+// Generate emits a warning carrying a real position.
+func (p *positionedWarner) Generate(ctx *plugin.GeneratorContext) error {
+	ctx.Diag.For(p.name).Warnf(
+		position.At("fixture.go", 3, 1),
+		"plugintest test: deliberate positioned warning",
+	)
+	return nil
 }
 
 // joinFake renders every message a fake TB recorded, for inclusion in

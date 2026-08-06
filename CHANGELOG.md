@@ -65,13 +65,43 @@ omitted unless they change what a caller can rely on.
   additive with a working zero value; the suite picks both fingerprints, so
   leaving the field empty still exercises the changed-composition pass.
 
+- **`eidostest/plugintest`: the generator, annotator and frontend suites now
+  read the diagnostic sink they hand the plugin.** All three built a collecting
+  sink, passed it in, and dropped it on return, so a plugin reporting an
+  Error-severity diagnostic on every input cleared 7/7 generator, 4/4 annotator
+  and 3/3 frontend subtests. The backend suite has always failed that shape. The
+  escape was never silent — `Pipeline.Run` returns `ErrRunHadErrors` after any
+  phase that recorded one, so every user run exits non-zero — but the suite
+  certified a plugin nobody could use.
+
+  | New subtest | What it catches |
+  |---|---|
+  | `<Role> produces no Error-severity diagnostics` (per fixture) | an Error or Internal diagnostic on an input the fixture declares the plugin handles |
+  | `Generate` / `Annotate` `on empty store produces no Error-severity diagnostics` | a plugin that complains when there is nothing to do, so every project whose patterns expand to no matches exits non-zero |
+  | `<Role> diagnostics carry a source position` (per fixture) | a diagnostic built with a zero `position.Pos`, which the text formatter renders as a dash where the file and line belong |
+
+  The frontend's `Load on empty pattern does not panic` probe is deliberately
+  exempt from both: rejecting an empty pattern loudly is the conforming
+  behaviour, not a defect.
+
+  Migration: fix the plugin, or narrow the fixture to the input it genuinely
+  covers — a fixture is a declaration that the plugin handles that input, and a
+  negative-path input belongs in a direct test that asserts the diagnostic. For
+  the position check only, `GeneratorFixture`, `AnnotatorFixture` and
+  `FrontendFixture` gained `AllowsPositionlessDiagnostics bool`, for run- and
+  configuration-level complaints that genuinely name no source construct. It
+  does not waive the no-Error-severity contract.
+
 ### Added
 
-- **`eidostest/plugintest`: `Violation`, `BrokenPlugin`, `Violations`, and
-  `LyingNodesOnlyGenerator`.** Plugins that deliberately break exactly one
-  framework contract. Running `RunSuite` against one and watching it fail is the
+- **`eidostest/plugintest`: `Violation`, `BrokenPlugin`, `Violations`,
+  `LyingNodesOnlyGenerator`, `ErroringGenerator`, `ErroringAnnotator` and
+  `ErroringFrontend`.** Plugins that deliberately break exactly one framework or
+  per-role contract. Running `RunSuite` against one and watching it fail is the
   cheapest way to confirm a conformance harness is wired up at all — the failure
-  mode this guards against is a suite that is never actually invoked.
+  mode this guards against is a suite that is never actually invoked. The three
+  `Erroring*` fixtures report an Error-severity diagnostic on every input and
+  otherwise behave, so they defeat the diagnostic checks and nothing else.
 
 - **`eidostest/plugintest.ConformanceLanguage`.** The backend language every
   capability lookup in the suite is driven with. Exported because it is part of

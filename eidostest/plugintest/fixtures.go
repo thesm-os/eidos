@@ -116,8 +116,15 @@ func NewFixturePlugin() *FixturePlugin {
 func NewMultiOutputFixturePlugin() *FixturePlugin {
 	p := NewFixturePlugin()
 	p.PluginName = "multi-output-fixture"
+	// Keyed on ConformanceLanguage, not on the language's own short
+	// name. This fixture shipped keyed on "go" while the suite probes
+	// "golang", so Outputs(ConformanceLanguage) returned an empty
+	// slice: the fixture offered to authors as an Outputs reference
+	// answered no probe, and the meta-tests built on it asserted
+	// nothing. TestShippedFixturesAnswerTheProbedLanguages now fails
+	// on any fixture keyed on a language the suite never drives.
 	p.OutputsByLang = map[string][]plugin.Output{
-		"go": {
+		ConformanceLanguage: {
 			{Suffix: "_fixture.go"},
 			{Tag: fixtureTag, Suffix: "_fixture_test.go"},
 		},

@@ -4,12 +4,15 @@
 package enum_test
 
 import (
+	"strings"
 	"testing"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/plugin"
 	enumplugin "go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/store"
 )
@@ -20,6 +23,15 @@ import (
 // well-formed shape); the generator suite pins the
 // determinism / frozen-source / diagnostic-discipline contracts
 // across a representative fixture set.
+//
+// Every fixture here is an input the plugin handles cleanly, which
+// is what a conformance fixture means: the suite fails any fixture
+// producing an Error-severity diagnostic, because the pipeline turns
+// one into a non-zero exit for the user. The one input that does
+// produce a diagnostic — an annotated enum with no variants — is
+// pinned directly in [TestGenerateOnAnnotatedEnumWithNoVariants],
+// where the assertion is about the diagnostic rather than about the
+// contracts a valid input satisfies.
 func TestConformance(t *testing.T) {
 	t.Parallel()
 
@@ -55,17 +67,6 @@ func TestConformance(t *testing.T) {
 						return buildEnumStore(t, withOverride)
 					},
 				},
-				{
-					Name: "annotated enum with no variants (skipped with diagnostic)",
-					BuildStore: func(t *testing.T) *store.Store {
-						t.Helper()
-						return storefixture.New().
-							Enum("Empty", func(eb *storefixture.EnumBuilder) {
-								eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
-							}).
-							Build()
-					},
-				},
 			},
 		)
 	})
@@ -81,6 +82,91 @@ func TestConformance(t *testing.T) {
 			UnknownKey: "no_such_key",
 		})
 	})
+}
+
+// TestGenerateOnAnnotatedEnumWithNoVariants pins the plugin's only
+// diagnostic path: an enum carrying `+gen:enum` with nothing to
+// enumerate.
+//
+// Driven directly rather than through [plugintest.RunGeneratorSuite]
+// because the two disagree about what the input is. To the suite a
+// fixture is an input the plugin handles; this one it refuses, on
+// purpose, and the refusal is the behaviour worth pinning — with its
+// severity and its position, neither of which a conformance run
+// inspects.
+func TestGenerateOnAnnotatedEnumWithNoVariants(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the empty enum is reported as an Error-severity diagnostic", func(t *testing.T) {
+		t.Parallel()
+
+		_, d := generateEmptyEnum(t)
+
+		if !d.HasErrors() {
+			t.Fatalf("an annotated enum with no variants produced no Error diagnostic; got %+v",
+				d.Diagnostics())
+		}
+		if got := d.Diagnostics()[0].Message; !strings.Contains(got, enumplugin.ErrEnumHasNoVariants.Error()) {
+			t.Errorf("diagnostic message %q does not name ErrEnumHasNoVariants", got)
+		}
+	})
+
+	t.Run("the diagnostic carries the enum's own position", func(t *testing.T) {
+		t.Parallel()
+
+		_, d := generateEmptyEnum(t)
+
+		got := d.Diagnostics()[0].Pos
+		if got.IsZero() {
+			t.Fatal("the diagnostic carries no position; it renders as a dash where the file and " +
+				"line belong and the user cannot find the enum to fix")
+		}
+		if want := emptyEnumPos; got != want {
+			t.Errorf("diagnostic position = %v; want the enum's own %v", got, want)
+		}
+	})
+
+	t.Run("the empty enum contributes nothing to the emit graph", func(t *testing.T) {
+		t.Parallel()
+
+		s, _ := generateEmptyEnum(t)
+
+		if got := len(s.Emit().PendingOriginSlots()); got != 0 {
+			t.Errorf("plugin queued %d contribution(s) for an enum it reported on; want 0 — a "+
+				"diagnostic that does not also stop the emit renders a broken file", got)
+		}
+	})
+}
+
+// emptyEnumPos is the position the no-variant fixture declares, so
+// the position assertion compares against a value the fixture owns
+// rather than a literal repeated on both sides.
+var emptyEnumPos = position.At("empty/empty.go", 1, 1)
+
+// generateEmptyEnum drives Generate against a store holding one
+// annotated enum with no variants and returns the store together
+// with the diagnostics it produced.
+//
+// The sink is [diag.Capture] rather than [diag.Discard]: the whole
+// point of this test is what was emitted.
+func generateEmptyEnum(t *testing.T) (*store.Store, *diag.Sink) {
+	t.Helper()
+	s := storefixture.New().
+		Package("empty", "example.com/empty").
+		Enum("Empty", func(eb *storefixture.EnumBuilder) {
+			eb.Pos(emptyEnumPos)
+			eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
+		}).
+		Build()
+	d := diag.Capture()
+	if err := enumplugin.New().Generate(&plugin.GeneratorContext{
+		Store:  s,
+		Reader: store.NewReader(s),
+		Diag:   d,
+	}); err != nil {
+		t.Fatalf("Generate returned an error on an enum it should have reported on: %v", err)
+	}
+	return s, d
 }
 
 // buildEnumStore returns a [store.Store] populated with one

@@ -82,6 +82,22 @@ type FrontendFixture struct {
 	// fixture exists to pin.
 	ExpectsEmpty bool
 
+	// AllowsPositionlessDiagnostics waives the requirement that
+	// every diagnostic the frontend emits on this fixture carries a
+	// source position.
+	//
+	// This is the role that most often needs it. A frontend's
+	// run-level failures — a pattern that resolves to nothing, a
+	// package the toolchain refuses to load — name no source
+	// construct, so there is no line to point at and inventing one
+	// would be worse than the dash. Per-declaration complaints are a
+	// different matter: those have a position and the check exists
+	// to keep them carrying it.
+	//
+	// It does not waive the no-Error-severity contract; that one is
+	// not negotiable per fixture.
+	AllowsPositionlessDiagnostics bool
+
 	// Fingerprint is the composition fingerprint the suite stamps
 	// on [plugin.FrontendContext.Fingerprint] for the first of its
 	// two cache passes. Leave it empty and the suite picks one.
@@ -99,8 +115,15 @@ type FrontendFixture struct {
 // without panicking, must record something, must be
 // deterministic — two invocations driven against equivalent
 // contexts (independent stores, same pattern, same options) must
-// produce equivalent node graphs — and must not replay a cached
-// graph across a change of composition fingerprint.
+// produce equivalent node graphs — must not replay a cached
+// graph across a change of composition fingerprint, and must
+// surface no Error-severity diagnostics on a fixture it declares
+// it handles, with every diagnostic it does emit carrying a
+// source position.
+//
+// The empty-pattern probe is deliberately outside the diagnostic
+// contract: a frontend is permitted to reject an empty pattern, and
+// complaining about it is the conforming behaviour.
 //
 // The suite calls [plugin.OptionsProvider.SetOptions] before
 // every Load when the frontend implements the capability, so
@@ -126,6 +149,12 @@ func RunFrontendSuite(t *testing.T, f plugin.Frontend, fixtures []FrontendFixtur
 		})
 		t.Run("fixture="+fx.Name+"/Load populates the store", func(t *testing.T) {
 			assertLoadPopulatesStore(t, f, fx)
+		})
+		t.Run("fixture="+fx.Name+"/Load produces no Error-severity diagnostics", func(t *testing.T) {
+			assertLoadCarriesNoErrors(t, f, fx)
+		})
+		t.Run("fixture="+fx.Name+"/Load diagnostics carry a source position", func(t *testing.T) {
+			assertLoadDiagnosticsArePositioned(t, f, fx)
 		})
 		t.Run("fixture="+fx.Name+"/Load is deterministic across two runs", func(t *testing.T) {
 			assertLoadIsDeterministic(t, f, fx)
@@ -191,6 +220,13 @@ func assertFrontendFixtureNamesUnique(tb testing.TB, fixtures []FrontendFixture)
 // pattern crash the process on projects whose patterns expand
 // to nothing.
 //
+// The sink is discarded here and only here. The generator and
+// annotator empty-store probes read theirs, because a plugin with
+// nothing to do has nothing to complain about; a frontend handed no
+// pattern has been asked for something impossible, and rejecting it
+// loudly is what the role is supposed to do. Reading the sink here
+// would fail conforming frontends for their conformance.
+//
 // fx supplies the Options only; its Pattern is cleared here, so
 // callers hand over a real fixture rather than assembling a
 // pattern-less copy. A frontend whose schema declares a required
@@ -199,11 +235,52 @@ func assertFrontendFixtureNamesUnique(tb testing.TB, fixtures []FrontendFixture)
 func assertLoadEmptyPatternDoesNotPanic(tb testing.TB, f plugin.Frontend, fx FrontendFixture) {
 	tb.Helper()
 	fx.Pattern = ""
-	res := runLoadRecovering(f, fx, store.New(), cache.NewNone())
+	res := runLoadRecovering(f, fx, store.New(), cache.NewNone(), diag.Discard())
 	failOnRejectedFixtureOptions(tb, fx, res)
 	if res.panicked {
 		tb.Errorf("Load panicked on empty pattern: %v", res.panicValue)
 	}
+}
+
+// assertLoadCarriesNoErrors drives the frontend against the fixture's
+// pattern and fails when the diagnostic sink records any
+// Error-severity entry. Mirrors [assertRenderCarriesNoErrors], whose
+// rationale transfers verbatim: the fixture is the author's own
+// declaration that this input loads cleanly, and an Error diagnostic
+// on it fails every user run through pipeline.ErrRunHadErrors.
+//
+// A non-nil Load return is not itself a failure here — the frontend
+// role reserves it for what the suite cannot classify — but a run
+// that ended in a panic is, because a sink from a half-executed Load
+// says nothing about the contract.
+func assertLoadCarriesNoErrors(tb testing.TB, f plugin.Frontend, fx FrontendFixture) {
+	tb.Helper()
+	d := diag.Capture()
+	res := runLoadRecovering(f, fx, store.New(), cache.NewNone(), d)
+	failOnRejectedFixtureOptions(tb, fx, res)
+	if res.panicked {
+		tb.Fatalf("Load panicked on fixture %q: %v", fx.Name, res.panicValue)
+	}
+	reportErrorDiagnostics(tb, roleFrontend, fixtureSubject(fx.Name), d)
+}
+
+// assertLoadDiagnosticsArePositioned drives the frontend against the
+// fixture's pattern and fails when any diagnostic it emitted carries
+// a zero position, unless the fixture waived the check through
+// [FrontendFixture.AllowsPositionlessDiagnostics].
+//
+// The frontend role is the one that documents the positioned
+// requirement (see [plugin.Frontend]), which is why the check lands
+// here rather than only on the roles whose docs are silent.
+func assertLoadDiagnosticsArePositioned(tb testing.TB, f plugin.Frontend, fx FrontendFixture) {
+	tb.Helper()
+	d := diag.Capture()
+	res := runLoadRecovering(f, fx, store.New(), cache.NewNone(), d)
+	failOnRejectedFixtureOptions(tb, fx, res)
+	if res.panicked {
+		tb.Fatalf("Load panicked on fixture %q: %v", fx.Name, res.panicValue)
+	}
+	reportPositionlessDiagnostics(tb, roleFrontend, fixtureSubject(fx.Name), d, fx.AllowsPositionlessDiagnostics)
 }
 
 // assertLoadDoesNotPanic drives the frontend against the
@@ -213,7 +290,7 @@ func assertLoadEmptyPatternDoesNotPanic(tb testing.TB, f plugin.Frontend, fx Fro
 // value for catastrophic failures the suite can't classify.
 func assertLoadDoesNotPanic(tb testing.TB, f plugin.Frontend, fx FrontendFixture) {
 	tb.Helper()
-	res := runLoadRecovering(f, fx, store.New(), cache.NewNone())
+	res := runLoadRecovering(f, fx, store.New(), cache.NewNone(), diag.Discard())
 	failOnRejectedFixtureOptions(tb, fx, res)
 	if res.panicked {
 		tb.Errorf("Load panicked on fixture %q: %v", fx.Name, res.panicValue)
@@ -233,7 +310,7 @@ func assertLoadDoesNotPanic(tb testing.TB, f plugin.Frontend, fx FrontendFixture
 func assertLoadPopulatesStore(tb testing.TB, f plugin.Frontend, fx FrontendFixture) {
 	tb.Helper()
 	s := store.New()
-	res := runLoadRecovering(f, fx, s, cache.NewNone())
+	res := runLoadRecovering(f, fx, s, cache.NewNone(), diag.Discard())
 	failOnRejectedFixtureOptions(tb, fx, res)
 	if res.panicked {
 		tb.Fatalf("Load panicked on fixture %q: %v", fx.Name, res.panicValue)
@@ -281,7 +358,7 @@ func assertLoadIsDeterministic(tb testing.TB, f plugin.Frontend, fx FrontendFixt
 	pass := withFingerprint(fx, first)
 
 	cold := store.New()
-	res := runLoadRecovering(f, pass, cold, shared)
+	res := runLoadRecovering(f, pass, cold, shared, diag.Discard())
 	failOnRejectedFixtureOptions(tb, fx, res)
 	if res.panicked {
 		tb.Fatalf("Load panicked on first determinism pass of fixture %q: %v", fx.Name, res.panicValue)
@@ -291,7 +368,7 @@ func assertLoadIsDeterministic(tb testing.TB, f plugin.Frontend, fx FrontendFixt
 	// still runs against the partial store the frontend populated;
 	// only a panic aborts.
 	warm := store.New()
-	res = runLoadRecovering(f, pass, warm, shared)
+	res = runLoadRecovering(f, pass, warm, shared, diag.Discard())
 	failOnRejectedFixtureOptions(tb, fx, res)
 	if res.panicked {
 		tb.Fatalf("Load panicked on second determinism pass of fixture %q: %v", fx.Name, res.panicValue)
@@ -342,7 +419,7 @@ func assertLoadIsFingerprintKeyed(tb testing.TB, f plugin.Frontend, fx FrontendF
 	first, second := fingerprintPair(fx)
 
 	cold := store.New()
-	res := runLoadRecovering(f, withFingerprint(fx, first), cold, probe)
+	res := runLoadRecovering(f, withFingerprint(fx, first), cold, probe, diag.Discard())
 	failOnRejectedFixtureOptions(tb, fx, res)
 	if res.panicked {
 		tb.Fatalf("Load panicked on the cold fingerprint pass of fixture %q: %v", fx.Name, res.panicValue)
@@ -351,7 +428,7 @@ func assertLoadIsFingerprintKeyed(tb testing.TB, f plugin.Frontend, fx FrontendF
 	probe.recompose()
 
 	recomposed := store.New()
-	res = runLoadRecovering(f, withFingerprint(fx, second), recomposed, probe)
+	res = runLoadRecovering(f, withFingerprint(fx, second), recomposed, probe, diag.Discard())
 	failOnRejectedFixtureOptions(tb, fx, res)
 	if res.panicked {
 		tb.Fatalf("Load panicked on the recomposed fingerprint pass of fixture %q: %v", fx.Name, res.panicValue)
@@ -434,15 +511,22 @@ func failOnRejectedFixtureOptions(tb testing.TB, fx FrontendFixture, res loadRes
 }
 
 // runLoadRecovering applies fixture options (when the frontend
-// supports OptionsProvider) and invokes Load against s and c. Panics
-// from either call are recovered into the returned [loadResult]
-// rather than propagating: a fixture that crashes one frontend must
-// not take the suite's remaining checks down with it.
+// supports OptionsProvider) and invokes Load against s, c and d.
+// Panics from either call are recovered into the returned
+// [loadResult] rather than propagating: a fixture that crashes one
+// frontend must not take the suite's remaining checks down with it.
+//
+// The sink is a parameter rather than a local because a check that
+// cannot reach it cannot assert on it. Pass [diag.Capture] to inspect
+// what was emitted, [diag.Discard] when the check is about panics,
+// node counts or cache keys and the diagnostics belong to a sibling
+// check.
 func runLoadRecovering(
 	f plugin.Frontend,
 	fx FrontendFixture,
 	s *store.Store,
 	c cache.Cache,
+	d *diag.Sink,
 ) (res loadResult) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -458,7 +542,7 @@ func runLoadRecovering(
 	}
 	res.loadErr = f.Load(&plugin.FrontendContext{
 		Store:       s,
-		Diag:        diag.New(),
+		Diag:        d,
 		Registry:    directive.NewRegistry(),
 		Parser:      directive.DefaultParser(),
 		Cache:       c,

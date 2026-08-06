@@ -11,6 +11,7 @@ import (
 	"text/template"
 
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/priority"
@@ -105,7 +106,20 @@ const (
 	// ViolationUnparsableTemplate ships a template file that does not
 	// parse. Today that surfaces mid-Render, after the run has
 	// already done its work.
+	//
+	// The fixture ships it one directory below the filesystem root,
+	// because that is where a real one lands: `//go:embed
+	// templates/golang/*.tmpl` without the matching [fs.Sub] produces
+	// exactly this shape, and a root-only enumeration would validate
+	// nothing and report green.
 	ViolationUnparsableTemplate Violation = "unparsable-template"
+
+	// ViolationReservedFuncName registers a funcmap entry under a name
+	// the backend reserves for its own dispatch helpers. The backend
+	// rejects it while merging plugin contributions — before it renders
+	// anything — so the run writes no files at all, for every plugin in
+	// the composition rather than only this one.
+	ViolationReservedFuncName Violation = "reserved-func-name"
 )
 
 // Violations returns every [Violation] this package ships, sorted.
@@ -131,6 +145,7 @@ func Violations() []Violation {
 		ViolationEmptyTagNotFirst,
 		ViolationFuncInBothMaps,
 		ViolationUnparsableTemplate,
+		ViolationReservedFuncName,
 		ViolationSharedSlice,
 	}
 	slices.Sort(out)
@@ -209,6 +224,8 @@ func BrokenPlugin(v Violation) plugin.Plugin {
 		return &brokenTemplateProvider{FixturePlugin: base, bothMaps: true}
 	case ViolationUnparsableTemplate:
 		return &brokenTemplateProvider{FixturePlugin: base, unparsable: true}
+	case ViolationReservedFuncName:
+		return &brokenTemplateProvider{FixturePlugin: base, reservedFunc: true}
 	default:
 		return base
 	}
@@ -324,9 +341,18 @@ func (p *brokenUnstableOutputs) Outputs(lang string) []plugin.Output {
 // selected by the flag set on it, and nothing else.
 type brokenTemplateProvider struct {
 	*FixturePlugin
-	bothMaps   bool
-	unparsable bool
+	bothMaps     bool
+	unparsable   bool
+	reservedFunc bool
 }
+
+// fixtureTemplateDir is the directory the fixture nests its template
+// under. It mirrors the documented embed idiom — `//go:embed
+// templates/golang/*.tmpl` — so the shipped fixture exercises the
+// recursive enumeration rather than only the filesystem root. A
+// regression to a root-only glob makes this fixture stop defeating the
+// check it names, which the completeness meta-test reports.
+const fixtureTemplateDir = "templates/golang/"
 
 func (p *brokenTemplateProvider) Templates(lang string) (fs.FS, bool) {
 	if lang != ConformanceLanguage {
@@ -339,12 +365,19 @@ func (p *brokenTemplateProvider) Templates(lang string) (fs.FS, bool) {
 		// currently waits until Render to surface.
 		body = `{{ define "fixture.bad" }}{{ .Unclosed `
 	}
-	return fstest.MapFS{"tmpl.tmpl": &fstest.MapFile{Data: []byte(body)}}, true
+	return fstest.MapFS{
+		fixtureTemplateDir + "tmpl.tmpl": &fstest.MapFile{Data: []byte(body)},
+	}, true
 }
 
-func (*brokenTemplateProvider) TemplateFuncs(lang string) template.FuncMap {
+func (p *brokenTemplateProvider) TemplateFuncs(lang string) template.FuncMap {
 	if lang != ConformanceLanguage {
 		return nil
+	}
+	if p.reservedFunc {
+		// `imp` is the backend's import-collection helper. A plugin
+		// registering it shadows the one every core template calls.
+		return template.FuncMap{"imp": func() string { return "" }}
 	}
 	return template.FuncMap{"fixtureHelper": func() string { return "" }}
 }
@@ -385,6 +418,72 @@ func (p *brokenSharedSlice) Provides() []string {
 // actually runs the truthfulness check.
 func LyingNodesOnlyGenerator() plugin.Generator {
 	return &brokenLyingNodesOnly{FixturePlugin: NewFixturePlugin()}
+}
+
+// ErroringGenerator returns a generator that reports an Error-severity
+// diagnostic on every input and returns nil, violating the diagnostic
+// contract and nothing else.
+//
+// Exported separately from [BrokenPlugin] for the reason
+// [LyingNodesOnlyGenerator] is: the contract it breaks is a per-role
+// one, and proving it needs a store to drive Generate against, which
+// the framework suite never builds.
+func ErroringGenerator() plugin.Generator {
+	return &brokenErroring{FixturePlugin: NewFixturePlugin()}
+}
+
+// ErroringAnnotator returns an annotator that reports an
+// Error-severity diagnostic on every input and returns nil.
+func ErroringAnnotator() plugin.Annotator {
+	return &brokenErroring{FixturePlugin: NewFixturePlugin()}
+}
+
+// ErroringFrontend returns a frontend that reports an Error-severity
+// diagnostic on every input, records no nodes, and returns nil.
+//
+// It fails the populate check as well as the diagnostic one, so drive
+// it at the individual assertion rather than through
+// [RunFrontendSuite]: a whole-suite run cannot attribute the failure.
+func ErroringFrontend() plugin.Frontend {
+	return &brokenErroring{FixturePlugin: NewFixturePlugin()}
+}
+
+// erroringDiagnosticMessage is the text every [brokenErroring] role
+// method emits. Named so a meta-test can key on it without restating
+// the literal, which is how a fixture and its assertion drift apart.
+const erroringDiagnosticMessage = "plugintest fixture: unsupported input"
+
+// brokenErroring emits one Error-severity diagnostic from each role
+// method it implements and then returns nil, modelling the plugin the
+// three role suites certified for as long as they discarded the sink:
+// well-formed everywhere the framework checks look, and unusable,
+// because [pipeline.Pipeline.Run] converts that diagnostic into
+// ErrRunHadErrors on the author's first real invocation.
+//
+// The position is deliberately zero. One fixture then defeats both
+// halves of the contract — no Error-severity diagnostics, and no
+// diagnostic without a source position — and the second half is what
+// [GeneratorFixture.AllowsPositionlessDiagnostics] waives.
+type brokenErroring struct{ *FixturePlugin }
+
+// Generate reports the sentinel diagnostic and returns cleanly, so
+// only the diagnostic checks can catch it.
+func (p *brokenErroring) Generate(ctx *plugin.GeneratorContext) error {
+	ctx.Diag.For(p.Name()).Errorf(position.Pos{}, erroringDiagnosticMessage)
+	return nil
+}
+
+// Annotate reports the sentinel diagnostic and returns cleanly.
+func (p *brokenErroring) Annotate(ctx *plugin.AnnotatorContext) error {
+	ctx.Diag.For(p.Name()).Errorf(position.Pos{}, erroringDiagnosticMessage)
+	return nil
+}
+
+// Load reports the sentinel diagnostic, records nothing, and returns
+// cleanly.
+func (p *brokenErroring) Load(ctx *plugin.FrontendContext) error {
+	ctx.Diag.For(p.Name()).Errorf(position.Pos{}, erroringDiagnosticMessage)
+	return nil
 }
 
 // brokenLyingNodesOnly declares NodesOnly and then reads the emit

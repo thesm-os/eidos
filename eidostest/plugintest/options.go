@@ -71,6 +71,9 @@ func RunOptionsSuite(t *testing.T, p plugin.Plugin, fixture OptionsFixture) {
 	t.Run("SetOptions accepts the supplied Valid values", func(t *testing.T) {
 		assertSetOptionsAcceptsValid(t, provider, fixture)
 	})
+	t.Run("SetOptions rejects a map omitting every required field", func(t *testing.T) {
+		assertSetOptionsRejectsMissingRequired(t, provider, fixture)
+	})
 	t.Run("SetOptions rejects an UnknownKey with ErrUnknownField", func(t *testing.T) {
 		assertSetOptionsRejectsUnknown(t, provider, fixture)
 	})
@@ -130,30 +133,111 @@ func assertSetOptionsAcceptsValid(tb testing.TB, p plugin.OptionsProvider, fx Op
 // catches config-file typos at decode time rather than
 // silently dropping the offending entry.
 //
-// Fixtures may set UnknownKey to the empty string when the
-// plugin's schema covers every plausible name (no negative
-// probe to perform); the suite then skips this check.
+// The probe key is the fixture's UnknownKey when it declares one and
+// a synthesised absent name otherwise.
+//
+// It used to return silently when UnknownKey was empty — printing PASS
+// under a subtest name asserting rejection, having asserted nothing.
+// The stated rationale was that a plugin's schema might cover "every
+// plausible name", which cannot be true: the schema enumerates its own
+// fields, so a name outside that set is always constructible. A
+// SetOptions that is `return nil` — never reaching opt.Decode, and so
+// never rejecting anything — cleared this check whenever the author
+// omitted one optional fixture field.
 func assertSetOptionsRejectsUnknown(tb testing.TB, p plugin.OptionsProvider, fx OptionsFixture) {
 	tb.Helper()
-	if fx.UnknownKey == "" {
-		return
+	probeKey := fx.UnknownKey
+	if probeKey == "" {
+		probeKey = synthesiseUnknownKey(p.OptionsSchema())
 	}
 	values := make(map[string]string, len(fx.Valid)+1)
 	maps.Copy(values, fx.Valid)
-	values[fx.UnknownKey] = "any"
+	values[probeKey] = "any"
 	err := p.SetOptions(opt.New(p.OptionsSchema(), values))
 	if err == nil {
 		tb.Errorf(
 			"SetOptions accepted an unknown key %q; the strict-decode contract "+
 				"requires every input key to match a declared field",
-			fx.UnknownKey,
+			probeKey,
 		)
 		return
 	}
 	if !errors.Is(err, opt.ErrUnknownField) {
 		tb.Errorf(
 			"SetOptions rejected the unknown key %q but the error did not wrap opt.ErrUnknownField: %v",
-			fx.UnknownKey, err,
+			probeKey, err,
+		)
+	}
+}
+
+// synthesiseUnknownKey returns a field name the schema does not
+// declare, so the unknown-key probe runs whether or not the fixture
+// author supplied one.
+//
+// The schema enumerates its own fields, which makes an absent name
+// trivially constructible: take a name no author would choose and
+// extend it until it collides with nothing.
+func synthesiseUnknownKey(schema opt.Schema) string {
+	declared := make(map[string]struct{}, len(schema.Fields))
+	for _, name := range schema.Names() {
+		declared[name] = struct{}{}
+	}
+	candidate := "plugintest_no_such_field"
+	for {
+		if _, taken := declared[candidate]; !taken {
+			return candidate
+		}
+		candidate += "_x"
+	}
+}
+
+// assertSetOptionsRejectsMissingRequired drives SetOptions with every
+// required field omitted and fails when the call succeeds.
+//
+// The suite held both halves of this contract and checked neither: it
+// forbids the fixture from omitting a required field
+// ([assertOptionsFixtureCoversRequired]), which is right for the
+// probes downstream of it, but that left opt.ErrMissingRequired
+// asserted nowhere. A plugin that never reaches opt.Decode satisfies
+// every other check in this suite.
+//
+// Schemas declaring no required field have nothing to omit, so the
+// check reports that rather than passing over it.
+func assertSetOptionsRejectsMissingRequired(tb testing.TB, p plugin.OptionsProvider, fx OptionsFixture) {
+	tb.Helper()
+	schema := p.OptionsSchema()
+
+	var required []string
+	for _, f := range schema.Fields {
+		if f.Required {
+			required = append(required, f.Name)
+		}
+	}
+	if len(required) == 0 {
+		tb.Skipf("schema declares no required field; there is nothing to omit")
+		return
+	}
+
+	values := make(map[string]string, len(fx.Valid))
+	maps.Copy(values, fx.Valid)
+	for _, name := range required {
+		delete(values, name)
+	}
+
+	err := p.SetOptions(opt.New(schema, values))
+	if err == nil {
+		tb.Errorf(
+			"SetOptions accepted a map omitting every required field (%v); a plugin that never "+
+				"reaches opt.Decode silently runs on defaults the author never chose",
+			required,
+		)
+		return
+	}
+	if !errors.Is(err, opt.ErrMissingRequired) {
+		tb.Errorf(
+			"SetOptions rejected the missing-required map but the error did not wrap "+
+				"opt.ErrMissingRequired: %v",
+			err,
 		)
 	}
 }

@@ -60,7 +60,7 @@ func TestRunGeneratorSuite_RejectsPanickingGenerator(t *testing.T) {
 	a := &panickingGenerator{name: "panicky"}
 	fake := newFakeT()
 	plugintest.AssertGenerateEmptyStoreDoesNotPanic(fake, a)
-	assertFakeMentions(t, fake, "Generate panicked on empty store")
+	assertFakeMentions(t, fake, "Generate panicked on an empty store")
 }
 
 // TestRunGeneratorSuite_RejectsNonDeterministicGenerator pins
@@ -155,12 +155,17 @@ func TestAssertEmittedTagsAreDeclared(t *testing.T) {
 		}
 	})
 
-	t.Run("the empty primary tag passes without being declared", func(t *testing.T) {
+	t.Run("the empty primary tag is reported when it is not declared", func(t *testing.T) {
 		t.Parallel()
-		// The primary output is addressed by the empty tag whether or
-		// not the plugin spells it out in Outputs, so a plugin that
-		// declares only tagged outputs must still be able to emit
-		// against the primary.
+		// This subtest previously asserted the opposite, on the
+		// rationale that the primary output is addressable by the empty
+		// tag whether or not the plugin spells it out. The framework
+		// disagrees: resolveSuffix reports ErrNoDefaultOutput when the
+		// tag is empty and the plugin declares no empty-tag entry
+		// (pipeline/layout.go), calling that the plugin's own "every
+		// decl must carry an explicit tag" intent — and drops the decl.
+		// Whitelisting the empty tag made the tag most decls carry the
+		// one tag the check could never fail on.
 		s := storefixture.New().Struct("User", nil).Build()
 		g := &slotCompanionGenerator{
 			name:    "companion",
@@ -170,9 +175,7 @@ func TestAssertEmittedTagsAreDeclared(t *testing.T) {
 		fake := newFakeT()
 		plugintest.AssertEmittedTagsAreDeclared(fake, g, s)
 		assertQueuedSlots(t, s, 1)
-		if fake.failed {
-			t.Fatalf("primary tag reported a failure: errs=%v fatals=%v", fake.errs, fake.fatals)
-		}
+		assertFakeMentions(t, fake, `stamped OutputTag "" on a`)
 	})
 }
 
@@ -498,4 +501,103 @@ func (*sourceMutatingGenerator) Generate(ctx *plugin.GeneratorContext) error {
 	}
 	_ = pkg
 	return nil
+}
+
+// flappingSlotGenerator contributes one slot item per source struct
+// whose name embeds a per-instance counter, so the same instance
+// varies its contribution across two calls.
+//
+// It emits through AppendOriginSlot exclusively and populates no emit
+// bucket, which is the shape four in-tree plugins ship. Under a
+// bucket-only projection both passes render an empty slice and the
+// determinism check compares nothing against nothing.
+type flappingSlotGenerator struct {
+	name  string
+	calls int
+}
+
+// Name returns the configured identifier.
+func (g *flappingSlotGenerator) Name() string { return g.name }
+
+// Generate queues one counter-named companion per source struct.
+func (g *flappingSlotGenerator) Generate(ctx *plugin.GeneratorContext) error {
+	g.calls++
+	for _, s := range ctx.Store.Nodes().Structs().Items() {
+		item := &emit.Function{
+			BaseEmit: emit.BaseEmit{SetByName: g.name},
+			Name:     fmt.Sprintf("%sCompanion%d", s.Name, g.calls),
+		}
+		prov := emit.Provenance{SetBy: g.name, Pos: s.Pos()}
+		if err := ctx.Store.Emit().AppendOriginSlot(s, "top", item, prov); err != nil {
+			return fmt.Errorf("flappingSlotGenerator: AppendOriginSlot: %w", err)
+		}
+	}
+	return nil
+}
+
+// TestRunGeneratorSuite_RejectsFlappingSlotContribution pins that the
+// determinism oracle observes slot contributions.
+//
+// A generator emitting exclusively through slots populated no bucket
+// the projection enumerated, so its determinism subtest compared two
+// empty slices and passed whatever the generator did.
+func TestRunGeneratorSuite_RejectsFlappingSlotContribution(t *testing.T) {
+	t.Parallel()
+	s1 := storefixture.New().Struct("User", nil).Build()
+	s2 := storefixture.New().Struct("User", nil).Build()
+	fake := newFakeT()
+	plugintest.AssertGenerateIsDeterministic(fake, &flappingSlotGenerator{name: "flap-slot"}, s1, s2)
+	assertFakeMentions(t, fake, "not deterministic")
+}
+
+// misattributingGenerator emits a struct stamped with a SetBy that is
+// not its own Name.
+//
+// SetBy is the key Layout looks its declared Outputs up under, the key
+// slot rendering orders contributions by, and the key the rendered
+// header attributes the file to. A value that is not the plugin's Name
+// matches no entry in any of the three, so every decl it stamps is
+// dropped at routing — while the generator suite reports green.
+type misattributingGenerator struct{ name string }
+
+// Name returns the configured identifier.
+func (g *misattributingGenerator) Name() string { return g.name }
+
+// Outputs declares one routable primary output.
+func (*misattributingGenerator) Outputs(lang string) []plugin.Output {
+	if lang != golangProbeLanguage {
+		return nil
+	}
+	return []plugin.Output{{Suffix: "_misattributed.go"}}
+}
+
+// Generate emits one struct per source struct, stamped with a
+// deliberately foreign SetBy.
+func (*misattributingGenerator) Generate(ctx *plugin.GeneratorContext) error {
+	structs := ctx.Store.Nodes().Structs().Items()
+	if len(structs) == 0 {
+		return nil
+	}
+	pkg := &emit.Package{Name: "mis", Path: "example.com/mis"}
+	for _, src := range structs {
+		pkg.Structs = append(pkg.Structs, &emit.Struct{
+			BaseEmit: emit.BaseEmit{SetByName: "some-other-plugin"},
+			Name:     src.Name + "Mis",
+			Package:  pkg.Name,
+		})
+	}
+	if err := ctx.Store.Emit().AddPackage(pkg); err != nil {
+		return fmt.Errorf("misattributingGenerator: AddPackage: %w", err)
+	}
+	return nil
+}
+
+// TestRunGeneratorSuite_RejectsForeignSetBy pins that emitted values
+// carry the emitting plugin's own identifier.
+func TestRunGeneratorSuite_RejectsForeignSetBy(t *testing.T) {
+	t.Parallel()
+	s := storefixture.New().Struct("User", nil).Build()
+	fake := newFakeT()
+	plugintest.AssertEmitValuesAreAttributed(fake, &misattributingGenerator{name: "mis"}, s)
+	assertFakeMentions(t, fake, "some-other-plugin")
 }

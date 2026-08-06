@@ -578,7 +578,8 @@ func composeTarget(
 	// precedence layer; the value-with-directory form stacks a
 	// relative path onto Target.Dir.
 	if spec, ok := selectOutDirective(
-		outDirectivesFor(p, origin, srcPkg), pluginName, outputTag, ps, origin); ok {
+		outDirectivesFor(p, origin, srcPkg), pluginName, outputTag, ps, origin,
+	); ok {
 		dir, filename := splitOutDirectivePath(spec.Path)
 		// Unscoped filename-pinning overrides against a multi-output
 		// plugin would force every output to share one filename —
@@ -675,7 +676,8 @@ func composeTarget(
 	if basename == "" && layers.Filename == manifest.LayerPluginSuffix {
 		p.reportLayoutErr(ps, fmt.Errorf(
 			"%w: %s %q emitted by %q has no source position and routed to %q, the bare suffix",
-			ErrPositionlessOrigin, kind, qnameOf(named), pluginName, t.Filename))
+			ErrPositionlessOrigin, kind, qnameOf(named), pluginName, t.Filename,
+		))
 		return emit.Target{}, manifest.ResolvedLayout{}, layerSet{}, false
 	}
 

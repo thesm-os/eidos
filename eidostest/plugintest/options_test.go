@@ -199,3 +199,49 @@ func (p *flappingSchemaPlugin) OptionsSchema() opt.Schema {
 // downstream is gated by the schema-stability check, so this
 // stub is sufficient.
 func (*flappingSchemaPlugin) SetOptions(_ opt.Options) error { return nil }
+
+// noopOptionsPlugin declares a schema and accepts everything.
+//
+// Its SetOptions never reaches opt.Decode, so it rejects neither an
+// unknown key nor a missing required field. It is the shape an author
+// arrives at by writing the method signature and filling in the body
+// later, and before the probes were made unconditional it cleared the
+// whole options suite whenever UnknownKey was left empty.
+type noopOptionsPlugin struct{ name string }
+
+// Name returns the configured identifier.
+func (p *noopOptionsPlugin) Name() string { return p.name }
+
+// Generate satisfies [plugin.Generator] so the role probe clears.
+func (*noopOptionsPlugin) Generate(_ *plugin.GeneratorContext) error { return nil }
+
+// OptionsSchema declares one required field.
+func (*noopOptionsPlugin) OptionsSchema() opt.Schema {
+	return opt.Schema{Fields: []opt.Field{{Name: "output_package", Required: true}}}
+}
+
+// SetOptions accepts anything, which is the defect.
+func (*noopOptionsPlugin) SetOptions(_ opt.Options) error { return nil }
+
+// TestRunOptionsSuite_ProbesAreUnconditional pins that the negative
+// probes run whether or not the fixture author opted into them.
+func TestRunOptionsSuite_ProbesAreUnconditional(t *testing.T) {
+	t.Parallel()
+
+	p := &noopOptionsPlugin{name: "noop-options"}
+	fx := plugintest.OptionsFixture{Valid: map[string]string{"output_package": "main"}}
+
+	t.Run("an unknown key is rejected even when the fixture names none", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertSetOptionsRejectsUnknown(fake, p, fx)
+		assertFakeMentions(t, fake, "accepted an unknown key")
+	})
+
+	t.Run("a map omitting every required field is rejected", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertSetOptionsRejectsMissingRequired(fake, p, fx)
+		assertFakeMentions(t, fake, "omitting every required field")
+	})
+}

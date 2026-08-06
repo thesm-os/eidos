@@ -10,11 +10,36 @@ non-deterministic output in production.
 This document is the reference for which suite applies to which
 role and how to write fixtures.
 
+## Where this sits
+
+`plugintest` is the first of five harness rungs and the narrowest.
+It drives one plugin in isolation and **renders nothing** — the emit
+graph is the last artifact any check here inspects. A template that
+parses but cannot execute clears every check in this document.
+
+| Rung | Proves | Does not prove |
+|---|---|---|
+| `plugintest` | declarations, determinism, diagnostic discipline | that anything renders |
+| `backendtest` | one backend over a hand-built emit graph | that a generator's templates merge |
+| `pipelinetest` | several plugins + real backend → rendered files | that a real frontend parses your source |
+| `frontendtest` | a real frontend with the plugin chain behind it | process-level behaviour |
+| `acceptancetest` | the binary; the only gate that runs `go build` on generated output | (in-tree only) |
+
+## Running the suite
+
+Run with `-count=2` at minimum. Two determinism checks compare passes
+inside one process, and Go randomises map-iteration order per range
+statement, so a "first key wins" defect over a two-entry map is a coin
+flip per invocation. This repository's own gate runs `count: 3`.
+
+Run with `-race` if your plugin holds state — the pipeline dispatches
+frontends concurrently and nothing here exercises that.
+
 ## The six suites
 
 ### `RunSuite(t, plugin)` — universal framework contracts
 
-Every plugin runs this. It pins thirteen contracts, in this
+Every plugin runs this. It pins fourteen contracts, in this
 order:
 
 - `Name()` returns a non-empty identifier, stable across calls
@@ -45,21 +70,34 @@ order:
   `Templates` / `TemplateFuncs` / `TemplateOverrides`, and no
   name appears in both funcmaps
 - `TemplateProvider`'s shipped `*.tmpl` files parse, and none
-  defines a name claiming the reserved `fragment.` prefix
+  defines a name claiming the reserved `fragment.` prefix. The
+  filesystem is walked recursively, so templates below the root —
+  the shape `//go:embed templates/golang/*.tmpl` produces without a
+  matching `fs.Sub` — are validated rather than silently skipped
+- `TemplateProvider`'s `TemplateFuncs` and `TemplateOverrides`
+  claim none of the backend's 25 reserved funcmap names. The backend
+  rejects a collision while merging, before it renders anything, so
+  the whole run writes zero files for every plugin in the
+  composition — not only the one at fault
 - Declaration accessors (`Provides`, `Requires`, `Directives`,
   `Outputs`) return a fresh slice on each call rather than the
   plugin's own backing array
 
 Pass any plugin instance — the suite probes for each capability
-via interface assertion and skips the checks for capabilities
-the plugin doesn't implement. The all-or-nothing
+via interface assertion and **reports a skip** for capabilities the
+plugin doesn't implement, so "validated" and "examined nothing" are
+distinguishable in the output. It also logs each role it detects and
+names the per-role suite that covers it, which `RunSuite` alone does
+not run. The all-or-nothing
 `CapabilityProvider` check is the exception: it fires precisely
 when `Priority()` is declared and the interface is not
 satisfied.
 
 Every per-language lookup runs against
 `plugintest.ConformanceLanguage` (`"golang"`) and against a
-language no backend claims, so the negative path is exercised
+language no backend claims. Plugins targeting another backend call
+`RunSuiteFor(t, p, "rust")` — under `RunSuite` those five checks
+validate an empty slice and report green having examined nothing, so the negative path is exercised
 rather than assumed. A plugin that branches `Outputs` or
 `Templates` on any other spelling answers no probe, and the
 per-language checks validate an empty slice.
@@ -71,8 +109,13 @@ For plugins satisfying `plugin.Annotator`. Pins:
 - `Annotate` on an empty store doesn't panic
 - For each fixture: `Annotate` doesn't panic, doesn't change
   the node count (the source-side store is frozen during the
-  annotator phase), and is idempotent (running twice produces
-  identical meta state).
+  annotator phase), is idempotent (running twice on one store
+  produces identical meta state), and is **deterministic** (two
+  independently built stores produce identical meta state).
+
+The last two catch different defects. A stamp derived from a counter
+or a map iteration passes idempotency — the usual already-stamped
+guard makes the second pass a no-op — and fails determinism.
 
 **Fixture shape:**
 
@@ -109,19 +152,27 @@ For plugins satisfying `plugin.Generator`. Pins:
     generator neither reads the emit graph through `ctx.Reader`
     nor produces different output when the emit graph is
     pre-seeded
-  - every `OutputTag` on an origin-anchored slot contribution
-    corresponds to an `Output` the plugin declares (skipped for
-    a plugin declaring none)
+  - every emitted value carries the generator's own `Name()` in
+    `SetBy` — Layout looks a plugin's declared Outputs up under it,
+    slot rendering orders by it, and the file header attributes by
+    it, so a foreign value drops the declaration at routing
+  - every `OutputTag` **anywhere in the emit graph** corresponds to
+    an `Output` the plugin declares (skipped for a plugin declaring
+    none). The empty primary tag is no longer exempt: Layout reports
+    `ErrNoDefaultOutput` when a decl carries no tag and the plugin
+    declares no empty-tag `Output`
   - every `emit.OutputPackageSetter` among those contributions
     tolerates a partial routing map — an empty one, one holding
     only foreign tags, one holding the primary tag with no
     derivable path — without panicking
 
-The determinism check compares a sorted projection of identity
-tuples (kind, qualified name, target), so a generator emitting
-the same set of decls in a different order still passes.
-Per-entity content is out of scope: golden-file assertions
-through `pipelinetest` / `backendtest` cover that.
+The determinism check compares an **ordered** projection produced by
+walking the emit graph the way Layout does, followed by the queued
+origin-slot contributions in registration order. Emission order and
+slot contributions are both inside the oracle — a generator emitting
+exclusively through `AppendOriginSlot` used to have its determinism
+checked against two empty projections. A sorted identity-only diff is
+still printed alongside a failure, because it is the readable one.
 
 **Fixture shape:** same as `AnnotatorFixture`. `BuildStore` is
 called once per subtest — twice each for the determinism and
@@ -198,7 +249,11 @@ For plugins satisfying `plugin.OptionsProvider`. Pins:
   `opt.ErrMissingRequired`)
 - `SetOptions(Valid)` succeeds
 - `SetOptions(Valid + UnknownKey)` returns an error wrapping
-  `opt.ErrUnknownField`
+  `opt.ErrUnknownField`. `UnknownKey` is now optional — the suite
+  synthesises a name the schema does not declare when the fixture
+  omits one, so the probe is unconditional
+- `SetOptions` with every required field omitted returns an error
+  wrapping `opt.ErrMissingRequired`
 
 **Fixture shape:**
 
@@ -208,7 +263,8 @@ plugintest.OptionsFixture{
         "output_package": "main",
         "mode":           "fast",
     },
-    UnknownKey: "no_such_field",
+    // Optional: the suite synthesises one when omitted.
+  UnknownKey: "no_such_field",
 }
 ```
 
