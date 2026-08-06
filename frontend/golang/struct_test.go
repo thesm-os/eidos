@@ -129,3 +129,76 @@ func TestConvertStruct(t *testing.T) {
 		}
 	})
 }
+
+// TestStructField_TrailingDirective covers the trailing-comment
+// position on a struct field.
+//
+// A field is the one shape where Go offers two comment groups, and
+// the trailing one is the natural place to write per-field metadata —
+// it sits on the line it describes. Reading only the leading group
+// dropped the directive with no diagnostic, so a generator emitted
+// output as though the line had never been written.
+func TestStructField_TrailingDirective(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a directive after the field attaches to it", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Config struct {\n\tHost string // +gen:nonzero\n}\n",
+		})
+		f := pkg.StructByName("Config").FieldByName("Host")
+		if f == nil {
+			t.Fatalf("Host field missing")
+		}
+		if len(f.DirectiveList) != 1 || f.DirectiveList[0].Name != "nonzero" {
+			t.Fatalf("expected one +gen:nonzero directive, got %+v", f.DirectiveList)
+		}
+	})
+
+	t.Run("a directive before the field still attaches", func(t *testing.T) {
+		t.Parallel()
+		// The control: the leading group must keep working.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Config struct {\n\t// +gen:nonzero\n\tHost string\n}\n",
+		})
+		f := pkg.StructByName("Config").FieldByName("Host")
+		if len(f.DirectiveList) != 1 || f.DirectiveList[0].Name != "nonzero" {
+			t.Fatalf("expected one +gen:nonzero directive, got %+v", f.DirectiveList)
+		}
+	})
+
+	t.Run("both positions contribute, in source order", func(t *testing.T) {
+		t.Parallel()
+		// Leading first, because that is the order they appear in
+		// the file and a plugin reading DirectiveList positionally
+		// should not have to know which group each came from.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Config struct {\n\t// +gen:nonzero\n\tHost string // +gen:secret\n}\n",
+		})
+		f := pkg.StructByName("Config").FieldByName("Host")
+		if len(f.DirectiveList) != 2 {
+			t.Fatalf("expected both directives, got %+v", f.DirectiveList)
+		}
+		if got := []string{
+			string(f.DirectiveList[0].Name), string(f.DirectiveList[1].Name),
+		}; got[0] != "nonzero" || got[1] != "secret" {
+			t.Fatalf("directive order = %v, want [nonzero secret]", got)
+		}
+	})
+
+	t.Run("a trailing comment does not become doc text", func(t *testing.T) {
+		t.Parallel()
+		// A trailing comment is a note on the line, not the entity's
+		// doc comment. Folding it into DocLines would put it in
+		// generated godoc where it does not belong.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Config struct {\n\tHost string // trailing prose\n}\n",
+		})
+		f := pkg.StructByName("Config").FieldByName("Host")
+		for _, line := range f.DocLines {
+			if strings.Contains(line, "trailing prose") {
+				t.Fatalf("trailing comment leaked into DocLines: %+v", f.DocLines)
+			}
+		}
+	})
+}

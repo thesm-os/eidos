@@ -62,7 +62,21 @@ func (c *converter) populateStructBody(s *node.Struct, expr ast.Expr, st *types.
 	idx := 0
 	for _, field := range astStruct.Fields.List {
 		docs := docLinesFromCommentGroup(field.Doc)
+		// Both comment groups contribute directives. A field is the
+		// one shape where Go offers two, and the trailing one is
+		// where per-field metadata naturally goes — it sits on the
+		// line it describes. Reading only Doc dropped it silently,
+		// which is the worst available failure: a plugin saw no
+		// directive and emitted output as though the line had never
+		// been written.
+		//
+		// Leading first, so DirectiveList arrives in source order.
+		//
+		// Docs deliberately take only the leading group. A trailing
+		// comment is a note on the line, not the entity's doc
+		// comment, and folding it in would put it in generated godoc.
 		dirs := c.parseDirectives(field.Doc)
+		dirs = append(dirs, c.parseDirectives(field.Comment)...)
 		typePos := posOf(c.fset, field.Type.Pos())
 		if len(field.Names) == 0 {
 			c.appendStructEmbed(s, st, idx, field, docs, dirs, typePos)

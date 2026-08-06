@@ -265,3 +265,42 @@ func TestAppendInterfaceMethod_BlankNameKeepsSiblings(t *testing.T) {
 		}
 	})
 }
+
+// TestInterfaceMethod_TrailingDirective is the interface-method twin
+// of [TestStructField_TrailingDirective].
+//
+// It matters independently: a method-scoped directive written on the
+// signature line is the natural place for it, and dropping it
+// silently produces a generated double missing whatever the directive
+// asked for, with nothing to explain the absence.
+func TestInterfaceMethod_TrailingDirective(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a directive after the method attaches to it", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Store interface {\n\tGet(key string) (string, error) // +gen:nonzero\n}\n",
+		})
+		m := pkg.InterfaceByName("Store").MethodByName("Get")
+		if m == nil {
+			t.Fatalf("Get method missing")
+		}
+		if len(m.DirectiveList) != 1 || m.DirectiveList[0].Name != "nonzero" {
+			t.Fatalf("expected one +gen:nonzero directive, got %+v", m.DirectiveList)
+		}
+	})
+
+	t.Run("both positions contribute, in source order", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Store interface {\n\t// +gen:nonzero\n\tGet(key string) (string, error) // +gen:secret\n}\n",
+		})
+		m := pkg.InterfaceByName("Store").MethodByName("Get")
+		if len(m.DirectiveList) != 2 {
+			t.Fatalf("expected both directives, got %+v", m.DirectiveList)
+		}
+		if m.DirectiveList[0].Name != "nonzero" || m.DirectiveList[1].Name != "secret" {
+			t.Fatalf("directive order = %+v, want [nonzero secret]", m.DirectiveList)
+		}
+	})
+}
