@@ -279,14 +279,34 @@ func (v *NodeView) addEnum(e *node.Enum, pkgPath string) error {
 		}
 		v.indexCommon(vt, pkgPath)
 	}
+	// See [NodeView.addAlias]: an enum is a named type that carries
+	// its own methods, and coalescing the alias into it must not make
+	// them less reachable than they were before.
+	for _, m := range e.Methods {
+		if err := v.addMethod(m, qname, pkgPath); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (v *NodeView) addAlias(a *node.Alias, pkgPath string) error {
-	if err := v.aliases.Add(a.QName(), a); err != nil {
+	qname := a.QName()
+	if err := v.aliases.Add(qname, a); err != nil {
 		return err
 	}
 	v.indexCommon(a, pkgPath)
+	// Methods on a named type are indexed like a struct's, so
+	// [NodeView.Methods] means every method in the package rather
+	// than every method on a struct or interface. Go allows methods
+	// on any named type, and a consumer asking the store for the
+	// package's methods has no way to know it was being handed a
+	// subset.
+	for _, m := range a.Methods {
+		if err := v.addMethod(m, qname, pkgPath); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

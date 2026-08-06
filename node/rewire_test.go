@@ -118,6 +118,32 @@ func TestRewireOwners(t *testing.T) {
 		}
 	})
 
+	t.Run("wires enum.Methods Owner and child params after round-trip", func(t *testing.T) {
+		t.Parallel()
+		// Mirrors the alias case above. An enum owns its method set
+		// for the same reason an alias does, so a deserialised enum
+		// has to arrive wired the way the frontend wires one.
+		method := &node.Method{
+			Name:    "String",
+			Params:  []*node.Param{{Name: "verbose", Type: namedRef("", "bool")}},
+			Returns: node.AnonReturns(namedRef("", "string")),
+		}
+		enum := &node.Enum{
+			Name:       "Status",
+			Package:    "p",
+			Underlying: namedRef("", "int"),
+			Methods:    []*node.Method{method},
+		}
+		pkg := &node.Package{Name: "p", Path: "p", Enums: []*node.Enum{enum}}
+		node.RewireOwners(pkg)
+		if method.Owner != node.Node(enum) {
+			t.Fatalf("enum method Owner not wired: got %+v", method.Owner)
+		}
+		if method.Params[0].Owner != node.Node(method) {
+			t.Fatalf("enum method param Owner not wired: got %+v", method.Params[0].Owner)
+		}
+	})
+
 	t.Run("idempotent: calling twice leaves the graph unchanged", func(t *testing.T) {
 		t.Parallel()
 		pkg := makeRichPackage()

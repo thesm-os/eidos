@@ -62,13 +62,26 @@ func (c *converter) detectEnums() {
 // [node.Constant] entries into a [node.Enum]. The alias is removed
 // from the package's Aliases slice (it has been subsumed); the
 // resulting Enum carries the alias's underlying type as
-// [node.Enum.Underlying].
+// [node.Enum.Underlying] and its method set as [node.Enum.Methods].
+//
+// Carrying the methods across is not cosmetic. The alias is the only
+// node that held them, and removeAlias deletes it, so a method set
+// left behind here is not relocated — it is discarded, with no
+// diagnostic. The same `type Status int` kept its methods right up
+// until a const block turned it into an enum.
+//
+// The methods' Owner back-pointers are not re-pointed here. They
+// still name the alias at this point, and [node.RewireOwners] — which
+// the loader runs over every package after conversion — re-attaches
+// them to the Enum via rewireEnum. Doing it in both places would put
+// the same invariant in two spots that can disagree.
 func (c *converter) promoteAliasToEnum(alias *node.Alias, members []*node.Constant) {
 	enum := &node.Enum{
 		BaseNode:   alias.BaseNode,
 		Name:       alias.Name,
 		Package:    alias.Package,
 		Underlying: alias.Target,
+		Methods:    alias.Methods,
 	}
 	for _, m := range members {
 		variant := &node.EnumVariant{

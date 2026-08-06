@@ -618,3 +618,71 @@ func TestNodeView_MetaKeyIndexRegistrationCost(t *testing.T) {
 	}
 	t.Logf("ingest allocations: index off %v, index on %v (delta %v)", off, on, on-off)
 }
+
+// TestNodeView_NamedTypeMethodsAreIndexed pins that methods on named
+// types reach [store.NodeView.Methods].
+//
+// Only addStruct indexed its method set, so the bucket meant "every
+// method on a struct or interface" while reading as "every method in
+// the package". Go allows methods on any named type, and a consumer
+// asking the store for the package's methods had no way to know it
+// was handed a subset — an enum's String was absent, and so was an
+// alias's.
+func TestNodeView_NamedTypeMethodsAreIndexed(t *testing.T) {
+	t.Parallel()
+
+	// pkgWithNamedMethods builds a package holding one alias and one
+	// enum, each carrying a single method.
+	pkgWithNamedMethods := func() *node.Package {
+		return &node.Package{
+			Name: "a", Path: "example.com/a",
+			Aliases: []*node.Alias{{
+				Name: "Colour", Package: "example.com/a",
+				Methods: []*node.Method{{Name: "String"}},
+			}},
+			Enums: []*node.Enum{{
+				Name: "Status", Package: "example.com/a",
+				Methods: []*node.Method{{Name: "MarshalText"}},
+			}},
+		}
+	}
+
+	t.Run("an alias's methods are indexed", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		assertNoError(t, s.Nodes().AddPackage(pkgWithNamedMethods()))
+		if _, ok := s.Nodes().Methods().ByQName("example.com/a.Colour.String"); !ok {
+			t.Fatalf("alias method missing; bucket holds %d", s.Nodes().Methods().Len())
+		}
+	})
+
+	t.Run("an enum's methods are indexed", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		assertNoError(t, s.Nodes().AddPackage(pkgWithNamedMethods()))
+		if _, ok := s.Nodes().Methods().ByQName("example.com/a.Status.MarshalText"); !ok {
+			t.Fatalf("enum method missing; bucket holds %d", s.Nodes().Methods().Len())
+		}
+	})
+
+	t.Run("the bucket holds every method in the package", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		assertNoError(t, s.Nodes().AddPackage(pkgWithNamedMethods()))
+		if got := s.Nodes().Methods().Len(); got != 2 {
+			t.Fatalf("Methods().Len() = %d, want 2", got)
+		}
+	})
+
+	t.Run("a named type with no methods indexes none", func(t *testing.T) {
+		t.Parallel()
+		s := store.New()
+		assertNoError(t, s.Nodes().AddPackage(&node.Package{
+			Name: "a", Path: "example.com/a",
+			Enums: []*node.Enum{{Name: "Status", Package: "example.com/a"}},
+		}))
+		if got := s.Nodes().Methods().Len(); got != 0 {
+			t.Fatalf("Methods().Len() = %d, want 0", got)
+		}
+	})
+}

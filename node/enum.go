@@ -42,6 +42,25 @@ type Enum struct {
 
 	// Variants are the declared variants in source order.
 	Variants []*EnumVariant `json:"variants,omitempty"`
+
+	// Methods declared on the enum's type.
+	//
+	// Coalescing a typed-iota group into an Enum subsumes the
+	// [Alias] that would otherwise have carried them, so they live
+	// here instead: one rule — a defined type carries its methods —
+	// holds regardless of which node the frontend chose for the
+	// declaration. Without this the same `type Status int` keeps its
+	// methods right up until a const block makes it an enum, and
+	// then loses them silently.
+	//
+	// What a consumer does with them: the method set is what decides
+	// which assertions a generator can honestly make about an enum.
+	// String plus Parse admits a round-trip law; String alone admits
+	// only distinctness and the out-of-range fallback; neither
+	// leaves just the constant set. A methodless graph forces the
+	// weakest form on every enum, or emits round-trips against
+	// methods that may not exist.
+	Methods []*Method `json:"methods,omitempty"`
 }
 
 // Kind returns [KindEnum].
@@ -80,6 +99,28 @@ func (e *Enum) VariantsWith(pred func(*EnumVariant) bool) []*EnumVariant {
 	for _, v := range e.Variants {
 		if pred(v) {
 			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// MethodByName returns the method named name, or nil when no such
+// method exists.
+func (e *Enum) MethodByName(name string) *Method {
+	for _, m := range e.Methods {
+		if m.Name == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// MethodsWith returns methods matching pred in declaration order.
+func (e *Enum) MethodsWith(pred func(*Method) bool) []*Method {
+	out := make([]*Method, 0, len(e.Methods))
+	for _, m := range e.Methods {
+		if pred(m) {
+			out = append(out, m)
 		}
 	}
 	return out

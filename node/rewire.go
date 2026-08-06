@@ -131,6 +131,13 @@ func rewireEnum(e *Enum) {
 	for _, v := range e.Variants {
 		v.Owner = e
 	}
+	// Mirrors rewireAlias: an enum owns its method set for the same
+	// reason an alias does, so a deserialised enum has to arrive
+	// wired the same way one built by the frontend does.
+	for _, m := range e.Methods {
+		m.Owner = e
+		rewireMethod(m)
+	}
 }
 
 // rewireAlias re-attaches every back-pointer reachable from a.
