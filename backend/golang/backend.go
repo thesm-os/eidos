@@ -5,10 +5,13 @@ package golang
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -329,7 +332,7 @@ func renderTarget(
 		}
 		res.candidates = unresolvedCandidates(refs, tracked)
 		res.topLevel = refs.topLevel
-		body = finaliseBody(body, target, ps, tracked)
+		body = finaliseBody(body, target, ps)
 		res.out = composeFile(ctx, entities, body)
 		res.skip = false
 	}
@@ -494,15 +497,39 @@ func renderFile(
 //
 // imports has already been through [pruneImports], so every entry
 // here is one the rendered body references or one no body text
-// could reference (`_`, `.`). The goimports post-pass regroups
-// stdlib vs external imports per Go convention; owning that
-// grouping is what retires the pass.
+// could reference (`_`, `.`).
+//
+// Entries are sorted by [importGroup] then by path, with a blank
+// line between groups — the arrangement the goimports resolve pass
+// used to impose. Sorting on path alone within a group needs no
+// tiebreak: [writer.ImportSet] is keyed by path, so no two entries
+// can share one.
+//
+// Only the grouping is load-bearing. [go/format.Source] runs after
+// this and calls [go/ast.SortImports], which re-sorts each
+// blank-line-delimited run by path — so a within-group order that
+// disagreed would be corrected, while a misplaced blank line would
+// not. Sorting here anyway keeps the emitted bytes already
+// canonical, which matters for the fused parse-and-print that
+// eventually removes the formatter from this path.
 func writeImportBlock(buf *bytes.Buffer, imports []writer.Import) {
 	if len(imports) == 0 {
 		return
 	}
+	sorted := slices.Clone(imports)
+	slices.SortFunc(sorted, func(a, b writer.Import) int {
+		if g := cmp.Compare(importGroup(a.Path), importGroup(b.Path)); g != 0 {
+			return g
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
 	buf.WriteString("\nimport (\n")
-	for _, imp := range imports {
+	prev := importGroup(sorted[0].Path)
+	for _, imp := range sorted {
+		if g := importGroup(imp.Path); g != prev {
+			buf.WriteByte('\n')
+			prev = g
+		}
 		buf.WriteByte('\t')
 		// Against the raw segment, not the derived alias: an alias
 		// the writer had to sanitise or suffix is exactly the one
@@ -516,4 +543,30 @@ func writeImportBlock(buf *bytes.Buffer, imports []writer.Import) {
 		buf.WriteByte('\n')
 	}
 	buf.WriteString(")\n")
+}
+
+// importGroup reports the gofmt grouping bucket for path, mirroring
+// `importGroup` in x/tools' internal/imports.
+//
+// Three of its four rules are reachable here. The local-prefix rule
+// (group 3) is not: `imports.LocalPrefix` is a package-level global
+// that nothing in this workspace assigns, so it is always empty and
+// the rule always declines. The appengine rule is reachable despite
+// looking like a relic — it is not gated on the local prefix, and a
+// path beginning `appengine` would otherwise land in the standard
+// library's bucket.
+//
+// This is a duplicated rule and can drift from a future x/tools.
+// [TestImportGroup_MatchesResolver] is the mitigation: it compares
+// this against the resolver's own arrangement over a path corpus,
+// which is the only check that can see divergence — a golden file
+// pins our output and would keep passing through it.
+func importGroup(path string) int {
+	if strings.HasPrefix(path, "appengine") {
+		return 2
+	}
+	if first, _, _ := strings.Cut(path, "/"); strings.Contains(first, ".") {
+		return 1
+	}
+	return 0
 }

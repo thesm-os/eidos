@@ -91,7 +91,10 @@ type renderState struct {
 	// Only the run's own outputs are covered. Third-party packages
 	// whose name diverges from their directory stay on the derived
 	// alias, because nothing in the emit graph knows their package
-	// clause; goimports corrects those in the finalise pass.
+	// clause. Nothing corrects that afterwards any more — the
+	// resolve pass that used to is gone — so a plugin referencing
+	// such a package must supply the alias itself, through
+	// [emit.Import.Alias] or a `imp`-side registration.
 	selfPackages map[string]string
 }
 

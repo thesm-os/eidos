@@ -4,13 +4,11 @@
 package golang
 
 import (
-	"bytes"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
-	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/writer"
 )
@@ -392,58 +390,6 @@ func (t *T%d) Do(in fmt.Stringer) error {
 `, i, i)
 	}
 	return b.String()
-}
-
-// TestPruneImports_MatchesResolverDeletion is the differential: the
-// same body finalised with the prune applied and with the full
-// import set left intact must produce identical bytes, because
-// goimports deletes exactly what the prune dropped.
-//
-// This is what proves the replacement reproduces the resolver
-// rather than merely resembling it. It is inherently temporary —
-// when the goimports pass is removed the two chains stop being two
-// chains, and this test goes with it. The durable statement of the
-// same property is the "declaring an unused import changes no byte"
-// subtest in render_file_test.go.
-func TestPruneImports_MatchesResolverDeletion(t *testing.T) {
-	t.Parallel()
-
-	const body = "func f() { _ = kept.Symbol }\n"
-	full := []writer.Import{
-		{Path: "example.com/kept", Alias: "kept"},
-		{Path: "strings", Alias: "strings"},
-	}
-	refs := refsOf(t, "package p\n\n"+body)
-	pruned := pruneImports(full, refs)
-
-	compose := func(imports []writer.Import) []byte {
-		var buf bytes.Buffer
-		buf.WriteString("package p\n")
-		writeImportBlock(&buf, imports)
-		buf.WriteString("\n" + body)
-		return buf.Bytes()
-	}
-
-	target := emit.Target{Dir: "p", Filename: "x.go", Package: "p"}
-	finalise := func(imports []writer.Import) []byte {
-		d := diag.New()
-		return finaliseBody(compose(imports), target, d.For(Name), imports)
-	}
-
-	t.Run("the prune drops exactly the unreferenced entry", func(t *testing.T) {
-		t.Parallel()
-		if len(pruned) != 1 || pruned[0].Path != "example.com/kept" {
-			t.Fatalf("expected only the referenced import to survive; got %+v", pruned)
-		}
-	})
-
-	t.Run("both chains finalise to the same bytes", func(t *testing.T) {
-		t.Parallel()
-		withPrune, withResolver := finalise(pruned), finalise(full)
-		if !bytes.Equal(withPrune, withResolver) {
-			t.Fatalf("prune and resolver disagree:\npruned:\n%s\nresolver:\n%s", withPrune, withResolver)
-		}
-	})
 }
 
 // TestUnresolvedCandidates covers the subtraction directly.

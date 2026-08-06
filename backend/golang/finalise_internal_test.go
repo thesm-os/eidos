@@ -19,28 +19,28 @@ import (
 //
 // This is the benchmark that makes BenchmarkBackend_Render
 // actionable. Render's per-target cost is template execution plus
-// finalisation, and the open question — whether the sequential
-// per-target loop is worth parallelising — turns on which of the
-// two dominates. Template execution scales with the emit graph;
-// finalisation re-parses the rendered text twice ([go/format.Source]
-// and the goimports pass, which itself re-parses the output a third
-// time in [importPaths]) and is pure CPU with no shared state, so if
-// it dominates then the loop is embarrassingly parallel and worth
-// splitting.
+// finalisation, and the split between them is what says whether
+// effort belongs in the templates or in the finalise chain.
 //
-// Three sub-benchmarks, one operation each:
+// The chain used to be dominated by the goimports resolve pass,
+// which forked `go env` once per file and re-parsed the body twice
+// more on top of [go/format.Source]. That pass is gone, so both
+// sub-benchmarks below now measure the same single parse-and-print
+// and "full chain" is expected to track "format.Source" closely —
+// a gap opening between them means something re-entered the chain.
+//
+// Two sub-benchmarks, one operation each:
 //
 //   - "format.Source" times [runGoFormat] on the raw body.
-//   - "goimports" times [runGoImports] on already-formatted bytes,
-//     because that is what it receives in the chain — feeding it
-//     unformatted input would measure a reformat the chain never
-//     pays for.
 //   - "full chain" times [finaliseBody], the composition the
 //     backend actually calls.
 //
+// The walk that replaced the resolver's correctness work is not
+// here: it runs in renderFile, not finaliseBody, and is measured by
+// [BenchmarkCollectRefs].
+//
 // Deliberately outside the timed region: body generation, the
-// tracked-import list, the pre-format for the goimports stage, and
-// the diagnostic sink.
+// tracked-import list, and the diagnostic sink.
 //
 // The fixture is chosen so no diagnostic fires: the body is
 // gofmt-parseable and every import it declares is tracked. That is
@@ -51,9 +51,7 @@ import (
 func BenchmarkFinaliseBody(b *testing.B) {
 	b.ReportAllocs()
 
-	body, tracked, target := benchFinaliseFixture(16)
-	formatted, _ := runGoFormat(body, target, diag.New().For(Name))
-
+	body, _, target := benchFinaliseFixture(16)
 	b.Run("format.Source", func(b *testing.B) {
 		b.ReportAllocs()
 		d := diag.New()
@@ -69,25 +67,13 @@ func BenchmarkFinaliseBody(b *testing.B) {
 		assertBenchClean(b, d, out)
 	})
 
-	b.Run("goimports", func(b *testing.B) {
-		b.ReportAllocs()
-		d := diag.New()
-		ps := d.For(Name)
-		paths := trackedPaths(tracked)
-		var out []byte
-		for b.Loop() {
-			out = runGoImports(formatted, target, ps, paths)
-		}
-		assertBenchClean(b, d, out)
-	})
-
 	b.Run("full chain", func(b *testing.B) {
 		b.ReportAllocs()
 		d := diag.New()
 		ps := d.For(Name)
 		var out []byte
 		for b.Loop() {
-			out = finaliseBody(body, target, ps, tracked)
+			out = finaliseBody(body, target, ps)
 		}
 		assertBenchClean(b, d, out)
 	})
@@ -112,12 +98,12 @@ func BenchmarkFinaliseBody_Decls(b *testing.B) {
 	for _, decls := range []int{1, 10, 100, 1000} {
 		b.Run(strconv.Itoa(decls), func(b *testing.B) {
 			b.ReportAllocs()
-			body, tracked, target := benchFinaliseFixture(decls)
+			body, _, target := benchFinaliseFixture(decls)
 			d := diag.New()
 			ps := d.For(Name)
 			var out []byte
 			for b.Loop() {
-				out = finaliseBody(body, target, ps, tracked)
+				out = finaliseBody(body, target, ps)
 			}
 			assertBenchClean(b, d, out)
 		})

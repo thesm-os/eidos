@@ -123,46 +123,6 @@ func TestFinalise_GoimportsRegroupsImports(t *testing.T) {
 	})
 }
 
-// TestFinalise_GoimportsUntrackedImportWarns covers the safety-net
-// branch: when goimports adds an import the backend did not
-// register through `imp`, the discrepancy surfaces as a Warn so
-// downstream maintainers can fix the converter or template that
-// produced the unrecorded reference.
-//
-// The fixture triggers the path via a BuiltinRef whose name happens
-// to be a qualified stdlib type ("time.Time"). renderType emits it
-// verbatim without calling imp; goimports detects the missing
-// import and injects it; the backend's tracked set does not
-// contain "time" → Warn fires.
-func TestFinalise_GoimportsUntrackedImportWarns(t *testing.T) {
-	t.Parallel()
-
-	t.Run("untracked goimports-injected import surfaces a Warn", func(t *testing.T) {
-		t.Parallel()
-		ctx, mem, d := newBackendContext(t)
-		target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
-		addEmitPackage(t, ctx, emitPackage("x", &emit.Struct{
-			Name: "X", Package: "x", Target: target,
-			Fields: []*emit.Field{
-				{Name: "When", Type: emit.Builtin("time.Time")},
-			},
-		}))
-		if err := mustNew(t).Render(ctx); err != nil {
-			t.Fatalf("Render: %v", err)
-		}
-		body, ok := mem.Get(target)
-		if !ok {
-			t.Fatalf("file should still be written even when an untracked import is added")
-		}
-		if !strings.Contains(string(body), "\"time\"") {
-			t.Fatalf("goimports should have injected 'time' into the imports block; got:\n%s", body)
-		}
-		if !diagnosticsContain(d, diag.Warn, "untracked import") {
-			t.Fatalf("expected Warn about an untracked import; got %+v", d.Diagnostics())
-		}
-	})
-}
-
 // TestFinalise_AliasCollision covers the deterministic suffix
 // discipline `writer.ImportSet` provides. Two distinct external
 // packages whose default-derived alias collides ("users") produce

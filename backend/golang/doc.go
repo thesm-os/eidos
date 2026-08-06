@@ -26,12 +26,14 @@
 //  1. Template execution against a per-Target template clone — `imp` calls
 //     accumulate into a fresh [writer.ImportSet] so import tracking is
 //     isolated per file.
-//  2. [go/format.Source] for canonical Go formatting. Failure attaches a Warn
-//     diagnostic and falls back to the unformatted body so the user can debug.
-//  3. The goimports library pass for stdlib/external regrouping and import
-//     hygiene. Failure falls back to the gofmt'd bytes with a Warn; imports
-//     goimports adds beyond what the templates declared via `imp` surface as
-//     one Warn per uncovered reference.
+//  2. One AST walk over the assembled body. Imports the body never
+//     references are dropped; qualifiers no import binds surface as one Warn
+//     each, after subtracting the package-scope names every target rendering
+//     into the same package declares. The surviving imports are written as a
+//     path-sorted block, grouped standard-library first.
+//  3. [go/format.Source] for canonical Go formatting. Failure attaches an
+//     Error diagnostic and falls back to the unformatted body so the user can
+//     debug.
 //  4. Header (item 1) + body (items 2–8) + footer (item 9) composition. The
 //     footer carries the SHA-256 provenance hash over the body bytes actually
 //     written. The header carries no timestamp so two runs over the same
@@ -125,9 +127,15 @@
 // Slot ordering is capability-topo + append-sequence; free-floating decls
 // sort by capability-topo + QName(); headers carry no timestamp; the
 // provenance hash is over the body bytes actually written. The `format.Source`
-// and goimports passes are themselves deterministic per input, so the
-// success-vs-failure path is a property of the input — hash equality across
-// runs is preserved regardless of which path the format pass took.
+// pass is itself deterministic per input, so the success-vs-failure path is a
+// property of the input — hash equality across runs is preserved regardless of
+// which path the format pass took.
+//
+// Determinism now extends to the import block, which it did not while the
+// goimports resolve pass ran: an unresolved reference sent that pass into the
+// developer's module cache to choose an import, so the same emit graph produced
+// different bytes on different machines. Nothing in the render path consults
+// anything outside the emit graph.
 //
 // # Sentinel errors
 //

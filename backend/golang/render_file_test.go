@@ -520,17 +520,17 @@ func TestRenderFile_ShadowedImportIsKeptAndReported(t *testing.T) {
 		return string(body), d
 	}
 
-	t.Run("goimports still deletes it while the resolve pass runs", func(t *testing.T) {
+	t.Run("the shadowed import survives into the output", func(t *testing.T) {
 		t.Parallel()
-		// Pinning the state this series changes. goimports resolves
-		// the shadowing properly and removes the import, so the file
-		// compiles today and the Warn above is advance notice. When
-		// the resolve pass goes, the import survives into the output
-		// and this assertion inverts — which is the point of writing
-		// it down rather than leaving the transition implicit.
+		// The resolve pass used to resolve the shadowing properly and
+		// delete the import. Nothing does now, and keeping it is the
+		// deliberate choice: dropping an import on an ambiguous
+		// reading is the direction that changes what compiling code
+		// does. The file fails to build with "imported and not used",
+		// and the Warn below is what points at why.
 		body, _ := build(t)
-		if strings.Contains(body, `"strings"`) {
-			t.Fatalf("expected goimports to still remove the shadowed import:\n%s", body)
+		if !strings.Contains(body, `"strings"`) {
+			t.Fatalf("shadowed import was dropped:\n%s", body)
 		}
 	})
 
