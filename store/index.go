@@ -100,17 +100,44 @@ func NewMultiIndex[K comparable, V any]() *MultiIndex[K, V] {
 	return &MultiIndex[K, V]{entries: map[K][]V{}}
 }
 
+// newMultiIndexSize returns a MultiIndex pre-sized for keys distinct
+// keys, reserving both the map and the insertion-order slice.
+//
+// For the by-Target index the order slice holds [emit.Target] values
+// at 64 bytes each, so growing it from nil is the larger half of the
+// cost — a rebuild over a thousand files walks that ladder from zero
+// every time.
+//
+// The caller supplies a key count, not an entity count. Sizing from
+// the sum of the routable buckets would be wrong in the direction
+// that looks right: the whole purpose of a by-Target index is many
+// entities per Target.
+func newMultiIndexSize[K comparable, V any](keys int) *MultiIndex[K, V] {
+	return &MultiIndex[K, V]{
+		entries: make(map[K][]V, keys),
+		order:   make([]K, 0, keys),
+	}
+}
+
 // Add appends value to the list under key, preserving insertion
 // order. The first Add for a key also records the key in the
 // index-wide first-insertion-order list surfaced by
 // [MultiIndex.Keys].
+// Two map operations, not three. The obvious spelling — a
+// presence check, then m.entries[key] = append(m.entries[key], …) —
+// hashes the key three times: once to probe, once to read the slice
+// append extends, once to store it back. Reusing the value the probe
+// already returned removes the middle one. For the by-Target
+// instantiation the key is a struct of four strings, so every cycle
+// saved is four string hashes saved.
 func (m *MultiIndex[K, V]) Add(key K, value V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, seen := m.entries[key]; !seen {
+	cur, seen := m.entries[key]
+	if !seen {
 		m.order = append(m.order, key)
 	}
-	m.entries[key] = append(m.entries[key], value)
+	m.entries[key] = append(cur, value)
 }
 
 // Get returns a copy of the values recorded under key in insertion

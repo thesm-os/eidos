@@ -570,14 +570,20 @@ func (p *Pipeline) compositionFingerprint() string {
 func (p *Pipeline) recordCacheKey(name string, r *store.Reader) {
 	routing := cache.HashStrings(p.cacheRoutingComponents(name))
 	scope := cache.HashStrings([]string{p.targetSym, p.outFilename})
+	// Hashed once and used twice. Calling Hash for the key and again
+	// for the body re-drained the map, re-sorted it, and re-ran
+	// SHA-256 to produce the same string four lines apart — and left
+	// the two able to disagree if a plugin had a goroutine still
+	// recording reads.
+	reads := r.ReadSet().Hash()
 	key := cache.NewKey(
 		"plugin", name,
 		"version", p.pluginVersion(name),
-		"reads", r.ReadSet().Hash(),
+		"reads", reads,
 		"routing", routing,
 		"scope", scope,
 	)
-	_ = p.cache.Put(key, []byte(r.ReadSet().Hash())) //nolint:errcheck // best-effort cache marker
+	_ = p.cache.Put(key, []byte(reads)) //nolint:errcheck // best-effort cache marker
 }
 
 // pluginVersion returns the version the named plugin declares via

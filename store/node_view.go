@@ -210,7 +210,7 @@ func (v *NodeView) addInterface(i *node.Interface, pkgPath string) error {
 }
 
 func (v *NodeView) addMethod(m *node.Method, ownerQName, pkgPath string) error {
-	qname := fmt.Sprintf("%s.%s", ownerQName, m.Name)
+	qname := ownerQName + "." + m.Name
 	if err := v.methods.Add(qname, m); err != nil {
 		return err
 	}

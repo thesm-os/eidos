@@ -298,7 +298,7 @@ func (v *EmitView) addInterface(i *emit.Interface, pkgPath string) error {
 }
 
 func (v *EmitView) addMethod(m *emit.Method, ownerQName, pkgPath string, target emit.Target) error {
-	qname := fmt.Sprintf("%s.%s", ownerQName, m.Name)
+	qname := ownerQName + "." + m.Name
 	if err := v.methods.Add(qname, m); err != nil {
 		return err
 	}
@@ -425,7 +425,10 @@ func (v *EmitView) ByTarget() *MultiIndex[emit.Target, emit.Node] { return v.byT
 // find File entries the router didn't itself rewrite — File Targets
 // are pinned at FileFor-creation time.
 func (v *EmitView) RebuildByTarget() {
-	v.byTarget = NewMultiIndex[emit.Target, emit.Node]()
+	// Sized from the file population, which is Target identity: the
+	// files bucket is keyed by Dir + "/" + Filename, exactly the
+	// fields that distinguish one Target from another.
+	v.byTarget = newMultiIndexSize[emit.Target, emit.Node](v.files.Len())
 	v.files.Range(func(e *emit.File) bool {
 		if t := e.Target(); !t.IsZero() {
 			v.byTarget.Add(t, e)

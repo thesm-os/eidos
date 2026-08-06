@@ -1404,11 +1404,20 @@ var benchRunSizes = []int{1, 10, 100, 1000}
 //
 // Two deliberate exclusions:
 //
-//   - The fixture's node and emit packages are built once, above the
-//     timed region, and handed to the plugins to install. The timed
-//     region therefore covers the pipeline re-indexing them into a
-//     fresh store on every run — which is real per-run work — but
-//     not the cost of allocating the fixture, which is not.
+//   - The fixture's node and emit packages are rebuilt per iteration
+//     with the timer stopped. The timed region therefore covers the
+//     pipeline indexing them into a fresh store on every run — real
+//     per-run work — but not the cost of allocating the fixture,
+//     which is not.
+//
+//     Per iteration, not once: the store registers a metadata
+//     observer on every ingested node and nothing deregisters it, so
+//     re-ingesting the same pointers grew each bag's observer slice
+//     by one entry per iteration and every retained closure pinned
+//     that iteration's whole NodeView and EmitView. The benchmark
+//     leaked stores, and every allocation figure it reported was an
+//     upper bound rather than a per-run cost.
+//
 //   - The backend writes a fixed body per resolved Target instead of
 //     rendering one. The Go backend lives in its own module and the
 //     root module deliberately declares no requirements, so it
@@ -1426,22 +1435,25 @@ func BenchmarkPipeline_Run(b *testing.B) {
 	for _, n := range benchRunSizes {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			b.ReportAllocs()
-			srcPkg, emitPkg := newRunBenchFixture(n)
 			mem := sink.NewMemory()
 			d := diag.Capture()
-			p, err := pipeline.New().
-				WithFrontend(&benchRunFE{pkg: srcPkg}).
-				WithGenerator(&benchRunGen{pkg: emitPkg}).
-				WithBackend(&benchRunBE{}).
-				WithSink(mem).
-				WithDiag(d).
-				Build()
-			if err != nil {
-				b.Fatalf("Build: %v", err)
-			}
 			ctx := b.Context()
 
 			for b.Loop() {
+				b.StopTimer()
+				srcPkg, emitPkg := newRunBenchFixture(n)
+				p, err := pipeline.New().
+					WithFrontend(&benchRunFE{pkg: srcPkg}).
+					WithGenerator(&benchRunGen{pkg: emitPkg}).
+					WithBackend(&benchRunBE{}).
+					WithSink(mem).
+					WithDiag(d).
+					Build()
+				if err != nil {
+					b.Fatalf("Build: %v", err)
+				}
+				b.StartTimer()
+
 				if err := p.Run(ctx, "./..."); err != nil {
 					b.Fatalf("Run: %v", err)
 				}

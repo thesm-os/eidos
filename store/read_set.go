@@ -76,10 +76,22 @@ func (r *ReadSet) Keys() []string {
 // use it as a stable cache-key fragment.
 func (r *ReadSet) Hash() string {
 	keys := r.Keys()
-	h := sha256.New()
+	total := len(keys) // one separator byte per key
 	for _, k := range keys {
-		h.Write([]byte(k))
-		h.Write([]byte{0}) // unambiguous separator
+		total += len(k)
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	// One buffer and a by-value digest, rather than streaming through
+	// a hash.Hash interface. sha256.New allocates a 224-byte digest on
+	// the heap and Sum(nil) allocates its 32-byte result; Sum256 keeps
+	// both on the stack.
+	//
+	// The byte stream is identical — each key followed by a zero
+	// separator, in the same order — so the digest is unchanged.
+	buf := make([]byte, 0, total)
+	for _, k := range keys {
+		buf = append(buf, k...)
+		buf = append(buf, 0) // unambiguous separator
+	}
+	sum := sha256.Sum256(buf)
+	return hex.EncodeToString(sum[:])
 }
