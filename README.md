@@ -54,9 +54,11 @@ These are guarantees the library provides, tested in CI:
 - **Parallel safety.** Annotators with disjoint `Provides` may run
   concurrently; the Store and emit graph are race-detector clean and
   enforce mutability windows per phase. The Go backend renders its
-  targets in a sequential loop, and each target gets its own template
-  clone and its own `ImportSet`; what the loop shares across targets
-  it only reads. No render step reaches into another's state.
+  targets concurrently, one worker per CPU: each target gets its own
+  template clone and its own `ImportSet`, and what the workers share
+  they only read. Sink writes and diagnostics are replayed in target
+  order afterwards, so concurrency changes nothing observable —
+  output stays byte-identical run to run.
 - **Caching.** The Go and protobuf frontends key their parsed node
   graph on the frontend version plus a content hash over every input
   file and the configured options, and skip re-conversion on a hit.

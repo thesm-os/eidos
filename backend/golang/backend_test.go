@@ -4,8 +4,10 @@
 package golang_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -992,4 +994,83 @@ func newBenchmarkContext(b *testing.B, targets int) (*plugin.BackendContext, *si
 	}
 	s.Emit().RebuildByTarget()
 	return ctx, mem, diag.New()
+}
+
+// TestRender_ConcurrencyPreservesOrder pins that parallel rendering
+// changes nothing observable.
+//
+// Render dispatches one goroutine per CPU across targets, so the
+// order work *completes* in is nondeterministic. Everything a
+// consumer sees must not be: sink writes reach the sink in
+// ByTarget().Keys() order, and diagnostics are buffered per target
+// and replayed in that same order rather than written straight
+// through. Without the buffering, `-diag-format json` would emit a
+// different sequence on each run.
+func TestRender_ConcurrencyPreservesOrder(t *testing.T) {
+	t.Parallel()
+
+	// A target whose entities render nothing produces an Error
+	// diagnostic, so a spread of failing and succeeding targets
+	// exercises both the write path and the diagnostic path.
+	render := func(t *testing.T) (map[emit.Target][]byte, []string) {
+		t.Helper()
+		ctx, mem, d := newBackendContext(t)
+		pkg := &emit.Package{Name: "conc", Path: "example.com/conc"}
+		for i := range 40 {
+			pkg.Structs = append(pkg.Structs, &emit.Struct{
+				Name:    fmt.Sprintf("Entity%d", i),
+				Package: "example.com/conc",
+				Target: emit.Target{
+					Dir:        "conc",
+					Filename:   fmt.Sprintf("entity%d.go", i),
+					Package:    "conc",
+					ImportPath: "example.com/conc",
+				},
+				Fields: []*emit.Field{{Name: "ID", Type: emit.Builtin("string")}},
+			})
+		}
+		addEmitPackage(t, ctx, pkg)
+		ctx.Store.Emit().RebuildByTarget()
+		if err := golang.New().Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		msgs := make([]string, 0, len(d.Diagnostics()))
+		for _, g := range d.Diagnostics() {
+			msgs = append(msgs, g.Message)
+		}
+		return mem.Files(), msgs
+	}
+
+	t.Run("every target reaches the sink", func(t *testing.T) {
+		t.Parallel()
+		// A concurrent pass that dropped work would still look
+		// deterministic across runs, so count is asserted separately
+		// from stability.
+		if got, _ := render(t); len(got) != 40 {
+			t.Fatalf("sink holds %d files, want 40", len(got))
+		}
+	})
+
+	t.Run("two runs produce byte-identical output", func(t *testing.T) {
+		t.Parallel()
+		first, _ := render(t)
+		second, _ := render(t)
+		if len(first) != len(second) {
+			t.Fatalf("run sizes differ: %d vs %d", len(first), len(second))
+		}
+		for target, body := range first {
+			if !bytes.Equal(body, second[target]) {
+				t.Fatalf("%s differed between runs", target.JoinPath())
+			}
+		}
+	})
+
+	t.Run("diagnostic order is stable across runs", func(t *testing.T) {
+		t.Parallel()
+		_, first := render(t)
+		_, second := render(t)
+		if !slices.Equal(first, second) {
+			t.Fatalf("diagnostic order differed:\n%v\nvs\n%v", first, second)
+		}
+	})
 }

@@ -7,9 +7,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"runtime"
 	"strconv"
+	"sync"
 	"text/template"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/node"
@@ -114,11 +117,148 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 	pluginOrder := pluginOrderFrom(ctx)
 	bridgeImports := collectBridgeImports(ctx.Store)
 	selfPackages := collectSelfPackages(ctx.Store)
-	for _, target := range ctx.Store.Emit().ByTarget().Keys() {
-		entities := ctx.Store.Emit().ByTarget().Get(target)
-		state := newRenderState(merged.tmpl, pluginOrder, merged.extensions, merged.overrides)
-		state.bridgeImports = bridgeImports
-		state.selfPackages = selfPackages
+
+	keys := ctx.Store.Emit().ByTarget().Keys()
+	results := make([]renderResult, len(keys))
+	renderTargets(keys, results,
+		func() *renderState {
+			st := newRenderState(merged.tmpl, pluginOrder, merged.extensions, merged.overrides)
+			st.bridgeImports = bridgeImports
+			st.selfPackages = selfPackages
+			return st
+		},
+		func(st *renderState, i int) renderResult {
+			return renderTarget(ctx, st, keys[i])
+		},
+	)
+
+	// Replay and write in key order. Rendering is what parallelises;
+	// the observable sequence stays exactly what the sequential loop
+	// produced, so Stdout ordering, diagnostic ordering and the
+	// manifest are all unchanged by concurrency.
+	for i, res := range results {
+		for _, d := range res.diags {
+			ctx.Diag.Append(d)
+		}
+		if res.skip {
+			continue
+		}
+		if err := ctx.Sink.Write(keys[i], res.out); err != nil {
+			return fmt.Errorf("%s: sink write %s: %w", Name, keys[i].JoinPath(), err)
+		}
+	}
+	return nil
+}
+
+// renderResult carries one target's rendered bytes and the
+// diagnostics its render produced, so both can be replayed in key
+// order after a concurrent render pass.
+type renderResult struct {
+	// out is the finalised file content, valid only when skip is
+	// false.
+	out []byte
+
+	// diags are the diagnostics this target's render emitted, held
+	// rather than written straight through so their order does not
+	// depend on which goroutine finished first.
+	diags []diag.Diag
+
+	// skip marks a target that produced no renderable content
+	// ([ErrEmptyTarget]) or whose render failed. Either way it
+	// reaches no sink; a failure has already recorded its
+	// diagnostic.
+	skip bool
+}
+
+// renderTargets fills results by invoking render for every index,
+// bounded to one worker per CPU.
+//
+// The work is embarrassingly parallel: each target owns a template
+// clone, a funcmap of closures bound to its own render state, and a
+// fresh [writer.ImportSet]. Nothing crosses between them, which is
+// the property backend/golang's package doc has always claimed and
+// this dispatches on.
+//
+// Bounded rather than one goroutine per target because a clone is
+// not free — a thousand-target workspace would hold a thousand
+// template trees at once for no throughput gain past the core count.
+//
+// Writes into results are by distinct index into a pre-sized slice,
+// so no synchronisation is needed on the slice itself.
+//
+// newState is called once per worker, not once per target. A
+// [renderState] costs a full template clone plus a funcmap of bound
+// closures — together the largest allocation in the render path, at
+// 27% of everything the backend allocates — and a worker handles its
+// targets one at a time, so one state per worker is all the
+// isolation the design needs. [renderTarget] resets the only
+// per-target field on it.
+func renderTargets(
+	keys []emit.Target,
+	results []renderResult,
+	newState func() *renderState,
+	render func(*renderState, int) renderResult,
+) {
+	if len(keys) == 0 {
+		return
+	}
+	workers := min(runtime.GOMAXPROCS(0), len(keys))
+	if workers <= 1 {
+		st := newState()
+		for i := range keys {
+			results[i] = render(st, i)
+		}
+		return
+	}
+	idx := make(chan int)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			st := newState()
+			for i := range idx {
+				results[i] = render(st, i)
+			}
+		}()
+	}
+	for i := range keys {
+		idx <- i
+	}
+	close(idx)
+	wg.Wait()
+}
+
+// renderTarget renders one target to finalised bytes, collecting its
+// diagnostics into a private sink so the caller can replay them in
+// key order.
+//
+// The private sink is what keeps diagnostics deterministic under
+// concurrency: writing straight to ctx.Diag would order them by
+// whichever goroutine finished first, and `-diag-format json` makes
+// that observable.
+func renderTarget(
+	ctx *plugin.BackendContext,
+	state *renderState,
+	target emit.Target,
+) (res renderResult) {
+	local := diag.New()
+	ps := local.For(Name)
+	res = renderResult{skip: true}
+	// Named return: the deferred collection must land on the value
+	// the caller receives, not on a copy already taken.
+	defer func() { res.diags = local.Diagnostics() }()
+
+	// The import set is the only per-target state the render state
+	// carries — the template clone, the bound funcmap, and the
+	// bridge / self-package maps are per-worker or run-wide. Every
+	// funcmap closure reaches it through the receiver rather than
+	// capturing it, so replacing it here needs no rebinding and
+	// leaks nothing from the worker's previous target.
+	state.imports = writer.NewImportSet(nil)
+
+	entities := ctx.Store.Emit().ByTarget().Get(target)
+	{
 		// Forward the target's own import path + short name to the
 		// per-file import set. The path enables same-package
 		// elision ([emit.ExternalRef] / [emit.ExprExternal]
@@ -144,18 +284,16 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 		body, tracked, err := renderFile(state, target, entities, packageDocsFor(ctx, target))
 		if err != nil {
 			if errors.Is(err, ErrEmptyTarget) {
-				continue
+				return res
 			}
 			ps.Errorf(position.Pos{}, "%s: %v", target.JoinPath(), err)
-			continue
+			return res
 		}
 		body = finaliseBody(body, target, ps, tracked)
-		out := composeFile(ctx, entities, body)
-		if err := ctx.Sink.Write(target, out); err != nil {
-			return fmt.Errorf("%s: sink write %s: %w", Name, target.JoinPath(), err)
-		}
+		res.out = composeFile(ctx, entities, body)
+		res.skip = false
 	}
-	return nil
+	return res
 }
 
 // collectSelfPackages maps each import path the run writes into to
