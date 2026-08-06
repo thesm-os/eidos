@@ -4007,3 +4007,132 @@ func TestLayout_OneFileOnePackage_TwoConflicts(t *testing.T) {
 		}
 	})
 }
+
+// TestLayout_ErrorMessagesNameTheDeclaration pins the qualified name
+// inside each routing diagnostic.
+//
+// The routing path stopped building a qname per decl and now carries
+// the declaration itself, resolving the name inside the error
+// branches that read it. The sibling tests around this file assert
+// the sentinel each branch wraps; none of them would notice the qname
+// going empty or resolving on the wrong value, which is precisely
+// what the deferral can get wrong.
+//
+// One trap is pinned by its absence: the origin-slot path routes a
+// slot tuple rather than a declaration and has always reported an
+// empty qname. Feeding it the tuple's item would read better and
+// would be a silent message change.
+func TestLayout_ErrorMessagesNameTheDeclaration(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a synthetic decl is named in the no-Origin diagnostic", func(t *testing.T) {
+		t.Parallel()
+		// No Origin, so composeOrZero reports before it can route —
+		// the first branch to read the deferred name.
+		nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
+		orphan := &emit.Struct{Name: "Orphan", Package: "example.com/users"}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&layoutGen{name: "rg", suffix: "_gen.go", pkg: &emit.Package{
+				Name: "users", Path: "example.com/users",
+				Structs: []*emit.Struct{orphan},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			WithDiag(diag.New()).
+			Build()
+		assertNoError(t, err)
+		d := p.Diag()
+		_ = p.Run(t.Context(), "x")
+		if !hasDiagContaining(d, `synthetic struct "example.com/users.Orphan" has no Origin`) {
+			t.Fatalf("diagnostic did not name the declaration; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("the slot path still reports an empty qname", func(t *testing.T) {
+		t.Parallel()
+		// The documented shape is `slot init ""` — the kind carries
+		// the slot name, and the qname slot is empty. It reads oddly
+		// and that is exactly why it needs pinning: the obvious
+		// "improvement" — naming the tuple's item — changes a message
+		// nothing else guards.
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{SourcePos: position.Pos{File: "x/x.go"}},
+			Name:     "X", Package: "example.com/x",
+		}
+		gen := &slotContributingGen{
+			name:   "rg",
+			suffix: "_gen.go",
+			contribute: func(ctx *plugin.GeneratorContext) error {
+				return ctx.Store.Emit().AppendOriginSlot(
+					origin, "init",
+					&emit.Constant{Name: "X", Package: "x"},
+					emit.Provenance{SetBy: "ghost"},
+				)
+			},
+		}
+		d := diag.New()
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithGenerator(gen).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			WithDiag(d).
+			Build()
+		assertNoError(t, err)
+		_ = p.Run(t.Context(), "x")
+		if !hasDiagContaining(d, `slot init ""`) {
+			t.Fatalf("slot diagnostic changed shape; got %+v", d.Diagnostics())
+		}
+	})
+}
+
+// TestLayout_DispatchesEmptyImportPath pins the "routed, path
+// unknown" state through the inlined output-path record.
+//
+// recordOutputPath deliberately stores an empty import path when
+// centralised routing resolves a Target without a derivable one, and
+// implementors are documented to observe that separately from "not
+// routed at all". The inline form's presence flag is what preserves
+// it: a guard written as `path != ""` — or a dispatch guard written
+// as "the map is non-empty" — would drop the entry and never call the
+// setter.
+func TestLayout_DispatchesEmptyImportPath(t *testing.T) {
+	t.Parallel()
+
+	nodePkg := &node.Package{Name: "users", Path: "example.com/users"}
+	origin := &node.Struct{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: "internal/users/user.go"}},
+		Name:     "User", Package: "example.com/users",
+	}
+	gen := &outputPackageSetterGen{origin: origin}
+	p, err := pipeline.New().
+		WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+		WithGenerator(gen).
+		WithBackend(&stubBE{name: "be"}).
+		WithSink(sink.NewMemory()).
+		// Centralised into a directory with no module context, so the
+		// resolved Target carries no import path.
+		WithOutputLayout(string(pipeline.LayoutCentralised)).
+		WithOutputDir("generated").
+		Build()
+	assertNoError(t, err)
+	assertNoError(t, p.Run(t.Context(), "x"))
+
+	t.Run("the setter is still called", func(t *testing.T) {
+		t.Parallel()
+		if gen.item == nil || gen.item.calls == 0 {
+			t.Fatalf("SetOutputPackages was not called for an empty-path route")
+		}
+	})
+
+	t.Run("the empty path arrives as an entry, not as an absence", func(t *testing.T) {
+		t.Parallel()
+		if gen.item == nil {
+			t.Fatalf("no item recorded")
+		}
+		if _, ok := gen.item.got[""]; !ok {
+			t.Fatalf("primary tag missing from %+v", gen.item.got)
+		}
+	})
+}

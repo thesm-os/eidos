@@ -294,6 +294,29 @@ func BenchmarkRunLayout(b *testing.B) {
 		}
 	})
 
+	b.Run("shared", func(b *testing.B) {
+		b.ReportAllocs()
+		for _, n := range benchLayoutSizes {
+			b.Run(strconv.Itoa(n), func(b *testing.B) {
+				b.ReportAllocs()
+				d := diag.Capture()
+				p := newLayoutBenchPipeline(b, d)
+				s, first := newSharedLayoutStore(b, n)
+
+				for b.Loop() {
+					p.runLayout(s)
+				}
+
+				if first.Target.Filename == "" {
+					b.Fatalf("first decl left unrouted; the phase measured nothing")
+				}
+				if d.HasErrors() {
+					b.Fatalf("shared fixture produced routing errors: %v", d.Diagnostics())
+				}
+			})
+		}
+	})
+
 	b.Run("conflicting", func(b *testing.B) {
 		b.ReportAllocs()
 		for _, n := range benchLayoutConflictSizes {
@@ -337,8 +360,8 @@ const layoutBenchGenName = "bench-generator"
 // cardinality checks, and one generator declaring a filename suffix
 // so decls attributed to it are routable. No sink is configured
 // because the phase never writes.
-func newLayoutBenchPipeline(b *testing.B, d *diag.Sink) *Pipeline {
-	b.Helper()
+func newLayoutBenchPipeline(tb testing.TB, d *diag.Sink) *Pipeline {
+	tb.Helper()
 	p, err := New().
 		WithFrontend(&layoutBenchFE{}).
 		WithGenerator(&layoutBenchGen{}).
@@ -346,7 +369,7 @@ func newLayoutBenchPipeline(b *testing.B, d *diag.Sink) *Pipeline {
 		WithDiag(d).
 		Build()
 	if err != nil {
-		b.Fatalf("Build: %v", err)
+		tb.Fatalf("Build: %v", err)
 	}
 	return p
 }
@@ -361,8 +384,8 @@ func newLayoutBenchPipeline(b *testing.B, d *diag.Sink) *Pipeline {
 // composeTarget resolves it per decl through a ByQName lookup;
 // omitting it would exercise the nil-package branch instead of the
 // path a real run takes.
-func newDistinctLayoutStore(b *testing.B, n int) (*store.Store, *emit.Struct) {
-	b.Helper()
+func newDistinctLayoutStore(tb testing.TB, n int) (*store.Store, *emit.Struct) {
+	tb.Helper()
 	s := store.New()
 	srcPkg := &node.Package{Name: "bench", Path: "example.com/bench"}
 	emitPkg := &emit.Package{Name: "bench", Path: "example.com/bench"}
@@ -383,10 +406,10 @@ func newDistinctLayoutStore(b *testing.B, n int) (*store.Store, *emit.Struct) {
 		})
 	}
 	if err := s.Nodes().AddPackage(srcPkg); err != nil {
-		b.Fatalf("Nodes().AddPackage: %v", err)
+		tb.Fatalf("Nodes().AddPackage: %v", err)
 	}
 	if err := s.Emit().AddPackage(emitPkg); err != nil {
-		b.Fatalf("Emit().AddPackage: %v", err)
+		tb.Fatalf("Emit().AddPackage: %v", err)
 	}
 	return s, emitPkg.Structs[0]
 }
@@ -402,8 +425,58 @@ func newDistinctLayoutStore(b *testing.B, n int) (*store.Store, *emit.Struct) {
 // clauses — and it is the only shape that drives
 // clearConflictedTargets, whose per-violation full-store rescan is
 // the phase's candidate quadratic term.
-func newConflictingLayoutStore(b *testing.B, n int) (*store.Store, *emit.Struct) {
-	b.Helper()
+// sharedLayoutFanout is how many decls newSharedLayoutStore routes
+// into each Target. Eight is arbitrary but representative: a
+// generator emitting a type plus a handful of methods into one file
+// is the shape that makes d > 1, and the exact number matters less
+// than that it is not one.
+const sharedLayoutFanout = 8
+
+// newSharedLayoutStore builds n routable decls sharing n/8 Targets:
+// one origin per group, eight emit structs per origin, so every decl
+// in a group composes the same (Dir, Filename, Package).
+//
+// This is the population neither existing fixture produces. Both
+// newDistinctLayoutStore and newConflictingLayoutStore route exactly
+// one decl per Target, so the branch recordResolvedLayout exists for
+// — d decls composing into one file, where d-1 calls hash, compare
+// and discard — has never been measured. A remedy aimed at that
+// branch scored against those fixtures is scored against nothing.
+func newSharedLayoutStore(tb testing.TB, n int) (*store.Store, *emit.Struct) {
+	tb.Helper()
+	s := store.New()
+	srcPkg := &node.Package{Name: "bench", Path: "example.com/bench"}
+	emitPkg := &emit.Package{Name: "bench", Path: "example.com/bench"}
+	groups := max(n/sharedLayoutFanout, 1)
+	for g := range groups {
+		gid := strconv.Itoa(g)
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos: position.Pos{File: "internal/bench/pkg" + gid + "/entity" + gid + ".go"},
+			},
+			Name:    "Entity" + gid,
+			Package: "example.com/bench",
+		}
+		srcPkg.Structs = append(srcPkg.Structs, origin)
+		for d := range sharedLayoutFanout {
+			emitPkg.Structs = append(emitPkg.Structs, &emit.Struct{
+				BaseEmit: emit.BaseEmit{OriginNode: origin, SetByName: layoutBenchGenName},
+				Name:     "Entity" + gid + "Gen" + strconv.Itoa(d),
+				Package:  "example.com/bench",
+			})
+		}
+	}
+	if err := s.Nodes().AddPackage(srcPkg); err != nil {
+		tb.Fatalf("Nodes().AddPackage: %v", err)
+	}
+	if err := s.Emit().AddPackage(emitPkg); err != nil {
+		tb.Fatalf("Emit().AddPackage: %v", err)
+	}
+	return s, emitPkg.Structs[0]
+}
+
+func newConflictingLayoutStore(tb testing.TB, n int) (*store.Store, *emit.Struct) {
+	tb.Helper()
 	s := store.New()
 	srcPkg := &node.Package{Name: "bench", Path: "example.com/bench"}
 	alpha := &emit.Package{Name: "alpha", Path: "example.com/bench/alpha"}
@@ -430,13 +503,13 @@ func newConflictingLayoutStore(b *testing.B, n int) (*store.Store, *emit.Struct)
 		})
 	}
 	if err := s.Nodes().AddPackage(srcPkg); err != nil {
-		b.Fatalf("Nodes().AddPackage: %v", err)
+		tb.Fatalf("Nodes().AddPackage: %v", err)
 	}
 	if err := s.Emit().AddPackage(alpha); err != nil {
-		b.Fatalf("Emit().AddPackage(alpha): %v", err)
+		tb.Fatalf("Emit().AddPackage(alpha): %v", err)
 	}
 	if err := s.Emit().AddPackage(beta); err != nil {
-		b.Fatalf("Emit().AddPackage(beta): %v", err)
+		tb.Fatalf("Emit().AddPackage(beta): %v", err)
 	}
 	return s, alpha.Structs[0]
 }
@@ -469,3 +542,56 @@ type layoutBenchBE struct{}
 func (*layoutBenchBE) Name() string                          { return "bench-backend" }
 func (*layoutBenchBE) Language() string                      { return "bench" }
 func (*layoutBenchBE) Render(_ *plugin.BackendContext) error { return nil }
+
+// TestRunLayout_AllocationBudget is the enforced half of the
+// per-declaration allocation work.
+//
+// BenchmarkRunLayout records the figure but nothing fails a build on
+// a benchmark, and bench/baseline.txt is per-developer and
+// gitignored. A ceiling asserted here is what makes the
+// reintroduction of any one construct fail rather than be absorbed by
+// the others.
+//
+// The budget is per decl, so it holds as n changes, and it is an
+// allocation count rather than a duration — deterministic for a given
+// input, where the wall-clock on this fixture swings by double digits
+// between runs.
+//
+// Not parallel: testing.AllocsPerRun panics in a parallel test.
+//
+//nolint:paralleltest // testing.AllocsPerRun panics in a parallel test.
+func TestRunLayout_AllocationBudget(t *testing.T) {
+	const (
+		decls = 100
+		// 11.08 per decl before this work, of which 1.03 is the
+		// store's byTarget rebuild and out of scope here. The
+		// ceiling sits just above what the phase measures so a
+		// single construct coming back is visible.
+		perDecl = 4.5
+	)
+
+	for _, tc := range []struct {
+		name  string
+		build func(tb testing.TB, n int) *store.Store
+	}{
+		{"distinct", func(tb testing.TB, n int) *store.Store {
+			tb.Helper()
+			s, _ := newDistinctLayoutStore(tb, n)
+			return s
+		}},
+		{"shared", func(tb testing.TB, n int) *store.Store {
+			tb.Helper()
+			s, _ := newSharedLayoutStore(tb, n)
+			return s
+		}},
+	} {
+		s := tc.build(t, decls)
+		p := newLayoutBenchPipeline(t, diag.Discard())
+		got := testing.AllocsPerRun(5, func() { p.runLayout(s) })
+		if budget := perDecl * decls; got > budget {
+			t.Fatalf("%s: runLayout allocated %v for %d decls, budget %v",
+				tc.name, got, decls, budget)
+		}
+		t.Logf("%s: %v allocations for %d decls (%.2f/decl)", tc.name, got, decls, got/decls)
+	}
+}

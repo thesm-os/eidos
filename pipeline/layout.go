@@ -6,6 +6,7 @@ package pipeline
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -80,7 +81,7 @@ func (p *Pipeline) runLayout(s *store.Store) {
 	v := s.Emit()
 	outputs := p.collectPluginOutputs()
 
-	loc := map[originOutputs]map[string]string{}
+	loc := map[originOutputs]outputPaths{}
 	routeDecls(s, v, ps, outputs, p, loc)
 	materialiseOriginSlots(s, v, ps, outputs, p, loc)
 	// Dispatch before the conflict pass: a plugin's reference to its
@@ -112,7 +113,7 @@ func routeDecls(
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
 	p *Pipeline,
-	loc map[originOutputs]map[string]string,
+	loc map[originOutputs]outputPaths,
 ) {
 	v.Structs().Range(func(e *emit.Struct) bool {
 		e.Target = composeOrZero(
@@ -125,7 +126,7 @@ func routeDecls(
 			e.Origin(),
 			e.Package,
 			"struct",
-			e.QName(),
+			e,
 			loc,
 		)
 		return true
@@ -141,7 +142,7 @@ func routeDecls(
 			e.Origin(),
 			e.Package,
 			"interface",
-			e.QName(),
+			e,
 			loc,
 		)
 		return true
@@ -157,7 +158,7 @@ func routeDecls(
 			e.Origin(),
 			e.Package,
 			"function",
-			e.QName(),
+			e,
 			loc,
 		)
 		return true
@@ -173,7 +174,7 @@ func routeDecls(
 			e.Origin(),
 			e.Package,
 			"variable",
-			e.QName(),
+			e,
 			loc,
 		)
 		return true
@@ -189,7 +190,7 @@ func routeDecls(
 			e.Origin(),
 			e.Package,
 			"constant",
-			e.QName(),
+			e,
 			loc,
 		)
 		return true
@@ -205,7 +206,7 @@ func routeDecls(
 			e.Origin(),
 			e.Package,
 			"enum",
-			e.QName(),
+			e,
 			loc,
 		)
 		return true
@@ -227,7 +228,7 @@ func routeDecls(
 				m.Origin(),
 				pkg.Path,
 				"method",
-				m.QName(),
+				m,
 				loc,
 			)
 		}
@@ -244,7 +245,7 @@ func routeDecls(
 			e.Origin(),
 			e.Package,
 			"alias",
-			e.QName(),
+			e,
 			loc,
 		)
 		return true
@@ -271,15 +272,16 @@ func composeOrZero(
 	setBy, outputTag string,
 	origin node.Node,
 	emitPkgPath string,
-	kind, qname string,
-	loc map[originOutputs]map[string]string,
+	kind string,
+	named qnamer,
+	loc map[originOutputs]outputPaths,
 ) emit.Target {
 	if origin == nil {
 		ps.Errorf(position.Pos{},
-			"synthetic %s %q has no Origin; cannot route", kind, qname)
+			"synthetic %s %q has no Origin; cannot route", kind, qnameOf(named))
 		return emit.Target{}
 	}
-	suffix, ok := resolveSuffix(p, ps, outputs, setBy, outputTag, kind, qname)
+	suffix, ok := resolveSuffix(p, ps, outputs, setBy, outputTag, kind, named)
 	if !ok {
 		return emit.Target{}
 	}
@@ -295,7 +297,7 @@ func composeOrZero(
 		origin,
 		emitPkgPath,
 		kind,
-		qname,
+		named,
 	)
 	if !ok {
 		return emit.Target{}
@@ -328,12 +330,13 @@ func resolveSuffix(
 	p *Pipeline,
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
-	setBy, outputTag, kind, qname string,
+	setBy, outputTag, kind string,
+	named qnamer,
 ) (string, bool) {
 	slice, ok := outputs[setBy]
 	if !ok || len(slice) == 0 {
 		p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q",
-			ErrMissingFilenameProvider, kind, qname, setBy))
+			ErrMissingFilenameProvider, kind, qnameOf(named), setBy))
 		return "", false
 	}
 	for _, o := range slice {
@@ -343,11 +346,11 @@ func resolveSuffix(
 	}
 	if outputTag == "" {
 		p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q; declared tags: %v",
-			ErrNoDefaultOutput, kind, qname, setBy, declaredTags(slice)))
+			ErrNoDefaultOutput, kind, qnameOf(named), setBy, declaredTags(slice)))
 		return "", false
 	}
 	p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q has OutputTag %q; declared tags: %v",
-		ErrUnknownOutputTag, kind, qname, setBy, outputTag, declaredTags(slice)))
+		ErrUnknownOutputTag, kind, qnameOf(named), setBy, outputTag, declaredTags(slice)))
 	return "", false
 }
 
@@ -399,7 +402,8 @@ func composeTarget(
 	multiOutput bool,
 	origin node.Node,
 	emitPkgPath string,
-	kind, qname string,
+	kind string,
+	named qnamer,
 ) (emit.Target, manifest.ResolvedLayout, bool) {
 	policy := p.LayoutPolicyForTag(pluginName, outputTag)
 	srcPkg := originSourcePackage(s, origin)
@@ -514,7 +518,7 @@ func composeTarget(
 		// with `tag=<tag>` or relax to a directory-only path.
 		if multiOutput && filename != "" && spec.Tag == "" {
 			p.reportLayoutErr(ps, fmt.Errorf("%w: %s %q emitted by %q with directive path %q",
-				ErrUnscopedMultiOutputOverride, kind, qname, pluginName, spec.Path))
+				ErrUnscopedMultiOutputOverride, kind, qnameOf(named), pluginName, spec.Path))
 			return emit.Target{}, manifest.ResolvedLayout{}, false
 		}
 		if filename != "" {
@@ -640,7 +644,7 @@ func materialiseOriginSlots(
 	ps *diag.PluginSink,
 	outputs map[string][]plugin.Output,
 	p *Pipeline,
-	loc map[originOutputs]map[string]string,
+	loc map[originOutputs]outputPaths,
 ) {
 	pending := v.PendingOriginSlots()
 	for _, tup := range pending {
@@ -653,7 +657,7 @@ func materialiseOriginSlots(
 		// per-output dispatch the same way decl-level OutputTag
 		// values do.
 		outputTag := tup.Item.OutputTag()
-		suffix, ok := resolveSuffix(p, ps, outputs, setBy, outputTag, "slot "+tup.SlotName, "")
+		suffix, ok := resolveSuffix(p, ps, outputs, setBy, outputTag, "slot "+tup.SlotName, nil)
 		if !ok {
 			continue
 		}
@@ -672,7 +676,7 @@ func materialiseOriginSlots(
 			tup.Origin,
 			"",
 			"slot "+tup.SlotName,
-			"",
+			nil,
 		)
 		if !ok {
 			continue
@@ -713,7 +717,7 @@ type originOutputs struct {
 // state [emit.OutputPackageSetter] implementors are documented to observe
 // separately from "not routed at all".
 func recordOutputPath(
-	loc map[originOutputs]map[string]string,
+	loc map[originOutputs]outputPaths,
 	origin node.Node,
 	plugin, tag, importPath string,
 ) {
@@ -721,12 +725,62 @@ func recordOutputPath(
 		return
 	}
 	key := originOutputs{origin: origin, plugin: plugin}
-	byTag, ok := loc[key]
-	if !ok {
-		byTag = map[string]string{}
-		loc[key] = byTag
+	cur := loc[key]
+	if !cur.set {
+		cur.tag, cur.path, cur.set = tag, importPath, true
+		loc[key] = cur
+		return
 	}
-	byTag[tag] = importPath
+	if tag == cur.tag {
+		cur.path = importPath
+		loc[key] = cur
+		return
+	}
+	if cur.more == nil {
+		cur.more = map[string]string{}
+	}
+	cur.more[tag] = importPath
+	loc[key] = cur
+}
+
+// outputPaths records the import paths one plugin's outputs resolved
+// to for one origin, with the single-tag case held inline.
+//
+// Almost every plugin declares one Output, so the map this replaces
+// held exactly one entry and was allocated once per routed
+// declaration — for a lookup table read only by the few emit values
+// implementing [emit.OutputPackageSetter].
+//
+// set, not path != "", is the presence test. An empty importPath is
+// recorded deliberately: centralised routing resolves a Target
+// without a derivable import path, and "routed, path unknown" is a
+// state implementors are documented to observe separately from "not
+// routed at all".
+type outputPaths struct {
+	tag  string
+	path string
+	set  bool
+
+	// more carries the second and subsequent tags, allocated only
+	// when a plugin actually declares more than one output.
+	more map[string]string
+}
+
+// byTag materialises the exported view [emit.OutputPackageSetter]
+// receives.
+//
+// Built at dispatch rather than at record time, so only the values
+// that consume it pay for a map. It is a fresh copy per call, which
+// means a plugin retaining or mutating it — which the interface
+// docblock forbids — no longer reaches the pipeline's own state.
+func (o outputPaths) byTag() map[string]string {
+	if !o.set {
+		return nil
+	}
+	out := make(map[string]string, 1+len(o.more))
+	out[o.tag] = o.path
+	maps.Copy(out, o.more)
+	return out
 }
 
 // dispatchOutputPackages hands every [emit.OutputPackageSetter] value in the
@@ -747,7 +801,7 @@ func recordOutputPath(
 // A value whose (origin, plugin) pair routed nothing is skipped
 // rather than called with an empty map, so an implementor can treat
 // any call as carrying at least one usable answer.
-func dispatchOutputPackages(v *store.EmitView, loc map[originOutputs]map[string]string) {
+func dispatchOutputPackages(v *store.EmitView, loc map[originOutputs]outputPaths) {
 	seen := map[emit.Node]struct{}{}
 	var walker emit.Visitor
 	walker = emit.VisitorFunc(func(n emit.Node) emit.Visitor {
@@ -759,8 +813,11 @@ func dispatchOutputPackages(v *store.EmitView, loc map[originOutputs]map[string]
 			return walker
 		}
 		seen[n] = struct{}{}
-		if byTag := loc[originOutputs{origin: aware.Origin(), plugin: aware.SetBy()}]; len(byTag) > 0 {
-			aware.SetOutputPackages(byTag)
+		// "has at least one recorded tag", not "the map is
+		// non-empty": a single entry with a deliberately empty
+		// import path must still dispatch.
+		if paths := loc[originOutputs{origin: aware.Origin(), plugin: aware.SetBy()}]; paths.set {
+			aware.SetOutputPackages(paths.byTag())
 		}
 		return walker
 	})
@@ -793,45 +850,132 @@ func (p *Pipeline) reportLayoutErr(ps *diag.PluginSink, err error) {
 // the manifest sink correspondingly omits the conflicted Target.
 // The run continues for non-conflicting Targets.
 func enforceOneFileOnePackage(v *store.EmitView, ps *diag.PluginSink) {
-	groups := map[fileKey]map[string][]string{} // file → package → qnames
-	visit := func(t emit.Target, qname string) {
+	// Pass one answers only "does any output file receive two
+	// package values". It records the first package seen per file
+	// and a set of files where a second one disagreed — no per-decl
+	// slice, no per-group map, and no QName call at all.
+	//
+	// The grouping used to build, per decl, a slot pointer, a
+	// map[string][]string and a one-element slice to append into,
+	// then throw the whole structure away because a clean run has no
+	// conflicts. On a thousand-decl run that was three of the
+	// eleven allocations per routed declaration, plus a heap
+	// concatenation per decl for a qname the diagnostic never asked
+	// for.
+	firstPkg := make(map[fileKey]string)
+	conflicted := make(map[fileKey]struct{})
+	visit := func(t emit.Target) {
 		if t.Dir == "" || t.Filename == "" {
 			return
 		}
 		key := fileKey{dir: t.Dir, filename: t.Filename}
-		pkgs, ok := groups[key]
-		if !ok {
-			pkgs = map[string][]string{}
-			groups[key] = pkgs
+		prev, seen := firstPkg[key]
+		if !seen {
+			firstPkg[key] = t.Package
+			return
 		}
-		pkgs[t.Package] = append(pkgs[t.Package], qname)
+		if prev != t.Package {
+			conflicted[key] = struct{}{}
+		}
 	}
-	v.Structs().Range(func(e *emit.Struct) bool { visit(e.Target, e.QName()); return true })
-	v.Interfaces().Range(func(e *emit.Interface) bool { visit(e.Target, e.QName()); return true })
-	v.Functions().Range(func(e *emit.Function) bool { visit(e.Target, e.QName()); return true })
-	v.Variables().Range(func(e *emit.Variable) bool { visit(e.Target, e.QName()); return true })
-	v.Constants().Range(func(e *emit.Constant) bool { visit(e.Target, e.QName()); return true })
-	v.Enums().Range(func(e *emit.Enum) bool { visit(e.Target, e.QName()); return true })
-	v.Aliases().Range(func(e *emit.Alias) bool { visit(e.File, e.QName()); return true })
+	v.Structs().Range(func(e *emit.Struct) bool { visit(e.Target); return true })
+	v.Interfaces().Range(func(e *emit.Interface) bool { visit(e.Target); return true })
+	v.Functions().Range(func(e *emit.Function) bool { visit(e.Target); return true })
+	v.Variables().Range(func(e *emit.Variable) bool { visit(e.Target); return true })
+	v.Constants().Range(func(e *emit.Constant) bool { visit(e.Target); return true })
+	v.Enums().Range(func(e *emit.Enum) bool { visit(e.Target); return true })
+	v.Aliases().Range(func(e *emit.Alias) bool { visit(e.File); return true })
 
-	// Report every group first, then clear once. Clearing inside the
-	// loop re-walked all seven buckets per conflicting group and
-	// joined a path string for every decl it touched — 7k bucket
-	// walks and up to k·n concatenations, which on a repo-wide
-	// package mismatch is quadratic, since k scales with n.
-	conflicted := map[fileKey]struct{}{}
-	for key, pkgs := range groups {
-		if len(pkgs) < 2 {
-			continue
-		}
+	if len(conflicted) == 0 {
+		return
+	}
+
+	// Pass two runs only when something conflicts. It walks the same
+	// seven buckets in the same order — so qnames reach the
+	// diagnostic in the order they always did — collecting the
+	// detail the message needs and clearing the offending Targets in
+	// the same visit.
+	details := collectAndClearConflicts(v, conflicted)
+	for key := range conflicted {
 		ps.Errorf(position.Pos{},
 			"one-file-one-package violation at %s: conflicting package declarations %s",
-			key.path(), formatPackageConflict(pkgs))
-		conflicted[key] = struct{}{}
+			key.path(), formatPackageConflict(details[key]))
 	}
-	if len(conflicted) > 0 {
-		clearConflictedTargets(v, conflicted)
+}
+
+// collectAndClearConflicts gathers the qnames behind each conflicting
+// file, grouped by package, and zeroes the Target of every decl it
+// collects.
+//
+// Collection and clearing share one walk because they visit exactly
+// the same decls: the ones routed to a file in conflicted. Splitting
+// them would double the bucket traversals for no benefit, and the
+// clearing pass already had to visit each of them.
+//
+// Aliases route on File, not Target — a membership test written once
+// over e.Target would not compile against emit.Alias, which is the
+// safest possible reminder.
+func collectAndClearConflicts(
+	v *store.EmitView,
+	conflicted map[fileKey]struct{},
+) map[fileKey]map[string][]string {
+	details := make(map[fileKey]map[string][]string, len(conflicted))
+	take := func(t emit.Target, qname string) (emit.Target, bool) {
+		key := fileKey{dir: t.Dir, filename: t.Filename}
+		if _, bad := conflicted[key]; !bad {
+			return t, false
+		}
+		pkgs, ok := details[key]
+		if !ok {
+			pkgs = map[string][]string{}
+			details[key] = pkgs
+		}
+		pkgs[t.Package] = append(pkgs[t.Package], qname)
+		return emit.Target{}, true
 	}
+	v.Structs().Range(func(e *emit.Struct) bool {
+		if t, hit := take(e.Target, e.QName()); hit {
+			e.Target = t
+		}
+		return true
+	})
+	v.Interfaces().Range(func(e *emit.Interface) bool {
+		if t, hit := take(e.Target, e.QName()); hit {
+			e.Target = t
+		}
+		return true
+	})
+	v.Functions().Range(func(e *emit.Function) bool {
+		if t, hit := take(e.Target, e.QName()); hit {
+			e.Target = t
+		}
+		return true
+	})
+	v.Variables().Range(func(e *emit.Variable) bool {
+		if t, hit := take(e.Target, e.QName()); hit {
+			e.Target = t
+		}
+		return true
+	})
+	v.Constants().Range(func(e *emit.Constant) bool {
+		if t, hit := take(e.Target, e.QName()); hit {
+			e.Target = t
+		}
+		return true
+	})
+	v.Enums().Range(func(e *emit.Enum) bool {
+		if t, hit := take(e.Target, e.QName()); hit {
+			e.Target = t
+		}
+		return true
+	})
+	v.Aliases().Range(func(e *emit.Alias) bool {
+		if t, hit := take(e.File, e.QName()); hit {
+			e.File = t
+		}
+		return true
+	})
+	return details
 }
 
 // fileKey identifies the output file a decl routes to.
@@ -878,68 +1022,6 @@ func formatPackageConflict(pkgs map[string][]string) string {
 		parts = append(parts, fmt.Sprintf("%s={%s}", e.pkg, strings.Join(e.qnames, ",")))
 	}
 	return strings.Join(parts, "; ")
-}
-
-// clearConflictedTargets zeroes every routable decl routed to a file
-// in conflicted. The cleared decls drop from the byTarget rebuild and
-// from the manifest; they remain in their per-kind buckets so
-// debugging tooling can still inspect them.
-//
-// Takes the whole conflicting set so the seven buckets are walked
-// once for the run rather than once per conflicting group. Clearing
-// is idempotent and order-independent — zeroing a Target empties its
-// Dir and Filename, and the grouping pass skips those — so a batched
-// clear produces the identical cleared set a per-group one did.
-func clearConflictedTargets(v *store.EmitView, conflicted map[fileKey]struct{}) {
-	bad := func(t emit.Target) bool {
-		_, ok := conflicted[fileKey{dir: t.Dir, filename: t.Filename}]
-		return ok
-	}
-	v.Structs().Range(func(e *emit.Struct) bool {
-		if bad(e.Target) {
-			e.Target = emit.Target{}
-		}
-		return true
-	})
-	v.Interfaces().Range(func(e *emit.Interface) bool {
-		if bad(e.Target) {
-			e.Target = emit.Target{}
-		}
-		return true
-	})
-	v.Functions().Range(func(e *emit.Function) bool {
-		if bad(e.Target) {
-			e.Target = emit.Target{}
-		}
-		return true
-	})
-	v.Variables().Range(func(e *emit.Variable) bool {
-		if bad(e.Target) {
-			e.Target = emit.Target{}
-		}
-		return true
-	})
-	v.Constants().Range(func(e *emit.Constant) bool {
-		if bad(e.Target) {
-			e.Target = emit.Target{}
-		}
-		return true
-	})
-	v.Enums().Range(func(e *emit.Enum) bool {
-		if bad(e.Target) {
-			e.Target = emit.Target{}
-		}
-		return true
-	})
-	// Aliases route on File, not Target. A membership test written
-	// once over e.Target would compile and silently stop clearing
-	// them.
-	v.Aliases().Range(func(e *emit.Alias) bool {
-		if bad(e.File) {
-			e.File = emit.Target{}
-		}
-		return true
-	})
 }
 
 // collectPluginOutputs builds the plugin-name → declared-Outputs
@@ -1320,4 +1402,31 @@ func splitOutDirectivePath(value string) (dir, filename string) {
 	dir, filename = path.Split(value)
 	dir = strings.TrimRight(dir, "/")
 	return dir, filename
+}
+
+// qnamer is the QName-bearing subset every routable emit kind
+// satisfies.
+//
+// emit.Node does not declare QName, so this is the narrowest
+// interface that lets the routing path carry the declaration itself
+// instead of its qualified name. Every routable kind has a
+// pointer-receiver QName, so the conversion is a pointer into an
+// interface word and allocates nothing — where building the string
+// eagerly was a heap concatenation per decl, carried down two frames
+// and read only by error branches a clean run never reaches.
+type qnamer interface{ QName() string }
+
+// qnameOf returns n's qualified name, or the empty string when the
+// caller has no declaration to name.
+//
+// The origin-slot path is the nil case: it routes a slot tuple rather
+// than a decl and passed an empty qname before this parameter carried
+// a node. Feeding it the tuple's item there would change
+// ErrMissingFilenameProvider's text from `slot "x" ""` to a real
+// qname, so it passes nil and this returns what it always did.
+func qnameOf(n qnamer) string {
+	if n == nil {
+		return ""
+	}
+	return n.QName()
 }
