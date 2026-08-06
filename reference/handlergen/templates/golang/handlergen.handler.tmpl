@@ -1,0 +1,22 @@
+{{- define "handlergen.handler" -}}
+// {{ .TypeName }} serves {{ .Source }} over HTTP.
+//
+// The ServeHTTP body is assembled from three sources: the prebody
+// slot, this plugin's own statements, and the postbody slot.
+// handlergen does not know what the slots hold — each entry is
+// rendered by whichever template owns its kind.
+type {{ .TypeName }} struct{}
+
+// ServeHTTP implements http.Handler.
+func (h *{{ .TypeName }}) ServeHTTP(w {{ renderType .WriterRef }}, r {{ renderType .RequestRef }}) {
+{{- range (slot . "prebody").Items }}
+	{{ render . }}
+{{- end }}
+
+	// body owned by handlergen
+	h.serve(w, r)
+{{- range (slot . "postbody").Items }}
+	{{ render . }}
+{{- end }}
+}
+{{- end -}}

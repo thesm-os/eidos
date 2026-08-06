@@ -2,12 +2,15 @@
 
 Routing is the framework concern of deciding **where** a plugin's
 emit decls land: which directory, which filename, which `package`
-clause. Plugins contribute nothing to this decision beyond the
-filename suffix they declare and the source-node anchor they
-attach to each decl. Everything else — package name, dir,
-import path, test-package shift, cross-package qualification —
-is computed by the pipeline's Layout phase from the directives on
-the source and the project's configured policy.
+clause. A plugin contributes three things and no more: the
+filename suffixes it declares through `Outputs(lang) []Output`,
+the source-node anchor it attaches to each decl, and — when it
+has an opinion — the `emit.Package` name it emits into.
+Everything else — dir, import path, test-package shift — is
+computed by the pipeline's Layout phase from the directives on
+the source and the project's configured policy. Cross-package
+qualification is resolved later still, by the backend at render
+time.
 
 This guide covers the user-facing surface (the three directive
 forms), the precedence pipeline, the `_test.go` shift, and the
@@ -16,19 +19,20 @@ afterwards for slot-based cross-cutting; this document is purely
 about where files go.
 
 [1]: composition.md
+[2]: multi-file-output.md
 
 ## TL;DR
 
 | Form | Anchor | When to reach for it |
 |------|--------|---------------------|
 | Default (no directive) | source location | alongside source, source package — the common case |
-| `+gen:out <path>` | source node | any plugin without an obvious owning directive, or strict per-plugin scope via `plugin=` |
-| `+gen:mock out=... pkg=...` | the directive that triggers emission | one-line override that propagates to companion plugins |
+| `+gen:out <path>` | source node | moves every plugin emitting from that source; narrow to one with `plugin=<name>` |
+| `+gen:repo out=... pkg=...` | the directive that triggers emission | moves the owning plugin's output only, without naming it |
 
-All three feed the same precedence pipeline; only the syntactic
-anchor differs.
+All three feed the same precedence layer; they differ in the
+syntactic anchor and in default scope.
 
-## Three equivalent forms
+## Three routing forms
 
 ### 1. Default — no directive
 
@@ -39,37 +43,44 @@ type Store interface {
 }
 ```
 
-The mock plugin emits a struct anchored on `Store`. The Layout
-phase reads the anchor and resolves placement:
+mockgen emits a struct anchored on `Store`. The Layout phase
+reads the anchor and resolves placement:
 
 - **Dir** — source dir (where `store.go` lives).
 - **Filename** — `<source-basename><plugin.Output.Suffix>` →
-  `store_mock.go` for the mock plugin (`_mock.go` suffix) and
-  `store_mock_test.go` for the mocktest companion.
-- **Package** — source package, `store`, unless the filename ends
-  in `_test.go` (the next section).
-- **ImportPath** — source import path; receives the same `_test`
-  shift when the filename triggers it.
+  `store_mock_test.go` for mockgen (`_mock_test.go` suffix).
+- **Package** — the plugin's `emit.Package` name when it set
+  one, otherwise the source package, `store`. Either way a
+  filename ending in `_test.go` triggers the shift below.
+- **ImportPath** — the import path matching that package;
+  receives the same `_test` shift when the filename triggers it.
 
-The mocktest output lands in **`package store_test`** — Go's
-external test convention — automatically. No directive needed.
-Plugins that already opt into the convention themselves (their
-`emit.Package` ends in `_test`) bypass the shift; the framework
-does not double-suffix.
+The output lands in **`package store_test`** — Go's external
+test convention — with no directive. mockgen reaches it by
+emitting into a `<srcPkg>_test` `emit.Package` of its own; a
+plugin that leaves `emit.Package.Name` empty and declares a
+`_test.go` suffix reaches it through the framework shift
+instead. Neither route double-suffixes: a package already ending
+in `_test` is left alone.
 
 ### 2. Standalone `+gen:out`
 
-The framework reserves one core directive, `+gen:out`, that any
-source can carry. Positional path plus optional `plugin=<name>`
-scope and `pkg=<name>` package override:
+The framework reserves a core routing directive, `+gen:out`, that
+any source can carry. Positional path plus optional
+`plugin=<name>` scope, `pkg=<name>` package override, and
+`tag=<name>` output scope (see [multi-file output][2]):
 
 ```go
 //+gen:out testkit/
-//+gen:mock
-type Store interface { ... }
+//+gen:repo
+type User struct { ... }
 ```
 
-→ `store/testkit/store_mock.go` (`package testkit`) and
+Unscoped, it moves every plugin emitting against that source.
+repogen emits `User`'s repository, and mockgen mocks that
+repository against the same origin, so both files travel:
+
+→ `store/testkit/store_repo.go` (`package testkit`) and
 `store/testkit/store_mock_test.go` (`package testkit_test`).
 
 Three positional shapes:
@@ -79,6 +90,12 @@ Three positional shapes:
 //+gen:out subdir/             // place files in a sibling dir
 //+gen:out subdir/file.go      // both
 ```
+
+The path always resolves under the origin's own source
+directory. A leading separator is stripped and `..` segments are
+clamped, so `+gen:out /abs/file.go` and `+gen:out ../escape/`
+land at `store/abs/file.go` and `store/escape/` — the directive
+cannot write outside the source tree.
 
 When the path carries a dir and `pkg=` is not set, the package
 name is auto-derived from the resolved dir's basename. Use
@@ -96,74 +113,96 @@ applies **only** to the named plugin's output. Useful when one
 plugin should land somewhere distinct from its companions:
 
 ```go
-//+gen:out mocks/ plugin=mock
-//+gen:mock
-type Store interface { ... }
+//+gen:out mocks/ plugin=mockgen
+//+gen:repo
+type User struct { ... }
 ```
 
-→ the mock file moves to `store/mocks/`, but mocktest stays in
-the source dir following the default rules.
+→ the mock moves to `store/mocks/store_mock_test.go`
+(`package mocks_test`), while `store/store_repo.go` stays in the
+source dir following the default rules.
 
 ### 3. Per-directive `out=` / `pkg=` keys
 
 Routing keys on any plugin's own directive. The pipeline records
 directive ownership at Build time (from each plugin's
-`DirectiveProvider.Directives()`) and recognises `out=` and
-`pkg=` keys on every owned directive automatically:
+`DirectiveProvider.Directives()`) and recognises `out=`, `pkg=`
+and `tag=` keys on every owned directive automatically:
 
 ```go
-//+gen:mock out=testkit/ pkg=storetest
-type Store interface { ... }
+//+gen:repo out=testkit/ pkg=storetest
+type User struct { ... }
 ```
 
 Semantically equivalent to the standalone `+gen:out testkit/
-pkg=storetest` on the same source — same precedence layer, same
-companion-aware propagation — but anchored at the directive
-that actually triggers the emission. The natural form for the
-common "this directive's products travel together" case.
+pkg=storetest plugin=repogen` on the same source — same
+precedence layer, same scope — but anchored at the directive
+that actually triggers the emission, so the owning plugin's name
+never has to be written down.
 
-**Scope** — per-directive keys produce an **unscoped** spec
-(applies to every plugin emitting against the same origin), so
-sibling generators that discover output via meta (mocktest
-discovers mock output via `mock.iface`) inherit the override
-without restating it. To restrict to one plugin, fall back to
-the standalone form with `plugin=`.
+**Scope** — per-directive keys are scoped to the directive's
+**owning plugin** and to nothing else. Above, repogen's
+`store_repo.go` moves to `store/testkit/`; mockgen's
+`store_mock_test.go`, anchored on the same `User`, stays where
+the default rules put it. That is deliberate: the moment a type
+carries two directives, an unscoped reading would let whichever
+directive was written first decide where every other plugin's
+output went. A plugin that genuinely has to follow another one
+uses the standalone form with `plugin=`, which says so.
 
 ## Precedence
 
 Each layer overrides the previous when its field is set:
 
-1. **Framework default** — alongside source, source package,
-   plugin's filename suffix.
+1. **Framework default** — alongside source; `Dir` from the
+   origin's source file, `Package` / `ImportPath` from the
+   plugin's `emit.Package` when it named one, otherwise from the
+   origin's source package.
 2. **Plugin filename suffix** — appended to the source basename
-   (`store.go` + `_mock.go` → `store_mock.go`).
-3. **Project layout policy** — `output.*` block in `.eidos.yaml`.
+   (`store.go` + `_mock_test.go` → `store_mock_test.go`).
+3. **Resolved layout policy** — the `output.*` block in
+   `.eidos.yaml` (project, then per-plugin, then per-tag), with
+   the CLI `-layout`, `-p` and `-output-dir` folded in on top.
 4. **Per-source routing directives** — `+gen:out` (form 2) and
    per-directive `out=`/`pkg=` keys (form 3). Both feed the same
    layer; both can be present on one source.
-5. **CLI flags** — `-o`, `-p`, `-output-dir`, `-layout`.
+5. **CLI `-o`** — `-o <path>`, or the scoped
+   `-o <plugin>[:<tag>]=<path>` form.
+6. **The `_test.go → <pkg>_test` shift** — last, over whatever
+   the layers above resolved.
+
+`-p` sits at layer 3, not above the directives: a `pkg=` written
+on a source overrides it, because the source is more specific
+than the run.
 
 Higher layers replace whichever fields they touch and leave
-others unchanged. The `_test.go → <pkg>_test` shift runs at the
-framework-default layer and is skipped when any higher layer
-pinned `Package` (or when the resolved package already ends in
-`_test`).
+others unchanged, with one exception — `Dir` **stacks**. A
+directive path and a `-o` path each join onto the directory
+below them, so `+gen:out dirdir/` under `-o clidir/cli.go`
+resolves to `store/dirdir/clidir/cli.go`.
 
 ## The `_test.go → <pkg>_test` shift
 
 When the resolved filename ends `_test.go`, Layout appends
-`_test` to the resolved package and import path **at the
-framework-default layer only**. The rule is uniform — never
-conditional on the routing form:
+`_test` to the resolved package and import path **after every
+other layer has run**. The rule is uniform — never conditional
+on the routing form, and never on which layer supplied the
+package:
 
 | Resolved filename | Resolved dir | Resolved package |
 |-------------------|--------------|------------------|
 | `store_mock_test.go` | `store/` | `store_test` |
 | `store_mock_test.go` | `store/testkit/` (from `out=testkit/`) | `testkit_test` |
-| `store_mock_test.go` | `store/` (from `pkg=foo`) | `foo` — shift suppressed |
+| `store_mock_test.go` | `store/testkit/` (from `out=testkit/ pkg=foo`) | `foo_test` |
+| `store_mock_test.go` | `store/` (from `pkg=foo_test`) | `foo_test` — already suffixed |
 
-The shift gives Go's external test convention by default and
-stays out of the way when the user explicitly sets `pkg=`.
+`pkg=` answers "which package does this output belong to", not
+"suppress Go's test convention", so it does not suppress the
+shift: honouring `pkg=foo` literally on a `_test.go` file would
+turn an external test into an internal one silently. The one way
+to stop the shift is to resolve to a package that already ends
+in `_test` — by writing `pkg=<name>_test`, or by emitting into a
+`<pkg>_test` `emit.Package` as mockgen does.
 
 ## Cross-package references
 
@@ -175,12 +214,14 @@ resolved `Target.ImportPath`:
   path → bare name (same-package elision).
 - Target's import path **differs** → register the import on the
   file and qualify the name with the resulting alias.
+- Target has **no** resolved import path (synthetic, or never
+  routed) → bare name.
 
-This is what lets mocktest reference the mock struct via
-`emit.Internal(s)` regardless of whether the test file lands in
-the same package, `<pkg>_test`, or a sibling testkit package —
-the framework resolves the qualifier post-routing without the
-plugin knowing or caring.
+This is what lets mockgen reference repogen's interface via
+`emit.Internal(i)` regardless of whether the mock lands in the
+same package, `<pkg>_test`, or a sibling testkit package — the
+framework resolves the qualifier post-routing without the plugin
+knowing or caring.
 
 ## Plugin-side contract
 
@@ -199,7 +240,12 @@ anchor's source package and stamps the anchor as the default
 filename suffix via the `FilenameProvider` capability
 (`Outputs(lang) []Output`).
 
-Plugins **never** call `Package(name, path)` with non-empty
-arguments (that signals "no opinion"; the framework fills both
-in), never set `emit.Target` on a decl, and never look at the
-file's destination. The framework does all of that.
+Plugins leave `emit.Package.Name` empty — that is the "no
+opinion" signal, and the framework fills `Package` and
+`ImportPath` from the origin's source package. A plugin with a
+real reason to land elsewhere names the package itself, as
+mockgen does with `c.Package(srcPkg.Name+"_test",
+srcPkg.Path+"_test")`; the Layout phase honours a non-empty name
+under alongside-source layout. What plugins never do is set
+`emit.Target` on a decl or look at the file's destination. The
+framework does all of that.

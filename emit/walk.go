@@ -320,6 +320,7 @@ func walkStmt(s *Stmt, v Visitor) {
 	Walk(s.Call, v)
 	Walk(s.DeclType, v)
 	Walk(s.Inner, v)
+	Walk(s.Node, v)
 	for _, sub := range s.Block {
 		Walk(sub, v)
 	}

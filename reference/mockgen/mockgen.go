@@ -50,6 +50,14 @@ import (
 // [sdk.Plugin.Name].
 const Name = "mockgen"
 
+// Version is the plugin's declared version. It composes into the
+// pipeline's plugin fingerprint, which frontends fold into their cache
+// keys — so bumping it invalidates a warm cache populated when this
+// plugin behaved differently. A plugin that declares no version
+// contributes an empty string and can never invalidate anything, which
+// is a silent staleness bug waiting for its first behavioural change.
+const Version = "1.0.0"
+
 // Capability is the capability label mockgen advertises through
 // [plugin.CapabilityProvider.Provides].
 const Capability = "mock"
@@ -121,6 +129,9 @@ func New() *Plugin {
 
 // Name returns [Name].
 func (*Plugin) Name() string { return Name }
+
+// Version satisfies [sdk.Versioned].
+func (*Plugin) Version() string { return Version }
 
 // Priority places the plugin in the composition generator bucket so
 // it runs after the foundation generators that synthesise the

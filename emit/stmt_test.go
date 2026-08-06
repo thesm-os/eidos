@@ -35,6 +35,7 @@ func TestStmtKind_String(t *testing.T) {
 		{"Var", emit.StmtVar, "var"},
 		{"Const", emit.StmtConst, "const"},
 		{"Raw", emit.StmtRaw, "raw"},
+		{"Render", emit.StmtRender, "render"},
 		{"unknown stringifies with a marker", emit.StmtKind(99), "stmt_kind(?)"},
 	}
 
@@ -396,5 +397,42 @@ func TestNewRawStmt(t *testing.T) {
 			t.Fatalf("StmtKind mismatch: %s", s.StmtKind)
 		}
 		assertEqualString(t, s.RawText, "// custom")
+	})
+}
+
+func TestNewRenderStmt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("wraps the node under the render variant", func(t *testing.T) {
+		t.Parallel()
+		node := &emit.Field{Name: "Wrapped"}
+		s := emit.NewRenderStmt(node)
+		if s.StmtKind != emit.StmtRender {
+			t.Fatalf("StmtKind mismatch: %s", s.StmtKind)
+		}
+		if s.Node != emit.Node(node) {
+			t.Fatalf("Node should be the wrapped value; got %#v", s.Node)
+		}
+	})
+
+	// The wrapper's whole purpose is to satisfy a KindStmt-constrained
+	// slot on behalf of a node that cannot. A wrapper reporting its own
+	// wrapped kind would be rejected by the very slot it exists to
+	// enter.
+	t.Run("reports KindStmt, not the wrapped node's kind", func(t *testing.T) {
+		t.Parallel()
+		s := emit.NewRenderStmt(&emit.Field{Name: "Wrapped"})
+		if s.Kind() != emit.KindStmt {
+			t.Fatalf("Kind = %s, want %s", s.Kind(), emit.KindStmt)
+		}
+	})
+
+	t.Run("is accepted by a KindStmt-constrained slot", func(t *testing.T) {
+		t.Parallel()
+		host := &emit.Method{Name: "ServeHTTP"}
+		wrapped := emit.NewRenderStmt(&emit.Field{Name: "Wrapped"})
+		if err := host.Prebody().Append(wrapped, emit.Provenance{SetBy: "p"}); err != nil {
+			t.Fatalf("prebody should accept a render statement; got %v", err)
+		}
 	})
 }

@@ -109,13 +109,23 @@ func TestTemplates_ShippedForGoOnly(t *testing.T) {
 		}
 	})
 
-	t.Run("funcmap is language-keyed", func(t *testing.T) {
+	// The plugin contributes no funcmap entries for any language.
+	//
+	// It used to return the shared lang/golang helpers here, and this
+	// subtest asserted that as the contract. Both were wrong: the
+	// backend already merges that map into its overrideable bucket, so
+	// returning it re-registers existing names — a Build-time
+	// ErrTemplateFuncCollision. The practical effect was that stubgen
+	// could not appear in a pipeline beside any other plugin that
+	// shipped templates and did the same, which is exactly what
+	// happened when the middlewaregen composition set arrived.
+	t.Run("funcmap contributes nothing, for any language", func(t *testing.T) {
 		t.Parallel()
-		if got := stubgen.New().TemplateFuncs("golang"); len(got) == 0 {
-			t.Fatalf("TemplateFuncs(golang) is empty; want the shared Go helpers")
-		}
-		if got := stubgen.New().TemplateFuncs("rust"); got != nil {
-			t.Fatalf("TemplateFuncs(rust) = %v, want nil", got)
+		for _, lang := range []string{"golang", "rust", ""} {
+			if got := stubgen.New().TemplateFuncs(lang); got != nil {
+				t.Errorf("TemplateFuncs(%q) = %v, want nil; the shared helpers come from "+
+					"the backend and re-registering them collides at Build", lang, got)
+			}
 		}
 		if got := stubgen.New().TemplateOverrides("golang"); got != nil {
 			t.Fatalf("TemplateOverrides = %v; the plugin replaces no canonical entry", got)

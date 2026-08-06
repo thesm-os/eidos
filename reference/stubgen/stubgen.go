@@ -16,6 +16,14 @@ import (
 // Name is the plugin's stable identifier.
 const Name = "stubgen"
 
+// Version is the plugin's declared version. It composes into the
+// pipeline's plugin fingerprint, which frontends fold into their cache
+// keys — so bumping it invalidates a warm cache populated when this
+// plugin behaved differently. A plugin that declares no version
+// contributes an empty string and can never invalidate anything, which
+// is a silent staleness bug waiting for its first behavioural change.
+const Version = "1.0.0"
+
 // Capability is the label the plugin advertises so a downstream
 // consumer can declare a documentary dependency on stub generation.
 const Capability = "stub"
@@ -76,6 +84,9 @@ func New() *Plugin {
 // Name returns [Name].
 func (*Plugin) Name() string { return Name }
 
+// Version satisfies [sdk.Versioned].
+func (*Plugin) Version() string { return Version }
+
 // Priority places the plugin in the foundation bucket: the stub is a
 // base type other generators may decorate, so it must exist before
 // composition and cross-cutting plugins run.
@@ -128,12 +139,7 @@ func (*Plugin) Templates(lang string) (fs.FS, bool) {
 }
 
 // TemplateFuncs dispatches to the per-language adapter's funcmap.
-func (*Plugin) TemplateFuncs(lang string) template.FuncMap {
-	if lang == langGo {
-		return GoFuncMap()
-	}
-	return nil
-}
+func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
 
 // TemplateOverrides returns nil — the plugin replaces no canonical
 // funcmap entry.

@@ -6,9 +6,7 @@ package stubgen
 import (
 	"embed"
 	"io/fs"
-	"text/template"
 
-	refconv "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -53,12 +51,3 @@ func GoTemplates() (fs.FS, bool) {
 	}
 	return sub, true
 }
-
-// GoFuncMap returns the shared Go-convention helpers.
-//
-// The plugin contributes no entries of its own: everything the
-// templates need is either canonical (`renderType`, `renderExpr`,
-// `external`) or comes from the shared bundle, which is the point of
-// having a per-language package rather than each plugin restating
-// the same conversions.
-func GoFuncMap() template.FuncMap { return refconv.FuncMap() }

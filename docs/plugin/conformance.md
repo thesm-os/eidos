@@ -10,30 +10,59 @@ non-deterministic output in production.
 This document is the reference for which suite applies to which
 role and how to write fixtures.
 
-## The five suites
+## The six suites
 
 ### `RunSuite(t, plugin)` — universal framework contracts
 
-Every plugin runs this. It pins:
+Every plugin runs this. It pins thirteen contracts, in this
+order:
 
-- `Name()` returns a non-empty stable identifier
+- `Name()` returns a non-empty identifier, stable across calls
 - The plugin satisfies at least one role interface (Frontend /
   Annotator / Generator / Backend)
-- `CapabilityProvider.Provides()` / `.Requires()` (when
-  implemented) return deterministic, non-empty entries
+- `CapabilityProvider` is implemented in full or not at all — a
+  plugin declaring `Priority()` without `Provides()` and
+  `Requires()` does not satisfy the interface, so the pipeline
+  drops it into the default bucket and discards the ordering it
+  declared
+- `CapabilityProvider` (when implemented) returns a stable
+  `Priority()` and deterministic `Provides()` / `Requires()`
+  holding no empty labels
 - `DirectiveProvider.Directives()` (when implemented) declares
   unique non-empty schema names
 - `Versioned.Version()` (when implemented) is stable across
-  calls
+  calls — the empty string is legal and opts out of the cache
+  key
 - `EmitVersioned.EmitVersions()` (when implemented) is stable
   and contains no empty entries
 - `NodesOnly()` (when implemented) is stable across calls
 - `FilenameProvider.Outputs(lang)` (when implemented) is
   stable across calls for each language
+- `FilenameProvider.Outputs(lang)` returns a well-formed
+  slice: every `Suffix` non-empty, tags unique, at most one
+  empty-tag output, and that one at index 0
+- `TemplateProvider` (when implemented) returns stable
+  `Templates` / `TemplateFuncs` / `TemplateOverrides`, and no
+  name appears in both funcmaps
+- `TemplateProvider`'s shipped `*.tmpl` files parse, and none
+  defines a name claiming the reserved `fragment.` prefix
+- Declaration accessors (`Provides`, `Requires`, `Directives`,
+  `Outputs`) return a fresh slice on each call rather than the
+  plugin's own backing array
 
 Pass any plugin instance — the suite probes for each capability
-via interface assertion and skips checks for capabilities the
-plugin doesn't implement.
+via interface assertion and skips the checks for capabilities
+the plugin doesn't implement. The all-or-nothing
+`CapabilityProvider` check is the exception: it fires precisely
+when `Priority()` is declared and the interface is not
+satisfied.
+
+Every per-language lookup runs against
+`plugintest.ConformanceLanguage` (`"golang"`) and against a
+language no backend claims, so the negative path is exercised
+rather than assumed. A plugin that branches `Outputs` or
+`Templates` on any other spelling answers no probe, and the
+per-language checks validate an empty slice.
 
 ### `RunAnnotatorSuite(t, annotator, fixtures)`
 
@@ -69,14 +98,34 @@ fresh store each call.
 For plugins satisfying `plugin.Generator`. Pins:
 
 - `Generate` on an empty store doesn't panic
-- For each fixture: `Generate` doesn't panic, doesn't mutate
-  source-side node counts (generators write to `Store.Emit`,
-  not `Store.Nodes`), and is deterministic — driving Generate
-  against two freshly-built stores produced from the same
-  fixture yields identical emit projections.
+- For each fixture, six checks:
+  - `Generate` doesn't panic
+  - `Generate` doesn't mutate source-side node counts
+    (generators write to `Store.Emit`, not `Store.Nodes`)
+  - `Generate` is deterministic — driving it against two
+    freshly-built stores produced from the same fixture yields
+    identical emit projections
+  - a `NodesOnly() == true` declaration is truthful: the
+    generator neither reads the emit graph through `ctx.Reader`
+    nor produces different output when the emit graph is
+    pre-seeded
+  - every `OutputTag` on an origin-anchored slot contribution
+    corresponds to an `Output` the plugin declares (skipped for
+    a plugin declaring none)
+  - every `emit.OutputPackageSetter` among those contributions
+    tolerates a partial routing map — an empty one, one holding
+    only foreign tags, one holding the primary tag with no
+    derivable path — without panicking
 
-**Fixture shape:** same as `AnnotatorFixture`. The fixture's
-`BuildStore` is called twice for the determinism check.
+The determinism check compares a sorted projection of identity
+tuples (kind, qualified name, target), so a generator emitting
+the same set of decls in a different order still passes.
+Per-entity content is out of scope: golden-file assertions
+through `pipelinetest` / `backendtest` cover that.
+
+**Fixture shape:** same as `AnnotatorFixture`. `BuildStore` is
+called once per subtest — twice each for the determinism and
+`NodesOnly` checks.
 
 ### `RunBackendSuite(t, backend, fixtures)`
 
@@ -200,19 +249,30 @@ affect results.
 
 ## Reference fixture plugins
 
-The `plugintest` package also exports three reference plugin
-fixtures plugin authors can use directly:
+The `plugintest` package also exports reference plugin fixtures
+plugin authors can use directly:
 
-- **`plugintest.FixturePlugin`** — implements every role and
-  capability the framework recognises. Useful as a meta-test
-  baseline: passing `FixturePlugin` to `RunSuite` should always
-  succeed.
-- **`plugintest.MinimalPlugin`** — implements `plugin.Plugin`
-  only, no role. `RunSuite` against it fails the role probe —
-  useful for verifying conformance-test behaviour.
-- **`plugintest.OptionsFixturePlugin`** — a generator with a
-  small options schema covering required + default + free-text
-  - one-of fields. The reference example for the options suite.
+- **`NewFixturePlugin()`** — a generator implementing every
+  optional capability the framework suite probes:
+  `CapabilityProvider`, `DirectiveProvider`, `Versioned`,
+  `EmitVersioned`, `FilenameProvider`, `NodesOnly`. Useful as a
+  meta-test baseline: passing it to `RunSuite` always succeeds.
+- **`NewMinimalPlugin(name)`** — implements `plugin.Plugin`
+  only, no role. `RunSuite` against it fails the role probe and
+  nothing else.
+- **`NewOptionsFixturePlugin(name)`** — a generator whose
+  schema covers the three field shapes: required
+  (`output_package`), one-of with a default (`mode`), and free
+  text (`label`). The reference example for the options suite.
+- **`BrokenPlugin(v)`** — a plugin breaking exactly the one
+  contract the `Violation` `v` names and satisfying every
+  other; `Violations()` returns the full set. Running
+  `RunSuite` against one and watching it fail is the cheapest
+  confirmation that a harness is wired up at all.
+- **`LyingNodesOnlyGenerator()`** — declares `NodesOnly` and
+  reads the emit graph anyway. Exported separately from
+  `BrokenPlugin` because catching it needs `RunGeneratorSuite`,
+  which drives Generate against a store.
 
 ## Common conformance failures
 
@@ -224,8 +284,13 @@ place when the same value is re-stamped, so deterministic
 stamping passes idempotency for free.
 
 **Determinism fails on the generator suite.** Your `Generate`
-iterates a map (Go's map iteration order is non-deterministic).
-Sort the keys or use the store's order-preserving buckets
+iterates a map (Go's map iteration order is non-deterministic)
+and lets that order reach an identity — a synthesised index in
+a name, a first-one-wins pick, a filename derived from
+position. Order on its own is invisible to the check, because
+the projection is sorted; order that decides what a decl is
+called or where it lands is not. Sort the keys or use the
+store's order-preserving buckets
 (`ctx.Store.Nodes().Structs().Items()` etc.) instead of
 synthesising your own indices.
 

@@ -1,0 +1,5 @@
+{{- define "validategen.entry" -}}
+if err := {{ renderExpr .ValidatorRef }}(nil); err != nil { // validation for {{ .Handler }}
+	return
+}
+{{- end -}}

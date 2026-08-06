@@ -11,11 +11,14 @@ import (
 	"go.thesmos.sh/eidos/emit"
 )
 
-// ErrUnsupportedStmt is returned by [renderState.renderStmt] when
-// called with an [emit.StmtKind] variant the current funcmap can't
-// render — typically an out-of-range discriminator value (every
-// documented variant is wired). The wrapped message names the
-// offending kind so diagnostics attribute the gap precisely.
+// ErrUnsupportedStmt is returned by [renderState.renderStmt] when it
+// cannot produce a spelling for the statement it was handed. Two
+// cases: an out-of-range [emit.StmtKind] discriminator (every
+// documented variant is wired), and an [emit.StmtRender] whose
+// [emit.Stmt.Node] is nil, which means the contributing plugin built
+// the wrapper without anything to delegate to. The wrapped message
+// names the offending case so diagnostics attribute the gap
+// precisely.
 var ErrUnsupportedStmt = errors.New("golang: unsupported Stmt")
 
 // renderStmt produces the Go source spelling for an [emit.Stmt].
@@ -87,6 +90,11 @@ func (s *renderState) renderStmt(st *emit.Stmt) (string, error) {
 		return s.renderLocalDecl("const", st)
 	case emit.StmtRaw:
 		return st.RawText, nil
+	case emit.StmtRender:
+		if st.Node == nil {
+			return "", fmt.Errorf("%w: StmtRender carries no Node", ErrUnsupportedStmt)
+		}
+		return s.render(st.Node)
 	default:
 		return "", fmt.Errorf("%w: StmtKind=%s", ErrUnsupportedStmt, st.StmtKind)
 	}

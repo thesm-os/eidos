@@ -1,0 +1,13 @@
+{{- define "middlewaregen.stack" -}}
+{{ renderDocs .Docs }}// {{ .VarName }} is the middleware chain for {{ .TypeName }}.
+//
+// Entries are contributed by other plugins into this value's "chain"
+// slot and rendered by whichever template owns each one. Their order
+// is the pipeline's resolved capability topology, not the order they
+// were appended.
+var {{ .VarName }} = []func({{ renderType .HandlerRef }}) {{ renderType .HandlerRef }}{
+{{- range (slot . "chain").Items }}
+	{{ render . }},
+{{- end }}
+}
+{{- end -}}

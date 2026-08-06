@@ -317,20 +317,74 @@ func ifElseFixture() *emit.Stmt {
 // returned string is the rendered file body. Used by
 // [TestRenderStmt_Variants] to exercise every StmtKind through the
 // public render path.
+// TestRenderStmt_Render covers the [emit.StmtRender] variant, whose
+// spelling comes from the wrapped node's own template rather than
+// from the statement union.
+//
+// The variant exists so a plugin can contribute into a
+// KindStmt-constrained slot while rendering through its own template.
+// That path is exercised end to end by the reference contributors;
+// what belongs here is the backend's half — that the wrapper
+// dispatches on the wrapped node's Kind, and that the two ways it can
+// be built wrong are reported rather than silently dropped.
+func TestRenderStmt_Render(t *testing.T) {
+	t.Parallel()
+
+	t.Run("renders the wrapped node through that node's template", func(t *testing.T) {
+		t.Parallel()
+		wrapped := &emit.Constant{
+			Name:  "limit",
+			Value: &emit.Expr{ExprKind: emit.ExprLiteral, LitKind: emit.LitInt, RawText: "10"},
+		}
+		body := renderFuncLitBody(t, []*emit.Stmt{emit.NewRenderStmt(wrapped)})
+		if !strings.Contains(body, "const limit = 10") {
+			t.Fatalf("wrapped node should render via emit.constant; got:\n%s", body)
+		}
+	})
+
+	// A wrapper with nothing to delegate to means the contributing
+	// plugin built the value wrong. Rendering nothing would drop that
+	// plugin's contribution from the output with no signal at all.
+	t.Run("reports a nil wrapped node instead of rendering nothing", func(t *testing.T) {
+		t.Parallel()
+		ctx, _, d := newBackendContext(t)
+		target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
+		addEmitPackage(t, ctx, funcLitPackage(target, []*emit.Stmt{emit.NewRenderStmt(nil)}))
+
+		err := mustNew(t).Render(ctx)
+		if err == nil && !d.HasErrors() {
+			t.Fatalf("a nil wrapped node must not render silently")
+		}
+		if err != nil && !errors.Is(err, golang.ErrUnsupportedStmt) {
+			t.Fatalf("Render error should wrap ErrUnsupportedStmt; got %v", err)
+		}
+	})
+
+	// The wrapped node names its template by Kind. A plugin that
+	// declares a kind but forgets to ship the template gets a named
+	// miss, not a blank line in someone else's file.
+	t.Run("reports a wrapped kind with no registered template", func(t *testing.T) {
+		t.Parallel()
+		ctx, _, d := newBackendContext(t)
+		target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
+		wrapped := &emit.Field{Name: "Unrendered"}
+		addEmitPackage(t, ctx, funcLitPackage(target, []*emit.Stmt{emit.NewRenderStmt(wrapped)}))
+
+		err := mustNew(t).Render(ctx)
+		if err == nil && !d.HasErrors() {
+			t.Fatalf("a wrapped kind with no template must not render silently")
+		}
+		if err != nil && !errors.Is(err, golang.ErrTemplateMissing) {
+			t.Fatalf("Render error should wrap ErrTemplateMissing; got %v", err)
+		}
+	})
+}
+
 func renderFuncLitBody(t *testing.T, stmts []*emit.Stmt) string {
 	t.Helper()
 	ctx, mem, d := newBackendContext(t)
 	target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
-	addEmitPackage(t, ctx, &emit.Package{
-		Name: "x", Path: "x",
-		Variables: []*emit.Variable{{
-			Name: "Handler", Package: "x", Target: target,
-			Init: &emit.Expr{
-				ExprKind: emit.ExprFuncLit,
-				FuncBody: stmts,
-			},
-		}},
-	})
+	addEmitPackage(t, ctx, funcLitPackage(target, stmts))
 	body := assertRenderSucceeds(t, ctx, mem, d, target)
 	return string(body)
 }

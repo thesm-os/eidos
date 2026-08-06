@@ -16,6 +16,14 @@ import (
 // attribution, and cache-key derivation.
 const Name = "shape-writer"
 
+// Version is the plugin's declared version. It composes into the
+// pipeline's plugin fingerprint, which frontends fold into their cache
+// keys — so bumping it invalidates a warm cache populated when this
+// plugin behaved differently. A plugin that declares no version
+// contributes an empty string and can never invalidate anything, which
+// is a silent staleness bug waiting for its first behavioural change.
+const Version = "1.0.0"
+
 // DirectiveName is the bare directive name (without the `+gen:` or
 // `-gen:` prefix) the plugin reads from each struct's directive
 // list. The positive form forces detection; the negative form
@@ -53,6 +61,9 @@ func New() *Plugin { return &Plugin{} }
 
 // Name returns [Name].
 func (*Plugin) Name() string { return Name }
+
+// Version satisfies [sdk.Versioned].
+func (*Plugin) Version() string { return Version }
 
 // Priority places the plugin in the shape-detector bucket so it
 // runs alongside other annotators that stamp `shape.*` metadata.

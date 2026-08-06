@@ -77,37 +77,41 @@ Emits the host decl that everyone else extends. Owns the
 `ServeHTTP` method's structural skeleton; cross-cutting plugins
 contribute into its slots.
 
+handlergen ships **no template at all**. It emits an ordinary
+`emit.Struct` carrying an ordinary `emit.Method`, and the
+backend's core `emit.method` template renders it:
+
 ```go
-// handlergen template (handlergen.handler.tmpl, abbreviated)
-{{- define "handlergen.handler" -}}
-func (h *{{ .HandlerType }}) ServeHTTP(
-    w http.ResponseWriter, r *http.Request,
-) {
-    {{ renderMethodPrebody . }}
-
-    // — body owned by handlergen —
-    var req {{ .RequestType }}
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        h.respondError(w, err)
-        return
-    }
-    resp, err := h.handle(r.Context(), &req)
-    if err != nil {
-        h.respondError(w, err)
-        return
-    }
-    h.respondJSON(w, resp)
-
-    {{ renderMethodPostbody . }}
+serve := &emit.Method{
+    Name:         "ServeHTTP",
+    ReceiverName: "h",
+    Receiver:     emit.Ptr(emit.Internal(handler)),
+    Params: []*emit.Param{
+        {Name: "w", Type: emit.External("net/http", "ResponseWriter")},
+        {Name: "r", Type: emit.Ptr(emit.External("net/http", "Request"))},
+    },
+    Body: []*emit.Stmt{
+        emit.NewRawStmt("// body owned by handlergen"),
+        emit.NewRawStmt("h.serve(w, r)"),
+    },
 }
-{{- end -}}
 ```
 
-The two `renderMethodPrebody` / `renderMethodPostbody` calls are
-the **slot-composition helpers** the backend supplies in the
-funcmap. They render every contribution into those slots, in
-slot order. handlergen doesn't know what will land there;
-cross-cutting plugins fill them.
+The composition happens inside the core template, which calls
+`renderMethodBody`. That single helper renders **the prebody
+slot, then the method's typed `Body`, then the postbody slot**.
+handlergen does not know what will land in the slots, and does
+not have to arrange for them to be rendered — writing a custom
+template here would be work the framework already does.
+
+This is the **programmatic** half of the composition story:
+a plugin whose output is core emit kinds, rendered by templates
+it does not own. The **template** half is `middlewaregen` and
+its contributors below, where each plugin declares its own emit
+kind and ships the template that renders it. Reach for the
+programmatic form when the output is a plain Go declaration;
+reach for the template form when the shape is yours and a
+contributor needs to render inside it.
 
 ### `validategen` — composition
 
@@ -444,6 +448,11 @@ designed for.
 
 ## Custom slots — plugins depending on plugins
 
+> Runnable as `reference/middlewaregen` (the host) with
+> `reference/authgen`, `reference/metricgen` and
+> `reference/tracegen` (the contributors). The end-to-end
+> assertions live in `reference/middlewaregen/composition_test.go`.
+
 Standard slots (`prebody`, `postbody`, `methods`, `fields`, …)
 live on the core emit kinds (`Method`, `Struct`, `Function`)
 that any plugin can use without coordination. The richer
@@ -510,17 +519,24 @@ func (s *MiddlewareStack) Slot(name string) *emit.Slot {
     if name == "chain" {
         return s.Chain()
     }
-    return nil
+    return emit.NewSlot(name, "")
 }
 
 var _ emit.SlotHost = (*MiddlewareStack)(nil)
 ```
 
-The slot's **element kind** (`emit.KindExpr` here) is part of
-the contract: middlewaregen declares that contributions must be
-expressions, so the framework rejects a malformed append
-(`*Statement` into a `KindExpr` slot) at append time instead of
-producing broken output at render time.
+The slot's **element kind** is part of the contract. Declaring
+`emit.KindExpr` makes the framework reject a malformed append
+(a `*Statement` into an expression slot) at the append call,
+naming the contributing plugin, instead of producing broken
+output at render.
+
+Leave it empty when contributors bring their own emit kinds, as
+the runnable version of this example does — the content is then
+heterogeneous by design and no single kind describes it. The
+trade is where the error surfaces: an open slot accepts anything
+and fails at render with a missing template naming a *kind*,
+rather than at append naming a *plugin*.
 
 ### The template
 
@@ -528,19 +544,43 @@ producing broken output at render time.
 {{- define "middlewaregen.stack" -}}
 // middleware is the request-time chain assembled at handler init.
 func (h *{{ .HandlerType }}) middleware(handler http.Handler) http.Handler {
-{{- range slot "chain" . }}
-    handler = {{ renderExpr . }}(handler)
+{{- range (slot . "chain").Items }}
+    handler = {{ render . }}(handler)
 {{- end }}
     return handler
 }
 {{- end -}}
 ```
 
-The new helper here is `slot "chain" .` — the generic accessor
-that returns the named slot's contributions in append order.
-The template iterates them and calls `renderExpr` on each;
-because the slot was declared with `emit.KindExpr`, every
-contribution is renderable through the expression dispatcher.
+The new helper here is `slot . "chain"` — the generic accessor
+that returns the named slot. Note the argument order: the host
+comes first, the slot name second. The helper returns a
+`*emit.Slot`, which a template cannot range over directly, so
+the iteration is over `.Items`.
+
+Each item is rendered with `render`, which dispatches on the
+item's `Kind()` to whichever template owns it. That is what lets
+a contributor ship its own emit kind and its own template rather
+than handing over a bare expression — the host's template never
+learns what a contribution looks like. A slot whose entries are
+uniformly expressions can use `renderExpr` instead and declare
+`emit.KindExpr` as its element kind, trading that flexibility
+for a kind check at append time.
+
+Two constraints that bite the moment a second contributor
+appears, both learned by building this:
+
+- **Template *filenames* must be unique across every plugin in
+  the pipeline**, not just `define` names. Templates are
+  registered under their base filename as well, so three
+  contributors each shipping `entry.tmpl` collide. Name the file
+  for the plugin: `authgen.entry.tmpl`.
+- **Contributors must return `nil` from `TemplateFuncs`** unless
+  they have a helper of their own. The shared Go helpers are
+  already merged into the backend's overrideable funcmap, so
+  returning them re-registers existing names — a Build-time
+  `ErrTemplateFuncCollision`, which means two plugins that both
+  did it could never appear in one pipeline.
 
 ### Contributor plugins
 

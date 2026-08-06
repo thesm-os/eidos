@@ -60,6 +60,53 @@ omitted unless they change what a caller can rely on.
   cases across the hot paths; and executable examples for the `eidostest`
   harnesses and `emit/builder`.
 
+### Added
+
+- **Every shipped plugin now declares `plugin.Versioned`.** The pipeline hashes
+  each plugin's `name@version` into the composition fingerprint that frontends
+  fold into their cache keys, and the backend's version feeds the per-plugin key
+  as well. A plugin declaring no version contributed `name@""`, so changing its
+  behaviour could never invalidate a warm cache — the caller got stale output
+  with no signal, which is what made `--no-cache` a workaround in the first
+  place.
+
+  Seventeen plugins were missing it: every `reference/` plugin except auditgen,
+  errorgen, handlergen and validategen; all four under `plugins/`; plus
+  `backend/golang` and `bridge/protogo`. All now declare `Version = "1.0.0"`.
+
+  `plugintest`'s `AssertVersionedStability` cannot catch the omission — it
+  checks that a declared version is stable, and a plugin that does not implement
+  the interface passes it vacuously. `cmd/eidos-reference` gained a guard
+  asserting the declaration itself over the exact set the binary registers.
+
+- **`emit`: `StmtRender` and `NewRenderStmt`, so a plugin can contribute into a
+  statement slot while rendering through its own template.** The `prebody` /
+  `postbody` slots on `Method` and `Function` are constrained to `emit.stmt`,
+  which meant a cross-cutting plugin could not append a value of its own emit
+  kind there — and therefore could not own how its contribution renders. It had
+  to assemble the `emit.Stmt` union in Go, and anything the union does not model
+  fell back to `NewRawStmt` text.
+
+  `NewRenderStmt(node)` wraps any `emit.Node` in a statement that reports
+  `emit.KindStmt`, satisfying the slot, and defers its spelling to the template
+  registered under the wrapped node's `Kind`. Provenance, ordering and import
+  collection are unaffected: the wrapped node is walked as part of the graph, so
+  its external references still register on the host file.
+
+  The wrapper is deliberately thin rather than a widening of the slot. Backends
+  type a statement block as `[]*emit.Stmt` end to end, so a slot item has to be
+  a `Stmt`; admitting bare nodes would push a runtime type check into the block
+  renderer, which exists precisely to assume its contents are statements.
+
+  Both spellings remain supported and neither is deprecated —
+  `docs/plugin/recipes.md` documents the choice. `reference/auditweaver` and
+  `reference/debugweaver` now take the template route and are the worked
+  examples.
+
+  `backend/golang` reports two ways of building the wrapper wrong, both at
+  render time: a nil wrapped node wraps `ErrUnsupportedStmt`, and a wrapped kind
+  with no registered template wraps `ErrTemplateMissing`.
+
 ### Fixed
 
 - **`emit`: a reserved slot's element kind depended on which accessor reached

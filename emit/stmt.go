@@ -74,6 +74,24 @@ const (
 	// for language-specific constructs not modelled above. Use
 	// sparingly; the structured kinds give backends more leverage.
 	StmtRaw
+	// StmtRender defers this statement's spelling to the node in
+	// [Stmt.Node], which the backend renders through the template
+	// registered for that node's [Node.Kind].
+	//
+	// It exists for the plugin that wants to contribute into a
+	// statement slot — a [Method] or [Function] "prebody" /
+	// "postbody" — while rendering through its own template rather
+	// than by assembling this union by hand. Those slots are
+	// constrained to [KindStmt], so a plugin's own emit kind cannot
+	// be appended to them directly; wrapping satisfies the
+	// constraint while leaving the spelling to the wrapped node.
+	//
+	// The wrapper is deliberately thin. Backends type a statement
+	// block as []*Stmt end to end, so a slot item has to BE a Stmt;
+	// widening that to [Node] would push a runtime type check into
+	// the block renderer, which exists precisely to assume its
+	// contents are statements.
+	StmtRender
 )
 
 // String returns the lower-case textual form of k for diagnostics.
@@ -115,6 +133,8 @@ func (k StmtKind) String() string {
 		return "const"
 	case StmtRaw:
 		return labelRaw
+	case StmtRender:
+		return "render"
 	default:
 		return "stmt_kind(?)"
 	}
@@ -201,6 +221,14 @@ type Stmt struct {
 
 	// RawText is the verbatim text for StmtRaw.
 	RawText string
+
+	// Node is the node whose own template renders this statement,
+	// for StmtRender. Nil is a plugin error rather than an empty
+	// render: a wrapper with nothing to delegate to means the
+	// contributing plugin built the value wrong, and reporting that
+	// at render time names it, where silently emitting nothing would
+	// leave a contribution missing from the output with no signal.
+	Node Node
 }
 
 // Kind returns [KindStmt] regardless of StmtKind — [StmtKind]
@@ -337,4 +365,23 @@ func NewConstStmt(name string, typ Ref, value *Expr) *Stmt {
 // variant fits.
 func NewRawStmt(text string) *Stmt {
 	return &Stmt{StmtKind: StmtRaw, RawText: text}
+}
+
+// NewRenderStmt wraps n as a statement whose spelling comes from n's
+// own template, letting a plugin contribute into a [KindStmt]-
+// constrained slot without assembling the [Stmt] union by hand.
+//
+// The usual caller is a cross-cutting plugin appending into a [Method]
+// or [Function] "prebody" / "postbody":
+//
+//	entry := &Entry{Subject: owner + "." + m.Name}
+//	_ = c.AppendPrebody(m, NewRenderStmt(entry), EntryID)
+//
+// n must declare a [Node.Kind] the backend has a template for, and the
+// plugin ships that template like any other. Nothing else about the
+// contribution changes — provenance, ordering and import collection
+// work exactly as they do for a hand-built statement, because the
+// wrapped node is walked as part of the graph.
+func NewRenderStmt(n Node) *Stmt {
+	return &Stmt{StmtKind: StmtRender, Node: n}
 }

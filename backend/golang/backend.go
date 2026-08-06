@@ -24,6 +24,14 @@ import (
 // options via [pipeline.Builder.WithPluginOptions].
 const Name = "backend.golang"
 
+// Version is the plugin's declared version. It composes into the
+// pipeline's plugin fingerprint, which frontends fold into their cache
+// keys — so bumping it invalidates a warm cache populated when this
+// plugin behaved differently. A plugin that declares no version
+// contributes an empty string and can never invalidate anything, which
+// is a silent staleness bug waiting for its first behavioural change.
+const Version = "1.0.0"
+
 // collectBridgeImports walks every source-side [node.Package] in
 // s and records the pairs where the cross-language bridge stamped
 // `go.import` meta on the package. The returned map is keyed by
@@ -72,6 +80,9 @@ func New() *Backend {
 
 // Name reports the stable plugin identifier — returns [Name].
 func (*Backend) Name() string { return Name }
+
+// Version satisfies [plugin.Versioned].
+func (*Backend) Version() string { return Version }
 
 // Language reports the target-language identifier — returns
 // [Language].

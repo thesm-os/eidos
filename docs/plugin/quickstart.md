@@ -46,7 +46,6 @@ import (
     "strings"
 
     "go.thesmos.sh/eidos/core/meta"
-    "go.thesmos.sh/eidos/node"
     "go.thesmos.sh/eidos/sdk"
 )
 
@@ -180,10 +179,13 @@ Run it:
 go test ./...
 ```
 
-The suite checks: `Name()` returns a stable non-empty string;
-the plugin satisfies at least one role interface; `Annotate` on
-an empty store doesn't panic; node count is unchanged across
-Annotate; running Annotate twice produces identical meta state
+The two suites check: `Name()` returns a stable non-empty
+string; the plugin satisfies at least one role interface;
+`CapabilityProvider` is implemented in full, returns the same
+Provides / Requires on every call, and hands back a fresh slice
+each time rather than the plugin's own; `Annotate` on an empty
+store doesn't panic; node count is unchanged across Annotate;
+running Annotate twice produces identical meta state
 (idempotency).
 
 A green test means the plugin satisfies every framework
@@ -202,10 +204,10 @@ invariant the pipeline relies on at registration / build time.
 
 ## Common next-step questions
 
-**My plugin needs typed options.** Embed `*opt.Holder[Options]`
-on your plugin and call `opt.Bind(&p.opts)` in `New`. The
-pipeline calls `SetOptions` at build time; defaults are
-pre-applied at `Bind`-time, so even un-pipelined uses (tests,
+**My plugin needs typed options.** Embed `*sdk.Holder[Options]`
+on your plugin and assign `sdk.BindOptions(&p.opts)` to it in
+`New`. The pipeline calls `SetOptions` at build time; defaults
+are pre-applied at bind time, so even un-pipelined uses (tests,
 direct invocation) see populated values. See `reference/repogen`
 for a worked example.
 
@@ -213,9 +215,11 @@ for a worked example.
 `DirectiveProvider`:
 
 ```go
+import "go.thesmos.sh/eidos/node"
+
 func (*Plugin) Directives() []sdk.DirectiveSchema {
     return []sdk.DirectiveSchema{
-        sdk.NewDirective("myco.repo").
+        sdk.NewDirective("myco-repo").
             On(node.KindStruct).
             Describe("Opts the struct into MyCo repository emission.").
             Build(),
@@ -223,8 +227,10 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 }
 ```
 
-The framework auto-collects every plugin's schemas at build
-time and rejects duplicates.
+A directive name is not a meta-key name: the parser accepts a
+letter followed by letters, digits, `_` and `-`, so `myco.repo`
+names a key but never a directive. The framework auto-collects
+every plugin's schemas at build time and rejects duplicates.
 
 **My plugin emits code.** That's a Generator, not an Annotator.
 See `reference/repogen` for the canonical shape and the

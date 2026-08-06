@@ -27,6 +27,10 @@
 package debugweaver
 
 import (
+	"embed"
+	"io/fs"
+	"text/template"
+
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
@@ -34,6 +38,23 @@ import (
 
 // Name is the plugin's stable identifier.
 const Name = "debug-weaver"
+
+// Version is the plugin's declared version. It composes into the
+// pipeline's plugin fingerprint, which frontends fold into their cache
+// keys — so bumping it invalidates a warm cache populated when this
+// plugin behaved differently. A plugin that declares no version
+// contributes an empty string and can never invalidate anything, which
+// is a silent staleness bug waiting for its first behavioural change.
+const Version = "1.0.0"
+
+// Kind is the emit kind this plugin declares. It must equal the
+// `define` name in templates/golang/debugweaver.trace.tmpl.
+const Kind sdk.Kind = "debugweaver.trace"
+
+const langGo = "golang"
+
+//go:embed templates/golang/*.tmpl
+var goTemplates embed.FS
 
 // Capability is the capability label this plugin advertises so
 // downstream cross-cutting contributors (audit, metric, …) can
@@ -80,6 +101,39 @@ type Options struct {
 	Format string `eidos:"format,default=debug: %s entered"`
 }
 
+// Trace is the trace call this plugin contributes, as a
+// plugin-defined emit kind rather than a hand-assembled [emit.Stmt].
+//
+// The prebody slot it lands in is constrained to [emit.KindStmt], so
+// the contribution is wrapped by [emit.NewRenderStmt]: the wrapper
+// satisfies the slot, and the backend renders it by dispatching to the
+// template registered under this Kind. That is what lets the plugin own
+// its own spelling — the alternative is encoding the call shape in Go
+// against the [emit.Stmt] union, which no other reference contributor
+// does.
+//
+// The three fields are [emit.Expr] rather than plain strings so the
+// backend performs the literal escaping and the import registration.
+// Holding raw text here and interpolating it in the template would
+// re-implement both, badly.
+type Trace struct {
+	sdk.BaseEmit
+
+	// FuncRef is the trace function the entry calls, as an external
+	// reference. Rendering it registers the import on the host file.
+	FuncRef *emit.Expr
+
+	// Format is the printf-style first argument.
+	Format *emit.Expr
+
+	// Subject is the fully-qualified "<Type>.<Method>" the trace
+	// names.
+	Subject *emit.Expr
+}
+
+// Kind binds this value to its template.
+func (*Trace) Kind() sdk.Kind { return Kind }
+
 // Plugin is the cross-cutting debug-weaver.
 type Plugin struct {
 	*sdk.Holder[Options]
@@ -96,6 +150,9 @@ func New() *Plugin {
 
 // Name returns [Name].
 func (*Plugin) Name() string { return Name }
+
+// Version satisfies [sdk.Versioned].
+func (*Plugin) Version() string { return Version }
 
 // Priority places the plugin in the cross-cutting bucket so it
 // runs after foundation and composition generators.
@@ -132,19 +189,48 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		if m.HasNegatedDirective(DirectiveName) {
 			continue
 		}
-		stmt := emit.NewExprStmt(emit.NewCall(
-			sdk.NewExternal(p.pkg(), p.funcName()),
-			emit.NewLiteralString(p.format()),
-			emit.NewLiteralString(ownerName(m)+"."+m.Name),
-		))
+		trace := &Trace{
+			BaseEmit: sdk.BaseEmit{SetByName: c.SetBy(), SourcePos: m.Pos()},
+			FuncRef:  sdk.NewExternal(p.pkg(), p.funcName()),
+			Format:   emit.NewLiteralString(p.format()),
+			Subject:  emit.NewLiteralString(ownerName(m) + "." + m.Name),
+		}
 		// AppendPrebody can only fail when host is nil or carries
 		// an unsupported kind — neither possible for the *emit.Method
-		// values EmitMethods yields. The Append is therefore
+		// values EmitMethods yields, and the render wrapper reports
+		// emit.KindStmt by construction. The Append is therefore
 		// infallible at this call site.
-		_ = c.AppendPrebody(m, stmt, EntryID)
+		_ = c.AppendPrebody(m, emit.NewRenderStmt(trace), EntryID)
 	}
 	return nil
 }
+
+// Templates ships the trace template.
+//
+// A contributor shipping a template needs no [sdk.FilenameProvider]:
+// templates say how a value renders, outputs say where a file lands,
+// and this plugin renders inside a file it does not own.
+func (*Plugin) Templates(lang string) (fs.FS, bool) {
+	if lang != langGo {
+		return nil, false
+	}
+	sub, err := fs.Sub(goTemplates, "templates/golang")
+	if err != nil {
+		return nil, false
+	}
+	return sub, true
+}
+
+// TemplateFuncs contributes nothing.
+//
+// The shared Go helpers are already merged into the backend's
+// overrideable funcmap, so returning them here re-registers names that
+// exist — a Build-time collision that would stop this plugin and any
+// other plugin doing the same from appearing in one pipeline.
+func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
+
+// TemplateOverrides replaces nothing.
+func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // pkg / funcName / format return the configured option value or
 // the documented default when the option is empty.

@@ -46,13 +46,21 @@ import (
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/plugins/generator/sentinel"
+	"go.thesmos.sh/eidos/reference/auditgen"
 	"go.thesmos.sh/eidos/reference/auditweaver"
+	"go.thesmos.sh/eidos/reference/authgen"
 	"go.thesmos.sh/eidos/reference/debugweaver"
+	"go.thesmos.sh/eidos/reference/errorgen"
+	"go.thesmos.sh/eidos/reference/handlergen"
+	"go.thesmos.sh/eidos/reference/metricgen"
+	"go.thesmos.sh/eidos/reference/middlewaregen"
 	"go.thesmos.sh/eidos/reference/mockgen"
 	"go.thesmos.sh/eidos/reference/registrygen"
 	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/reference/shapewriter"
 	"go.thesmos.sh/eidos/reference/stubgen"
+	"go.thesmos.sh/eidos/reference/tracegen"
+	"go.thesmos.sh/eidos/reference/validategen"
 )
 
 // brand is the hardcoded identifier this binary advertises to
@@ -168,6 +176,18 @@ func defaultPlugins() []plugin.Plugin {
 		// foundation output.
 		mockgen.New(),
 		stubgen.New(),
+		// The composition set: middlewaregen owns an emit kind carrying
+		// a named slot, and the three contributors fill it. Registered
+		// out of rendered order on purpose — the chain's order comes
+		// from their Requires, not from this slice.
+		handlergen.New(),
+		middlewaregen.New(),
+		validategen.New(),
+		errorgen.New(),
+		auditgen.New(),
+		tracegen.New(),
+		metricgen.New(),
+		authgen.New(),
 
 		// Generators (cross-cutting bucket) — contribute into
 		// existing emit decls' slots, or scan post-generation

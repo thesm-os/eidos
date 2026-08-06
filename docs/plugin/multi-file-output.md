@@ -24,10 +24,10 @@ here.
 | Concept | Surface | Use |
 |--------|----------|-----|
 | Plugin declares outputs | `Outputs(lang) []plugin.Output` | One entry per rendered file the plugin produces |
-| Decl belongs to output | `BaseEmit.OutputTag` field | Set via `pkg.File(tag).<Decl>(...)`; empty = first output |
-| Layout looks up suffix | `composeTarget` reads `OutputTag` | Matches against the plugin's declared `Output.Tag` |
+| Decl belongs to output | `BaseEmit.OutputTagName` field, read via `OutputTag()` | Set via `pkg.File(tag).<Decl>(...)`; empty = the plugin's primary output |
+| Layout looks up suffix | `resolveSuffix` reads `OutputTag()` | Matches against the plugin's declared `Output.Tag` |
 | Per-output override | `+gen:out tag=<tag> <path>` / `-o <plugin>:<tag>=<path>` | Scopes routing overrides to one output |
-| Per-output config | `output.<plugin>.tags.<tag>.<field>` | Project-level routing per output |
+| Per-output config | `plugins[].output.tags.<tag>.<field>` | Project-level routing per output |
 
 Single-file plugins declare one output, set no tags, and behave
 identically to the pre-multi-output framework. Multi-file plugins
@@ -58,11 +58,11 @@ type FilenameProvider interface {
     Plugin
     // Outputs returns the set of rendered files this plugin
     // produces in the given backend language. The pipeline
-    // calls Outputs once per (plugin, language) after
-    // WithPluginOptions applies and caches the result on the
-    // resolved plan — static after Build, not static across
-    // runs. Options changing between runs produces a different
-    // Outputs slice and a different plugin cache identity.
+    // calls Outputs after WithPluginOptions applies: once per
+    // generator at Build time for shape validation, and once
+    // per generator at the start of every Layout phase. Nothing
+    // is memoised in between, so the slice must be stable for a
+    // given (plugin, language, options) triple.
     //
     // Returning nil or an empty slice signals the plugin has no
     // routable output in the requested language — the same
@@ -76,16 +76,18 @@ type FilenameProvider interface {
 
 The slice is ordered, deterministic, and part of the plugin's
 contract. External tools (CLI, config, manifest) reference
-outputs by tag. The resolved Outputs slice participates in the
-plugin's cache identity — option-driven variation produces
-distinct cache entries.
+outputs by tag. The slice does not enter the plugin's cache key
+— that key is composed from the plugin's version, its read set,
+its resolved layout policy, and the run-wide scope flags.
 
-## Per-decl tagging — `BaseEmit.OutputTag` + `pkg.File(tag)`
+## Per-decl tagging — `BaseEmit.OutputTagName` + `pkg.File(tag)`
 
-Every emit decl carries an `OutputTag string` field on `BaseEmit`.
-Empty tag means "the plugin's primary output" (the Output at
-index 0 in the slice — see the validation rules below). Non-empty
-tag must match one of the plugin's declared `Output.Tag` values.
+Every emit decl carries an `OutputTagName string` field on
+`BaseEmit`, read through the `OutputTag()` accessor. Empty tag
+means "the plugin's primary output" (the Output declaring an
+empty Tag, which validation pins at index 0 — see the validation
+rules below). Non-empty tag must match one of the plugin's
+declared `Output.Tag` values.
 
 The recommended way to set the tag is the `PackageBuilder.File(tag)`
 sub-context:
@@ -100,30 +102,31 @@ pkg.Struct("Status", func(sb *builder.StructBuilder) { ... })
 pkg.File("test").Function("TestStatusString_RoundTrip", func(fb *builder.FunctionBuilder) { ... })
 ```
 
-`pkg.File(tag)` is memoised per tag on the parent PackageBuilder.
+`pkg.File(tag)` is memoised per tag on the root PackageBuilder.
 Repeated calls with the same tag return the same sub-context;
 a plugin building N decls under `pkg.File("test")` in a loop
 reuses one sub-context, not N. `pkg.File("")` is the identity
-form — it returns the parent PackageBuilder unchanged, so plugin
-code that programmatically computes tags from options can write
+form — it returns the receiver unchanged, so plugin code that
+programmatically computes tags from options can write
 `pkg.File(maybeEmpty).<Decl>(...)` without special-casing the
 default-output case.
 
 `File` returns a `*PackageBuilder` decorated with the tag — the
-full PackageBuilder API surface (Struct, Interface, Function,
-Method, AppendOriginSlot, …) is available on the sub-context.
-Nested `pkg.File("a").File("b")` overwrites: the second call
-returns a sub-context tagged `"b"`, not a composed `"a.b"`.
+full decl-spawning surface (Struct, Interface, Function, Method,
+Enum, Alias, Variable, Constant, …) is available on the
+sub-context. Nested `pkg.File("a").File("b")` overwrites: the
+second call returns a sub-context tagged `"b"`, not `"a.b"`.
 Nesting is not a supported pattern — express each logical
 sub-file as a single `pkg.File(<tag>)` call directly off the
 root `pkg`.
 
-The sub-context shares the parent PackageBuilder's underlying
-`emit.Package`, Anchor default-origin, and routing state; only
-`OutputTag` differs.
+The sub-context shares the root PackageBuilder's underlying
+`emit.Package`, its Anchor default origin, and its error sink —
+`Err` and `Build` on a sub-context report the root's accumulated
+state. Only the stamped tag differs.
 
-Each decl belongs to exactly one output. The `OutputTag` field
-is a single string. A plugin that needs the same logical content
+Each decl belongs to exactly one output. The tag it carries is a
+single string. A plugin that needs the same logical content
 in two files (a helper function appearing in both production and
 test outputs, say) emits the decl twice — once tagged for each
 output. The framework never deduplicates decls across outputs.
@@ -136,10 +139,9 @@ unchanged:
 - A plugin declaring one output with an empty `Tag` produces
   decls with empty `OutputTag` — visually and structurally
   identical to today's single-file plugins.
-- A plugin declaring multiple outputs must declare the
-  primary one with an empty `Tag` at index 0. Decls without
-  explicit `pkg.File(...)` use stamping land in that primary
-  output.
+- A plugin declaring multiple outputs declares its primary one
+  with an empty `Tag` at index 0. Decls built without a
+  `pkg.File(...)` sub-context land in that primary output.
 
 A plugin can also declare every output with a non-empty tag and
 require explicit tagging on every decl. In that mode, a decl
@@ -151,15 +153,16 @@ See the validation rules table below for the diagnostic.
 ## Routing precedence — per-output scoping
 
 The precedence layers from [routing.md][1] apply per output. A
-decl with `OutputTag = "test"` flows through the same pipeline
-(framework default → project layout → directive → CLI) as any
-other decl; the layers consult per-output keys where they exist.
-The `_test.go → <pkg>_test` package shift runs at the
-framework-default layer per resolved Target — each tagged output
-computes its own Target, and the shift fires independently when
-that output's resolved filename ends in `_test.go` (or is
-skipped when a higher layer already set the package on that
-output).
+decl tagged `test` flows through the same pipeline (framework
+default → project layout → directive → CLI) as any other decl;
+the layers consult per-output keys where they exist. The
+`_test.go → <pkg>_test` package shift runs last, after every
+override layer, per resolved Target — each tagged output computes
+its own Target, and the shift fires independently when that
+output's resolved filename ends in `_test.go`. Which layer
+supplied the package is deliberately ignored; the only escape is
+a package that already ends in `_test`, which the shift leaves
+untouched rather than doubling.
 
 ### `+gen:out` with `tag=` scope
 
@@ -176,18 +179,23 @@ type Status int
   default).
 - Test-output decls (tag `test`) land in `store/testkit/searcher_enum_test.go`.
 
-The override resolves only when the `enum` plugin's `Outputs`
-slice declares a `test` tag; an unknown tag is a Layout-time
-error per the unknown-tag rule in the validation table.
+The override applies only to decls carrying the named tag. A
+`tag=` value no decl carries — a typo, or an output the `enum`
+plugin does not declare — matches nothing and the directive is a
+silent no-op: every decl routes by its declared suffix and no
+diagnostic fires. The unknown-tag rule in the validation table
+governs the other direction, a decl whose own tag names no
+declared output.
 
 When two plugins emitting against the same origin each declare a
 `test` tag in their own Outputs, an unscoped `+gen:out tag=test
 <path>` applies to every such plugin — `tag=` without `plugin=`
 expresses a cross-cutting intent ("route every plugin's test
-output here"), mirroring how `out=` / `pkg=` already propagate
-across companions. Reach for `plugin=<name> tag=test` to scope
-strictly to one plugin's test output (form covered in the
-intersection paragraph below).
+output here"), narrowing the standalone directive's existing
+apply-to-every-plugin reach by output instead of by plugin.
+Reach for `plugin=<name> tag=test` to scope strictly to one
+plugin's test output (form covered in the intersection paragraph
+below).
 
 `tag=` accepts a `pkg=` companion to pin the rendered package
 clause on the targeted output independently:
@@ -199,8 +207,11 @@ type Status int
 ```
 
 - Production-output decls keep the source package (`store`).
-- Test-output decls render under `package storetest` in
-  `store/testkit/searcher_enum_test.go`.
+- Test-output decls land in
+  `store/testkit/searcher_enum_test.go` and render under
+  `package storetest_test` — `pkg=` supplies the package name,
+  and the `_test.go` shift then appends `_test` to it. Write
+  `pkg=storetest_test` to state the rendered clause verbatim.
 
 `tag=`, `pkg=`, and `plugin=` are keyword arguments — order is
 irrelevant and the positional path may appear anywhere among
@@ -209,10 +220,13 @@ override scoped `plugin=mock tag=test` applies only to the
 `test` output of the `mock` plugin — not to any other plugin's
 `test` output and not to the `mock` plugin's primary output.
 
-Unscoped `+gen:out` on a multi-output plugin is **rejected** at
-Layout time with a teaching diagnostic — uniform application
-would silently collapse `_test.go` and `_main.go` into one file,
-which Go's per-file test-classification rule then misreads.
+An unscoped `+gen:out` that pins a **filename** against a
+multi-output plugin is rejected at Layout time with a teaching
+diagnostic — uniform application would silently collapse
+`_test.go` and `_main.go` into one file, which Go's per-file
+test-classification rule then misreads. A directory-only path
+(`testkit/`) is permitted unscoped: the per-output suffixes keep
+the filenames distinct inside the shared directory.
 
 Unscoped `+gen:out` on a single-output plugin continues to work
 as today (no ambiguity — the plugin has one output, which IS the
@@ -220,9 +234,9 @@ default).
 
 ### Per-directive `tag=` on emitter-owned directives
 
-The companion-aware form 3 from [routing.md][1] — `out=` and
-`pkg=` keys on an emitter's own directive — recognises `tag=`
-for per-output scoping:
+Form 3 from [routing.md][1] — `out=` and `pkg=` keys on an
+emitter's own directive — recognises `tag=` for per-output
+scoping:
 
 ```go
 //+gen:mock tag=test out=tests/ pkg=mocktest
@@ -230,14 +244,14 @@ type Store interface { ... }
 ```
 
 The override applies only to the `mock` plugin's `test` output;
-the primary output keeps the framework default. Unlike `out=`
-and `pkg=` (which propagate to every companion plugin emitting
-against the same origin), `tag=` scopes strictly within the
-emitter's own output namespace — tag values are plugin-scoped,
-and propagating one would route a sibling plugin to a tag it
-doesn't declare. Companion plugins continue to share the `out=`
-/ `pkg=` envelope but each routes its own output set
-independently.
+the primary output keeps the framework default. All three keys
+are scoped to the directive's owning plugin — the pipeline
+records a form-3 spec as if it carried `plugin=<owner>`, so a
+`+gen:mock out=…` never moves a companion plugin's output.
+`tag=` narrows that scope one step further, to one of the
+owner's declared outputs. A companion that genuinely must follow
+another plugin's routing says so with the standalone
+`+gen:out plugin=<name>` form.
 
 Form 3 without `tag=` follows the same "no implicit
 multi-output collapse" rule as form 2: an unscoped `out=` that
@@ -250,81 +264,120 @@ within the shared directory.
 
 CLI flag syntax mirrors the directive's scope:
 
-- `-o mock=mocks/handlers.go` — overrides the `mock` plugin's
-  primary (default) output. Backward-compatible with the existing
-  CLI form.
+- `-o mock=mocks/handlers.go` — overrides every output the `mock`
+  plugin declares. Backward-compatible with the existing CLI
+  form, and unambiguous for a single-output plugin; against a
+  multi-output plugin it pins one filename for all of them,
+  which the Layout phase does not reject the way it rejects the
+  directive equivalent.
 - `-o mock:test=tests/handlers.go` — overrides the `mock` plugin's
-  `test` output specifically.
+  `test` output specifically, and wins over the plugin-only form
+  for that output.
 
 One `=` separator between key and value; `:` lives inside the key
 to disambiguate plugin+tag from path-with-colon.
 
 ## Project-config schema
 
-The `output` block accepts per-plugin and per-tag overrides:
+Per-plugin routing lives on the plugin's own entry under
+`plugins:`, in its `output:` block; per-output routing nests one
+level deeper under `tags:`. The top-level `output:` block is the
+project-wide default and carries routing fields only — it is not
+keyed by plugin, and `tags:` there is ignored because tag values
+are plugin-scoped.
 
 ```yaml
 output:
-  # Single-output plugin (no tags): plugin-level routing block.
-  builder:
-    layout: alongside-source
-    dir: internal/builders
+  # Project-wide default for every plugin.
+  layout: alongside-source
+
+plugins:
+  # Single-output plugin (no tags): one routing block.
+  - name: builder
+    output:
+      layout: centralised
+      package: builders
+      dir: internal/builders
 
   # Multi-output plugin: per-tag routing via `tags:`.
-  mock:
-    layout: alongside-source        # applies to primary output
-    tags:
-      test:
-        layout: alongside-source    # applies to `test` output
-        dir: testkit
+  - name: mock
+    output:
+      layout: alongside-source      # applies to every output
+      tags:
+        test:
+          package: storetest        # applies to `test` only
 ```
 
+A field left empty inside `tags:` inherits from the surrounding
+per-plugin block, which in turn inherits from the project block.
+`dir:` takes effect only under `centralised` layout; under
+`alongside-source` the directory comes from the origin and the
+field is ignored.
+
 The `tags:` sub-namespace avoids collisions between tag names and
-field names — a plugin shipping a `format` tag and a `format`
-field coexist cleanly.
+field names — a plugin shipping a `dir` tag and the `dir` field
+coexist cleanly.
 
 ## Validation rules
 
-The framework rejects malformed `Outputs` slices at Build time:
+The framework rejects malformed `Outputs` slices at Build time,
+and malformed per-decl tags at Layout time. The first four
+diagnostics wrap `pipeline.ErrInvalidOutputs` and prefix the
+message below with `pipeline: invalid plugin Outputs: <plugin>:`;
+the last two wrap their own sentinel and name the offending decl.
 
 | Rule | Diagnostic |
 |------|-----------|
-| Output with empty `Suffix` | `output #<i>: Suffix is required` |
-| Duplicate `Tag` values | `outputs declare tag %q twice` |
-| More than one Output with empty Tag | `at most one output may declare an empty Tag (the plugin's primary output)` |
-| Output with empty Tag exists but is not at index 0 | `output with empty Tag must be declared at index 0` |
-| Decl with `OutputTag = "xyz"` not in plugin's declared outputs | Layout-time error: `decl tags unknown output %q on plugin %q (declared: %v)` |
-| Decl with empty `OutputTag` on plugin declaring no empty-Tag output | Layout-time error: `decl carries empty OutputTag; plugin %q declares no default output, every decl must use pkg.File(<tag>)` |
+| Output with empty `Suffix` | `outputs[<i>]: Suffix is required` |
+| Duplicate `Tag` values | `outputs declare tag "<tag>" at indices <i> and <j>` |
+| More than one Output with empty Tag | `<n> outputs declare an empty Tag; at most one is permitted (the plugin's primary output)` |
+| Output with empty Tag exists but is not at index 0 | `outputs[<i>]: empty-Tag output must be declared at index 0` |
+| Decl tagged with an output the plugin never declared | `pipeline.ErrUnknownOutputTag` — `pipeline: decl carries unknown OutputTag for its plugin's declared outputs: <kind> "<qname>" emitted by "<plugin>" has OutputTag "<tag>"; declared tags: [<declared>]` |
+| Untagged decl on a plugin declaring no empty-Tag output | `pipeline.ErrNoDefaultOutput` — `pipeline: decl carries empty OutputTag but plugin declares no default output: <kind> "<qname>" emitted by "<plugin>"; declared tags: [<declared>]` |
 
-Build-time validation fires regardless of whether the plugin
-runs `plugintest.RunSuite` — the framework enforces every rule
-in this table on its own. The conformance suite is the earlier
-signal for authors who run it during development: it checks the
-static shape of Outputs at registration time so violations
-surface before a pipeline run.
+The last two rules are Layout-time because they are
+data-dependent — the framework cannot tell statically which decls
+a generator will emit. A decl that trips either one is dropped
+from the run with an Error diagnostic; the rest of the run
+continues.
+
+The framework enforces every rule in this table on its own,
+whether or not the plugin runs `plugintest.RunSuite`. The
+conformance suite is the earlier signal for authors who run it
+during development: it checks the declared slice's shape for
+every language it probes, so a violation surfaces in the plugin's
+own tests rather than at a consumer's Build.
 
 ## Manifest reporting
 
-The per-target manifest entry's plugin attribution gains an
-optional `output_tag` field. Single-output runs and primary-output
-files omit it (the field is `omitempty`), keeping byte-stable
-parity with manifests produced before multi-output support
-landed. Secondary outputs surface the tag. The same enum source
-producing both files records side-by-side entries — the primary
-matches a pre-multi-output manifest byte-for-byte, and the
-secondary carries the tag explicitly:
+The per-target manifest entry's plugin attribution is
+polymorphic. An untagged attribution marshals as the bare plugin
+name, exactly as it did before multi-output support landed; a
+tagged one marshals as an object carrying `name` and
+`output_tag`. Unmarshal accepts either form, and one `plugins`
+array may hold both. The same enum source producing both files
+records side-by-side entries — the primary is byte-identical to a
+pre-multi-output manifest, and the secondary carries the tag
+explicitly (run-level fields and hashes abridged):
 
 ```json
-[
-  {
-    "target": { "dir": "store", "filename": "searcher_enum.go" },
-    "plugins": [{"name": "enum", "version": "1.0.0"}]
-  },
-  {
-    "target": { "dir": "store", "filename": "searcher_enum_test.go" },
-    "plugins": [{"name": "enum", "version": "1.0.0", "output_tag": "test"}]
-  }
-]
+{
+  "version": 2,
+  "outputs": [
+    {
+      "target": { "dir": "store", "filename": "searcher_enum.go", "package": "store" },
+      "plugins": ["enum"],
+      "hash": "sha256:…",
+      "pipeline_id": "…"
+    },
+    {
+      "target": { "dir": "store", "filename": "searcher_enum_test.go", "package": "store_test" },
+      "plugins": [{"name": "enum", "output_tag": "test"}],
+      "hash": "sha256:…",
+      "pipeline_id": "…"
+    }
+  ]
+}
 ```
 
 ### Cross-tool naming convention
@@ -367,9 +420,10 @@ func (*Plugin) Outputs(lang string) []plugin.Output {
 }
 ```
 
-Reference plugins (~7 sites) migrate identically. Test fixtures
-do the same. No behaviour change for any existing single-output
-plugin.
+Four reference plugins declared a suffix and migrated identically
+— `mockgen`, `registrygen`, `repogen`, and the since-removed
+`buildergen`. Test fixtures did the same. No behaviour change for
+any existing single-output plugin.
 
 ## Multi-output example — the enum stringer pattern
 
@@ -408,7 +462,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 
 `emitProduction` builds decls through `pkg` directly — they land
 in the primary output (`<src>_enum.go`). `emitTests` builds
-through `pkg.File("test")` — those decls carry `OutputTag = "test"`
+through `pkg.File("test")` — those decls carry the tag `test`
 and land in `<src>_enum_test.go`. The framework's `_test.go →
 <pkg>_test` shift applies to the test file's resolved package
 clause automatically.
@@ -461,12 +515,13 @@ recording / fault-injection / tracing) — compose with multi-output
 hosts without API change:
 
 - **Slot contributions on a host decl** (Prebody, Postbody,
-  FieldsSlot, MethodsSlot, …) inherit the host's `OutputTag`. The
-  weaver appends a `Stmt` / `Field` / `Method` to the host's slot;
-  the framework's render path emits the contribution where the
-  host decl renders. The weaver never sees `OutputTag` and is not
-  required to implement `Outputs`. Pure-weaver plugins keep the
-  "no `FilenameProvider`" signal that already exists today.
+  FieldsSlot, MethodsSlot, …) travel with the host. The weaver
+  appends a `Stmt` / `Field` / `Method` to the host's slot; the
+  contribution renders inside the host decl's rendered text, so
+  it lands in whichever file the host's tag routed the host to.
+  Routing never reads the contribution's own tag. The weaver is
+  not required to implement `Outputs`; pure-weaver plugins keep
+  the "no `FilenameProvider`" signal that already exists today.
 
   A weaver iterating decls across a multi-output host therefore
   contributes to every output the host emits — its contributions
@@ -475,16 +530,18 @@ hosts without API change:
   `TestStringRoundTrip` function (test output) lands one prebody
   in `<src>_enum.go` and another in `<src>_enum_test.go` from a
   single iteration, with no per-output coordination. Weavers that
-  want to scope to one output filter on `OutputTag` (or on a
-  per-host meta key) in the iteration body — the field is exposed
-  via `BaseEmit` like every other routing-relevant attribute.
+  want to scope to one output filter on the host's
+  `OutputTag()` (or on a per-host meta key) in the iteration
+  body — every emit decl exposes the accessor through `BaseEmit`.
 - **Origin-anchored slot contributions** (file-level slots
-  appended via `AppendOriginSlot` against a source node) compose
-  through the weaver's *own* `Outputs` slice — the framework
-  routes the contribution to the weaver's primary output by
-  default. A weaver targeting a specific own-output uses
-  `pkg.File(tag).AppendOriginSlot(...)` the same way emit decls
-  do.
+  appended via `EmitView.AppendOriginSlot` against a source node)
+  compose through the weaver's *own* `Outputs` slice — the
+  framework routes the contribution to the weaver's primary
+  output by default. `AppendOriginSlot` takes the item, not a
+  builder sub-context, so a weaver targeting one of its own
+  outputs stamps `OutputTagName` on the item's `BaseEmit` before
+  queueing it — the form the in-tree `enum` plugin uses for its
+  `test`-tagged contribution.
 - **Weavers that emit routable decls** (rare; the framework
   recommends splitting into a generator + a weaver instead)
   implement `Outputs(lang)` like any other generator.
@@ -504,7 +561,7 @@ keys, shared anchors) outside the routing surface.
 Multi-file output is **orthogonal** to the [templates surface][tmpl]:
 templates control *how* an emit decl renders into text, outputs
 control *where* that text lands. A plugin shipping templates for
-custom emit kinds (e.g. an `enum.Stringer` kind) gains nothing or
+custom emit kinds (e.g. an `enum.stringer` kind) gains nothing or
 loses nothing from declaring multiple outputs — the template
 renders the kind's text; the framework's per-output routing
 deposits the rendered text into the right file based on
@@ -563,16 +620,36 @@ surface — neither requires backend changes.
 
 ## Conformance contract
 
-`plugintest.RunSuite` adds a static check on `Outputs(lang)`:
+`plugintest.RunSuite` carries three static checks on
+`Outputs(lang)`, run against every language the suite probes:
 
-- The slice satisfies the validation rules above.
-- The slice is deterministic — multiple calls with the same
-  options return equal slices (the pipeline relies on the
-  caching of the static set after `WithPluginOptions` applies).
-- For backends the plugin claims to support (`Outputs` returns
-  non-empty), every declared Suffix renders successfully through
-  the backend's per-target render path.
+- **`FilenameProvider returns a well-formed Outputs slice`** — the
+  same shape rules the pipeline enforces at Build.
+- **`FilenameProvider returns stable Outputs per language`** —
+  two consecutive calls with the same argument return equal
+  slices.
+- **`declaration accessors return slices the caller may keep`** —
+  two calls must not share one backing array. The pipeline stores
+  what `Outputs` hands it, so a plugin returning its own field
+  has its declaration rewritten by any consumer that sorts or
+  filters in place. Return a copy.
 
-Plugin authors run the suite against every backend language they
-contribute to; the suite catches output-shape regressions before
-the plugin reaches a real pipeline.
+`plugintest.RunGeneratorSuite` adds two per-fixture checks that
+need the generator's actual emissions:
+
+- **`emitted output tags are declared`** — every tag the
+  generator stamps on an emit value matches an `Output` the same
+  generator declares. An undeclared tag does not fail loudly at
+  Layout; it routes somewhere other than the file the tag names.
+- **`output-package dispatch tolerates partial routing`** — every
+  `emit.OutputPackageSetter` the generator produced survives
+  being handed an empty map, a map of foreign tags, and a map
+  carrying only the primary tag with no derivable path. Layout
+  calls `SetOutputPackages` at most once per value, with only the
+  tags that actually routed, so an implementor that indexes the
+  map and uses the result unchecked emits a reference to the
+  empty package.
+
+Plugin authors run the suites against every backend language they
+contribute to; they catch output-shape regressions before the
+plugin reaches a real pipeline.

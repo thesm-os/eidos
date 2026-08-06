@@ -514,6 +514,30 @@ func TestWalk_StmtChildren(t *testing.T) {
 		}
 	})
 
+	// Import collection and provenance reporting both ride on Walk. A
+	// render statement whose wrapped node is skipped would leave that
+	// node's external references uncollected, so the file would render
+	// a qualifier it never imported.
+	t.Run("Render visits the wrapped node", func(t *testing.T) {
+		t.Parallel()
+		s := emit.NewRenderStmt(&emit.Field{Name: "Wrapped"})
+		got := recordWalk(s)
+		if got[0] != emit.KindStmt {
+			t.Fatalf("root should be Stmt; got %v", got)
+		}
+		if !slices.Contains(got, emit.KindField) {
+			t.Fatalf("wrapped node should be visited; got %v", got)
+		}
+	})
+
+	t.Run("Render with a nil node descends without panicking", func(t *testing.T) {
+		t.Parallel()
+		got := recordWalk(emit.NewRenderStmt(nil))
+		if len(got) != 1 || got[0] != emit.KindStmt {
+			t.Fatalf("only the root should be visited; got %v", got)
+		}
+	})
+
 	t.Run("ForRange visits RangeOver and body", func(t *testing.T) {
 		t.Parallel()
 		s := emit.NewForRange("k", "v", emit.NewIdent("xs"), []*emit.Stmt{emit.NewBlock()})

@@ -1,0 +1,6 @@
+{{- define "validategen.validator" -}}
+// {{ .FuncName }} reports whether the subject is well-formed.
+func {{ .FuncName }}(v {{ renderType .SubjectRef }}) error {
+	return nil
+}
+{{- end -}}

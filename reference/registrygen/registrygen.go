@@ -46,6 +46,14 @@ import (
 // Name is the plugin's stable identifier.
 const Name = "registry-gen"
 
+// Version is the plugin's declared version. It composes into the
+// pipeline's plugin fingerprint, which frontends fold into their cache
+// keys — so bumping it invalidates a warm cache populated when this
+// plugin behaved differently. A plugin that declares no version
+// contributes an empty string and can never invalidate anything, which
+// is a silent staleness bug waiting for its first behavioural change.
+const Version = "1.0.0"
+
 // Capability is the capability label this plugin advertises.
 const Capability = "registry"
 
@@ -133,6 +141,9 @@ func New() *Plugin {
 
 // Name returns [Name].
 func (*Plugin) Name() string { return Name }
+
+// Version satisfies [sdk.Versioned].
+func (*Plugin) Version() string { return Version }
 
 // Outputs returns the ordered set of rendered files this plugin
 // produces in the named language. The plugin ships golang

@@ -294,3 +294,19 @@ func renderSingleFieldStruct(t *testing.T, fieldName string, r emit.Ref) string 
 	}
 	return string(body)
 }
+
+// funcLitPackage builds the same single-variable fixture
+// [renderFuncLitBody] uses, for tests that need to drive Render
+// themselves because they expect it to fail.
+func funcLitPackage(target emit.Target, stmts []*emit.Stmt) *emit.Package {
+	return &emit.Package{
+		Name: "x", Path: "x",
+		Variables: []*emit.Variable{{
+			Name: "Handler", Package: "x", Target: target,
+			Init: &emit.Expr{
+				ExprKind: emit.ExprFuncLit,
+				FuncBody: stmts,
+			},
+		}},
+	}
+}

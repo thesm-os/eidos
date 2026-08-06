@@ -1,0 +1,3 @@
+{{- define "auditgen.entry" -}}
+{{ renderExpr .FuncRef }}(w, r) // audit log for {{ .Handler }}
+{{- end -}}

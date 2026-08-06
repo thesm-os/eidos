@@ -80,6 +80,14 @@ import (
 // Name is the plugin's stable identifier.
 const Name = "enum"
 
+// Version is the plugin's declared version. It composes into the
+// pipeline's plugin fingerprint, which frontends fold into their cache
+// keys — so bumping it invalidates a warm cache populated when this
+// plugin behaved differently. A plugin that declares no version
+// contributes an empty string and can never invalidate anything, which
+// is a silent staleness bug waiting for its first behavioural change.
+const Version = "1.0.0"
+
 // Capability is the capability label the plugin advertises
 // so downstream consumers can declare
 // `Requires: []string{Capability}` to document a dependency
@@ -167,6 +175,9 @@ func New() *Plugin {
 
 // Name returns [Name].
 func (*Plugin) Name() string { return Name }
+
+// Version satisfies [sdk.Versioned].
+func (*Plugin) Version() string { return Version }
 
 // Priority places the plugin in the foundation generator
 // bucket. Foundation runs before composition / cross-cutting

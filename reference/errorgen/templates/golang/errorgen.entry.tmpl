@@ -1,0 +1,3 @@
+{{- define "errorgen.entry" -}}
+{{ renderExpr .FuncRef }}(w, r) // recover-and-respond for {{ .Handler }}
+{{- end -}}
