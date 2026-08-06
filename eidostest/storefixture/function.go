@@ -19,7 +19,11 @@ type FunctionBuilder struct {
 // Node returns the underlying [node.Function].
 func (b *FunctionBuilder) Node() *node.Function { return b.f }
 
-// Pos overrides the function's source position.
+// Pos overrides the function's source position. Layout derives the
+// basename of any file generated from this node from Pos.File, so
+// the value decides the output filename; the fixture's synthetic
+// `<pkg>/<lowercased-name>.go` keeps that basename non-empty. See
+// [StructBuilder.Pos] for what an empty one costs.
 func (b *FunctionBuilder) Pos(p position.Pos) *FunctionBuilder {
 	b.f.SourcePos = p
 	return b

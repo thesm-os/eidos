@@ -32,9 +32,13 @@
 //	    Build().
 //	    Run()
 //
-//	p.AssertFile("user_repo_gen.go").
+//	p.AssertFile("user_repo.go").
 //	    Contains("type UserRepo struct").
 //	    MatchesGolden("testdata/user_repo.golden.go")
+//
+// The rendered basename is the origin's basename plus the emitting
+// plugin's declared filename suffix — `user.go` plus repogen's
+// `_repo.go`. A plugin's suffix, not the harness, decides it.
 //
 // # Failure semantics
 //
@@ -50,4 +54,29 @@
 // binary with `-update-golden` to rewrite golden fixtures from the
 // current run's output. The rewrite is atomic (temp + rename) so a
 // failed test does not leave a partial golden on disk.
+//
+// # What makes a golden portable
+//
+// A golden holds whole rendered bytes, and rendered bytes open with
+// a header envelope whose fields come from the run rather than from
+// the plugin under test. Three of them vary by invocation, and each
+// has an option that pins it:
+//
+//   - "Command:" — the pipeline's rendering of os.Args unless
+//     pinned. Under `go test` that is the test binary's own flag
+//     set, including the per-machine `-test.testlogfile` path and
+//     `-update-golden` itself, so the run that writes a baseline and
+//     the run that asserts against it can never agree. [New] pins it
+//     to [DefaultCommand] for exactly this reason; [Builder.WithCommand]
+//     overrides.
+//   - "Source:" — each entity's origin path, rendered relative to
+//     the source root. Unset, the source root is os.Getwd, which is
+//     the test binary's package directory. Fixtures carrying
+//     absolute origin paths pin it with [Builder.WithSourceRoot].
+//   - The generated-file marker and provenance footer carry the
+//     brand; [Builder.WithBrand] pins it.
+//
+// Everything else in the envelope — the plugin attribution list and
+// the body hash — is derived from the run's inputs and is stable by
+// construction.
 package pipelinetest

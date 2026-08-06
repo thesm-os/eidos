@@ -489,6 +489,186 @@ func TestLayout_OutDirective_PkgOverride(t *testing.T) {
 	})
 }
 
+// TestLayout_OutDirective_PackageScope pins the package-level form
+// of the routing directive.
+//
+// Writing it once above the `package` clause parsed and attached to
+// the [node.Package], and then nothing read it: every entity routed
+// as though the line were absent, with no diagnostic. A package
+// carrying six annotated types otherwise repeats the same routing
+// pair six times, and the sixth is the one that drifts.
+//
+// Precedence is scope-first: an entity-level directive beats a
+// package-level one whatever filters either carries. See
+// [outDirectiveSpec.score] — the weight is what keeps a line written
+// directly above a type from losing to one written pages away.
+func TestLayout_OutDirective_PackageScope(t *testing.T) {
+	t.Parallel()
+
+	// route builds a one-struct pipeline whose source package carries
+	// pkgDirs and whose origin carries originDirs, runs it, and
+	// returns the struct's resolved Target.
+	route := func(t *testing.T, pkgDirs, originDirs []*directive.Directive) emit.Target {
+		t.Helper()
+		nodePkg := &node.Package{
+			BaseNode: node.BaseNode{DirectiveList: pkgDirs},
+			Name:     "users", Path: "example.com/users",
+		}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos:     position.Pos{File: "internal/users/user.go"},
+				DirectiveList: originDirs,
+			},
+			Name: "User", Package: "example.com/users",
+		}
+		s := &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin},
+			Name:     "UserMock", Package: "example.com/users",
+		}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&layoutGen{name: "mg", suffix: "_mock.go", pkg: &emit.Package{
+				Name: "users", Path: "example.com/users",
+				Structs: []*emit.Struct{s},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		return s.Target
+	}
+
+	outDir := func(path string, kv map[string]string) *directive.Directive {
+		return &directive.Directive{Name: pipeline.OutDirective, Args: []string{path}, KV: kv}
+	}
+
+	t.Run("a package-level directive routes every entity in the package", func(t *testing.T) {
+		t.Parallel()
+		got := route(t, []*directive.Directive{outDir("plaintest/", nil)}, nil)
+		if want := filepath.Join("internal", "users", "plaintest"); got.Dir != want {
+			t.Fatalf("Target.Dir = %q, want %q (package-level directive)", got.Dir, want)
+		}
+	})
+
+	t.Run("a package-level pkg= applies too", func(t *testing.T) {
+		t.Parallel()
+		got := route(t, []*directive.Directive{
+			outDir("plaintest/", map[string]string{"pkg": "plaintest"}),
+		}, nil)
+		if got.Package != "plaintest" {
+			t.Fatalf("Target.Package = %q, want %q (package-level pkg=)", got.Package, "plaintest")
+		}
+	})
+
+	t.Run("an entity-level directive overrides the package default", func(t *testing.T) {
+		t.Parallel()
+		got := route(t,
+			[]*directive.Directive{outDir("plaintest/", nil)},
+			[]*directive.Directive{outDir("special/", nil)})
+		if want := filepath.Join("internal", "users", "special"); got.Dir != want {
+			t.Fatalf("Target.Dir = %q, want %q (entity overrides package)", got.Dir, want)
+		}
+	})
+
+	t.Run("an unscoped entity directive beats a filtered package one", func(t *testing.T) {
+		t.Parallel()
+		// Scope dominates filter specificity. Were it the other way
+		// round, the plugin-scoped package line would win and the
+		// directive written on the type would silently do nothing.
+		got := route(t,
+			[]*directive.Directive{outDir("plaintest/", map[string]string{"plugin": "mg"})},
+			[]*directive.Directive{outDir("special/", nil)})
+		if want := filepath.Join("internal", "users", "special"); got.Dir != want {
+			t.Fatalf("Target.Dir = %q, want %q (scope outranks filters)", got.Dir, want)
+		}
+	})
+
+	t.Run("a package default and an entity override are not a conflict", func(t *testing.T) {
+		t.Parallel()
+		// Both are unscoped, so they tie on filter specificity. Only
+		// the scope term separates them; without it selectOutDirective
+		// reports ErrConflictingRouting and the run fails.
+		d := diag.New()
+		nodePkg := &node.Package{
+			BaseNode: node.BaseNode{DirectiveList: []*directive.Directive{outDir("plaintest/", nil)}},
+			Name:     "users", Path: "example.com/users",
+		}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos:     position.Pos{File: "internal/users/user.go"},
+				DirectiveList: []*directive.Directive{outDir("special/", nil)},
+			},
+			Name: "User", Package: "example.com/users",
+		}
+		s := &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin},
+			Name:     "UserMock", Package: "example.com/users",
+		}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&layoutGen{name: "mg", suffix: "_mock.go", pkg: &emit.Package{
+				Name: "users", Path: "example.com/users",
+				Structs: []*emit.Struct{s},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			WithDiag(d).
+			Build()
+		assertNoError(t, err)
+		assertNoError(t, p.Run(t.Context(), "x"))
+		if d.HasErrors() {
+			t.Fatalf("package default + entity override must not conflict; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("two package-level directives of equal scope still conflict", func(t *testing.T) {
+		t.Parallel()
+		// The scope term must not disarm the ambiguity check within a
+		// scope: the source still says twice, differently, where one
+		// output goes.
+		d := diag.New()
+		nodePkg := &node.Package{
+			BaseNode: node.BaseNode{DirectiveList: []*directive.Directive{
+				outDir("one/", nil),
+				outDir("two/", nil),
+			}},
+			Name: "users", Path: "example.com/users",
+		}
+		origin := &node.Struct{
+			BaseNode: node.BaseNode{SourcePos: position.Pos{File: "internal/users/user.go"}},
+			Name:     "User", Package: "example.com/users",
+		}
+		s := &emit.Struct{
+			BaseEmit: emit.BaseEmit{OriginNode: origin},
+			Name:     "UserMock", Package: "example.com/users",
+		}
+		p, err := pipeline.New().
+			WithFrontend(&nodePackageFE{name: "fe", pkg: nodePkg}).
+			WithGenerator(&layoutGen{name: "mg", suffix: "_mock.go", pkg: &emit.Package{
+				Name: "users", Path: "example.com/users",
+				Structs: []*emit.Struct{s},
+			}}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			WithDiag(d).
+			Build()
+		assertNoError(t, err)
+		_ = p.Run(t.Context(), "x")
+		if !d.HasErrors() {
+			t.Fatal("two equal-scope package directives must still report a conflict")
+		}
+	})
+
+	t.Run("a package with no directives changes nothing", func(t *testing.T) {
+		t.Parallel()
+		got := route(t, nil, nil)
+		if want := filepath.Join("internal", "users"); got.Dir != want {
+			t.Fatalf("Target.Dir = %q, want %q (alongside-source default)", got.Dir, want)
+		}
+	})
+}
+
 // TestLayout_OutputFilenameOverride verifies the CLI -o override
 // (precedence layer 6) wins over the +gen:out directive (layer 5)
 // for Target.Filename.
@@ -1553,20 +1733,94 @@ func TestLayout_EmptyOriginPackage(t *testing.T) {
 	})
 }
 
-// TestLayout_EmptyOriginPos pins [originSourceDirBasename]'s
-// empty-Pos.File branch: a non-nil origin without a source
-// position is treated as having no derivable directory or
-// basename. Layout still composes the suffix-only filename
-// (e.g. "_meta.go") and leaves the directory empty; the
-// downstream sink rejects the empty directory at write time, so
-// the failure surfaces a second time at IO if the run still
-// attempts the write.
+// TestLayout_EmptyOriginPos pins the guard on
+// [originSourceDirBasename]'s empty-Pos.File branch. A non-nil
+// origin without a source position contributes no basename, so the
+// composed filename is the plugin's bare suffix — "_meta.go", a
+// basename go/packages discards before the Go toolchain sees the
+// file. The route used to be composed and written silently: valid,
+// gofmt-clean output that does not exist as far as the toolchain is
+// concerned, with no diagnostic at any severity.
+//
+// composeOrZero already guards a nil origin. A positionless but
+// non-nil origin is exactly what slips past that check, and this is
+// its counterpart.
 func TestLayout_EmptyOriginPos(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Method origin with empty Pos.File yields suffix-only Filename", func(t *testing.T) {
-		t.Parallel()
+	// positionlessSlotRun drives one slot contribution anchored at a
+	// positionless method through the pipeline and returns the run's
+	// error alongside the diagnostic sink.
+	positionlessSlotRun := func(t *testing.T) (*pipeline.Pipeline, *diag.Sink, error) {
+		t.Helper()
 		method := &node.Method{Name: "M"} // no SourcePos
+		item := &emit.Constant{Name: "K", Package: "x"}
+		gen := &slotContributingGen{
+			name:   "rg",
+			suffix: "_meta.go",
+			contribute: func(ctx *plugin.GeneratorContext) error {
+				return ctx.Store.Emit().AppendOriginSlot(
+					method, "init", item, emit.Provenance{SetBy: "rg"},
+				)
+			},
+		}
+		d := diag.New()
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithGenerator(gen).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			WithDiag(d).
+			Build()
+		assertNoError(t, err)
+		runErr := p.Run(t.Context(), "x")
+		return p, d, runErr
+	}
+
+	t.Run("a positionless origin is diagnosed", func(t *testing.T) {
+		t.Parallel()
+		_, d, runErr := positionlessSlotRun(t)
+		if !errors.Is(runErr, pipeline.ErrPositionlessOrigin) {
+			t.Fatalf("Run = %v, want it to match ErrPositionlessOrigin", runErr)
+		}
+		if !hasDiagContaining(d, pipeline.ErrPositionlessOrigin.Error()) {
+			t.Fatalf("expected ErrPositionlessOrigin diagnostic; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("the diagnostic names the degenerate filename", func(t *testing.T) {
+		t.Parallel()
+		_, d, _ := positionlessSlotRun(t)
+		if !hasDiagContaining(d, "_meta.go") {
+			t.Fatalf("diagnostic should name the composed filename; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("the suffix-only file is not created", func(t *testing.T) {
+		t.Parallel()
+		p, _, _ := positionlessSlotRun(t)
+		var found *emit.File
+		p.Store().Emit().Files().Range(func(f *emit.File) bool {
+			if f.Name == "_meta.go" {
+				found = f
+			}
+			return true
+		})
+		if found != nil {
+			t.Fatalf("suffix-only file %+v should have been dropped", found)
+		}
+	})
+
+	t.Run("an explicit out directive rescues the route", func(t *testing.T) {
+		t.Parallel()
+		method := &node.Method{
+			BaseNode: node.BaseNode{
+				DirectiveList: []*directive.Directive{
+					{Name: pipeline.OutDirective, Args: []string{"meta.go"}},
+				},
+			},
+			Name: "M",
+		}
 		item := &emit.Constant{Name: "K", Package: "x"}
 		gen := &slotContributingGen{
 			name:   "rg",
@@ -1585,16 +1839,15 @@ func TestLayout_EmptyOriginPos(t *testing.T) {
 			Build()
 		assertNoError(t, err)
 		assertNoError(t, p.Run(t.Context(), "x"))
-		// Filename is suffix-only; Dir is empty.
 		var found *emit.File
 		p.Store().Emit().Files().Range(func(f *emit.File) bool {
-			if f.Name == "_meta.go" && f.Dir == "" {
+			if f.Name == "meta.go" {
 				found = f
 			}
 			return true
 		})
 		if found == nil {
-			t.Fatalf("expected suffix-only file %q with empty Dir", "_meta.go")
+			t.Fatalf("a directive-pinned filename is a complete route and must survive")
 		}
 	})
 }

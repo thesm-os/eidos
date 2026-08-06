@@ -15,7 +15,14 @@ import (
 // pipeline and returns the FileAssertion bound to the supplied TB.
 func fileAssertion(tb testing.TB, body string) *pipelinetest.FileAssertion {
 	tb.Helper()
-	tgt := emit.Target{Dir: "out", Filename: "f.go", Package: "out"}
+	return targetedAssertion(tb, emit.Target{Dir: "out", Filename: "f.go", Package: "out"}, body)
+}
+
+// targetedAssertion is [fileAssertion] with the captured target
+// supplied by the caller. Tests that care about how a target's
+// routing metadata reads back in a failure message drive this form.
+func targetedAssertion(tb testing.TB, tgt emit.Target, body string) *pipelinetest.FileAssertion {
+	tb.Helper()
 	p := pipelinetest.New(tb).
 		WithFrontend(pipelinetest.FromNodes()).
 		WithBackend(&stubBackend{
@@ -25,7 +32,45 @@ func fileAssertion(tb testing.TB, body string) *pipelinetest.FileAssertion {
 		}).
 		Build().
 		Run()
-	return p.AssertFile("f.go")
+	return p.AssertFile(tgt.Filename)
+}
+
+// dirlessTarget is a routed target with no directory component —
+// the shape [emit.Target.JoinPath] returns "" for. Every assertion
+// failure message interpolates the file's path, so this is the case
+// that decides whether a failure names the file at all.
+func dirlessTarget() emit.Target {
+	return emit.Target{Filename: "orphan.go", Package: "orphan"}
+}
+
+// TestFileAssertion_FailureNamesTheFile covers every assertion in
+// the family at once: each interpolates the captured target's path,
+// and [emit.Target.JoinPath] returns "" whenever Dir is empty. A
+// blank interpolation reads as `file  does not contain …` in the
+// one package whose job is to explain what went wrong.
+func TestFileAssertion_FailureNamesTheFile(t *testing.T) {
+	t.Parallel()
+
+	fail := map[string]func(*pipelinetest.FileAssertion){
+		"Contains":    func(a *pipelinetest.FileAssertion) { a.Contains("absent") },
+		"NotContains": func(a *pipelinetest.FileAssertion) { a.NotContains("body") },
+		"Equals":      func(a *pipelinetest.FileAssertion) { a.Equals("other") },
+		"EqualsBytes": func(a *pipelinetest.FileAssertion) { a.EqualsBytes([]byte("other")) },
+	}
+	for name, trigger := range fail {
+		t.Run("the "+name+" failure names the file when the target has no directory", func(t *testing.T) {
+			t.Parallel()
+			fake := newFakeT()
+			trigger(targetedAssertion(fake, dirlessTarget(), "body"))
+			if !fake.Failed() {
+				t.Fatalf("expected the assertion to fail")
+			}
+			msg := strings.Join(fake.errs, "\n")
+			if !strings.Contains(msg, "orphan.go") {
+				t.Fatalf("failure message must name the file; got %q", msg)
+			}
+		})
+	}
 }
 
 func TestFileAssertion_Target(t *testing.T) {

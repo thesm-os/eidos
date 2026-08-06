@@ -20,7 +20,12 @@ type MethodBuilder struct {
 // Node returns the underlying [node.Method].
 func (b *MethodBuilder) Node() *node.Method { return b.m }
 
-// Pos overrides the method's source position.
+// Pos overrides the method's source position. The method inherits
+// its enclosing declaration's synthetic file, matching how a
+// frontend records every member of one declaration at the file it
+// was parsed from. Layout derives the output basename from Pos.File
+// whenever a plugin routes from a method, so overriding here
+// redirects that output. See [StructBuilder.Pos].
 func (b *MethodBuilder) Pos(p position.Pos) *MethodBuilder {
 	b.m.SourcePos = p
 	return b

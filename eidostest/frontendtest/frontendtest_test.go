@@ -4,7 +4,10 @@
 package frontendtest_test
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,10 +18,21 @@ import (
 	"go.thesmos.sh/eidos/plugin"
 )
 
+// sourceDirEnv carries the SourceDir value from a test to the
+// subprocess that drives the harness with it. Its presence is
+// also what tells [TestHelperRunRejectsSourceDir] it is running
+// as that subprocess rather than as an ordinary test.
+const sourceDirEnv = "EIDOS_FRONTENDTEST_SOURCE_DIR"
+
+// helperTestName is the subprocess entry point, named here so the
+// -test.run filter cannot drift from the function it selects.
+const helperTestName = "TestHelperRunRejectsSourceDir"
+
 // TestDemoFixture covers the [frontendtest.DemoFixture] helper:
 // it resolves through [runtime.Caller] and must point at the
 // shared demoproject testdata regardless of the test's working
-// directory.
+// directory — and at a directory that is actually there, which
+// the shape assertions alone never established.
 func TestDemoFixture(t *testing.T) {
 	t.Parallel()
 
@@ -37,6 +51,117 @@ func TestDemoFixture(t *testing.T) {
 			t.Fatalf("DemoFixture returned non-absolute path %q", got)
 		}
 	})
+
+	// Passes inside the workspace by construction — the fixture is
+	// on disk two directories up. It is here as the regression
+	// guard for the move that would silently reintroduce the
+	// defect: a helper returning a well-shaped path to nothing.
+	// The population it protects (a consumer resolving this from
+	// the published module, where eidostest/testdata does not
+	// exist) can only be reached by a smoke test run with
+	// GOWORK=off against the packaged module.
+	t.Run("the shared demo fixture exists at the path DemoFixture returns", func(t *testing.T) {
+		t.Parallel()
+		got := frontendtest.DemoFixture(t)
+		if _, err := os.Stat(got); err != nil {
+			t.Fatalf("DemoFixture returned %q, which does not exist: %v", got, err)
+		}
+	})
+}
+
+// TestRun_RejectsUnusableSourceDir pins the guard that turns a
+// SourceDir the frontend cannot load into a stop at the harness
+// boundary. Without it the pipeline converts the same failure
+// into Error diagnostics and [frontendtest.Run] returns them in a
+// [frontendtest.Result], so a test that asserts nothing about the
+// store passes over an empty one.
+//
+// Each subtest costs one process spawn; see [runHarnessSubprocess]
+// for why the fatal cannot be observed in-process.
+func TestRun_RejectsUnusableSourceDir(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a run against a source dir that does not exist fails the test", func(t *testing.T) {
+		t.Parallel()
+		missing := filepath.Join(t.TempDir(), "definitely-not-here")
+		out := runHarnessSubprocess(t, missing)
+		assertOutputMentions(t, out, "frontendtest.Run:", missing, "no such file or directory", "opts.SourceDir")
+	})
+
+	t.Run("a run against a source dir that is a file fails the test", func(t *testing.T) {
+		t.Parallel()
+		file := filepath.Join(t.TempDir(), "not-a-dir.go")
+		if err := os.WriteFile(file, []byte("package p\n"), 0o600); err != nil {
+			t.Fatalf("writing fixture file: %v", err)
+		}
+		out := runHarnessSubprocess(t, file)
+		assertOutputMentions(t, out, "frontendtest.Run:", file, "not a directory")
+	})
+}
+
+// TestHelperRunRejectsSourceDir is the body [runHarnessSubprocess]
+// executes in a child process: it drives [frontendtest.Run] with
+// the SourceDir carried in [sourceDirEnv] and expects the harness
+// to fail the test. Without that variable set it is a skip, so an
+// ordinary `go test` run neither drives it nor reports it as a
+// failure.
+func TestHelperRunRejectsSourceDir(t *testing.T) {
+	t.Parallel()
+	dir, ok := os.LookupEnv(sourceDirEnv)
+	if !ok {
+		t.Skipf("subprocess entry point; driven by TestRun_RejectsUnusableSourceDir via %s", sourceDirEnv)
+	}
+	frontendtest.Run(t, frontendtest.RunOptions{
+		Frontend:      &fakeFrontend{name: "fake-fe"},
+		SourceDir:     dir,
+		Pattern:       "single",
+		OutputPackage: "out",
+	})
+}
+
+// runHarnessSubprocess re-executes this test binary against
+// [helperTestName] with sourceDir in the environment, and returns
+// the child's combined output after asserting it exited non-zero.
+//
+// The re-exec is not incidental. [frontendtest.Run] takes a
+// concrete *testing.T, so its t.Fatalf cannot be routed to a
+// stand-in the way a testing.TB-shaped harness allows; and a
+// failure recorded on any *testing.T propagates up every parent,
+// so a subtest cannot absorb it either. A child process is the
+// only boundary that contains the failure while still exercising
+// the real wiring rather than a guard function called in
+// isolation.
+//
+// Cost is one process spawn (tens of milliseconds) per call. The
+// child shares nothing with the caller but a copied environment,
+// so callers stay parallel-safe.
+func runHarnessSubprocess(t *testing.T, sourceDir string) string {
+	t.Helper()
+	//nolint:gosec // the command is this test binary plus two constant flags; sourceDir travels in the environment, never on the command line
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+helperTestName+"$", "-test.v")
+	cmd.Env = append(os.Environ(), sourceDirEnv+"="+sourceDir)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("frontendtest.Run accepted SourceDir %q; expected the harness to fail the test:\n%s", sourceDir, out)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("running %s: %v:\n%s", os.Args[0], err, out)
+	}
+	return string(out)
+}
+
+// assertOutputMentions fails t for every want absent from out. The
+// harness's fatal has to name what failed and what the reader does
+// next, so the message text is part of the contract, not incidental
+// phrasing.
+func assertOutputMentions(t *testing.T, out string, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("harness output does not mention %q:\n%s", w, out)
+		}
+	}
 }
 
 // TestLoadDirect_DrivesFrontendLoad covers the happy path of
@@ -107,11 +232,15 @@ func TestLoadDirect_PluginOptionsBeatsFrontendOptions(t *testing.T) {
 // Verifies the harness wires the pipeline correctly and the
 // returned [Result] carries Store / Diag / Sink populated by
 // the run.
+//
+// SourceDir is an empty temp directory rather than the synthetic
+// path the LoadDirect cases use: the frontend ignores it, but Run
+// stats it, so it has to be somewhere real.
 func TestRun_HappyPath(t *testing.T) {
 	t.Parallel()
 	result := frontendtest.Run(t, frontendtest.RunOptions{
 		Frontend:      &fakeFrontend{name: "fake-fe"},
-		SourceDir:     "/synthetic",
+		SourceDir:     t.TempDir(),
 		Pattern:       "single",
 		OutputPackage: "out",
 	})
@@ -201,11 +330,14 @@ func ExampleRun() {
 	assertLoadsFakePackage := func(t *testing.T) {
 		t.Helper()
 
-		// A real test passes its own frontend and, usually,
-		// frontendtest.DemoFixture(t) or its own testdata directory.
+		// A real test passes its own frontend and its own testdata
+		// directory — or frontendtest.DemoFixture(t), which resolves
+		// only inside an eidos checkout. Whatever it names, Run stats
+		// it: an empty temp directory stands in here because this
+		// frontend synthesises its output from Pattern alone.
 		result := frontendtest.Run(t, frontendtest.RunOptions{
 			Frontend:  &fakeFrontend{name: "fake-fe"},
-			SourceDir: "/synthetic",
+			SourceDir: t.TempDir(),
 			Pattern:   "single",
 			// Command pins the header line the backend would
 			// otherwise derive from os.Args, which differs between a

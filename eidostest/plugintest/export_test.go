@@ -57,7 +57,9 @@ var (
 	// Frontend-suite assertions.
 	AssertLoadEmptyPatternDoesNotPanic = assertLoadEmptyPatternDoesNotPanic
 	AssertLoadDoesNotPanic             = assertLoadDoesNotPanic
+	AssertLoadPopulatesStore           = assertLoadPopulatesStore
 	AssertLoadIsDeterministic          = assertLoadIsDeterministic
+	AssertLoadIsFingerprintKeyed       = assertLoadIsFingerprintKeyed
 	AssertFrontendFixtureNamesUnique   = assertFrontendFixtureNamesUnique
 
 	// Options-suite assertions.

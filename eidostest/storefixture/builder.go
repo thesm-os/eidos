@@ -5,7 +5,9 @@ package storefixture
 
 import (
 	"fmt"
+	"strings"
 
+	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
 )
@@ -17,6 +19,52 @@ const defaultPackageName = "test"
 // defaultPackagePath is the import path applied to a [Builder] that
 // never calls [Builder.Package].
 const defaultPackagePath = "example.com/test"
+
+// anonymousDeclStem is the filename stem [declFile] falls back to
+// for a declaration with no name. An unnamed declaration is fixture
+// misuse, but it must not reintroduce the empty basename this
+// synthetic position exists to prevent.
+const anonymousDeclStem = "decl"
+
+// declFile returns the synthetic source file a declaration is
+// stamped with — `<pkg>/<lowercased-decl>.go`.
+//
+// # Why the fixture positions anything at all
+//
+// The Layout phase composes an output filename as
+// `<origin-basename><plugin-suffix>`, where the basename comes from
+// the origin's [position.Pos] File. A positionless origin therefore
+// routes to the bare suffix, and every suffix declared in this repo
+// starts with an underscore — a basename go/packages discards before
+// packages.Load ever sees the file. The generated file lands on
+// disk, is valid Go, and does not exist as far as the toolchain is
+// concerned, with no diagnostic at any severity. Seeding a
+// production-shaped position keeps fixture-driven pipelines routing
+// to files the toolchain can see.
+//
+// The directory component carries the package name so the composed
+// emit target has a non-empty Dir; a target with an empty Dir
+// renders a blank path in every harness failure message.
+func declFile(pkgName, declName string) string {
+	stem := strings.ToLower(declName)
+	if stem == "" {
+		stem = anonymousDeclStem
+	}
+	if pkgName == "" {
+		return stem + ".go"
+	}
+	return pkgName + "/" + stem + ".go"
+}
+
+// retargetPos rewrites p to the synthetic file for declName under
+// newPkg, but only when p still holds the synthetic file computed
+// under oldPkg. A position the caller set through a sub-builder's
+// Pos is left alone — the explicit value always wins.
+func retargetPos(p *position.Pos, oldPkg, newPkg, declName string) {
+	if p.File == declFile(oldPkg, declName) {
+		p.File = declFile(newPkg, declName)
+	}
+}
 
 // Builder accumulates declarations into a single [node.Package] and
 // turns the package into a populated [store.Store] on demand.
@@ -55,29 +103,53 @@ func New() *Builder {
 // package's identity — existing decls' [node.Struct.Package],
 // [node.Function.Package], and equivalents are rewritten so qualified
 // names stay coherent with the new path.
+//
+// The synthetic source file each declaration carries names the
+// package too, so the same pass retargets it — otherwise a package
+// renamed after its declarations were added would route its
+// generated output into the old package's directory. A position set
+// explicitly through a sub-builder's Pos is never rewritten; see
+// [StructBuilder.Pos].
 func (b *Builder) Package(name, path string) *Builder {
+	old := b.pkg.Name
 	b.pkg.Name = name
 	b.pkg.Path = path
 	for _, s := range b.pkg.Structs {
 		s.Package = path
+		retargetPos(&s.SourcePos, old, name, s.Name)
+		for _, f := range s.Fields {
+			retargetPos(&f.SourcePos, old, name, s.Name)
+		}
+		for _, m := range s.Methods {
+			retargetPos(&m.SourcePos, old, name, s.Name)
+		}
 	}
 	for _, i := range b.pkg.Interfaces {
 		i.Package = path
+		retargetPos(&i.SourcePos, old, name, i.Name)
+		for _, m := range i.Methods {
+			retargetPos(&m.SourcePos, old, name, i.Name)
+		}
 	}
 	for _, f := range b.pkg.Functions {
 		f.Package = path
+		retargetPos(&f.SourcePos, old, name, f.Name)
 	}
 	for _, v := range b.pkg.Variables {
 		v.Package = path
+		retargetPos(&v.SourcePos, old, name, v.Name)
 	}
 	for _, c := range b.pkg.Constants {
 		c.Package = path
+		retargetPos(&c.SourcePos, old, name, c.Name)
 	}
 	for _, e := range b.pkg.Enums {
 		e.Package = path
+		retargetPos(&e.SourcePos, old, name, e.Name)
 	}
 	for _, a := range b.pkg.Aliases {
 		a.Package = path
+		retargetPos(&a.SourcePos, old, name, a.Name)
 	}
 	return b
 }
@@ -101,8 +173,13 @@ func (b *Builder) Import(path string) *Builder {
 // at Struct call time so callers may shadow earlier names intentionally
 // in pathological tests.
 func (b *Builder) Struct(name string, fn func(*StructBuilder)) *Builder {
-	s := &node.Struct{Name: name, Package: b.pkg.Path}
-	sb := &StructBuilder{s: s, pkgPath: b.pkg.Path}
+	file := declFile(b.pkg.Name, name)
+	s := &node.Struct{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: file}},
+		Name:     name,
+		Package:  b.pkg.Path,
+	}
+	sb := &StructBuilder{s: s, pkgPath: b.pkg.Path, file: file}
 	if fn != nil {
 		fn(sb)
 	}
@@ -112,8 +189,13 @@ func (b *Builder) Struct(name string, fn func(*StructBuilder)) *Builder {
 
 // Interface declares an interface in the accumulating package.
 func (b *Builder) Interface(name string, fn func(*InterfaceBuilder)) *Builder {
-	i := &node.Interface{Name: name, Package: b.pkg.Path}
-	ib := &InterfaceBuilder{i: i, pkgPath: b.pkg.Path}
+	file := declFile(b.pkg.Name, name)
+	i := &node.Interface{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: file}},
+		Name:     name,
+		Package:  b.pkg.Path,
+	}
+	ib := &InterfaceBuilder{i: i, pkgPath: b.pkg.Path, file: file}
 	if fn != nil {
 		fn(ib)
 	}
@@ -123,7 +205,11 @@ func (b *Builder) Interface(name string, fn func(*InterfaceBuilder)) *Builder {
 
 // Function declares a standalone (non-method) function.
 func (b *Builder) Function(name string, fn func(*FunctionBuilder)) *Builder {
-	f := &node.Function{Name: name, Package: b.pkg.Path}
+	f := &node.Function{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: declFile(b.pkg.Name, name)}},
+		Name:     name,
+		Package:  b.pkg.Path,
+	}
 	fb := &FunctionBuilder{f: f}
 	if fn != nil {
 		fn(fb)
@@ -134,7 +220,11 @@ func (b *Builder) Function(name string, fn func(*FunctionBuilder)) *Builder {
 
 // Variable declares a package-level variable.
 func (b *Builder) Variable(name string, fn func(*VariableBuilder)) *Builder {
-	v := &node.Variable{Name: name, Package: b.pkg.Path}
+	v := &node.Variable{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: declFile(b.pkg.Name, name)}},
+		Name:     name,
+		Package:  b.pkg.Path,
+	}
 	vb := &VariableBuilder{v: v}
 	if fn != nil {
 		fn(vb)
@@ -146,7 +236,11 @@ func (b *Builder) Variable(name string, fn func(*VariableBuilder)) *Builder {
 // Constant declares a package-level constant that is not part of an
 // idiomatic enum group.
 func (b *Builder) Constant(name string, fn func(*ConstantBuilder)) *Builder {
-	c := &node.Constant{Name: name, Package: b.pkg.Path}
+	c := &node.Constant{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: declFile(b.pkg.Name, name)}},
+		Name:     name,
+		Package:  b.pkg.Path,
+	}
 	cb := &ConstantBuilder{c: c}
 	if fn != nil {
 		fn(cb)
@@ -158,7 +252,11 @@ func (b *Builder) Constant(name string, fn func(*ConstantBuilder)) *Builder {
 // Enum declares an enum (a group of typed constants sharing an
 // underlying type) in the accumulating package.
 func (b *Builder) Enum(name string, fn func(*EnumBuilder)) *Builder {
-	e := &node.Enum{Name: name, Package: b.pkg.Path}
+	e := &node.Enum{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: declFile(b.pkg.Name, name)}},
+		Name:     name,
+		Package:  b.pkg.Path,
+	}
 	eb := &EnumBuilder{e: e}
 	if fn != nil {
 		fn(eb)
@@ -171,7 +269,11 @@ func (b *Builder) Enum(name string, fn func(*EnumBuilder)) *Builder {
 // [AliasBuilder.True] to mark the declaration as an alias
 // (`type X = Y`) rather than a definition (`type X Y`).
 func (b *Builder) Alias(name string, fn func(*AliasBuilder)) *Builder {
-	a := &node.Alias{Name: name, Package: b.pkg.Path}
+	a := &node.Alias{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: declFile(b.pkg.Name, name)}},
+		Name:     name,
+		Package:  b.pkg.Path,
+	}
 	ab := &AliasBuilder{a: a}
 	if fn != nil {
 		fn(ab)

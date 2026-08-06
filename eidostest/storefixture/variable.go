@@ -18,7 +18,11 @@ type VariableBuilder struct {
 // Node returns the underlying [node.Variable].
 func (b *VariableBuilder) Node() *node.Variable { return b.v }
 
-// Pos overrides the variable's source position.
+// Pos overrides the variable's source position. Layout derives the
+// basename of any file generated from this node from Pos.File, so
+// the value decides the output filename; the fixture's synthetic
+// `<pkg>/<lowercased-name>.go` keeps that basename non-empty. See
+// [StructBuilder.Pos] for what an empty one costs.
 func (b *VariableBuilder) Pos(p position.Pos) *VariableBuilder {
 	b.v.SourcePos = p
 	return b

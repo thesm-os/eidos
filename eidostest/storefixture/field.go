@@ -19,7 +19,12 @@ type FieldBuilder struct {
 // Node returns the underlying [node.Field].
 func (b *FieldBuilder) Node() *node.Field { return b.f }
 
-// Pos overrides the field's source position.
+// Pos overrides the field's source position. The field inherits
+// its enclosing declaration's synthetic file, matching how a
+// frontend records every member of one declaration at the file it
+// was parsed from. Layout derives the output basename from Pos.File
+// whenever a plugin routes from a field, so overriding here
+// redirects that output. See [StructBuilder.Pos].
 func (b *FieldBuilder) Pos(p position.Pos) *FieldBuilder {
 	b.f.SourcePos = p
 	return b

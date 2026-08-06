@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
 	"path"
@@ -13,12 +14,47 @@ import (
 	"strings"
 
 	"go.thesmos.sh/eidos/core/diag"
+	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/manifest"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/store"
+)
+
+// ErrPositionlessOrigin is surfaced by the Layout phase when a
+// routable decl or slot contribution is anchored to an origin that
+// carries no source position, and no later precedence layer supplied
+// a filename.
+//
+// # Why it is an error rather than a fallback
+//
+// The framework composes an output filename as
+// `<origin-basename><plugin-suffix>`, and the basename comes from
+// the origin's [position.Pos] File. With no position there is no
+// basename, so the filename *is* the suffix. Every conventional
+// suffix in the ecosystem opens with an underscore, and go/packages
+// discards files whose basename begins with `_` before
+// `packages.Load` ever sees them — the generated file lands on disk,
+// is valid, and does not exist as far as the toolchain is concerned.
+// A suffix that does not open with an underscore fares no better: it
+// collapses every origin in the run onto one filename. Neither is a
+// route a caller can have meant.
+//
+// The check keys on the origin contributing no basename rather than
+// on the composed filename's leading character. The underscore rule
+// belongs to the Go toolchain, and Layout routes for whatever
+// language the active backend targets; keying on the basename states
+// the actual defect and stays correct for a backend where
+// `_registry.py` is an ordinary filename. A zero
+// [position.Pos] is how an origin gets there in practice — see
+// [originSourceDirBasename] for the derivation.
+//
+// [composeOrZero] already rejects a nil origin. A non-nil origin with
+// a zero position is exactly what slips past that guard.
+var ErrPositionlessOrigin = errors.New(
+	"pipeline: routed origin contributes no filename basename",
 )
 
 // runLayout resolves [emit.Target] on every routable emit entity in
@@ -541,7 +577,8 @@ func composeTarget(
 	// Target.Package + Target.ImportPath through the directive
 	// precedence layer; the value-with-directory form stacks a
 	// relative path onto Target.Dir.
-	if spec, ok := selectOutDirective(outDirectivesFor(p, origin), pluginName, outputTag, ps, origin); ok {
+	if spec, ok := selectOutDirective(
+		outDirectivesFor(p, origin, srcPkg), pluginName, outputTag, ps, origin); ok {
 		dir, filename := splitOutDirectivePath(spec.Path)
 		// Unscoped filename-pinning overrides against a multi-output
 		// plugin would force every output to share one filename —
@@ -622,6 +659,24 @@ func composeTarget(
 			t.Dir = filepath.Join(t.Dir, dir)
 			layers.Dir = manifest.LayerCLI
 		}
+	}
+
+	// Degenerate route: the origin contributed no basename, so
+	// Filename is the plugin's bare suffix. See
+	// [ErrPositionlessOrigin] for why that is never a route a caller
+	// meant.
+	//
+	// The check sits after the directive and CLI layers on purpose.
+	// An explicit `+gen:out` or `-o` filename is a complete answer to
+	// "where does this land" and needs no basename to be well
+	// defined; rejecting those would turn a working override into a
+	// hard failure. Only a Filename still attributed to the plugin
+	// suffix is degenerate.
+	if basename == "" && layers.Filename == manifest.LayerPluginSuffix {
+		p.reportLayoutErr(ps, fmt.Errorf(
+			"%w: %s %q emitted by %q has no source position and routed to %q, the bare suffix",
+			ErrPositionlessOrigin, kind, qnameOf(named), pluginName, t.Filename))
+		return emit.Target{}, manifest.ResolvedLayout{}, layerSet{}, false
 	}
 
 	// _test.go shift: when the resolved filename ends in `_test.go`
@@ -1251,11 +1306,64 @@ type outDirectiveSpec struct {
 	PluginName string
 	Tag        string
 	Package    string
+
+	// scope records where the directive was written. It participates
+	// in precedence ([outDirectiveSpec.score]) and in the
+	// equal-specificity conflict check, so it is deliberately part of
+	// the comparable value.
+	scope outScope
 }
 
-// outDirectivesFor returns every routing-bearing directive attached
-// to n in source order, parsed into the [outDirectiveSpec] shape.
-// Two flavours contribute:
+// outScope is where a routing directive was written, and the
+// high-order term of its precedence.
+type outScope int
+
+const (
+	// scopePackage is a directive above the `package` clause. It
+	// supplies the default for every entity in the package.
+	scopePackage outScope = iota
+	// scopeEntity is a directive on the routed declaration itself.
+	scopeEntity
+)
+
+// scopeWeight lifts an entity-scoped spec above every package-scoped
+// one regardless of filters. It must exceed the maximum filter score
+// (PluginName + Tag = 2).
+//
+// Proximity dominating filter specificity is the deliberate choice: a
+// directive written on the declaration is a local override of
+// whatever the package said, and that is the rule every layered
+// configuration system trains users to expect. The alternative —
+// letting a package-level `plugin=mock` spec outrank an unscoped
+// entity-level one — means a line written directly above a type
+// silently loses to one written pages away.
+const scopeWeight = 4
+
+// score ranks a spec for [selectOutDirective]: scope first, then the
+// number of filters set.
+func (s outDirectiveSpec) score() int {
+	score := 0
+	if s.PluginName != "" {
+		score++
+	}
+	if s.Tag != "" {
+		score++
+	}
+	if s.scope == scopeEntity {
+		score += scopeWeight
+	}
+	return score
+}
+
+// outDirectivesFor returns every routing-bearing directive that
+// applies to n, parsed into the [outDirectiveSpec] shape: n's own,
+// plus those on its owning package as the package-wide default. An
+// entity-level spec outranks a package-level one, so writing the
+// routing once above the `package` clause is the way to avoid
+// repeating it above each of six annotated types — where the sixth
+// is the one that drifts.
+//
+// Two flavours contribute at each scope:
 //
 //   - The standalone `+gen:out <path>` directive (with optional
 //     `plugin=<name>` scope and `pkg=<name>` override). Skipped
@@ -1267,9 +1375,35 @@ type outDirectiveSpec struct {
 //     `+gen:out plugin=<owner>` directive, but anchored at the
 //     directive that actually triggers the emission so users don't
 //     have to repeat the plugin name.
-func outDirectivesFor(p *Pipeline, n node.Node) []outDirectiveSpec {
-	var specs []outDirectiveSpec
-	for _, d := range n.Directives() {
+func outDirectivesFor(p *Pipeline, n node.Node, pkg *node.Package) []outDirectiveSpec {
+	specs := appendOutSpecs(p, nil, n.Directives(), scopeEntity)
+	// A package-level directive supplies the default for every entity
+	// in the package. Without this the directive parsed, attached to
+	// the [node.Package], and was then never read by anything — no
+	// routing effect and no diagnostic, which is the worst of both.
+	//
+	// Order here is presentational only; [outDirectiveSpec.score]
+	// decides precedence, so an entity-level spec wins whether it was
+	// appended first or last.
+	if pkg != nil {
+		specs = appendOutSpecs(p, specs, pkg.Directives(), scopePackage)
+	}
+	return specs
+}
+
+// appendOutSpecs parses one node's directives into specs at the given
+// scope, appending to dst. Split out of [outDirectivesFor] so the
+// entity and package passes cannot drift apart — a routing key
+// honoured on a declaration but not above the package clause would be
+// exactly the silent asymmetry this whole path exists to remove.
+func appendOutSpecs(
+	p *Pipeline,
+	dst []outDirectiveSpec,
+	directives []*directive.Directive,
+	scope outScope,
+) []outDirectiveSpec {
+	specs := dst
+	for _, d := range directives {
 		if d.Name == OutDirective {
 			if len(d.Args) == 0 {
 				continue
@@ -1279,6 +1413,7 @@ func outDirectivesFor(p *Pipeline, n node.Node) []outDirectiveSpec {
 				PluginName: d.Value("plugin"),
 				Tag:        d.Value("tag"),
 				Package:    d.Value("pkg"),
+				scope:      scope,
 			})
 			continue
 		}
@@ -1316,6 +1451,7 @@ func outDirectivesFor(p *Pipeline, n node.Node) []outDirectiveSpec {
 			Path:    out,
 			Tag:     tag,
 			Package: pkg,
+			scope:   scope,
 		}
 		spec.PluginName = owner
 		specs = append(specs, spec)
@@ -1327,9 +1463,10 @@ func outDirectivesFor(p *Pipeline, n node.Node) []outDirectiveSpec {
 // specs that applies to (pluginName, outputTag). Filter rules: a
 // spec's `PluginName` must be empty or equal pluginName, AND its
 // `Tag` must be empty or equal outputTag. Specificity rule among
-// matching specs: more filters set wins (both PluginName + Tag >
-// PluginName only > Tag only > unscoped). Returns (zero, false)
-// when no directive applies.
+// matching specs: entity scope beats package scope, then more
+// filters set wins (both PluginName + Tag > PluginName only > Tag
+// only > unscoped). See [outDirectiveSpec.score]. Returns
+// (zero, false) when no directive applies.
 //
 // Two matching specs at the same specificity are ambiguous: the
 // source says twice, differently, where one output goes, and
@@ -1358,13 +1495,7 @@ func selectOutDirective(
 		if s.Tag != "" && s.Tag != outputTag {
 			continue
 		}
-		score := 0
-		if s.PluginName != "" {
-			score++
-		}
-		if s.Tag != "" {
-			score++
-		}
+		score := s.score()
 		switch {
 		case !haveBest || score > bestScore:
 			best = s

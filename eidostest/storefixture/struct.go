@@ -20,16 +20,41 @@ import (
 type StructBuilder struct {
 	s       *node.Struct
 	pkgPath string
+	// file is the synthetic source file [Builder.Struct] stamped on
+	// the struct. Fields and methods inherit it verbatim: a real
+	// frontend records every member of a declaration at the file the
+	// declaration was parsed from, and the Layout phase routes from
+	// whichever of them a plugin picks as its origin.
+	//
+	// Read at Field / Method call time from the value the parent
+	// computed, never from b.s.SourcePos — a Pos call inside the
+	// callback would otherwise make a member's file depend on
+	// whether it was declared before or after it.
+	file string
 }
 
 // Node returns the underlying [node.Struct]. Use this accessor to set
 // typed metadata or to assert against the node directly in tests.
 func (b *StructBuilder) Node() *node.Struct { return b.s }
 
-// Pos overrides the struct's source position. By default a struct
-// constructed via the fixture carries a zero [position.Pos], which is
-// the convention for synthetic test nodes that do not originate from
-// a parsed source file.
+// Pos overrides the struct's source position.
+//
+// The position is load-bearing, not decoration. The Layout phase
+// composes a generated file's name as
+// `<origin-basename><plugin-suffix>`, and the basename comes from
+// the origin's Pos.File — so this value decides where everything
+// generated from the struct lands. A zero position yields an empty
+// basename and the filename collapses to the bare suffix
+// (`_repo.go`, `_enum.go`), which go/packages discards before the
+// Go toolchain ever sees the file: valid, gofmt-clean, invisible,
+// and undiagnosed at any severity.
+//
+// The fixture therefore seeds `<pkg>/<lowercased-name>.go` rather
+// than leaving the node positionless, and fields and methods
+// declared inside the callback inherit that file. Call Pos when a
+// test pins a specific generated filename or asserts on a
+// diagnostic's reported location; otherwise the default already
+// routes correctly.
 func (b *StructBuilder) Pos(p position.Pos) *StructBuilder {
 	b.s.SourcePos = p
 	return b
@@ -74,7 +99,12 @@ func (b *StructBuilder) Embed(t *node.TypeRef) *StructBuilder {
 // non-nil) against a [FieldBuilder] to configure it. The field's
 // Owner back-pointer is set automatically.
 func (b *StructBuilder) Field(name string, t *node.TypeRef, fn func(*FieldBuilder)) *StructBuilder {
-	f := &node.Field{Name: name, Type: t, Owner: b.s}
+	f := &node.Field{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: b.file}},
+		Name:     name,
+		Type:     t,
+		Owner:    b.s,
+	}
 	fb := &FieldBuilder{f: f}
 	if fn != nil {
 		fn(fb)
@@ -91,6 +121,7 @@ func (b *StructBuilder) Field(name string, t *node.TypeRef, fn func(*FieldBuilde
 // [MethodBuilder.Receiver] when the test cares about value receivers.
 func (b *StructBuilder) Method(name string, fn func(*MethodBuilder)) *StructBuilder {
 	m := &node.Method{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: b.file}},
 		Name:     name,
 		Receiver: Pointer(PkgNamed(b.pkgPath, b.s.Name)),
 		Owner:    b.s,

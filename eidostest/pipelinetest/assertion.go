@@ -28,6 +28,24 @@ type FileAssertion struct {
 // to content.
 func (a *FileAssertion) Target() emit.Target { return a.target }
 
+// path names the file for a failure message.
+//
+// [emit.Target.JoinPath] returns "" whenever either component is
+// empty, and a routed target with no directory is ordinary — a
+// centralised layout with no configured Dir, or an [emit.File]
+// carrying an explicit Target that pins only the filename, both
+// produce one. Interpolating JoinPath alone printed
+// `testpipe: file  does not contain …` for every one of them, in
+// the package whose entire job is to say what went wrong. The
+// filename is the identity [Pipeline.AssertFile] selects on, so it
+// is the honest fallback.
+func (a *FileAssertion) path() string {
+	if p := a.target.JoinPath(); p != "" {
+		return p
+	}
+	return a.target.Filename
+}
+
 // Bytes returns a copy of the file's rendered content. Mutations on
 // the returned slice do not affect the assertion's state or later
 // chained calls.
@@ -47,7 +65,7 @@ func (a *FileAssertion) Contains(substr string) *FileAssertion {
 	a.t.Helper()
 	if !bytes.Contains(a.body, []byte(substr)) {
 		a.t.Errorf("testpipe: file %s does not contain %q\n----- file body -----\n%s\n----- end -----",
-			a.target.JoinPath(), substr, a.body)
+			a.path(), substr, a.body)
 	}
 	return a
 }
@@ -58,21 +76,21 @@ func (a *FileAssertion) NotContains(substr string) *FileAssertion {
 	a.t.Helper()
 	if bytes.Contains(a.body, []byte(substr)) {
 		a.t.Errorf("testpipe: file %s unexpectedly contains %q\n----- file body -----\n%s\n----- end -----",
-			a.target.JoinPath(), substr, a.body)
+			a.path(), substr, a.body)
 	}
 	return a
 }
 
 // Equals fails the test (without stopping) when the file's content
-// is not byte-identical to expected. The failure message uses the
-// captured target's [emit.Target.JoinPath] so the user can identify
-// the file at a glance.
+// is not byte-identical to expected. The failure message names the
+// captured target's path so the user can identify the file at a
+// glance.
 func (a *FileAssertion) Equals(expected string) *FileAssertion {
 	a.t.Helper()
 	if string(a.body) != expected {
 		a.t.Errorf(
 			"testpipe: file %s did not match\n----- got -----\n%s\n----- want -----\n%s\n----- end -----",
-			a.target.JoinPath(), a.body, expected,
+			a.path(), a.body, expected,
 		)
 	}
 	return a
@@ -84,7 +102,7 @@ func (a *FileAssertion) EqualsBytes(expected []byte) *FileAssertion {
 	if !bytes.Equal(a.body, expected) {
 		a.t.Errorf(
 			"testpipe: file %s did not match\n----- got -----\n%s\n----- want -----\n%s\n----- end -----",
-			a.target.JoinPath(), a.body, expected,
+			a.path(), a.body, expected,
 		)
 	}
 	return a

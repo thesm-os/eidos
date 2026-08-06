@@ -20,7 +20,11 @@ type EnumBuilder struct {
 // Node returns the underlying [node.Enum].
 func (b *EnumBuilder) Node() *node.Enum { return b.e }
 
-// Pos overrides the enum's source position.
+// Pos overrides the enum's source position. Layout derives the
+// basename of any file generated from this node from Pos.File, so
+// the value decides the output filename; the fixture's synthetic
+// `<pkg>/<lowercased-name>.go` keeps that basename non-empty. See
+// [StructBuilder.Pos] for what an empty one costs.
 func (b *EnumBuilder) Pos(p position.Pos) *EnumBuilder {
 	b.e.SourcePos = p
 	return b

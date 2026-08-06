@@ -5,6 +5,8 @@ package pipelinetest_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -127,6 +129,45 @@ func TestPipeline_Sink(t *testing.T) {
 		second := p.Sink()
 		if first != second {
 			t.Fatalf("Sink must return the same sink across calls")
+		}
+	})
+}
+
+func TestPipeline_Manifest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a manifest records the emitting plugin under dry run", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "manifest.json")
+		m := routedBuilder(t, &greeterGenerator{}).
+			WithManifestPath(path).
+			WithDryRun(true).
+			Build().
+			Run().
+			Manifest()
+		if m == nil {
+			t.Fatalf("Manifest should be populated once WithManifestPath is set")
+		}
+		var attributed bool
+		for _, o := range m.Outputs {
+			for _, p := range o.Plugins {
+				if p.Name == "greetergen" {
+					attributed = true
+				}
+			}
+		}
+		if !attributed {
+			t.Errorf("manifest should attribute an output to greetergen; got %+v", m.Outputs)
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("dry run should leave %s unwritten; stat err = %v", path, err)
+		}
+	})
+
+	t.Run("returns nil when no manifest path was configured", func(t *testing.T) {
+		t.Parallel()
+		if m := routedBuilder(t, &greeterGenerator{}).Build().Run().Manifest(); m != nil {
+			t.Fatalf("Manifest should stay nil without WithManifestPath; got %+v", m)
 		}
 	})
 }

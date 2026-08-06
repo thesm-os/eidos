@@ -4,6 +4,7 @@
 package pipelinetest_test
 
 import (
+	"bytes"
 	"flag"
 	"os"
 	"path/filepath"
@@ -41,6 +42,30 @@ func boolString(v bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// withArgs swaps os.Args for the duration of fn and restores it
+// afterwards. os.Args is process-global, which is why every test in
+// this file forgoes t.Parallel: Go releases parallel tests only once
+// the sequential ones have finished, so the swap cannot be observed
+// by a pipeline running in another subtest.
+func withArgs(tb testing.TB, args []string, fn func()) {
+	tb.Helper()
+	prev := os.Args
+	os.Args = args
+	defer func() { os.Args = prev }()
+	fn()
+}
+
+// renderCommand runs one synthetic pipeline under args and returns
+// the bytes its backend captured for the "Command:" header field.
+func renderCommand(tb testing.TB, args []string) []byte {
+	tb.Helper()
+	var body []byte
+	withArgs(tb, args, func() {
+		body = headerPipeline(tb).AssertFile("command.txt").Bytes()
+	})
+	return body
 }
 
 // readBytes is a test-only helper that reads a file and fails the
@@ -208,6 +233,31 @@ func TestFileAssertion_MatchesGolden(t *testing.T) {
 		})
 		if !fake.Failed() {
 			t.Fatalf("expected Fatalf when parent path is not a directory")
+		}
+	})
+
+	t.Run("the same pipeline rendered under two different os.Args produces identical bytes", func(t *testing.T) {
+		first := renderCommand(t, []string{"pipelinetest.test", "-test.run=TestFirst", "-test.paniconexit0"})
+		second := renderCommand(t, []string{"pipelinetest.test", "-test.run=TestSecond", "-update-golden"})
+		if !bytes.Equal(first, second) {
+			t.Fatalf("rendered bytes vary with os.Args:\n first = %q\nsecond = %q", first, second)
+		}
+	})
+
+	t.Run("the documented golden round-trip passes on its second run", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "command.golden")
+		withUpdateGolden(t, true, func() {
+			withArgs(t, []string{"pipelinetest.test", "-test.run=TestRoundTrip", "-update-golden"}, func() {
+				headerPipeline(t).AssertFile("command.txt").MatchesGolden(path)
+			})
+		})
+
+		fake := newFakeT()
+		withArgs(t, []string{"pipelinetest.test", "-test.run=TestRoundTrip", "-test.count=1"}, func() {
+			headerPipeline(fake).AssertFile("command.txt").MatchesGolden(path)
+		})
+		if fake.Failed() {
+			t.Fatalf("a golden written under -update-golden must re-assert clean: %v", fake.errs)
 		}
 	})
 

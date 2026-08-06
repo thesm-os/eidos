@@ -11,6 +11,7 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/emit"
+	"go.thesmos.sh/eidos/manifest"
 	"go.thesmos.sh/eidos/pipeline"
 	"go.thesmos.sh/eidos/sink"
 )
@@ -54,6 +55,22 @@ func (p *Pipeline) Run(patterns ...string) *Pipeline {
 // that assert against emitted diagnostics inspect the snapshot via
 // [diag.Sink.Diagnostics].
 func (p *Pipeline) Diagnostics() *diag.Sink { return p.diag }
+
+// Manifest returns the per-run record of every output the backend
+// produced, each attributed to the plugins that contributed to it.
+// It is the only place a test can observe what `eidos prune` and
+// `eidos check` will later consume — [emit.Target], contributing
+// plugin names, content hash and resolved routing, per file.
+//
+// Nil until [Builder.WithManifestPath] is set and [Pipeline.Run] has
+// been called: the pipeline returns before assembling anything when
+// no path is configured. Pair the path with
+// [Builder.WithDryRun](true) — assembly happens before the write, so
+// the manifest is fully populated and nothing reaches disk.
+//
+// The returned value is the pipeline's own manifest, not a copy;
+// treat it as read-only.
+func (p *Pipeline) Manifest() *manifest.Manifest { return p.inner.LastManifest() }
 
 // Sink returns the in-memory sink the run wrote rendered files into.
 // Tests that need fine-grained access (e.g. enumerating every

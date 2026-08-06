@@ -16,12 +16,21 @@ import (
 type InterfaceBuilder struct {
 	i       *node.Interface
 	pkgPath string
+	// file is the synthetic source file [Builder.Interface] stamped
+	// on the interface; methods inherit it. See [StructBuilder] for
+	// why the value is carried here rather than read back off the
+	// node.
+	file string
 }
 
 // Node returns the underlying [node.Interface].
 func (b *InterfaceBuilder) Node() *node.Interface { return b.i }
 
-// Pos overrides the interface's source position.
+// Pos overrides the interface's source position. Layout derives the
+// basename of any file generated from this node from Pos.File, so
+// the value decides the output filename; the fixture's synthetic
+// `<pkg>/<lowercased-name>.go` keeps that basename non-empty. See
+// [StructBuilder.Pos] for what an empty one costs.
 func (b *InterfaceBuilder) Pos(p position.Pos) *InterfaceBuilder {
 	b.i.SourcePos = p
 	return b
@@ -61,7 +70,11 @@ func (b *InterfaceBuilder) Embed(t *node.TypeRef) *InterfaceBuilder {
 // stays nil (matching Go's interface-method shape); the Owner
 // back-pointer is set to the enclosing interface.
 func (b *InterfaceBuilder) Method(name string, fn func(*MethodBuilder)) *InterfaceBuilder {
-	m := &node.Method{Name: name, Owner: b.i}
+	m := &node.Method{
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: b.file}},
+		Name:     name,
+		Owner:    b.i,
+	}
 	mb := &MethodBuilder{m: m}
 	if fn != nil {
 		fn(mb)

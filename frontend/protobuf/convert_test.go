@@ -210,6 +210,49 @@ func serializeFixture(t *testing.T, name string) []byte {
 	return body
 }
 
+// TestConvert_WiresOwnerBackPointers pins the invariant the cache
+// split relies on: a freshly-converted package must carry the same
+// owner back-pointers a deserialised one does. JSON drops them —
+// Owner fields are `json:"-"` to break the cycle — so the cache-hit
+// path rewires explicitly. A conversion path that never wired them
+// in the first place means a cold run and a warm run hand consumers
+// different graphs, and every consumer that walks upward from a
+// field (qualified naming, ownership-scoped directives) reads nil
+// on the cold one.
+func TestConvert_WiresOwnerBackPointers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a freshly converted field resolves its owning struct", func(t *testing.T) {
+		t.Parallel()
+		env := loadFixture(t, "simple", "./...")
+		pkgs := collectPackages(t, env)
+		if len(pkgs) != 1 {
+			t.Fatalf("expected exactly 1 package; got %d (%+v)", len(pkgs), packagePaths(pkgs))
+		}
+		for _, s := range pkgs[0].Structs {
+			for _, f := range s.Fields {
+				if f.Owner == nil {
+					t.Errorf("field %q on struct %q has a nil Owner after a fresh conversion", f.Name, s.QName())
+				}
+			}
+		}
+	})
+
+	t.Run("a freshly converted file resolves its owning package", func(t *testing.T) {
+		t.Parallel()
+		env := loadFixture(t, "simple", "./...")
+		pkgs := collectPackages(t, env)
+		if len(pkgs) != 1 {
+			t.Fatalf("expected exactly 1 package; got %d (%+v)", len(pkgs), packagePaths(pkgs))
+		}
+		for _, f := range pkgs[0].Files {
+			if f.Owner == nil {
+				t.Errorf("file %q has a nil Owner after a fresh conversion", f.Name)
+			}
+		}
+	})
+}
+
 // fileNames returns the Name field of each file contributing to
 // pkg — the cheapest diagnostic surface when a Files assertion fails.
 func fileNames(pkg *node.Package) []string {

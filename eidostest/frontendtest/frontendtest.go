@@ -9,10 +9,10 @@
 // assertions.
 //
 // The package supersedes language-specific harnesses (the
-// previous demopipe and protopipe wrappers) — every Go-frontend
-// test now passes `frontend_golang.New()` and the proto-frontend
-// tests pass `protobuf.New()`. The framework stays neutral; the
-// harness's surface doesn't know about either source language.
+// previous demopipe and protopipe wrappers): a caller hands over
+// `frontend_golang.New()`, `protobuf.New()` or its own frontend
+// and the harness's surface stays neutral — it knows no source
+// language of its own.
 //
 // Two entry points: [Run] builds a full pipeline and returns the
 // rendered outputs; [LoadDirect] invokes the frontend's Load
@@ -23,7 +23,9 @@
 package frontendtest
 
 import (
+	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -50,14 +52,55 @@ import (
 //	})
 //
 // The function resolves through [runtime.Caller] so the result
-// is stable regardless of the test's working directory.
+// is stable regardless of the test's working directory. Stable
+// and present are different properties, so it also stats the
+// result and fails the test when the fixture is not there.
+//
+// Absent is the normal case outside an eidos checkout. The
+// fixture tree carries its own go.mod, and the module zipper
+// skips every directory holding one, so eidostest/testdata is
+// missing from the published eidostest module in full. A test
+// resolving this helper from the module cache therefore stops
+// here rather than handing the pipeline a path to nothing and
+// asserting over an empty store. Downstream authors point
+// [RunOptions.SourceDir] at their own testdata directory
+// instead.
 func DemoFixture(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatalf("frontendtest.DemoFixture: runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(file), "..", "testdata", "demoproject")
+	dir := filepath.Join(filepath.Dir(file), "..", "testdata", "demoproject")
+	if err := sourceDirError(dir); err != nil {
+		t.Fatalf("frontendtest.DemoFixture: %v; the shared fixture is not shipped in the "+
+			"published eidostest module — it is a nested Go module, so the module zip "+
+			"excludes eidostest/testdata, and this helper resolves only inside an eidos "+
+			"checkout: set RunOptions.SourceDir to your own testdata directory instead", err)
+	}
+	return dir
+}
+
+// sourceDirError reports why dir is unusable as a source fixture,
+// or nil when dir is an existing directory. [DemoFixture] and
+// [Run] call it before a frontend ever sees the value: a frontend
+// handed a path that is not there reports it as a diagnostic, and
+// a diagnostic no test inspects is indistinguishable from a
+// passing run over an empty store.
+//
+// The message carries no prefix of its own; each caller names the
+// entry point that rejected the value and what to pass instead.
+//
+// One stat syscall; no allocation on the nil path.
+func sourceDirError(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("source directory %q: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("source directory %q is not a directory", dir)
+	}
+	return nil
 }
 
 // RunOptions configures one [Run] or [LoadDirect] call.
@@ -67,9 +110,10 @@ type RunOptions struct {
 	Frontend plugin.Frontend
 
 	// SourceDir is the absolute path of the source fixture the
-	// frontend loads from. Required; the harness sets the
-	// frontend's `dir` option to this value unless overridden via
-	// [FrontendOptions] or [PluginOptions].
+	// frontend loads from. Required, and for [Run] it must name an
+	// existing directory; the harness sets the frontend's `dir`
+	// option to this value unless overridden via [FrontendOptions]
+	// or [PluginOptions].
 	SourceDir string
 
 	// Pattern overrides the default `./...` recursive sweep the
@@ -182,6 +226,12 @@ type Result struct {
 // minimal no-op backend that satisfies the pipeline's build
 // invariants without emitting anything; the returned Sink is
 // the caller's (or a default empty one).
+//
+// A [RunOptions.SourceDir] that is not an existing directory is a
+// fatal test error, raised before the pipeline is built. Left
+// through, the frontend turns the same path into Error
+// diagnostics and Run returns them in [Result], where a test that
+// asserts nothing about the store passes over an empty one.
 func Run(t *testing.T, opts RunOptions) Result {
 	t.Helper()
 	if opts.Frontend == nil {
@@ -189,6 +239,10 @@ func Run(t *testing.T, opts RunOptions) Result {
 	}
 	if opts.SourceDir == "" {
 		t.Fatalf("frontendtest.Run: opts.SourceDir is required")
+	}
+	if err := sourceDirError(opts.SourceDir); err != nil {
+		t.Fatalf("frontendtest.Run: %v; set opts.SourceDir to a directory the frontend "+
+			"can load, such as your own testdata tree", err)
 	}
 	if opts.Sink == nil {
 		opts.Sink = sink.NewMemory()
@@ -272,6 +326,11 @@ func Run(t *testing.T, opts RunOptions) Result {
 // graph. [Result.RunErr] is always nil — LoadDirect calls the
 // frontend's Load method directly rather than driving a
 // pipeline, so there's no pipeline run error to surface.
+//
+// Unlike [Run], LoadDirect does not stat [RunOptions.SourceDir].
+// It hands the value to the frontend, and the frontend's own Load
+// error is what fails the test — so a frontend that never reads
+// the filesystem accepts a path to nothing here.
 func LoadDirect(t *testing.T, opts RunOptions) Result {
 	t.Helper()
 	if opts.Frontend == nil {

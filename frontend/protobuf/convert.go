@@ -58,6 +58,13 @@ func convertFiles(
 	for _, qualifier := range order {
 		pkg := pkgs[qualifier]
 		dedupeImports(pkg)
+		// The cache-hit path rewires here too — JSON breaks the
+		// cycle with `json:"-"` on every Owner — so wiring on the
+		// conversion path as well is what makes the two routes
+		// agree on what lands in the store. Idempotent: every
+		// assignment is an unconditional overwrite of a pointer the
+		// converter either left nil or already set correctly.
+		node.RewireOwners(pkg)
 		out = append(out, pkg)
 	}
 	return out

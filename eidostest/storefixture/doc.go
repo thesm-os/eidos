@@ -29,6 +29,19 @@
 //	    }).
 //	    Build()
 //
+// # Source positions are routing input
+//
+// Every declaration the fixture builds carries a synthetic source
+// position, `<pkg>/<lowercased-name>.go`, and fields and methods
+// inherit their enclosing declaration's. This is not cosmetic: the
+// Layout phase composes a generated file's name as
+// `<origin-basename><plugin-suffix>`, so a positionless node routes
+// its output to the bare suffix — `_repo.go`, a basename the Go
+// toolchain discards before it ever loads the file. Fixture-driven
+// pipelines therefore route to production-shaped filenames by
+// default. Call a sub-builder's Pos to pin a specific one; see
+// [StructBuilder.Pos].
+//
 // # Type-reference helpers
 //
 // The package-level constructors ([Named], [PkgNamed], [Pointer],

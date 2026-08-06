@@ -42,6 +42,29 @@ omitted unless they change what a caller can rely on.
   existing frontends compile unchanged. Frontends that cache a parsed node
   graph **must** fold it into their cache key — see Fixed, below, for why.
 
+- **`eidostest/plugintest`: `RunFrontendSuite` gained two per-fixture checks and
+  now fails a fixture the frontend rejects.** Previously the suite applied a
+  fixture's `Options` before building the context and discarded the rejection,
+  so a frontend whose schema declared a required field the fixture omitted
+  passed every subtest with `Load` invoked zero times.
+
+  | Change | What you see |
+  |---|---|
+  | a rejected fixture is now fatal | `FrontendFixture "<name>": the frontend rejected the fixture's Options: …; populate them so Load is actually driven` |
+  | `fixture=<N>/Load populates the store` | `Load recorded no nodes for fixture "<name>" …` — set the new `FrontendFixture.ExpectsEmpty` when an empty node graph is the outcome the fixture pins |
+  | `fixture=<N>/Load re-parses when the composition fingerprint changes` | `… Load read back cache entries written under composition fingerprint …; plugin.FrontendContext.Fingerprint MUST be folded into the cache key` |
+
+  `fixture=<N>/Load is deterministic across two runs` now drives both passes
+  against one `cache.Disk` rooted in `t.TempDir()` instead of a `cache.None`, so
+  the second pass runs warm. A frontend whose cache round-trip loses a node — an
+  owner back-pointer the deserialised graph rewires and the parsed one does not —
+  fails there for the first time. The empty-pattern probe now inherits the first
+  fixture's `Options`, so a required-option frontend reaches `Load` at all.
+
+  `FrontendFixture` gained `ExpectsEmpty bool` and `Fingerprint string`. Both are
+  additive with a working zero value; the suite picks both fingerprints, so
+  leaving the field empty still exercises the changed-composition pass.
+
 ### Added
 
 - **`eidostest/plugintest`: `Violation`, `BrokenPlugin`, `Violations`, and
@@ -108,6 +131,14 @@ omitted unless they change what a caller can rely on.
   with no registered template wraps `ErrTemplateMissing`.
 
 ### Fixed
+
+- **`frontend/protobuf`: a cold run and a cached run produced different graphs.**
+  `convertFiles` never wired the owner back-pointers, while the cache-hit path
+  rewires them explicitly because JSON breaks the cycle with `json:"-"` on every
+  `Owner`. A freshly-parsed field therefore reported a nil owner and the same
+  field read back from the cache reported its struct, so anything resolving a
+  declaration's qualified name upward saw one answer on the first run of a
+  project and another on the second. Conversion now rewires too.
 
 - **`emit`: a reserved slot's element kind depended on which accessor reached
   it first.** Slot creation is lookup-or-create, and only the typed accessors

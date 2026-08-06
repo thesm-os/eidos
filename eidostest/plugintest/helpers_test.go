@@ -28,8 +28,20 @@ type fakeT struct {
 	failed bool
 }
 
-// newFakeT returns a fresh fake TB.
+// newFakeT returns a fresh fake TB. Its embedded [testing.TB] is
+// nil, so it answers only the four methods below; checks that reach
+// for anything else on the interface need [newFakeTIn].
 func newFakeT() *fakeT { return &fakeT{} }
+
+// newFakeTIn returns a fake TB that delegates everything it does not
+// override to tb. The frontend suite's cache checks call
+// [testing.TB.TempDir], which the zero fakeT cannot answer — and the
+// delegated directory is cleaned up with tb rather than leaking into
+// the temp root.
+func newFakeTIn(tb testing.TB) *fakeT {
+	tb.Helper()
+	return &fakeT{TB: tb}
+}
 
 // Errorf records the formatted message and marks the fake as
 // failed without aborting the test.
