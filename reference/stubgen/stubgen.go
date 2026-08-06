@@ -298,7 +298,7 @@ func (t *Tests) SetOutputPackages(byTag map[string]string) {
 // certainly a mistake, and emitting an empty struct would hide it.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
-	for _, iface := range ctx.Reader.Interfaces().Slice() {
+	for iface := range ctx.Reader.Interfaces().All() {
 		if !iface.HasPositiveDirective(DirectiveName) {
 			continue
 		}

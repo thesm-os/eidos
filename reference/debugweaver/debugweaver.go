@@ -185,7 +185,7 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 // [emit.NewExternal] expression.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
-	for _, m := range ctx.Reader.EmitMethods().Slice() {
+	for m := range ctx.Reader.EmitMethods().All() {
 		if m.HasNegatedDirective(DirectiveName) {
 			continue
 		}

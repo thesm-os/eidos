@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -419,4 +420,106 @@ func BenchmarkBucket_ByQName(b *testing.B) {
 			}
 		})
 	}
+}
+
+// TestBucket_All covers the iterator that replaced the defensive copy
+// on the annotator walk.
+func TestBucket_All(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, names ...string) *store.Bucket[*node.Struct] {
+		t.Helper()
+		b := store.NewBucket[*node.Struct]()
+		for _, n := range names {
+			if err := b.Add(n, &node.Struct{Name: n}); err != nil {
+				t.Fatalf("Add %q: %v", n, err)
+			}
+		}
+		return b
+	}
+
+	t.Run("yields every item in insertion order", func(t *testing.T) {
+		t.Parallel()
+		b := build(t, "C", "A", "B")
+		var got []string
+		for s := range b.All() {
+			got = append(got, s.Name)
+		}
+		if want := []string{"C", "A", "B"}; !slices.Equal(got, want) {
+			t.Fatalf("All yielded %v, want %v", got, want)
+		}
+	})
+
+	t.Run("yields the same items as Items", func(t *testing.T) {
+		t.Parallel()
+		// The iterator aliases where Items copies; the sequence they
+		// present must not diverge, or a plugin's behaviour would
+		// depend on which accessor it happened to use.
+		b := build(t, "A", "B", "C")
+		var got []*node.Struct
+		for s := range b.All() {
+			got = append(got, s)
+		}
+		if !slices.Equal(got, b.Items()) {
+			t.Fatalf("All and Items disagree: %v vs %v", got, b.Items())
+		}
+	})
+
+	t.Run("stops early when the yield returns false", func(t *testing.T) {
+		t.Parallel()
+		b := build(t, "A", "B", "C")
+		var got []string
+		for s := range b.All() {
+			got = append(got, s.Name)
+			if len(got) == 2 {
+				break
+			}
+		}
+		if want := []string{"A", "B"}; !slices.Equal(got, want) {
+			t.Fatalf("early break yielded %v, want %v", got, want)
+		}
+	})
+
+	t.Run("the bucket is writable from inside the iteration", func(t *testing.T) {
+		t.Parallel()
+		// This is the whole reason All exists rather than Range:
+		// Range holds the read lock for its duration and its docblock
+		// forbids calling back, but plugin.Walk yields to arbitrary
+		// plugin hooks. A store lock held across those is a deadlock
+		// waiting for a plugin author to write the obvious thing.
+		b := build(t, "A", "B")
+		for s := range b.All() {
+			if err := b.Add("added-"+s.Name, &node.Struct{Name: "added-" + s.Name}); err != nil {
+				t.Fatalf("Add during iteration: %v", err)
+			}
+		}
+		if got := b.Len(); got != 4 {
+			t.Fatalf("bucket holds %d after writing during iteration, want 4", got)
+		}
+	})
+
+	t.Run("iteration is a snapshot, unaffected by concurrent appends", func(t *testing.T) {
+		t.Parallel()
+		// The header is copied under the lock and released before the
+		// first yield, so a write during iteration is not observed by
+		// that iteration.
+		b := build(t, "A", "B")
+		count := 0
+		for range b.All() {
+			count++
+			if err := b.Add("x"+strconv.Itoa(count), &node.Struct{}); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+		}
+		if count != 2 {
+			t.Fatalf("iteration saw %d items, want the 2 present when it started", count)
+		}
+	})
+
+	t.Run("an empty bucket yields nothing", func(t *testing.T) {
+		t.Parallel()
+		for range store.NewBucket[*node.Struct]().All() {
+			t.Fatalf("empty bucket yielded an item")
+		}
+	})
 }

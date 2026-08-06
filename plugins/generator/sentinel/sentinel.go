@@ -375,7 +375,7 @@ func (t *Tests) HasContent() bool {
 // routing precedence.
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
-	for _, pkg := range ctx.Reader.Packages().Slice() {
+	for pkg := range ctx.Reader.Packages().All() {
 		if !pkg.HasPositiveDirective(DirectiveName) {
 			continue
 		}

@@ -374,7 +374,7 @@ var _ sdk.EmitNode = (*Tests)(nil)
 // drops from the output set.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
-	for _, e := range ctx.Reader.Enums().Slice() {
+	for e := range ctx.Reader.Enums().All() {
 		if !e.HasPositiveDirective(DirectiveName) {
 			continue
 		}

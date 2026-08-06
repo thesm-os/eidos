@@ -257,7 +257,7 @@ func groupSourceInterfaces(
 ) (map[string][]*node.Interface, []string) {
 	groups := map[string][]*node.Interface{}
 	order := []string{}
-	for _, i := range ctx.Reader.Interfaces().Slice() {
+	for i := range ctx.Reader.Interfaces().All() {
 		if !i.HasPositiveDirective(DirectiveName) {
 			continue
 		}
@@ -290,7 +290,7 @@ func groupEmitInterfaces(
 	}
 	groups := map[string]*emitInterfaceGroup{}
 	order := []string{}
-	for _, ei := range ctx.Reader.EmitInterfaces().Slice() {
+	for ei := range ctx.Reader.EmitInterfaces().All() {
 		if ei.HasNegatedDirective(DirectiveName) {
 			continue
 		}

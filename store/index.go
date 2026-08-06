@@ -5,6 +5,7 @@ package store
 
 import (
 	"fmt"
+	"iter"
 	"sync"
 )
 
@@ -59,6 +60,53 @@ func (b *Bucket[T]) Items() []T {
 	out := make([]T, len(b.items))
 	copy(out, b.items)
 	return out
+}
+
+// itemsRef returns the bucket's live backing slice without copying.
+//
+// The caller must not mutate the result and must not retain it past
+// the point the bucket can accept another write, because an append
+// may reallocate the array underneath it.
+//
+// That constraint is why this is unexported and why it is used from
+// the node-side Reader accessors only. The pipeline freezes the
+// NodeView at the end of the frontend phase, before any annotator or
+// generator runs, so every reader that can observe a node bucket
+// observes a bucket that will never be written to again. The EmitView
+// is not frozen until the end of layout, and reference generators
+// read emit buckets during the generator phase while later generators
+// are still calling AddPackage — those accessors keep [Bucket.Items]
+// and its copy. A new accessor added to store/reader.go has to pick
+// the right one, and the reason is not visible from the call site.
+func (b *Bucket[T]) itemsRef() []T {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.items
+}
+
+// All returns an iterator over the bucket's items in insertion order.
+//
+// The iterator takes a point-in-time snapshot of the slice header
+// under the read lock and releases it before yielding anything, so a
+// concurrent append is not observed mid-iteration and the yield
+// function may safely call back into the bucket. That last part is
+// the difference from [Bucket.Range], whose docblock forbids it:
+// plugin.Walk yields to arbitrary plugin hooks, and holding a store
+// lock across those is a deadlock waiting for a plugin author.
+//
+// Unlike [Bucket.Items] the result is not a private copy, so callers
+// that need to mutate keep using Items.
+func (b *Bucket[T]) All() iter.Seq[T] {
+	b.mu.RLock()
+	items := b.items
+	b.mu.RUnlock()
+	return func(yield func(T) bool) {
+		for _, item := range items {
+			if !yield(item) {
+				return
+			}
+		}
+	}
 }
 
 // Len returns the number of items in the bucket.

@@ -90,7 +90,7 @@ func (*Plugin) Directives() []sdk.DirectiveSchema { return nil }
 // bridge is scoped to its source language.
 func (*Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 	ps := ctx.Diag.For(Name)
-	for _, pkg := range ctx.Reader.Packages().Slice() {
+	for pkg := range ctx.Reader.Packages().All() {
 		marker, ok := protobuf.MetaFrontend.Get(pkg.Meta())
 		if !ok || marker != protobuf.FrontendName {
 			continue

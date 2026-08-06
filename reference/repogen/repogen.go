@@ -217,7 +217,7 @@ func groupByPackage(
 ) (map[string][]*node.Struct, []string) {
 	groups := map[string][]*node.Struct{}
 	order := []string{}
-	for _, s := range ctx.Reader.Structs().Slice() {
+	for s := range ctx.Reader.Structs().All() {
 		if !pred(s) {
 			continue
 		}

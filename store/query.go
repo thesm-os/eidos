@@ -3,6 +3,8 @@
 
 package store
 
+import "iter"
+
 // Query is a typed, deferred query against a slice of T values.
 // Predicates added via [Query.Where] accumulate; iteration happens
 // only when a terminal call ([Query.Each], [Query.Slice],
@@ -57,9 +59,38 @@ func (q *Query[T]) Each(fn func(T)) {
 	}
 }
 
+// All returns an iterator over the matching items in insertion order.
+//
+// Where [Query.Slice] materialises a slice sized to the whole source
+// regardless of how selective the predicate is — a query matching one
+// of five hundred still reserves five hundred slots — All yields
+// matches as it finds them and allocates nothing.
+//
+// The read is recorded once, when iteration begins, exactly as Slice
+// records it. Abandoning the iterator early does not un-record it:
+// the plugin asked the question, and the cache key reflects what it
+// could have seen.
+func (q *Query[T]) All() iter.Seq[T] {
+	q.recordRead()
+	return func(yield func(T) bool) {
+		for _, item := range q.source {
+			if q.pred != nil && !q.pred(item) {
+				continue
+			}
+			if !yield(item) {
+				return
+			}
+		}
+	}
+}
+
 // Slice returns the matched items as a new slice in source insertion
 // order. Slice records the query's tag in the [ReadSet] before
 // materialising.
+//
+// [Query.All] is the cheaper terminal when the result is only ranged
+// over, which is what every in-tree caller does; Slice remains right
+// for a caller that needs to keep, sort, or mutate the result.
 func (q *Query[T]) Slice() []T {
 	q.recordRead()
 	out := make([]T, 0, len(q.source))

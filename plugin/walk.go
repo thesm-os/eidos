@@ -90,22 +90,22 @@ func Walk(ctx *AnnotatorContext, target any) error {
 		h.BeforeNodes(ctx)
 	}
 	if h, ok := target.(StructHook); ok {
-		for _, s := range ctx.Store.Nodes().Structs().Items() {
+		for s := range ctx.Store.Nodes().Structs().All() {
 			h.OnStruct(ctx, s)
 		}
 	}
 	if h, ok := target.(InterfaceHook); ok {
-		for _, i := range ctx.Store.Nodes().Interfaces().Items() {
+		for i := range ctx.Store.Nodes().Interfaces().All() {
 			h.OnInterface(ctx, i)
 		}
 	}
 	if h, ok := target.(MethodHook); ok {
-		for _, m := range ctx.Store.Nodes().Methods().Items() {
+		for m := range ctx.Store.Nodes().Methods().All() {
 			h.OnMethod(ctx, m)
 		}
 	}
 	if h, ok := target.(FunctionHook); ok {
-		for _, f := range ctx.Store.Nodes().Functions().Items() {
+		for f := range ctx.Store.Nodes().Functions().All() {
 			h.OnFunction(ctx, f)
 		}
 	}

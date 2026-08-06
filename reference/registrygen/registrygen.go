@@ -250,7 +250,7 @@ var _ sdk.EmitNode = (*Registration)(nil)
 // the plugin itself sets no Target.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
-	for _, s := range ctx.Reader.Structs().Slice() {
+	for s := range ctx.Reader.Structs().All() {
 		if !s.HasPositiveDirective(DirectiveName) {
 			continue
 		}

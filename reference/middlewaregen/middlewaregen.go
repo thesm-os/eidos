@@ -213,7 +213,7 @@ var _ emit.SlotHost = (*MiddlewareStack)(nil)
 // Generate emits one stack per annotated struct.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
-	for _, src := range ctx.Reader.Structs().Slice() {
+	for src := range ctx.Reader.Structs().All() {
 		if !src.HasPositiveDirective(DirectiveName) {
 			continue
 		}

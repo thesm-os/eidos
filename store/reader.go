@@ -90,80 +90,80 @@ func (r *Reader) ReadSet() *ReadSet { return r.reads }
 // Packages returns a [Query] over every recorded [node.Package].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Packages() *Query[*node.Package] {
-	return newQuery(applyScope(r, r.store.Nodes().Packages().Items()), r.reads, "node:packages")
+	return newQuery(applyScope(r, r.store.Nodes().Packages().itemsRef()), r.reads, "node:packages")
 }
 
 // Files returns a [Query] over every recorded [node.File].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Files() *Query[*node.File] {
-	return newQuery(applyScope(r, r.store.Nodes().Files().Items()), r.reads, "node:files")
+	return newQuery(applyScope(r, r.store.Nodes().Files().itemsRef()), r.reads, "node:files")
 }
 
 // Imports returns a [Query] over every recorded [node.Import].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Imports() *Query[*node.Import] {
-	return newQuery(applyScope(r, r.store.Nodes().Imports().Items()), r.reads, "node:imports")
+	return newQuery(applyScope(r, r.store.Nodes().Imports().itemsRef()), r.reads, "node:imports")
 }
 
 // Structs returns a [Query] over every recorded [node.Struct].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Structs() *Query[*node.Struct] {
-	return newQuery(applyScope(r, r.store.Nodes().Structs().Items()), r.reads, "node:structs")
+	return newQuery(applyScope(r, r.store.Nodes().Structs().itemsRef()), r.reads, "node:structs")
 }
 
 // Interfaces returns a [Query] over every recorded [node.Interface].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Interfaces() *Query[*node.Interface] {
-	return newQuery(applyScope(r, r.store.Nodes().Interfaces().Items()), r.reads, "node:interfaces")
+	return newQuery(applyScope(r, r.store.Nodes().Interfaces().itemsRef()), r.reads, "node:interfaces")
 }
 
 // Methods returns a [Query] over every recorded [node.Method].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Methods() *Query[*node.Method] {
-	return newQuery(applyScope(r, r.store.Nodes().Methods().Items()), r.reads, "node:methods")
+	return newQuery(applyScope(r, r.store.Nodes().Methods().itemsRef()), r.reads, "node:methods")
 }
 
 // Fields returns a [Query] over every recorded [node.Field].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Fields() *Query[*node.Field] {
-	return newQuery(applyScope(r, r.store.Nodes().Fields().Items()), r.reads, "node:fields")
+	return newQuery(applyScope(r, r.store.Nodes().Fields().itemsRef()), r.reads, "node:fields")
 }
 
 // Functions returns a [Query] over every recorded [node.Function].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Functions() *Query[*node.Function] {
-	return newQuery(applyScope(r, r.store.Nodes().Functions().Items()), r.reads, "node:functions")
+	return newQuery(applyScope(r, r.store.Nodes().Functions().itemsRef()), r.reads, "node:functions")
 }
 
 // Variables returns a [Query] over every recorded [node.Variable].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Variables() *Query[*node.Variable] {
-	return newQuery(applyScope(r, r.store.Nodes().Variables().Items()), r.reads, "node:variables")
+	return newQuery(applyScope(r, r.store.Nodes().Variables().itemsRef()), r.reads, "node:variables")
 }
 
 // Constants returns a [Query] over every recorded [node.Constant].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Constants() *Query[*node.Constant] {
-	return newQuery(applyScope(r, r.store.Nodes().Constants().Items()), r.reads, "node:constants")
+	return newQuery(applyScope(r, r.store.Nodes().Constants().itemsRef()), r.reads, "node:constants")
 }
 
 // Enums returns a [Query] over every recorded [node.Enum].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Enums() *Query[*node.Enum] {
-	return newQuery(applyScope(r, r.store.Nodes().Enums().Items()), r.reads, "node:enums")
+	return newQuery(applyScope(r, r.store.Nodes().Enums().itemsRef()), r.reads, "node:enums")
 }
 
 // EnumVariants returns a [Query] over every recorded
 // [node.EnumVariant]. Filtered by the Reader's scope predicate when
 // set.
 func (r *Reader) EnumVariants() *Query[*node.EnumVariant] {
-	return newQuery(applyScope(r, r.store.Nodes().EnumVariants().Items()), r.reads, "node:enum_variants")
+	return newQuery(applyScope(r, r.store.Nodes().EnumVariants().itemsRef()), r.reads, "node:enum_variants")
 }
 
 // Aliases returns a [Query] over every recorded [node.Alias].
 // Filtered by the Reader's scope predicate when set.
 func (r *Reader) Aliases() *Query[*node.Alias] {
-	return newQuery(applyScope(r, r.store.Nodes().Aliases().Items()), r.reads, "node:aliases")
+	return newQuery(applyScope(r, r.store.Nodes().Aliases().itemsRef()), r.reads, "node:aliases")
 }
 
 // EmitPackages returns a [Query] over every recorded [emit.Package].

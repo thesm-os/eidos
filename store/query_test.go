@@ -15,9 +15,17 @@ import (
 
 func makeStructPopulatedReader(t *testing.T) *store.Reader {
 	t.Helper()
+	return store.NewReader(makeQueryStore(t))
+}
+
+// makeQueryStore returns the store behind
+// [makeStructPopulatedReader], for tests that need to compare a
+// Reader's view against the buckets underneath it.
+func makeQueryStore(t *testing.T) *store.Store {
+	t.Helper()
 	s := store.New()
 	assertNoError(t, s.Nodes().AddPackage(makeUserPackage()))
-	return store.NewReader(s)
+	return s
 }
 
 func TestQuery_Where(t *testing.T) {
@@ -287,4 +295,125 @@ func BenchmarkQuery_Where(b *testing.B) {
 			}
 		})
 	}
+}
+
+// TestQuery_All covers the non-materialising terminal.
+func TestQuery_All(t *testing.T) {
+	t.Parallel()
+
+	t.Run("yields the same items Slice returns", func(t *testing.T) {
+		t.Parallel()
+		// The two terminals must not disagree: All is a drop-in for
+		// every `for _, x := range q.Slice()` in the tree.
+		s := makeQueryStore(t)
+		r := store.NewReader(s)
+		var got []*node.Struct
+		for x := range r.Structs().All() {
+			got = append(got, x)
+		}
+		if want := store.NewReader(s).Structs().Slice(); !slices.Equal(got, want) {
+			t.Fatalf("All yielded %v, Slice returned %v", got, want)
+		}
+	})
+
+	t.Run("honours an accumulated predicate", func(t *testing.T) {
+		t.Parallel()
+		s := makeQueryStore(t)
+		r := store.NewReader(s)
+		want := r.Structs().Where(func(x *node.Struct) bool { return x.Name == "User" }).Slice()
+		var got []*node.Struct
+		for x := range store.NewReader(s).Structs().
+			Where(func(x *node.Struct) bool { return x.Name == "User" }).All() {
+			got = append(got, x)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("All with a predicate yielded %v, want %v", got, want)
+		}
+	})
+
+	t.Run("records the read even when iteration is abandoned", func(t *testing.T) {
+		t.Parallel()
+		// The plugin asked the question; the cache key has to reflect
+		// what it could have seen, not what it bothered to consume.
+		s := makeQueryStore(t)
+		r := store.NewReader(s)
+		for range r.Structs().All() {
+			break
+		}
+		if got := r.ReadSet().Keys(); len(got) == 0 {
+			t.Fatalf("abandoning the iterator left the read unrecorded")
+		}
+	})
+
+	t.Run("stops early when the yield returns false", func(t *testing.T) {
+		t.Parallel()
+		s := makeQueryStore(t)
+		count := 0
+		for range store.NewReader(s).Structs().All() {
+			count++
+			break
+		}
+		if count != 1 {
+			t.Fatalf("early break consumed %d items, want 1", count)
+		}
+	})
+}
+
+// TestReader_NodeAccessorsAliasTheBucket is the guard on the
+// asymmetric aliasing in store/reader.go.
+//
+// The 13 node-side accessors hand out the bucket's live backing array
+// instead of a copy, which is only safe because the pipeline freezes
+// the NodeView at the end of the frontend phase. The 13 emit-side
+// accessors keep copying, because reference generators read emit
+// buckets during the generator phase while later generators are still
+// adding to them.
+//
+// What this pins is that the two produce the same values. A future
+// accessor that picks the wrong helper is a correctness bug the call
+// site does not reveal, so the equivalence is asserted rather than
+// left to the docblock.
+func TestReader_NodeAccessorsAliasTheBucket(t *testing.T) {
+	t.Parallel()
+
+	s := makeQueryStore(t)
+
+	t.Run("a node-side query matches the bucket's own items", func(t *testing.T) {
+		t.Parallel()
+		got := store.NewReader(s).Structs().Slice()
+		if want := s.Nodes().Structs().Items(); !slices.Equal(got, want) {
+			t.Fatalf("reader query = %v, bucket items = %v", got, want)
+		}
+	})
+
+	t.Run("an emit-side query still returns a private copy", func(t *testing.T) {
+		t.Parallel()
+		// The emit accessors deliberately keep Bucket.Items and its
+		// copy: the EmitView is not frozen until the end of layout,
+		// and reference generators read emit buckets during the
+		// generator phase while later generators are still writing.
+		got := store.NewReader(s).EmitStructs().Slice()
+		if want := s.Emit().Structs().Items(); !slices.Equal(got, want) {
+			t.Fatalf("reader query = %v, bucket items = %v", got, want)
+		}
+	})
+
+	t.Run("mutating a returned slice does not corrupt the bucket", func(t *testing.T) {
+		t.Parallel()
+		// Slice still materialises a private result, so the alias
+		// stops at the Query's source. A caller writing through what
+		// Slice handed back must not reach the store.
+		before := len(s.Nodes().Structs().Items())
+		got := store.NewReader(s).Structs().Slice()
+		if len(got) > 0 {
+			got[0] = &node.Struct{Name: "clobbered"}
+		}
+		after := s.Nodes().Structs().Items()
+		if len(after) != before {
+			t.Fatalf("bucket length changed from %d to %d", before, len(after))
+		}
+		if len(after) > 0 && after[0].Name == "clobbered" {
+			t.Fatalf("writing through Slice reached the bucket")
+		}
+	})
 }
