@@ -186,3 +186,70 @@ func assertBenchClean(b *testing.B, d *diag.Sink, out []byte) {
 		b.Fatalf("fixture should finalise without diagnostics; got %+v", got)
 	}
 }
+
+// TestRunGoFormat_InvalidBodyIsAnError pins the severity of a
+// formatter failure.
+//
+// Reported as a Warn, a run wrote unparseable Go and exited
+// successfully: the pipeline counts only Errors toward failure, so
+// the defect surfaced later at `go build`, inside generated code,
+// with nothing pointing back at the generator. A file the formatter
+// cannot parse is never a file the compiler can, so the run must
+// fail — while still emitting the bytes, since reading the broken
+// output is how a template bug gets diagnosed.
+func TestRunGoFormat_InvalidBodyIsAnError(t *testing.T) {
+	t.Parallel()
+
+	const invalid = "package p\n\ntype T struct {\n\tField if-absent.Value\n}\n"
+	target := emit.Target{Dir: "x", Filename: "broken.go", Package: "p"}
+
+	run := func(t *testing.T) (*diag.Sink, []byte, bool) {
+		t.Helper()
+		d := diag.New()
+		out, ok := runGoFormat([]byte(invalid), target, d.For(Name))
+		return d, out, ok
+	}
+
+	t.Run("the failure is reported at Error severity", func(t *testing.T) {
+		t.Parallel()
+		d, _, _ := run(t)
+		if !d.HasErrors() {
+			t.Fatalf("unparseable output did not fail the run; diags=%+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("the diagnostic names the offending file", func(t *testing.T) {
+		t.Parallel()
+		// The whole point is attribution: a build error in generated
+		// code is useless without knowing which target produced it.
+		d, _, _ := run(t)
+		for _, g := range d.Diagnostics() {
+			if strings.Contains(g.Message, target.JoinPath()) {
+				return
+			}
+		}
+		t.Fatalf("no diagnostic named %q; got %+v", target.JoinPath(), d.Diagnostics())
+	})
+
+	t.Run("the unformatted bytes are still returned", func(t *testing.T) {
+		t.Parallel()
+		// Failing the run must not also withhold the evidence.
+		_, out, ok := run(t)
+		if ok {
+			t.Fatalf("runGoFormat reported success on unparseable input")
+		}
+		if string(out) != invalid {
+			t.Fatalf("fallback bytes were altered")
+		}
+	})
+
+	t.Run("valid input stays clean", func(t *testing.T) {
+		t.Parallel()
+		// Guards against the Error being raised unconditionally,
+		// which would satisfy every assertion above.
+		d := diag.New()
+		if _, ok := runGoFormat([]byte("package p\n"), target, d.For(Name)); !ok || d.HasErrors() {
+			t.Fatalf("valid input reported ok=%v errors=%v", ok, d.Diagnostics())
+		}
+	})
+}

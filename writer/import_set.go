@@ -5,8 +5,11 @@ package writer
 
 import (
 	"fmt"
+	"go/token"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 )
 
 // AliasFunc derives the default local alias for an import path
@@ -30,6 +33,76 @@ func DefaultAlias(path string) string {
 	// is in scope. Go source never yields such a path, but
 	// [emit.External] takes one from plugin code, which is precisely
 	// where a joined or configured path picks up a trailing slash.
+	return sanitiseAlias(rawSegment(path))
+}
+
+// sanitiseAlias turns a path segment into a valid, non-reserved Go
+// identifier, returning seg unchanged when it already is one.
+//
+// A path's last segment is not required to be an identifier and
+// frequently is not: `if-absent`, `go-redis`, `go-cmp`, `yaml.v3`.
+// Emitting such a segment as a qualifier produces source the parser
+// rejects, and the caller then writes it anyway. Two segments are
+// worse than merely invalid — `if` and `go` are keywords, and a
+// segment that lands on `go` yields `import "go"`, which resolves
+// against the standard library and fails with "package go is not in
+// std".
+//
+// The result is used as an *explicit* alias, which is what makes
+// this correct rather than a guess: `import yamlv3 "gopkg.in/yaml.v3"`
+// binds regardless of the package declaring `package yaml`. Deriving
+// a name from a path can never know the real package name; an
+// explicit alias does not need to.
+//
+// Non-identifier runes are dropped rather than replaced so the
+// result stays readable, a leading digit gains a `pkg` prefix, and a
+// Go keyword gains a trailing underscore.
+//
+// A segment yielding nothing at all returns the empty string rather
+// than a synthesised name. That is load-bearing: the empty alias is
+// [ImportSet.Imp]'s sentinel for "no alias is derivable", which it
+// turns into [ErrEmptyPath]. Substituting a placeholder would accept
+// a path that should be rejected and bind a package under a name
+// nothing declares.
+func sanitiseAlias(seg string) string {
+	var b strings.Builder
+	for _, r := range seg {
+		if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return ""
+	}
+	if r, _ := utf8.DecodeRuneInString(out); unicode.IsDigit(r) {
+		return "pkg" + out
+	}
+	if token.IsKeyword(out) {
+		return out + "_"
+	}
+	return out
+}
+
+// NeedsExplicitAlias reports whether alias must be written into the
+// import statement rather than left implicit.
+//
+// Go binds an unaliased import to the package's *declared* name,
+// which the writer cannot know — it only sees the path. Leaving the
+// alias implicit is therefore only safe when it is the path's last
+// segment verbatim, the case where the overwhelming convention makes
+// the guess right. Anything else — a sanitised segment
+// (`if-absent` → `ifabsent`), a collision suffix (`context2`), or a
+// caller-supplied override — must be stated, and stating it makes it
+// true regardless of what the package calls itself.
+func NeedsExplicitAlias(path, alias string) bool {
+	return alias != rawSegment(path)
+}
+
+// rawSegment returns the path's last "/"-delimited segment with no
+// sanitisation, which is what an unaliased import actually binds to
+// by convention.
+func rawSegment(path string) string {
 	path = strings.TrimRight(path, "/")
 	if i := strings.LastIndexByte(path, '/'); i >= 0 {
 		return path[i+1:]

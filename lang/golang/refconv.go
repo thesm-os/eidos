@@ -37,6 +37,15 @@ func liftFromNode(r *node.TypeRef) emit.Ref {
 		return emit.ArrayOf(FromNode(r.Elem), r.ArrayLen)
 	case r.IsMap():
 		return emit.MapOf(FromNode(r.MapKey), FromNode(r.MapValue))
+	case r.IsFunc():
+		// A func type is structural: it names no package, so the
+		// fall-through below would build an external reference with
+		// an empty import path and the backend would reject it
+		// (writer: empty import path), aborting the whole render
+		// rather than emitting bad output. Only the types *inside*
+		// the signature register imports, which they do through
+		// their own conversion.
+		return emit.FuncOf(refSlice(r.FuncParams), refSlice(r.FuncReturns))
 	case r.IsBuiltin():
 		return emit.Builtin(r.Name)
 	case r.IsTypeParam():
@@ -54,11 +63,19 @@ func liftFromNode(r *node.TypeRef) emit.Ref {
 		// the inline shape, which is a separate follow-up.
 		return emit.Builtin("any")
 	}
-	args := make([]emit.Ref, 0, len(r.TypeArgs))
-	for _, a := range r.TypeArgs {
-		args = append(args, FromNode(a))
+	return emit.External(r.Package, r.Name, refSlice(r.TypeArgs)...)
+}
+
+// refSlice lifts a slice of source type references into emit form,
+// preserving order. Returns an empty (non-nil) slice for empty
+// input so callers can pass the result straight into constructors
+// that distinguish "none" from "unset".
+func refSlice(in []*node.TypeRef) []emit.Ref {
+	out := make([]emit.Ref, 0, len(in))
+	for _, r := range in {
+		out = append(out, FromNode(r))
 	}
-	return emit.External(r.Package, r.Name, args...)
+	return out
 }
 
 // setOrigin records r as the OriginNode of ref on every concrete

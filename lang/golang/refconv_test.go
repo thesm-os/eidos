@@ -164,3 +164,51 @@ func TestConstraintFromNode(t *testing.T) {
 		}
 	})
 }
+
+// TestFromNode_FuncType pins that a func-typed reference converts
+// structurally rather than falling through to an external reference.
+//
+// A func type names no package, so the fall-through built
+// emit.External with an empty import path and the backend rejected
+// it — aborting the whole render with "writer: empty import path"
+// rather than emitting bad output. Callback parameters are ordinary:
+// options, hooks, visitors.
+func TestFromNode_FuncType(t *testing.T) {
+	t.Parallel()
+
+	fn := &node.TypeRef{
+		TypeKind:    node.TypeRefFunc,
+		FuncParams:  []*node.TypeRef{{TypeKind: node.TypeRefNamed, Name: "string"}},
+		FuncReturns: []*node.TypeRef{{TypeKind: node.TypeRefNamed, Name: "error"}},
+	}
+
+	t.Run("converts to a func composite", func(t *testing.T) {
+		t.Parallel()
+		got, ok := refconv.FromNode(fn).(*emit.CompositeRef)
+		if !ok {
+			t.Fatalf("FromNode returned %T, want *emit.CompositeRef", refconv.FromNode(fn))
+		}
+		if got.Shape != emit.ShapeFunc {
+			t.Fatalf("Shape = %v, want ShapeFunc", got.Shape)
+		}
+	})
+
+	t.Run("carries its parameters and returns", func(t *testing.T) {
+		t.Parallel()
+		// A composite with the right shape but empty signature would
+		// render `func()` and silently change the type.
+		got := refconv.FromNode(fn).(*emit.CompositeRef) //nolint:forcetypeassert // pinned by the subtest above
+		if len(got.FuncParams) != 1 || len(got.FuncReturns) != 1 {
+			t.Fatalf("params=%d returns=%d, want 1 and 1", len(got.FuncParams), len(got.FuncReturns))
+		}
+	})
+
+	t.Run("a func with no signature is still a func composite", func(t *testing.T) {
+		t.Parallel()
+		bare := &node.TypeRef{TypeKind: node.TypeRefFunc}
+		got, ok := refconv.FromNode(bare).(*emit.CompositeRef)
+		if !ok || got.Shape != emit.ShapeFunc {
+			t.Fatalf("FromNode(bare func) = %T, want a ShapeFunc composite", refconv.FromNode(bare))
+		}
+	})
+}

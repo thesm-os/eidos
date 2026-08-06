@@ -447,7 +447,13 @@ func registerSequence(t *testing.T, paths []string, selfPath, selfName string) [
 		// than on p == "" is what lets the corpus entry for "/"
 		// assert the rejection instead of reporting it as a refusal
 		// of a legitimate path.
-		unaliasable := strings.Trim(p, "/") == ""
+		// Widened from "trims to nothing" to "yields no identifier
+		// rune". A segment may be non-empty and still unaliasable —
+		// " " and "---" carry nothing an alias can be built from —
+		// and since the derived alias is emitted explicitly, an
+		// alias that is not a valid Go identifier would produce
+		// source the parser rejects rather than a usable import.
+		unaliasable := writer.DefaultAlias(p) == ""
 		switch {
 		case unaliasable && !errors.Is(err, writer.ErrEmptyPath):
 			t.Fatalf("Imp(%q) returned alias %q, err %v; want ErrEmptyPath", p, alias, err)
@@ -630,4 +636,71 @@ func benchCollidingPaths(n int) []string {
 		out[i] = "example.com/bench/p" + strconv.Itoa(i) + "/ctx"
 	}
 	return out
+}
+
+// TestDefaultAlias_Sanitisation pins that a derived alias is always
+// a usable Go identifier.
+//
+// A path's last segment is not required to be one, and hyphenated
+// segments are ordinary in Go — go-redis, go-cmp. Emitting such a
+// segment as a qualifier produces source the parser rejects, and the
+// backend then writes the file anyway.
+func TestDefaultAlias_Sanitisation(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct{ path, want string }{
+		"ordinary segment is unchanged":  {"go.thesmos.sh/eidos/emit", "emit"},
+		"hyphens are dropped":            {"example.com/x/if-absent", "ifabsent"},
+		"dots are dropped":               {"gopkg.in/yaml.v3", "yamlv3"},
+		"a keyword segment is suffixed":  {"example.com/x/go", "go_"},
+		"a leading digit gains a prefix": {"example.com/x/2fa", "pkg2fa"},
+		// Nothing survives sanitisation, so no alias is derivable
+		// and Imp must reject the path rather than bind it under a
+		// name nothing declares.
+		"an all-punctuation segment yields no alias": {"example.com/x/---", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := writer.DefaultAlias(tc.path); got != tc.want {
+				t.Fatalf("DefaultAlias(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNeedsExplicitAlias covers the decision that makes a sanitised
+// alias correct rather than a guess.
+//
+// An unaliased import binds to the package's declared name, which the
+// writer never sees. Stating the alias makes the qualifier true
+// regardless — `import yamlv3 "gopkg.in/yaml.v3"` binds even though
+// the package declares `package yaml`.
+func TestNeedsExplicitAlias(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a verbatim segment stays implicit", func(t *testing.T) {
+		t.Parallel()
+		// The common case, and the one where convention makes the
+		// implicit binding right. Emitting it would add noise to
+		// every generated import block.
+		if writer.NeedsExplicitAlias("go.thesmos.sh/eidos/emit", "emit") {
+			t.Errorf("an unmodified segment should not need an explicit alias")
+		}
+	})
+
+	t.Run("a sanitised segment must be stated", func(t *testing.T) {
+		t.Parallel()
+		if !writer.NeedsExplicitAlias("example.com/x/if-absent", "ifabsent") {
+			t.Errorf("a sanitised alias must be written into the import")
+		}
+	})
+
+	t.Run("a collision suffix must be stated", func(t *testing.T) {
+		t.Parallel()
+		// Imp's suffix loop produces these; left implicit, the
+		// second import would bind the same name as the first.
+		if !writer.NeedsExplicitAlias("example.com/y/context", "context2") {
+			t.Errorf("a suffixed alias must be written into the import")
+		}
+	})
 }

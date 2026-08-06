@@ -439,7 +439,11 @@ func writeImportBlock(buf *bytes.Buffer, imports []writer.Import) {
 	buf.WriteString("\nimport (\n")
 	for _, imp := range imports {
 		buf.WriteByte('\t')
-		if imp.Alias != writer.DefaultAlias(imp.Path) {
+		// Against the raw segment, not the derived alias: an alias
+		// the writer had to sanitise or suffix is exactly the one
+		// that must be stated, and comparing it against its own
+		// derivation would always agree and never emit it.
+		if writer.NeedsExplicitAlias(imp.Path, imp.Alias) {
 			buf.WriteString(imp.Alias)
 			buf.WriteByte(' ')
 		}

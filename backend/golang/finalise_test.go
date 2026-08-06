@@ -42,36 +42,40 @@ func TestFinalise_HappyPath(t *testing.T) {
 	})
 }
 
-// TestFinalise_FormatFailureWarns covers the warn-on-failure
-// contract for format.Source: a body that gofmt cannot parse still
-// reaches the sink unchanged, and a Warn naming the format error
-// is recorded.
-func TestFinalise_FormatFailureWarns(t *testing.T) {
+// TestFinalise_FormatFailureIsAnError covers the contract for a
+// body gofmt cannot parse: the bytes still reach the sink so the
+// defect can be read, and the failure is an Error so the run does
+// not exit successfully having written Go that does not compile.
+//
+// This was a Warn, which meant a template bug surfaced later at
+// `go build` inside generated code with nothing pointing back at
+// the generator that produced it.
+func TestFinalise_FormatFailureIsAnError(t *testing.T) {
 	t.Parallel()
 
-	t.Run("invalid Go body warns and writes unformatted bytes", func(t *testing.T) {
+	t.Run("invalid Go body errors and writes unformatted bytes", func(t *testing.T) {
 		t.Parallel()
 		ctx, mem, d := newBackendContext(t)
 		target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
 		// Field names with whitespace produce invalid Go syntax —
 		// format.Source rejects, and the backend's contract is to
-		// warn-and-emit-unformatted, not abort.
+		// report-and-emit-unformatted, not abort the render loop.
 		addEmitPackage(t, ctx, emitPackage("x", &emit.Struct{
 			Name: "X", Package: "x", Target: target,
 			Fields: []*emit.Field{{Name: "Not A Valid Name", Type: emit.Builtin("int")}},
 		}))
 		if err := mustNew(t).Render(ctx); err != nil {
-			t.Fatalf("Render should not return an error on a format failure: %v", err)
+			t.Fatalf("Render should not abort on a format failure: %v", err)
 		}
 		body, ok := mem.Get(target)
 		if !ok {
-			t.Fatalf("warn-on-failure: sink must still receive the unformatted body")
+			t.Fatalf("sink must still receive the unformatted body")
 		}
 		if !strings.Contains(string(body), "Not A Valid Name") {
 			t.Fatalf("body should retain unformatted content; got:\n%s", body)
 		}
-		if !diagnosticsContain(d, diag.Warn, "format.Source failed") {
-			t.Fatalf("expected Warn from format.Source failure; got %+v", d.Diagnostics())
+		if !diagnosticsContain(d, diag.Error, "format.Source failed") {
+			t.Fatalf("expected Error from format.Source failure; got %+v", d.Diagnostics())
 		}
 	})
 }
