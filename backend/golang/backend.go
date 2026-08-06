@@ -251,10 +251,16 @@ func renderTarget(
 
 	// The import set is the only per-target state the render state
 	// carries — the template clone, the bound funcmap, and the
-	// bridge / self-package maps are per-worker or run-wide. Every
-	// funcmap closure reaches it through the receiver rather than
-	// capturing it, so replacing it here needs no rebinding and
-	// leaks nothing from the worker's previous target.
+	// bridge / self-package maps are per-worker or run-wide.
+	// Replacing it here needs no rebinding, and leaks nothing from
+	// the worker's previous target, for exactly one reason: no
+	// funcmap entry may capture s.imports. Every entry is bound as
+	// `s.<method>`, which resolves the field when the template
+	// calls it. Binding `s.imports.<method>` instead would freeze
+	// the pointer at funcmap-construction time and silently orphan
+	// everything the templates write — see [renderState.imp], which
+	// exists to keep that invariant true for the one entry whose
+	// work is the import set's rather than the state's.
 	state.imports = writer.NewImportSet(nil)
 
 	entities := ctx.Store.Emit().ByTarget().Get(target)

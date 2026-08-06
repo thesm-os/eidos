@@ -238,11 +238,28 @@ func (s *renderState) coreFuncMap() template.FuncMap {
 		"renderMethodParams":     s.renderMethodParams,
 		"renderFunctionReturns":  s.renderFunctionReturns,
 		"renderMethodReturns":    s.renderMethodReturns,
-		"imp":                    s.imports.Imp,
+		"imp":                    s.imp,
 		"external":               emit.NewExternal,
 		"slot":                   slot,
 		"provenance":             provenance,
 	}
+}
+
+// imp is the template-facing import helper — `{{ imp "path" }}`
+// registers path with the file's import set and returns the
+// qualifier to spell references with.
+//
+// It exists as a method rather than as the method value
+// `s.imports.Imp` because Go binds a method value's receiver when
+// the value is created, not when it is called. [renderTarget]
+// replaces s.imports once per target, so a value bound at
+// funcmap-construction time would keep writing into the set the
+// state has already moved on from and nothing the template declared
+// would reach the file. A method on s dereferences the field at
+// call time, which is the invariant every other entry in this map
+// already satisfies.
+func (s *renderState) imp(path string) (string, error) {
+	return s.imports.Imp(path)
 }
 
 // render executes the template named after n's [emit.Node.Kind] and

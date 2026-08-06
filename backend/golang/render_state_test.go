@@ -7,9 +7,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"go.thesmos.sh/eidos/backend/golang"
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/emit"
+	"go.thesmos.sh/eidos/plugin"
+	"go.thesmos.sh/eidos/sink"
 )
 
 // TestErrTemplateMissing covers the sentinel surfaced when the
@@ -60,6 +64,84 @@ func TestNewRenderState_LifecycleViaPublicPath(t *testing.T) {
 		}
 		if mem.Len() != 2 {
 			t.Fatalf("expected 2 sink writes; got %d", mem.Len())
+		}
+	})
+}
+
+// TestRender_ImpTracksAgainstTheLiveImportSet pins the invariant
+// behind the `imp` funcmap entry — the documented way a plugin
+// template declares an import.
+//
+// `imp` is the only funcmap entry that reaches the import set rather
+// than the render state, and the import set is the one field
+// [renderTarget] replaces per target. An entry bound as a method
+// value on the field (`s.imports.Imp`) captures the pointer at
+// funcmap-construction time and keeps writing into the object the
+// state has since moved on from, so nothing the template declares
+// reaches the file it is building.
+//
+// The two assertions are separate because they fail at different
+// times. Only the tracking one catches a stale binding today:
+// goimports repairs the output, so the rendered bytes are correct
+// either way — until the resolve pass goes and the bytes stop
+// compiling.
+func TestRender_ImpTracksAgainstTheLiveImportSet(t *testing.T) {
+	t.Parallel()
+
+	// Two targets rather than one: the render state is constructed
+	// once per worker and reset once per target, so a single-target
+	// render is the weakest possible exercise of the reset.
+	first := emit.Target{Dir: "a", Filename: "x.go", Package: "a"}
+	second := emit.Target{Dir: "b", Filename: "x.go", Package: "b"}
+
+	render := func(t *testing.T) (*sink.Memory, *diag.Sink) {
+		t.Helper()
+		ctx, mem, d := newBackendContext(t)
+		ctx.Plugins = []plugin.Plugin{&stubTemplateProvider{
+			name: "impgen",
+			tmplFS: fstest.MapFS{
+				"templates/golang/struct.tmpl": &fstest.MapFile{
+					Data: []byte(`{{ define "emit.struct" -}}
+type {{ .Name }} struct {
+	Ctx {{ imp "context" }}.Context
+}
+{{- end -}}`),
+				},
+			},
+		}}
+		ctx.Ordered = ctx.Plugins
+		addEmitPackage(t, ctx, emitPackage("a", emitStructWithFields("a", "A", first)))
+		addEmitPackage(t, ctx, emitPackage("b", emitStructWithFields("b", "B", second)))
+		if err := mustNew(t).Render(ctx); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		if d.HasErrors() {
+			t.Fatalf("unexpected error diagnostics: %+v", d.Diagnostics())
+		}
+		return mem, d
+	}
+
+	t.Run("the backend tracks the import the template declared", func(t *testing.T) {
+		t.Parallel()
+		// goimports reporting that it added the import is the tell
+		// that the backend never knew about it.
+		_, d := render(t)
+		if diagnosticsContain(d, diag.Warn, "goimports added untracked import") {
+			t.Fatalf("imp wrote to an import set the file was not built from; got %+v", d.Diagnostics())
+		}
+	})
+
+	t.Run("every rendered target carries the declared import", func(t *testing.T) {
+		t.Parallel()
+		mem, _ := render(t)
+		for _, target := range []emit.Target{first, second} {
+			body, ok := mem.Get(target)
+			if !ok {
+				t.Fatalf("no output for %s", target.JoinPath())
+			}
+			if !strings.Contains(string(body), `"context"`) {
+				t.Fatalf("%s: declared import missing from:\n%s", target.JoinPath(), body)
+			}
 		}
 	})
 }
