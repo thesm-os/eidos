@@ -1013,31 +1013,61 @@ func allPlugins(
 // validateNoDuplicateNames returns one error per duplicate plugin
 // name observed across every registered role.
 func (b *Builder) validateNoDuplicateNames() []error {
-	seen := map[string]struct{}{}
+	// Keyed by instance, not by a bare marker: one plugin may
+	// implement several roles and is registered once per role it
+	// implements — which is what [plugin.Annotator] and
+	// [plugin.Generator] on one type means, and what the CLI's
+	// registerPlugin does unconditionally. Keying on the name alone
+	// made that composition indistinguishable from two different
+	// plugins colliding, so the documented shape failed Build.
+	seen := map[string]plugin.Plugin{}
 	var errs []error
-	check := func(name string) {
+	check := func(p plugin.Plugin) {
+		name := p.Name()
 		if name == "" {
 			return
 		}
-		if _, dup := seen[name]; dup {
+		if prior, dup := seen[name]; dup && prior != p {
 			errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicatePlugin, name))
 			return
 		}
-		seen[name] = struct{}{}
+		seen[name] = p
 	}
-	for _, p := range b.frontends {
-		check(p.Name())
+	// Within one role the exemption does not apply: registering the
+	// same instance twice as a generator runs Generate twice, which
+	// is a mistake rather than a composition. Each slice is checked
+	// against its own set first, then against the cross-role one.
+	checkSlice := func(ps []plugin.Plugin) {
+		withinRole := map[string]struct{}{}
+		for _, p := range ps {
+			name := p.Name()
+			if name == "" {
+				continue
+			}
+			if _, dup := withinRole[name]; dup {
+				errs = append(errs, fmt.Errorf("%w: %q", ErrDuplicatePlugin, name))
+				continue
+			}
+			withinRole[name] = struct{}{}
+			check(p)
+		}
 	}
-	for _, p := range b.annotators {
-		check(p.Name())
-	}
-	for _, p := range b.generators {
-		check(p.Name())
-	}
-	for _, p := range b.backends {
-		check(p.Name())
-	}
+	checkSlice(asPlugins(b.frontends))
+	checkSlice(asPlugins(b.annotators))
+	checkSlice(asPlugins(b.generators))
+	checkSlice(asPlugins(b.backends))
 	return errs
+}
+
+// asPlugins widens a role slice to [plugin.Plugin] so the duplicate
+// check can compare instances across roles. Every role interface
+// embeds Plugin, so the conversion is total.
+func asPlugins[T plugin.Plugin](in []T) []plugin.Plugin {
+	out := make([]plugin.Plugin, len(in))
+	for i, p := range in {
+		out[i] = p
+	}
+	return out
 }
 
 // validateRoleCounts returns errors when the frontend / backend

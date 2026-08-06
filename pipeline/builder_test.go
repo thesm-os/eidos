@@ -753,3 +753,79 @@ func TestBuilder_WithPluginTagOutput(t *testing.T) {
 		})
 	}
 }
+
+// dualRolePlugin implements two roles on one type — the composition
+// plugin/doc.go documents and cli's registerPlugin performs for
+// every role a plugin implements.
+type dualRolePlugin struct{ name string }
+
+// Name returns the configured plugin identifier.
+func (p *dualRolePlugin) Name() string { return p.name }
+
+// Annotate satisfies [plugin.Annotator]; the fixture stamps nothing.
+func (*dualRolePlugin) Annotate(*plugin.AnnotatorContext) error { return nil }
+
+// Generate satisfies [plugin.Generator]; the fixture emits nothing.
+func (*dualRolePlugin) Generate(*plugin.GeneratorContext) error { return nil }
+
+// TestBuilder_DuplicatePluginNames pins that the duplicate-name
+// check distinguishes one plugin registered under several roles from
+// two different plugins claiming one name.
+//
+// The check keyed on the name alone, so a dual-role plugin — the
+// shape plugin/doc.go promises and cli/build.go's registerPlugin
+// performs unconditionally — failed Build with ErrDuplicatePlugin.
+// Every CLI-driven run with such a plugin was rejected on the
+// documented composition.
+func TestBuilder_DuplicatePluginNames(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, wire func(*pipeline.Builder)) error {
+		t.Helper()
+		b := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory())
+		wire(b)
+		_, err := b.Build()
+		return err
+	}
+
+	t.Run("one instance under two roles builds", func(t *testing.T) {
+		t.Parallel()
+		d := &dualRolePlugin{name: "dual"}
+		if err := build(t, func(b *pipeline.Builder) {
+			b.WithAnnotator(d).WithGenerator(d)
+		}); err != nil {
+			t.Fatalf("dual-role registration failed: %v", err)
+		}
+	})
+
+	t.Run("two instances sharing a name are rejected", func(t *testing.T) {
+		t.Parallel()
+		// The check's actual purpose. Exempting by identity must not
+		// exempt by name, or two unrelated plugins could both claim
+		// one identity in the manifest and the Plugins: header.
+		err := build(t, func(b *pipeline.Builder) {
+			b.WithAnnotator(&dualRolePlugin{name: "same"})
+			b.WithGenerator(&dualRolePlugin{name: "same"})
+		})
+		if !errors.Is(err, pipeline.ErrDuplicatePlugin) {
+			t.Fatalf("Build error = %v, want ErrDuplicatePlugin", err)
+		}
+	})
+
+	t.Run("one instance registered twice in one role is rejected", func(t *testing.T) {
+		t.Parallel()
+		// Identity alone would permit this, and it would run Generate
+		// twice — a mistake, not a composition, so the exemption is
+		// scoped across roles rather than within one.
+		d := &dualRolePlugin{name: "twice"}
+		err := build(t, func(b *pipeline.Builder) {
+			b.WithGenerator(d).WithGenerator(d)
+		})
+		if !errors.Is(err, pipeline.ErrDuplicatePlugin) {
+			t.Fatalf("Build error = %v, want ErrDuplicatePlugin", err)
+		}
+	})
+}
