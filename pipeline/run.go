@@ -384,7 +384,7 @@ func (p *Pipeline) invokeFrontend(fe plugin.Frontend, pattern string, s *store.S
 		Parser:      p.parser,
 		Cache:       p.cache,
 		Pattern:     pattern,
-		Fingerprint: p.compositionFingerprint(),
+		Fingerprint: p.fingerprint,
 	}
 	if err := fe.Load(ctx); err != nil {
 		p.reportPluginError(ps, fe.Name(), fmt.Sprintf("frontend Load(%q)", pattern), err)
@@ -512,33 +512,6 @@ func (p *Pipeline) invokeGenerator(gen plugin.Generator, s *store.Store) {
 	p.recordCacheKey(gen.Name(), r)
 }
 
-// compositionFingerprint returns a stable hash over the pipeline's
-// plugin composition: each registered plugin's name paired with its
-// [plugin.Versioned] string.
-//
-// Frontends fold this into their own cache keys so a parsed node
-// graph is never reused across a change of plugin set. The graph
-// carries frontend-stamped metadata that downstream plugins read, and
-// an upgraded plugin expecting a key an older frontend never stamped
-// is exactly the failure that made `--no-cache` a workaround.
-//
-// [cache.HashStrings] sorts before hashing, so registration order does
-// not perturb the result — two pipelines composed of the same plugins
-// in different orders share a fingerprint, which is correct: the parse
-// does not depend on the order either.
-func (p *Pipeline) compositionFingerprint() string {
-	plugins := p.registeredPlugins()
-	parts := make([]string, 0, len(plugins))
-	for _, pl := range plugins {
-		version := ""
-		if v, ok := any(pl).(plugin.Versioned); ok {
-			version = v.Version()
-		}
-		parts = append(parts, pl.Name()+"@"+version)
-	}
-	return cache.HashStrings(parts)
-}
-
 // recordCacheKey writes the per-plugin cache marker — a key
 // composed of every input the plugin's output depends on — to
 // the configured cache. Two kinds of routing input enter the key
@@ -571,54 +544,32 @@ func (p *Pipeline) compositionFingerprint() string {
 // best-effort: a failed write is no worse than running without a
 // cache at all.
 func (p *Pipeline) recordCacheKey(name string, r *store.Reader) {
-	routing := cache.HashStrings(p.cacheRoutingComponents(name))
-	scope := cache.HashStrings([]string{p.targetSym, p.outFilename})
 	// Hashed once and used twice. Calling Hash for the key and again
 	// for the body re-drained the map, re-sorted it, and re-ran
 	// SHA-256 to produce the same string four lines apart — and left
 	// the two able to disagree if a plugin had a goroutine still
 	// recording reads.
 	reads := r.ReadSet().Hash()
-	key := cache.NewKey(
-		"plugin", name,
-		"version", p.pluginVersion(name),
-		"reads", reads,
-		"routing", routing,
-		"scope", scope,
-	)
+	key := p.cacheKeyFor(name, reads)
 	_ = p.cache.Put(key, []byte(reads)) //nolint:errcheck // best-effort cache marker
 }
 
-// pluginVersion returns the version the named plugin declares via
-// [plugin.Versioned], or the empty string when it declares none.
+// cacheKeyFor composes the cache key for one plugin invocation.
 //
-// [plugin.Versioned]'s own docblock states that the version composes
-// into the plugin's cache key so a bump invalidates that plugin's
-// entries and no other's — a claim the sdk alias, the cache package
-// doc and the README all repeat. Nothing read it, so a version bump
-// changed no key. This closes that gap: the value is a key
-// component, so a bump produces a different key for the bumping
-// plugin alone.
-//
-// Plugins that declare no version contribute the empty string, which
-// is stable across runs and therefore harmless — they simply have no
-// version dimension in their key.
-func (p *Pipeline) pluginVersion(name string) string {
-	for _, pl := range allPlugins(p.frontends, p.annotators, p.generators, nil) {
-		if pl.Name() != name {
-			continue
-		}
-		if v, ok := any(pl).(plugin.Versioned); ok {
-			return v.Version()
-		}
-		return ""
-	}
-	if p.backend != nil && p.backend.Name() == name {
-		if v, ok := any(p.backend).(plugin.Versioned); ok {
-			return v.Version()
-		}
-	}
-	return ""
+// Split out from [Pipeline.recordCacheKey] so the composed key is
+// assertable without a cache round-trip. Frontends fold the
+// composition fingerprint into their own keys and the marker written
+// here is filed under this one, so a silent change in either
+// invalidates on-disk caches without failing anything — which makes
+// the key worth pinning by value rather than by derivation.
+func (p *Pipeline) cacheKeyFor(name, reads string) string {
+	return cache.NewKey(
+		"plugin", name,
+		"version", p.pluginVersions[name],
+		"reads", reads,
+		"routing", p.routingHash(name),
+		"scope", p.scopeHash,
+	)
 }
 
 // cacheRoutingComponents returns the resolved-policy fields that
@@ -765,4 +716,54 @@ func (p *Pipeline) orderedPlugins() []plugin.Plugin {
 	}
 	out = append(out, p.plan.Backend)
 	return dedupePlugins(out)
+}
+
+// precomputeRunInvariants derives the cache-key and fingerprint
+// inputs that cannot change once Build has returned.
+//
+// Called from [Builder.Build] after the Pipeline is assembled,
+// because the derivations read through [Pipeline.LayoutPolicyFor] and
+// so need the finished value. Everything it computes is a pure
+// function of fields Build assigns and nothing mutates afterwards.
+//
+// Keyed per plugin name at [Pipeline.LayoutPolicyFor]'s granularity,
+// not [Pipeline.LayoutPolicyForTag]'s: cacheRoutingComponents reads
+// the per-plugin policy, and matching the per-tag one instead would
+// change every key it feeds.
+func (p *Pipeline) precomputeRunInvariants() {
+	plugins := p.registeredPlugins()
+	p.pluginVersions = make(map[string]string, len(plugins))
+	p.routingHashes = make(map[string]string, len(plugins))
+
+	parts := make([]string, 0, len(plugins))
+	for _, pl := range plugins {
+		name := pl.Name()
+		version := ""
+		if v, ok := any(pl).(plugin.Versioned); ok {
+			version = v.Version()
+		}
+		p.pluginVersions[name] = version
+		p.routingHashes[name] = cache.HashStrings(p.cacheRoutingComponents(name))
+		parts = append(parts, name+"@"+version)
+	}
+
+	// registeredPlugins already includes the backend and dedupes a
+	// dual-role plugin, so the composition string is exactly what
+	// compositionFingerprint built per (frontend × pattern).
+	p.fingerprint = cache.HashStrings(parts)
+	p.scopeHash = cache.HashStrings([]string{p.targetSym, p.outFilename})
+}
+
+// routingHash returns the precomputed routing digest for name.
+//
+// Falls back to computing it for a name Build never saw. That is not
+// dead code: [Pipeline.LayoutPolicyFor] documents the unknown-name
+// case as resolving through the project + CLI merge, and a lookup
+// that silently answered the empty string instead would change the
+// key rather than reproduce it.
+func (p *Pipeline) routingHash(name string) string {
+	if h, ok := p.routingHashes[name]; ok {
+		return h
+	}
+	return cache.HashStrings(p.cacheRoutingComponents(name))
 }

@@ -504,7 +504,7 @@ func (b *Builder) Build() (*Pipeline, error) {
 	}
 
 	defaultPolicy, pluginPolicies, pluginTagPolicies := b.resolveLayoutPolicies()
-	return &Pipeline{
+	p := &Pipeline{
 		frontends:          b.frontends,
 		annotators:         b.annotators,
 		generators:         b.generators,
@@ -531,7 +531,9 @@ func (b *Builder) Build() (*Pipeline, error) {
 		registry:           registry,
 		parser:             parser,
 		directiveOwners:    directiveOwners,
-	}, nil
+	}
+	p.precomputeRunInvariants()
+	return p, nil
 }
 
 // resolveSourceRoot returns the SourceRoot the constructed Pipeline

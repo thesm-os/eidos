@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"testing"
 
+	"go.thesmos.sh/eidos/cache"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/manifest"
+	"go.thesmos.sh/eidos/plugin"
+	"go.thesmos.sh/eidos/sink"
 )
 
 // The keys the Layout phase writes into
@@ -207,5 +210,199 @@ func TestManifestOutputEqual_ResolvedLayout(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+// invariantDual is a dual-role plugin with a version — the shape the
+// precomputation is most likely to get wrong, since it reaches the
+// plugin list twice and must be counted once.
+type invariantDual struct{ name, version string }
+
+func (p *invariantDual) Name() string                          { return p.name }
+func (p *invariantDual) Version() string                       { return p.version }
+func (*invariantDual) Annotate(*plugin.AnnotatorContext) error { return nil }
+func (*invariantDual) Generate(*plugin.GeneratorContext) error { return nil }
+
+// invariantFE is a minimal frontend carrying a version.
+type invariantFE struct{ name, version string }
+
+func (p *invariantFE) Name() string                     { return p.name }
+func (p *invariantFE) Version() string                  { return p.version }
+func (*invariantFE) Load(*plugin.FrontendContext) error { return nil }
+
+// invariantBE is a minimal backend carrying a version.
+type invariantBE struct{ name, version string }
+
+func (p *invariantBE) Name() string                      { return p.name }
+func (p *invariantBE) Version() string                   { return p.version }
+func (*invariantBE) Language() string                    { return "golang" }
+func (*invariantBE) Render(*plugin.BackendContext) error { return nil }
+
+// buildInvariantPipeline returns a Pipeline registering a frontend, a
+// dual-role plugin under both the annotator and generator roles, and
+// a backend — plus a per-plugin routing override so routingHashes has
+// something to distinguish.
+func buildInvariantPipeline(t *testing.T) (*Pipeline, *invariantDual, *invariantBE) {
+	t.Helper()
+	dual := &invariantDual{name: "dual", version: "2.1.0"}
+	be := &invariantBE{name: "be", version: "3.0.0"}
+	p, err := New().
+		WithFrontend(&invariantFE{name: "fe", version: "1.0.0"}).
+		WithAnnotator(dual).
+		WithGenerator(dual).
+		WithBackend(be).
+		WithSink(sink.NewMemory()).
+		WithPluginOutput("dual", string(LayoutCentralised), "dualpkg", "dualdir").
+		// A per-(plugin, tag) override that differs from the
+		// per-plugin one. Without it LayoutPolicyForTag falls back to
+		// LayoutPolicyFor and the two are indistinguishable, so a
+		// precomputation keyed at the wrong granularity would pass.
+		WithPluginTagOutput("dual", "tagged", string(LayoutCentralised), "tagpkg", "tagdir").
+		Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	return p, dual, be
+}
+
+// TestPrecomputeRunInvariants covers the values Build now pins.
+//
+// Each is asserted against the derivation it replaced rather than
+// against a recorded constant, so the test proves equivalence rather
+// than merely detecting change. The fixture registers one plugin
+// under two roles because that is the case a naive precomputation
+// double-counts — and a double-counted plugin changes the
+// composition fingerprint, which frontends fold into their own cache
+// keys.
+func TestPrecomputeRunInvariants(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the fingerprint matches a fresh composition hash", func(t *testing.T) {
+		t.Parallel()
+		p, _, _ := buildInvariantPipeline(t)
+		plugins := p.registeredPlugins()
+		parts := make([]string, 0, len(plugins))
+		for _, pl := range plugins {
+			version := ""
+			if v, ok := any(pl).(plugin.Versioned); ok {
+				version = v.Version()
+			}
+			parts = append(parts, pl.Name()+"@"+version)
+		}
+		if want := cache.HashStrings(parts); p.fingerprint != want {
+			t.Fatalf("fingerprint = %q, want %q", p.fingerprint, want)
+		}
+	})
+
+	t.Run("a dual-role plugin is counted once", func(t *testing.T) {
+		t.Parallel()
+		// Registered under two roles, so a precomputation that walked
+		// the role slices without deduping would hash "dual@2.1.0"
+		// twice and produce a different fingerprint.
+		p, _, _ := buildInvariantPipeline(t)
+		seen := 0
+		for _, pl := range p.registeredPlugins() {
+			if pl.Name() == "dual" {
+				seen++
+			}
+		}
+		if seen != 1 {
+			t.Fatalf("dual-role plugin appears %d times in the composition", seen)
+		}
+		if len(p.pluginVersions) != len(p.registeredPlugins()) {
+			t.Fatalf("pluginVersions has %d entries for %d plugins",
+				len(p.pluginVersions), len(p.registeredPlugins()))
+		}
+	})
+
+	t.Run("pluginVersions covers every role including the backend", func(t *testing.T) {
+		t.Parallel()
+		// The old lookup excluded backends from its flattened list
+		// and covered the backend with a trailing fallback. The map
+		// has to subsume both.
+		p, _, _ := buildInvariantPipeline(t)
+		for name, want := range map[string]string{
+			"fe": "1.0.0", "dual": "2.1.0", "be": "3.0.0",
+		} {
+			if got := p.pluginVersions[name]; got != want {
+				t.Fatalf("pluginVersions[%q] = %q, want %q", name, got, want)
+			}
+		}
+	})
+
+	t.Run("routingHashes match the per-plugin policy", func(t *testing.T) {
+		t.Parallel()
+		// Keyed at LayoutPolicyFor's granularity. The override above
+		// gives "dual" a different policy from the default, so a
+		// precomputation reading the wrong policy shows up here.
+		p, _, _ := buildInvariantPipeline(t)
+		for _, name := range []string{"fe", "dual", "be"} {
+			want := cache.HashStrings(p.cacheRoutingComponents(name))
+			if got := p.routingHashes[name]; got != want {
+				t.Fatalf("routingHashes[%q] = %q, want %q", name, got, want)
+			}
+		}
+		if p.routingHashes["dual"] == p.routingHashes["fe"] {
+			t.Fatalf("the per-plugin override did not change dual's routing hash")
+		}
+	})
+
+	t.Run("routing is keyed per plugin, not per tag", func(t *testing.T) {
+		t.Parallel()
+		// cacheRoutingComponents reads LayoutPolicyFor. Hashing the
+		// per-tag policy instead would change every key it feeds, and
+		// the two only differ when a per-tag override exists — which
+		// the fixture registers precisely so this can fail.
+		p, _, _ := buildInvariantPipeline(t)
+		tagged := p.LayoutPolicyForTag("dual", "tagged")
+		perTag := cache.HashStrings([]string{tagged.Layout, tagged.Package, tagged.Dir})
+		if p.routingHashes["dual"] == perTag {
+			t.Fatalf("routing hash matches the per-tag policy; it must use the per-plugin one")
+		}
+	})
+
+	t.Run("scopeHash matches a fresh hash of its two inputs", func(t *testing.T) {
+		t.Parallel()
+		p, _, _ := buildInvariantPipeline(t)
+		if want := cache.HashStrings([]string{p.targetSym, p.outFilename}); p.scopeHash != want {
+			t.Fatalf("scopeHash = %q, want %q", p.scopeHash, want)
+		}
+	})
+
+	t.Run("an unregistered name still resolves its routing hash", func(t *testing.T) {
+		t.Parallel()
+		// LayoutPolicyFor documents the unknown-name case as
+		// resolving through the project + CLI merge. A map lookup
+		// answering "" instead would change the key rather than
+		// reproduce it.
+		p, _, _ := buildInvariantPipeline(t)
+		want := cache.HashStrings(p.cacheRoutingComponents("never-registered"))
+		if got := p.routingHash("never-registered"); got != want {
+			t.Fatalf("routingHash(unregistered) = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestCacheKeyFor_IsStable pins the composed key by value.
+//
+// The equivalence tests above prove each input still derives the way
+// it used to; this proves the composition of them has not moved. It
+// is worth a literal rather than a re-derivation because nothing
+// fails when a cache key changes — the run simply misses, silently,
+// against every marker an older binary wrote.
+//
+// A deliberate constant: if this fails, the question to answer is
+// "was the key change intended", not "does the derivation still
+// match itself".
+func TestCacheKeyFor_IsStable(t *testing.T) {
+	t.Parallel()
+
+	const want = "plugin:dual:version:2.1.0:reads:deadbeef:" +
+		"routing:362ccfc09c8fcfc37077ed1587eb07c0857dc20938281b09f9807b395da76e74:" +
+		"scope:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+
+	p, _, _ := buildInvariantPipeline(t)
+	if got := p.cacheKeyFor("dual", "deadbeef"); got != want {
+		t.Fatalf("cache key changed:\ngot  %s\nwant %s", got, want)
 	}
 }

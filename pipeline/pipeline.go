@@ -159,6 +159,28 @@ type Pipeline struct {
 	resolvedLayoutsMu sync.Mutex
 	resolvedLayouts   map[emit.Target]manifest.ResolvedLayout
 
+	// fingerprint, scopeHash, routingHashes and pluginVersions are
+	// the cache-key and composition inputs Build pins.
+	//
+	// Every one is a pure function of the plugin slices and the
+	// routing configuration, all of which are assigned in Build and
+	// have no mutator. Deriving them per invocation meant a run over
+	// the reference pipeline's 21 plugins discarded 40 SHA-256
+	// digests over constant bytes and 420 reflect.Value.Comparable
+	// calls — the latter growing with the square of the plugin count,
+	// since every one of the 20 recordCacheKey calls re-flattened and
+	// re-deduped the whole set to find one version string.
+	//
+	// Hoisting also moves the plugin.Versioned assertion to Build.
+	// The interface documents Version as a release-time constant, so
+	// that is where it belongs; a plugin reading mutable state there
+	// would now produce a different key, which is the intended
+	// reading of the contract.
+	fingerprint    string
+	scopeHash      string
+	routingHashes  map[string]string
+	pluginVersions map[string]string
+
 	// layoutErrs holds the sentinel-wrapped errors the Layout phase
 	// reported this run, so [Pipeline.Run] can join them into its
 	// return value and callers can classify with errors.Is. Guarded
