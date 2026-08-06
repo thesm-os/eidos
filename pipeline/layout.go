@@ -793,22 +793,18 @@ func (p *Pipeline) reportLayoutErr(ps *diag.PluginSink, err error) {
 // the manifest sink correspondingly omits the conflicted Target.
 // The run continues for non-conflicting Targets.
 func enforceOneFileOnePackage(v *store.EmitView, ps *diag.PluginSink) {
-	type slot struct {
-		key  string
-		pkgs map[string][]string // package → qnames carrying that package value
-	}
-	groups := map[string]*slot{}
+	groups := map[fileKey]map[string][]string{} // file → package → qnames
 	visit := func(t emit.Target, qname string) {
 		if t.Dir == "" || t.Filename == "" {
 			return
 		}
-		key := t.Dir + "/" + t.Filename
-		g, ok := groups[key]
+		key := fileKey{dir: t.Dir, filename: t.Filename}
+		pkgs, ok := groups[key]
 		if !ok {
-			g = &slot{key: key, pkgs: map[string][]string{}}
-			groups[key] = g
+			pkgs = map[string][]string{}
+			groups[key] = pkgs
 		}
-		g.pkgs[t.Package] = append(g.pkgs[t.Package], qname)
+		pkgs[t.Package] = append(pkgs[t.Package], qname)
 	}
 	v.Structs().Range(func(e *emit.Struct) bool { visit(e.Target, e.QName()); return true })
 	v.Interfaces().Range(func(e *emit.Interface) bool { visit(e.Target, e.QName()); return true })
@@ -818,16 +814,46 @@ func enforceOneFileOnePackage(v *store.EmitView, ps *diag.PluginSink) {
 	v.Enums().Range(func(e *emit.Enum) bool { visit(e.Target, e.QName()); return true })
 	v.Aliases().Range(func(e *emit.Alias) bool { visit(e.File, e.QName()); return true })
 
-	for _, g := range groups {
-		if len(g.pkgs) < 2 {
+	// Report every group first, then clear once. Clearing inside the
+	// loop re-walked all seven buckets per conflicting group and
+	// joined a path string for every decl it touched — 7k bucket
+	// walks and up to k·n concatenations, which on a repo-wide
+	// package mismatch is quadratic, since k scales with n.
+	conflicted := map[fileKey]struct{}{}
+	for key, pkgs := range groups {
+		if len(pkgs) < 2 {
 			continue
 		}
 		ps.Errorf(position.Pos{},
 			"one-file-one-package violation at %s: conflicting package declarations %s",
-			g.key, formatPackageConflict(g.pkgs))
-		clearConflictedTargets(v, g.key)
+			key.path(), formatPackageConflict(pkgs))
+		conflicted[key] = struct{}{}
+	}
+	if len(conflicted) > 0 {
+		clearConflictedTargets(v, conflicted)
 	}
 }
+
+// fileKey identifies the output file a decl routes to.
+//
+// A comparable struct rather than the joined "dir/filename" string
+// the grouping used to build: the concatenation escaped into the map
+// key on every visited decl, and the clearing pass then rebuilt it
+// per decl per group.
+//
+// It also distinguishes Dir="a/b", Filename="c" from Dir="a",
+// Filename="b/c", which the joined form reported as a conflict.
+// splitOutDirectivePath never puts a separator in a filename, so that
+// pairing is unreachable — but it was a false positive and it is gone.
+type fileKey struct {
+	dir      string
+	filename string
+}
+
+// path renders the key the way the joined string used to read, for
+// the diagnostic. Kept as a method so the message cannot drift from
+// the identity it names.
+func (k fileKey) path() string { return k.dir + "/" + k.filename }
 
 // formatPackageConflict renders the conflicting-package set in a
 // deterministic, parser-friendly form for the diagnostic message:
@@ -854,49 +880,62 @@ func formatPackageConflict(pkgs map[string][]string) string {
 	return strings.Join(parts, "; ")
 }
 
-// clearConflictedTargets zeroes every routable decl whose
-// (Dir, Filename) joins to key. The cleared decls drop from the
-// byTarget rebuild and from the manifest; they remain in their
-// per-kind buckets so debugging tooling can still inspect them.
-func clearConflictedTargets(v *store.EmitView, key string) {
+// clearConflictedTargets zeroes every routable decl routed to a file
+// in conflicted. The cleared decls drop from the byTarget rebuild and
+// from the manifest; they remain in their per-kind buckets so
+// debugging tooling can still inspect them.
+//
+// Takes the whole conflicting set so the seven buckets are walked
+// once for the run rather than once per conflicting group. Clearing
+// is idempotent and order-independent — zeroing a Target empties its
+// Dir and Filename, and the grouping pass skips those — so a batched
+// clear produces the identical cleared set a per-group one did.
+func clearConflictedTargets(v *store.EmitView, conflicted map[fileKey]struct{}) {
+	bad := func(t emit.Target) bool {
+		_, ok := conflicted[fileKey{dir: t.Dir, filename: t.Filename}]
+		return ok
+	}
 	v.Structs().Range(func(e *emit.Struct) bool {
-		if e.Target.JoinPath() == key {
+		if bad(e.Target) {
 			e.Target = emit.Target{}
 		}
 		return true
 	})
 	v.Interfaces().Range(func(e *emit.Interface) bool {
-		if e.Target.JoinPath() == key {
+		if bad(e.Target) {
 			e.Target = emit.Target{}
 		}
 		return true
 	})
 	v.Functions().Range(func(e *emit.Function) bool {
-		if e.Target.JoinPath() == key {
+		if bad(e.Target) {
 			e.Target = emit.Target{}
 		}
 		return true
 	})
 	v.Variables().Range(func(e *emit.Variable) bool {
-		if e.Target.JoinPath() == key {
+		if bad(e.Target) {
 			e.Target = emit.Target{}
 		}
 		return true
 	})
 	v.Constants().Range(func(e *emit.Constant) bool {
-		if e.Target.JoinPath() == key {
+		if bad(e.Target) {
 			e.Target = emit.Target{}
 		}
 		return true
 	})
 	v.Enums().Range(func(e *emit.Enum) bool {
-		if e.Target.JoinPath() == key {
+		if bad(e.Target) {
 			e.Target = emit.Target{}
 		}
 		return true
 	})
+	// Aliases route on File, not Target. A membership test written
+	// once over e.Target would compile and silently stop clearing
+	// them.
 	v.Aliases().Range(func(e *emit.Alias) bool {
-		if e.File.JoinPath() == key {
+		if bad(e.File) {
 			e.File = emit.Target{}
 		}
 		return true

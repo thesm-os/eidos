@@ -3925,3 +3925,85 @@ func TestLayout_SentinelsAreMatchable(t *testing.T) {
 		}
 	})
 }
+
+// TestLayout_OneFileOnePackage_TwoConflicts pins the diagnostic's
+// file prefix across two independent conflicting files.
+//
+// The grouping key used to be the joined "dir/filename" string and is
+// now a comparable struct, so the message reconstructs the path
+// rather than printing the key it grouped by. That reconstruction is
+// the one user-visible surface this change can move, and a
+// single-conflict fixture cannot show that the batched clear still
+// reaches every conflicting file.
+//
+// The emitted order is not asserted: the report loop ranges a Go map,
+// so with two or more conflicts the sequence is already unstable.
+// That predates this change and is not cured by it.
+func TestLayout_OneFileOnePackage_TwoConflicts(t *testing.T) {
+	t.Parallel()
+
+	// Two files, each with two origins from different source
+	// packages: internal/x/first.go and internal/x/second.go.
+	origin := func(dir, out, pkgPath, name string) *node.Struct {
+		return &node.Struct{
+			BaseNode: node.BaseNode{
+				SourcePos: position.Pos{File: dir + "/src.go"},
+				DirectiveList: []*directive.Directive{
+					{Name: pipeline.OutDirective, Args: []string{out}},
+				},
+			},
+			Name: name, Package: pkgPath,
+		}
+	}
+	mk := func(o *node.Struct, name, pkg string) *emit.Struct {
+		return &emit.Struct{BaseEmit: emit.BaseEmit{OriginNode: o}, Name: name, Package: pkg}
+	}
+
+	a1 := mk(origin("internal/x", "first.go", "example.com/x", "A1"), "A1", "x")
+	a2 := mk(origin("internal/x", "first.go", "example.com/y", "A2"), "A2", "y")
+	b1 := mk(origin("internal/x", "second.go", "example.com/x", "B1"), "B1", "x")
+	b2 := mk(origin("internal/x", "second.go", "example.com/y", "B2"), "B2", "y")
+
+	pkgX := &node.Package{Name: "x", Path: "example.com/x"}
+	pkgY := &node.Package{Name: "y", Path: "example.com/y"}
+
+	d := diag.New()
+	p, err := pipeline.New().
+		WithFrontend(&multiNodePackageFE{name: "fe", pkgs: []*node.Package{pkgX, pkgY}}).
+		WithGenerator(&layoutGen{name: "rg", suffix: "_gen.go", pkg: &emit.Package{
+			Name: "x", Path: "example.com/x",
+			Structs: []*emit.Struct{a1, a2, b1, b2},
+		}}).
+		WithBackend(&stubBE{name: "be"}).
+		WithSink(sink.NewMemory()).
+		WithDiag(d).
+		Build()
+	assertNoError(t, err)
+	if runErr := p.Run(t.Context(), "x"); !errors.Is(runErr, pipeline.ErrRunHadErrors) {
+		t.Fatalf("Run = %v, want ErrRunHadErrors", runErr)
+	}
+
+	t.Run("both conflicting files are named with their dir prefix", func(t *testing.T) {
+		t.Parallel()
+		for _, want := range []string{
+			"one-file-one-package violation at internal/x/first.go",
+			"one-file-one-package violation at internal/x/second.go",
+		} {
+			if !hasDiagContaining(d, want) {
+				t.Fatalf("missing %q in %+v", want, d.Diagnostics())
+			}
+		}
+	})
+
+	t.Run("one clearing pass reaches every conflicting file", func(t *testing.T) {
+		t.Parallel()
+		// The batched clear walks the buckets once for the whole
+		// conflicting set; a membership test that only carried the
+		// last group would leave the other file's decls routed.
+		for name, s := range map[string]*emit.Struct{"A1": a1, "A2": a2, "B1": b1, "B2": b2} {
+			if s.Target != (emit.Target{}) {
+				t.Fatalf("%s kept Target %+v", name, s.Target)
+			}
+		}
+	})
+}
