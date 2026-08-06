@@ -68,7 +68,7 @@ check-coverage: ## Enforce per-layer coverage thresholds
 check-uncovered: ## List every uncovered line across the tree (ignores layer config + excludes)
 	$(ERGON) check coverage uncovered
 check-mutation: ## Run gremlins mutation testing per layer (slow)
-	$(ERGON) check mutation
+	$(ERGON) check mutation --mutants
 check-branch: ## Run gobco branch-coverage gating per layer (slow)
 	$(ERGON) check branch
 check-vuln: ## Run govulncheck per module
