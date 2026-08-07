@@ -5,12 +5,12 @@ go 1.26.5
 require (
 	go.thesmos.sh/eidos v1.10.0
 	go.thesmos.sh/eidos/backend/golang v1.8.0
-	go.thesmos.sh/eidos/bridge/protogo v1.5.2
+	go.thesmos.sh/eidos/bridge/protogo v1.6.0
 	go.thesmos.sh/eidos/cli v1.7.1
 	go.thesmos.sh/eidos/frontend/golang v1.7.0
 	go.thesmos.sh/eidos/frontend/protobuf v1.5.4
 	go.thesmos.sh/eidos/plugins v1.8.0
-	go.thesmos.sh/eidos/reference v1.6.2
+	go.thesmos.sh/eidos/reference v1.7.0
 )
 
 require (
