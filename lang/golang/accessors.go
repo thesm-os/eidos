@@ -65,15 +65,35 @@ func readString(n metaCarrier, k meta.Key[string]) string {
 // IsError reports whether t references the predeclared error
 // interface.
 //
-// Read from the stamp rather than matched by name: a consumer's own
-// type named `error` in some package is a different type, and a
-// name match would treat the two alike.
-func IsError(t *node.TypeRef) bool { return readBool(t, MetaIsError) }
+// Answers as the union documented in query.go: the stamp where a
+// frontend supplied one, the unqualified spelling otherwise. The
+// stamp alone reads false on every graph no Go frontend produced —
+// a fixture, a bridge, a synthesised node — and a generator asking
+// which return slot carries the error would then find none.
+//
+// The spelling half is gated on [node.TypeRef.IsBuiltin], so a
+// qualified `mypkg.error` cannot match. What remains is a type
+// declared in the package under generation and named `error`, which
+// shadows the predeclared identifier; source doing that is
+// pathological and every Go classifier in this repository already
+// accepts the same risk.
+func IsError(t *node.TypeRef) bool {
+	return readBool(t, MetaIsError) || IsBuiltinNamed(t, "error")
+}
 
 // IsContext reports whether t references context.Context, which is
 // what a generator branches on to decide whether a signature
 // threads a cancellation.
-func IsContext(t *node.TypeRef) bool { return readBool(t, MetaIsContext) }
+//
+// Union of stamp and spelling, for the reason [IsError] gives. The
+// spelling half requires the `context` qualifier, so there is no
+// same-package shadowing case here at all.
+func IsContext(t *node.TypeRef) bool {
+	if readBool(t, MetaIsContext) {
+		return true
+	}
+	return t != nil && t.Name == "Context" && t.Package == "context"
+}
 
 // IsStringer reports whether t's type implements fmt.Stringer in
 // either its value or its pointer form.

@@ -39,11 +39,11 @@ var keywords = map[string]struct{}{
 //nolint:gochecknoglobals // closed language-defined set
 var predeclared = map[string]struct{}{
 	// Types.
-	"any": {}, "bool": {}, "byte": {}, "comparable": {}, "complex64": {},
-	"complex128": {}, "error": {}, "float32": {}, "float64": {}, "int": {},
-	"int8": {}, "int16": {}, "int32": {}, "int64": {}, "rune": {},
-	"string": {}, "uint": {}, "uint8": {}, "uint16": {}, "uint32": {},
-	"uint64": {}, "uintptr": {},
+	typeAny: {}, typeBool: {}, typeByte: {}, typeComparable: {}, typeComplex64: {},
+	typeComplex128: {}, typeError: {}, typeFloat32: {}, typeFloat64: {}, typeInt: {},
+	typeInt8: {}, typeInt16: {}, typeInt32: {}, typeInt64: {}, typeRune: {},
+	typeString: {}, typeUint: {}, typeUint8: {}, typeUint16: {}, typeUint32: {},
+	typeUint64: {}, typeUintptr: {},
 	// Constants and the zero value.
 	"true": {}, "false": {}, "iota": {}, "nil": {},
 	// Builtin functions.

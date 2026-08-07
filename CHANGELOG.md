@@ -252,6 +252,174 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`lang/golang` is now the complete Go vocabulary a generator needs.** A Go
+  generator does four things in order — asks questions of a source
+  declaration, projects it into renderable data, spells that data as Go, and
+  declares itself to the pipeline. The package answered fragments of the first
+  and third; it now answers all three. Every group below was answered
+  privately, and differently, by two or more consumers first.
+
+  **Signature queries** (`query.go`) — `Callable`, `ReceiverOf`,
+  `IsInterfaceMethod`, `HasContext`, `ContextParam`, `StripContext`,
+  `TrailingVariadic`, `StripVariadic`, `ErrorReturn`, `StripError`,
+  `StripErrorTypes`, `PointerElem`, `SliceElem`, `ArrayElem`, `MapKey`,
+  `MapValue`, `FuncSignature`, `Deref`, `IteratorOfType`, `IteratorElem`,
+  `IteratorSecond`, `IteratorYieldsError`, plus the structural predicates
+  `IsBool`, `IsString`, `IsInteger`, `IsFloat`, `IsComplex`, `IsNumeric`,
+  `IsAny`, `IsBuiltinNamed`, `IsBlank`, `Nilable`, `Keyable`.
+
+  **Well-known method shapes** (`sigshape.go`) — `IsErrorMethod`,
+  `IsUnwrapMethod`, `IsIsMethod`, `IsAsMethod`, `IsStringMethod`,
+  `IsWriteMethod`, `IsReadMethod`, `IsCloseMethod`, the four codec shapes,
+  `ImplementsError`/`Stringer`/`Writer`/`Reader`, `ReturnsOnly`,
+  `SignatureMatches`, `IsByteSliceAny`. Matched on the slot's *type*: every
+  `Error() string` in the wild is written anonymously, so a classifier reading
+  the binding name compiles and matches nothing.
+
+  **The projection** (`method.go`) — `Sig`, `Param`, `Return` with `SigOf`,
+  `SigOfFunc` and `SigOfEmit`. One callable in the form a generator renders:
+  what a body calls each parameter, which recorded-call field each return maps
+  to, which slot carries the error, whether the source's return names survive.
+  It accepts both models, because a generator consuming upstream emit output
+  needs the same projection over a shape with no source node.
+
+  **Emit construction** (`construct.go`) — `FuncTypeOf`, `FuncTypeFrom`,
+  `EmitParams`, `EmitReturns`, `CallArgs`, `FieldCall`, `MethodCall`,
+  `DelegateBody`, `CaptureAssign`, `ReturnLocals`, `RecordCall`,
+  `RecordFields`, `SatisfiesAssertion`, `NilOf`, `ZeroValueExpr`.
+
+  **List rendering** (`render.go`) — `Args`, `ParamNames`, `Idents`,
+  `IdentArgs`, `Blanks`, `CallFields`, `Locals`, `LocalFields`, `IdentFields`,
+  `NamedFields`, `Reads`, `Fails`, `ZeroArgs`.
+
+  **References** (`refs.go`) — `QName`, `Display`, `MethodQName`, `LocalName`,
+  `RefFor`, `RefForQualified`, `RefsOf`, `ParamRefs`, `ReturnRefs`,
+  `PkgPathOf`, `SubjectRef`, `ErrBadSymbol`.
+
+  **Import paths** (`imports.go`) — `IsStdlib`, `IsValidImportPath`,
+  `ExternalTestPackage`, `IsExternalTestPackage`, `ImportAlias`,
+  `TrimVersionSuffix`, `PackageClauseFor`, `TestPackageSuffix`.
+
+  **Numeric facts** (`numeric.go`) — `NumericBounds`, `FitsIn`, `IsUnsigned`,
+  `BitSize`, `NextOutOfRange`, `FormatVerb`, `ParseIntValue`,
+  `ParseStringValue`.
+
+  **Values** (`values.go`) — `Resolver`, `SampleValues`, `SampleFor`,
+  `ZeroLiteralFor`, `ParseTag`, `TagValue`, `Quote`, `RawQuote`. Zero and
+  sample are different questions: a check comparing against a single value
+  passes whenever the subject already held it.
+
+  **Instantiation** (`witness.go`) — `WitnessPalette`, `Witnesses`,
+  `WitnessNames`, `WitnessUse`, `WitnessBindings`, `AdmitsAnyBasicType`,
+  `SubstituteTypeParams`, `SubstituteSig`, and the emit-side type-param
+  lifters.
+
+  **Conventions** (`conventions.go`) — `GeneratedHeader`, `IsGeneratedSource`,
+  `BuildTag`, `TestFuncName`, `BenchmarkFuncName`, `FuzzFuncName`,
+  `ExampleFuncName`, `ConstructorName`, `GetterName`, `SetterName`,
+  `WithName`, `SentinelName`, `ParseFuncName`, `Doc`, `DeprecatedDoc`,
+  `TestFileName`, `IsTestFileName`.
+
+  **Template bundles** (`funcmap.go`) — `SigFuncMap`, `QueryFuncMap`,
+  `ConventionFuncMap`, `AllFuncMap`, all prefixed so two plugins can hold
+  them; the canonical `FuncMap` is unchanged. `TemplateZeroLiteral` is the
+  installable form of `ZeroLiteral`, since `text/template` panics on a
+  `(T, bool)` signature.
+
+  **Embedding** (`embed.go`) — `EmbedIdent`, `EmbedTarget`, `PromotedField`,
+  `FieldSet`, `PromotedFields`, `ExportedFieldSet`, `PromotedMethods`,
+  `EmbedsType`. Go's promotion rules in full: a declared field shadows a
+  promoted one, a shallower promotion shadows a deeper one, and two
+  promotions at equal depth cancel. A generator reading `s.Fields` reads what
+  the source typed, not what the struct has — `struct{ Base; Name string }`
+  has every exported field of Base as well.
+
+  **Interface satisfaction** (`satisfies.go`) — `Satisfies`,
+  `SameSignature`, `MissingMethod`, `UnderlyingOf`, `ComparableDeep`,
+  `RecommendedReceiver`, `ReceiverIsPointerDecl`. `Satisfies` distinguishes a
+  missing method from one of the wrong signature, which are different
+  mistakes. `ComparableDeep` is the honest version of `Keyable`: given a
+  resolver it sees that a struct holds a slice field, which the
+  reference-only answer cannot.
+
+  **Enums** (`enum.go`) — `EnumForm`, `EnumFormOf`, `EnumUnderlying`,
+  `VariantText`, `VariantOverride`, `EnumTexts`, `EnumTextLiteral`,
+  `DuplicateText`, `ZeroVariant`, `EnumValues`, `OutOfRangeValue`,
+  `OutOfRangeText`, `EnumMethods`, `EnumDeclares`, `IsIotaDerived`. The six
+  facts every enum generator derives, including the one two implementations
+  disagreed on: for a string-valued enum the textual form is the *declared
+  value*, not the identifier. Deriving `US` from `US Region = "us-east"`
+  discards the only thing the declaration said — a value arriving from JSON
+  no longer parses, while still round-tripping against itself, so a check
+  testing only the generated pair passes.
+
+  **Type expressions** (`typestring.go`) — `TypeString`,
+  `TypeStringQualified`, `ParseTypeRef`, `ErrBadTypeExpr`. Rendering is for
+  messages and doc comments: it registers no import, so text put into
+  generated source names a package the file never imports. `ParseTypeRef`
+  reads `[]*pkg.T` and `map[string]*User` back into a reference, which is
+  what a directive value naming a type needs; function types, channels,
+  arrays and generic instantiations are refused rather than half-parsed.
+
+  **More well-known shapes** — `IsMarshalBinary`, `IsUnmarshalBinary`,
+  `IsGobEncode`, `IsGobDecode`, `IsScanMethod`, `IsValuerMethod`,
+  `IsLenMethod`, `IsLessMethod`, `IsSwapMethod`, `ImplementsSorter`,
+  `IsEqualMethod`, `IsCompareMethod`, `IsCloneMethod`, `IsResetMethod`,
+  `IsValidateMethod`, `IsByteSliceAny`, and `Codecs`, which reports only
+  *complete* pairs — a type declaring `MarshalJSON` without its partner does
+  not round-trip, and a check asserting that it does fails against code that
+  never claimed to.
+
+  **Doc and tag conventions** — `DocSummary`, `DocDeprecation`, `JSONName`,
+  `HasTagOption`. `JSONName` distinguishes `json:"-"` from `json:"-,"`, which
+  a caller splitting on the comma gets backwards.
+
+### Changed
+
+- **`lang/golang` predicates now answer as a union: the `go.*` stamp where a
+  frontend supplied one, the Go spelling otherwise.** `IsError` and
+  `IsContext` previously read the stamp alone, which is false on every graph
+  no Go frontend produced — a test fixture, a bridge from another source
+  language, a generator's own synthesised node. A generator asking which
+  return slot carries the error found none.
+
+  The spelling half is gated on `node.TypeRef.IsBuiltin`, so a qualified
+  `mypkg.error` cannot match. What remains is a type declared in the package
+  under generation and named `error`, which shadows the predeclared identifier;
+  every Go classifier in this repository already accepts the same risk.
+
+  Migration: none for a pipeline with a Go frontend. A consumer relying on the
+  narrower answer — asserting that an unstamped `error` reads as *not* the
+  builtin — now sees it recognised.
+
+- **`lang/golang` gained the zero-value and struct-tag spellings.**
+  `ZeroLiteral` returns a type's zero as Go source and reports whether one is
+  derivable at all — the second result is the point. A generator naming a field
+  in a composite literal needs a value for it, and a partial private copy of
+  this table answered `nil` for the widths it omitted, so an `int8` field
+  rendered `Code: nil`. Not derivable for a named non-interface type, an array,
+  an anonymous struct or a type parameter, because the model records a name and
+  the caller may be able to resolve what the model cannot.
+
+  `StructTag` assembles a tag from ordered `TagEntry` pairs, quoted with Go's
+  own escaping and without the surrounding backticks — the backend owns those,
+  and a caller embedding them produces a literal it cannot nest.
+
+- **`lang/golang` gained the signature rules three generators had each written
+  a slice of.** `ParamIdent` and `ParamIdents` name a parameter a generated
+  body can reference: the declared name where there is one, `arg<N>` where the
+  source left it anonymous, keyword adjustment on top, and uniqueness within
+  the list — `Read(arg1 []byte, []byte)` names the first parameter exactly what
+  the second falls back to.
+
+  `ErrorSlot` and `ReturnsError` find the error return by asking each slot
+  rather than by taking the last one: `(error, string)` is legal Go, and a
+  positional rule binds the wrong slot without failing to compile.
+  `NamedReturnsUsable` reports whether the source's return names survive onto a
+  generated signature — all-or-nothing, because Go requires results to be all
+  named or all anonymous and a name colliding with the receiver does not
+  compile.
+
 - **`eidostest/plugintest`: `Violation`, `BrokenPlugin`, `Violations`,
   `LyingNodesOnlyGenerator`, `ErroringGenerator`, `ErroringAnnotator` and
   `ErroringFrontend`.** Plugins that deliberately break exactly one framework or
@@ -270,6 +438,33 @@ omitted unless they change what a caller can rely on.
   `store`, `pipeline`, `cli` and `frontend/golang`; benchmarks including scaling
   cases across the hot paths; and executable examples for the `eidostest`
   harnesses and `emit/builder`.
+
+### Fixed
+
+- **`plugins/generator/sentinel` recognised no custom error type at all.**
+  `node.Return` carries a binding name alongside the type and both spell that
+  field `Name`, so the three signature predicates read the binding name after
+  the model gained named return slots. Every `Error() string` in the wild is
+  written anonymously, so the predicate matched nothing: the whole
+  custom-error-type half of the plugin went silent — no diagnostic, no output,
+  no failing test, because the fixtures only asserted the framework contract.
+  `Is` and `Unwrap` detection were dead the same way.
+
+  Consumers of a package declaring an error type now get the checks that half
+  was always meant to emit.
+
+- **`plugins/generator/sentinel` wrote `nil` into typed struct fields.** A
+  private zero-literal table answered `nil` for every width it omitted, so an
+  `int8` field rendered `Code: nil`. The rendered check also used a field's
+  sample in two positions Go constrains further than a composite literal does:
+  `wantF := <sample>` needs a value with a default type and `target.F != wantF`
+  needs a comparable one, and the nil keyword satisfies neither.
+
+  Fields whose only derivable zero is nil — pointers, slices, maps, and named
+  types the model cannot resolve — are now dropped from the rendered checks
+  rather than emitted into a file that does not compile. A dropped field costs
+  one assertion; rendering it cost the whole file, and the failure landed in
+  the consumer's build of generated code.
 
 ### Added
 

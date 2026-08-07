@@ -18,14 +18,6 @@ import (
 // side.
 const Language = "golang"
 
-// typeByte and typeUint8 are Go's two spellings of the same builtin.
-// The frontend records whichever the author wrote, so both
-// predicates below have to know both.
-const (
-	typeByte  = "byte"
-	typeUint8 = "uint8"
-)
-
 // IsExported reports whether name follows Go's
 // exported-identifier rule — first rune upper-case ASCII for
 // the simple cases plugins target. Empty input is unexported

@@ -8,24 +8,109 @@
 //
 // # Surface
 //
-// The package surface splits into three groups:
+// A Go generator does four things, in order: it asks questions
+// of a source declaration, projects it into renderable data,
+// spells that data as Go, and declares itself to the pipeline.
+// The first three live here. Each group was answered privately
+// — and differently — by two or more consumers before it did.
 //
-//   - Predicates ([IsExported], [IsByteSlice], [IsSlice],
-//     [IsMap]) — classify source [node.TypeRef] / [node.Field]
-//     shapes against Go's grammar so plugin templates can
-//     branch correctly without re-implementing the rules.
-//   - Lifters ([FromNode], [ConstraintFromNode], [FieldType],
-//     [ElemType], [MapKeyType], [MapValType], [TypeParams],
-//     [TypeArgs], [SelfType]) — convert source-side
-//     [node.*] values into the [emit.Ref] / [emit.TypeParam]
-//     forms the backend's `renderType` / `renderTypeParams`
-//     funcmap entries consume.
-//   - The [FuncMap] bundler — returns every entry above
-//     keyed under the conventional template-side name
-//     ("isExported", "selfType", "typeArgs", …). Plugins
-//     compose it with their plugin-specific extensions in
-//     their own [plugin.TemplateProvider.TemplateFuncs]
-//     implementation.
+// Ask, over [node] values:
+//
+//   - Signature queries (query.go): [Callable], [HasContext],
+//     [StripContext], [TrailingVariadic], [StripVariadic],
+//     [ErrorSlot], [ErrorReturn], [StripError], [Deref],
+//     [PointerElem], [SliceElem], [ArrayElem], [MapKey],
+//     [MapValue], [FuncSignature], [IteratorOfType].
+//   - Type predicates (query.go, golang.go): [IsBool],
+//     [IsString], [IsNumeric], [IsInteger], [IsAny],
+//     [IsBuiltinNamed], [Nilable], [Keyable], [IsExported],
+//     [IsByteSlice], [IsSlice], [IsMap].
+//   - Well-known shapes (sigshape.go): [IsErrorMethod],
+//     [IsUnwrapMethod], [IsStringMethod], [IsWriteMethod],
+//     the four codec pairs plus [Codecs], [IsScanMethod],
+//     [IsValuerMethod], [ImplementsSorter], [IsEqualMethod],
+//     [IsCloneMethod], [IsValidateMethod], [SignatureMatches] —
+//     the signatures the standard library gives meaning to, matched
+//     on types rather than on a return's binding name.
+//   - Embedding (embed.go): [EmbedIdent], [EmbedTarget],
+//     [FieldSet], [PromotedFields], [ExportedFieldSet],
+//     [PromotedMethods], [EmbedsType] — Go's promotion rules in
+//     full, since a generator reading `s.Fields` reads what the
+//     source typed rather than what the struct has.
+//   - Satisfaction (satisfies.go): [Satisfies], [SameSignature],
+//     [UnderlyingOf], [ComparableDeep], [RecommendedReceiver].
+//   - Enums (enum.go): [EnumFormOf], [VariantText], [EnumTexts],
+//     [DuplicateText], [ZeroVariant], [EnumValues],
+//     [OutOfRangeValue], [OutOfRangeText], [EnumMethods],
+//     [IsIotaDerived] — the six facts every enum generator derives,
+//     including the one that matters: a string enum's textual form
+//     is its declared value, not its identifier.
+//   - Metadata accessors (accessors.go): [IsError], [IsContext],
+//     [IsInterface], [ReceiverIsPointer], [Tag] — typed readers
+//     over the `go.*` vocabulary below.
+//
+// Project, from either model:
+//
+//   - [Sig], [Param], [Return] with [SigOf], [SigOfFunc] and
+//     [SigOfEmit] (method.go) — one callable in the form a
+//     generator renders: what a body calls each parameter, which
+//     recorded-call field each return maps to, which slot carries
+//     the error, whether the source's return names survive.
+//
+// Spell, into [emit] values or into text:
+//
+//   - Lifters (refconv.go): [FromNode], [ConstraintFromNode],
+//     [FieldType], [ElemType], [MapKeyType], [MapValType].
+//   - Emit construction (construct.go): [FuncTypeOf],
+//     [EmitParams], [EmitReturns], [CallArgs], [DelegateBody],
+//     [CaptureAssign], [RecordCall], [RecordFields],
+//     [SatisfiesAssertion], [NilOf], [ZeroValueExpr].
+//   - List rendering (render.go): [Args], [ParamNames],
+//     [CallFields], [Locals], [LocalFields], [Fails], [Reads] —
+//     the expression lists a template writes around a signature.
+//   - References (refs.go): [QName], [Display], [LocalName],
+//     [RefFor], [RefForQualified], [PkgPathOf], [SubjectRef].
+//   - Type expressions (typestring.go): [TypeString],
+//     [TypeStringQualified] render a source type as text a human
+//     reads; [ParseTypeRef] reads a directive value naming one back
+//     into a reference. Neither registers an import, which is why
+//     the rendered form is for messages and not for source.
+//   - Identifiers (idents.go): [SafeIdent], [UniqueIdent],
+//     [ReceiverIdent], [PackageName], [IsKeyword],
+//     [IsPredeclared], [IsInternal].
+//   - Import paths (imports.go): [IsStdlib], [IsValidImportPath],
+//     [ExternalTestPackage], [ImportAlias], [PackageClauseFor].
+//   - Values (literals.go, values.go): [ZeroLiteral],
+//     [ZeroLiteralFor], [SampleValues], [SampleFor],
+//     [StructTag], [ParseTag], [Quote], [RawQuote].
+//   - Numeric facts (numeric.go): [NumericBounds], [FitsIn],
+//     [NextOutOfRange], [FormatVerb], [ParseIntValue].
+//   - Generics (generics.go, witness.go): [TypeParamsOf],
+//     [TypeParamDecls], [TypeParamNames], [TypeParamRefs],
+//     [SelfRef], [Witnesses], [SubstituteTypeParams],
+//     [SubstituteSig].
+//   - Conventions (conventions.go): [GeneratedHeader],
+//     [IsGeneratedSource], [TestFuncName], [ConstructorName],
+//     [SentinelName], [Doc], [DeprecatedDoc], [TestFileName].
+//
+// # How predicates answer
+//
+// Every type predicate answers as the union: the `go.*` stamp
+// where a frontend supplied one, the Go spelling otherwise.
+// Neither half suffices alone. A stamp-only answer reads false
+// on every graph no Go frontend produced — a fixture, a bridge,
+// a synthesised node — and a spelling-only answer cannot see a
+// fact the frontend derived from the type checker. The spelling
+// half is gated on [node.TypeRef.IsBuiltin], so a qualified type
+// cannot match.
+//
+// # Template surface
+//
+// [FuncMap] is the canonical bundle the Go backend merges once;
+// it cannot grow without bound, because a name in it is a name
+// no plugin may contribute. [SigFuncMap], [QueryFuncMap],
+// [ConventionFuncMap] and [AllFuncMap] are opt-in and take a
+// prefix, so two plugins can both have them.
 //
 // # The `go.*` metadata vocabulary
 //
