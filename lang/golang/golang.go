@@ -18,6 +18,14 @@ import (
 // side.
 const Language = "golang"
 
+// typeByte and typeUint8 are Go's two spellings of the same builtin.
+// The frontend records whichever the author wrote, so both
+// predicates below have to know both.
+const (
+	typeByte  = "byte"
+	typeUint8 = "uint8"
+)
+
 // IsExported reports whether name follows Go's
 // exported-identifier rule — first rune upper-case ASCII for
 // the simple cases plugins target. Empty input is unexported
@@ -65,7 +73,7 @@ func IsByteSlice(t *node.TypeRef) bool {
 	if t == nil || !t.IsSlice() || t.Elem == nil {
 		return false
 	}
-	return t.Elem.IsBuiltin() && t.Elem.Name == "byte"
+	return t.Elem.IsBuiltin() && t.Elem.Name == typeByte
 }
 
 // FieldType returns the [emit.Ref] for a field's declared
@@ -196,7 +204,7 @@ func FuncMap() template.FuncMap {
 // gets wrong, and the one that turns a `[]byte` convenience setter
 // into a `[]uint8` one nobody expected.
 func IsByte(t *node.TypeRef) bool {
-	return t != nil && t.IsBuiltin() && (t.Name == "byte" || t.Name == "uint8")
+	return t != nil && t.IsBuiltin() && (t.Name == typeByte || t.Name == typeUint8)
 }
 
 // IsEmptyStruct reports whether t is the anonymous empty struct,

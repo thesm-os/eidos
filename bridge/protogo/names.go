@@ -5,90 +5,19 @@ package protogo
 
 import (
 	"strings"
-	"unicode"
+
+	"go.thesmos.sh/eidos/core/naming"
 )
 
-// commonInitialisms is the canonical set of acronyms the
-// rendered Go form preserves in upper-case (matching the
-// protobuf-Go canonical generator). Names containing these
-// substrings keep them uppercase rather than running through
-// the title-case rule that would produce `Id` / `Url` / etc.
+// GoFieldName returns the Go-idiomatic PascalCase identifier for a
+// proto-style snake_case name (`user_id` → `UserID`).
 //
-//nolint:gochecknoglobals // immutable lookup table.
-var commonInitialisms = map[string]bool{
-	"ACL":   true,
-	"API":   true,
-	"ASCII": true,
-	"CPU":   true,
-	"CSS":   true,
-	"DNS":   true,
-	"EOF":   true,
-	"GUID":  true,
-	"HTML":  true,
-	"HTTP":  true,
-	"HTTPS": true,
-	"ID":    true,
-	"IP":    true,
-	"JSON":  true,
-	"LHS":   true,
-	"QPS":   true,
-	"RAM":   true,
-	"RHS":   true,
-	"RPC":   true,
-	"SLA":   true,
-	"SMTP":  true,
-	"SQL":   true,
-	"SSH":   true,
-	"TCP":   true,
-	"TLS":   true,
-	"TTL":   true,
-	"UDP":   true,
-	"UI":    true,
-	"UID":   true,
-	"UUID":  true,
-	"URI":   true,
-	"URL":   true,
-	"UTF8":  true,
-	"VM":    true,
-	"XML":   true,
-	"XMPP":  true,
-	"XSRF":  true,
-	"XSS":   true,
-}
-
-// GoFieldName returns the Go-idiomatic PascalCase identifier for
-// a proto-style snake_case name. The rule splits on underscores,
-// title-cases each segment, then promotes any segment that is a
-// recognised initialism to its uppercase form (`id` → `ID`,
-// `url` → `URL`). Empty input produces empty output; segments
-// of length 0 between consecutive underscores are skipped.
-//
-// Examples:
-//
-//	"user_id"     → "UserID"
-//	"created_at"  → "CreatedAt"
-//	"http_status" → "HTTPStatus"
-//	"id"          → "ID"
-func GoFieldName(name string) string {
-	if name == "" {
-		return ""
-	}
-	var b strings.Builder
-	for segment := range strings.SplitSeq(name, "_") {
-		if segment == "" {
-			continue
-		}
-		upper := strings.ToUpper(segment)
-		if commonInitialisms[upper] {
-			b.WriteString(upper)
-			continue
-		}
-		runes := []rune(segment)
-		runes[0] = unicode.ToUpper(runes[0])
-		b.WriteString(string(runes))
-	}
-	return b.String()
-}
+// Deprecated: use [naming.Pascal], which applies the same rule with
+// the same initialism set. This package carried a private copy of
+// both; the two agreed on every input, which is the drift that had
+// not happened yet rather than a difference worth keeping. Removed
+// no earlier than the next minor release.
+func GoFieldName(name string) string { return naming.Pascal(name) }
 
 // GoPackageName returns the Go package clause derived from a
 // proto package qualifier or from a `go_package` option value.

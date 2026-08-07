@@ -38,6 +38,23 @@ omitted unless they change what a caller can rely on.
   Migration: for the fresh-slice check, return `slices.Clone(...)` from the
   accessor. For the others, the failure message names the specific rule.
 
+- **`lang/golang` gained the Go identifier rules `core/naming` defers to it.**
+  `naming.Identifier` sanitises runes and states that reserved words are "not
+  handled here — callers layer it on top, typically inside a language-specific
+  helper". Nothing did, so a generator deriving a parameter name from a source
+  field called `type` or `len` emitted code that did not compile.
+
+  `IsKeyword`, `IsPredeclared`, `SafeIdent`, `UniqueIdent`, `ReceiverIdent`,
+  `PackageName`, `IsInternal`. `PackageName` handles the major-version suffix —
+  `example.com/foo/v2` is package `foo`, and taking the trailing segment yields
+  a clause that compiles and names the wrong thing everywhere.
+
+- **`bridge/protogo.GoFieldName` is deprecated in favour of `naming.Pascal`.**
+  The bridge carried a private `commonInitialisms` table and a hand-rolled
+  PascalCase converter that duplicated `naming.CommonInitialisms` and
+  `naming.Pascal`; the two agreed on every input tested. Removed no earlier
+  than the next minor release.
+
 - **`lang/golang` gained typed readers for the whole `go.*` vocabulary.**
   Twenty-two keys were declared with no accessor, so every consumer wrote the
   value-plus-ok dance itself, decided independently what an absent stamp meant,

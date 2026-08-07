@@ -6,6 +6,7 @@ package protogo
 import (
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/meta"
+	"go.thesmos.sh/eidos/core/naming"
 	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/frontend/protobuf"
 	"go.thesmos.sh/eidos/node"
@@ -51,7 +52,7 @@ func stampFieldName(f *node.Field) {
 	if _, ok := MetaGoName.Get(f.Meta()); ok {
 		return
 	}
-	MetaGoName.Set(f.EnsureMeta(), GoFieldName(f.Name), Name)
+	MetaGoName.Set(f.EnsureMeta(), naming.Pascal(f.Name), Name)
 }
 
 // stampFieldType records [MetaGoType] on f.Type using the
