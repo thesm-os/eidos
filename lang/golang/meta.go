@@ -224,6 +224,12 @@ var (
 	) //nolint:gochecknoglobals // typed registry-singleton key
 )
 
+// MetaTagPrefix is the per-key namespace under which struct-tag
+// entries are stamped on [node.Field] meta. For a field tag
+// `json:"id" db:"id_col"`, the converter stamps
+// `go.tag.json="id"` and `go.tag.db="id_col"`.
+const MetaTagPrefix = "go.tag."
+
 // constraintTermsParser is the [meta.Parser] for
 // [MetaConstraintTerms]. The body shape mirrors the JSON wire form
 // documented on [ConstraintTerm].

@@ -38,6 +38,28 @@ omitted unless they change what a caller can rely on.
   Migration: for the fresh-slice check, return `slices.Clone(...)` from the
   accessor. For the others, the failure message names the specific rule.
 
+- **`lang/golang` gained typed readers for the whole `go.*` vocabulary.**
+  Twenty-two keys were declared with no accessor, so every consumer wrote the
+  value-plus-ok dance itself, decided independently what an absent stamp meant,
+  and — where the dance was awkward — re-derived the fact structurally instead.
+  A downstream generator matched `iter.Seq` by package and name while eidos
+  stamped `go.isIterSeq` on the same function, and wrote its own `IsError`
+  beside the stamped `go.isError`.
+
+  `IsError`, `IsContext`, `IsStringer`, `IsComparable`, `IsInterface`,
+  `EmbedsInterface`, `IsEmptyInterface`, `IsConstraintInterface`,
+  `ReceiverIsPointer`, `UnderlyingKind`, `IotaValue`, `IsChannel`, `ChanDir`,
+  `ChanElem`, `IsBidirectionalChan`, `IteratorOf`, `IterKeyType`,
+  `IterValueType`, `ConstraintTerms`, `GoType`, `GoName`, `GoImport`, `Tag`,
+  `Tags`. Absent reads as false or empty throughout; a nil node reads as
+  unstamped rather than panicking.
+
+  Also `IsByte` (both spellings — the frontend records whichever the author
+  wrote), `IsEmptyStruct`, `IsVariadic`, and `Instantiation` — the third of
+  Go's three type-parameter spellings, completing `TypeParams` (declaration)
+  and `TypeArgs` (use). `MetaTagPrefix` moved from `frontend/golang` with the
+  rest of the vocabulary and is aliased there as `Deprecated`.
+
 - **`emit/builder.For` no longer takes a target.** The variadic `emit.Target`
   argument was documented as a test-fixture escape hatch, and no production
   caller ever passed a non-zero value — all twenty call sites across this

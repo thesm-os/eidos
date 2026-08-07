@@ -188,3 +188,53 @@ func FuncMap() template.FuncMap {
 		"selfType":       SelfType,
 	}
 }
+
+// IsByte reports whether t is the builtin byte.
+//
+// Both spellings, because the frontend records whichever the author
+// wrote — which is the edge case a private copy of this predicate
+// gets wrong, and the one that turns a `[]byte` convenience setter
+// into a `[]uint8` one nobody expected.
+func IsByte(t *node.TypeRef) bool {
+	return t != nil && t.IsBuiltin() && (t.Name == "byte" || t.Name == "uint8")
+}
+
+// IsEmptyStruct reports whether t is the anonymous empty struct,
+// which is what makes a map to it a set rather than a mapping.
+//
+// Both emptiness tests, because an anonymous struct may carry
+// embedded types as well as declared fields, and one holding either
+// is a value a caller has something to say about.
+func IsEmptyStruct(t *node.TypeRef) bool {
+	return t != nil && t.IsAnonStruct() && len(t.Fields) == 0 && len(t.Embeds) == 0
+}
+
+// IsVariadic reports whether p is a variadic parameter.
+//
+// Worth a predicate rather than a field read because forwarding a
+// variadic parameter without its ellipsis passes the slice as a
+// single element: it type-checks against `...any` and silently
+// records one argument where the caller passed several.
+func IsVariadic(p *node.Param) bool { return p != nil && p.Variadic }
+
+// Instantiation renders the concrete type-argument list a generic
+// declaration is instantiated at — `[string, int]` — or the empty
+// string when args is empty.
+//
+// The third of Go's three type-parameter spellings, completing
+// [TypeParams] (the declaration form, `[K comparable, V any]`) and
+// [TypeArgs] (the use form, `[K, V]`). Mixing them produces code
+// that either fails to compile or compiles and asserts the wrong
+// thing, and naming only two of the three is what leaves a consumer
+// inventing a name for the third — which is how two packages end up
+// exporting one identifier for different forms.
+//
+// The concrete form is what a non-generic entry point needs: a Go
+// test function cannot take type parameters, so anything driving a
+// generic helper from one must instantiate it here.
+func Instantiation(args ...string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(args, ", ") + "]"
+}

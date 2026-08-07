@@ -65,11 +65,12 @@ var (
 	MetaConstraintTerms       = langgo.MetaConstraintTerms       //nolint:gochecknoglobals // re-exported registry singleton
 )
 
-// MetaTagPrefix is the per-key namespace under which struct-tag
-// entries are stamped on [node.Field] meta. For a field tag
-// `json:"id" db:"id_col"`, the converter stamps
-// `go.tag.json="id"` and `go.tag.db="id_col"`.
-const MetaTagPrefix = "go.tag."
+// MetaTagPrefix is the per-key namespace struct-tag entries are
+// stamped under.
+//
+// Deprecated: use [lang/golang.MetaTagPrefix]. Removed no earlier
+// than the next minor release.
+const MetaTagPrefix = langgo.MetaTagPrefix
 
 // ConstraintTerm carries one disjunctive type-set term from a Go
 // generic constraint.

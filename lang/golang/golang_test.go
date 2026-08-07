@@ -444,3 +444,153 @@ func TestFuncMap(t *testing.T) {
 		}
 	})
 }
+
+// TestIsByte pins both spellings of Go's byte.
+//
+// The frontend records whichever the author wrote, so a predicate
+// matching one name turns a `[]byte` convenience setter into a
+// `[]uint8` one for half the corpus — which is the edge case a
+// private copy of this gets wrong.
+func TestIsByte(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		ref  *node.TypeRef
+		want bool
+	}{
+		{"byte", &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "byte"}, true},
+		{"uint8", &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "uint8"}, true},
+		{"int", &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"}, false},
+		{"qualified byte", &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "pkg", Name: "byte"}, false},
+		{"nil", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := golang.IsByte(tc.ref); got != tc.want {
+				t.Fatalf("IsByte(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsEmptyStruct pins the shape that makes a map a set.
+func TestIsEmptyStruct(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the anonymous empty struct matches", func(t *testing.T) {
+		t.Parallel()
+		if !golang.IsEmptyStruct(&node.TypeRef{TypeKind: node.TypeRefAnonStruct}) {
+			t.Fatalf("struct{} must match")
+		}
+	})
+
+	t.Run("an anonymous struct with a field does not match", func(t *testing.T) {
+		t.Parallel()
+		r := &node.TypeRef{TypeKind: node.TypeRefAnonStruct, Fields: []*node.Field{{Name: "X"}}}
+		if golang.IsEmptyStruct(r) {
+			t.Fatalf("a struct with a field must not match")
+		}
+	})
+
+	t.Run("an anonymous struct with an embed does not match", func(t *testing.T) {
+		t.Parallel()
+		// Both emptiness tests: an anonymous struct may carry embeds
+		// as well as declared fields, and one holding either is a
+		// value a caller has something to say about.
+		r := &node.TypeRef{TypeKind: node.TypeRefAnonStruct, Embeds: []*node.Embed{{}}}
+		if golang.IsEmptyStruct(r) {
+			t.Fatalf("a struct with an embed must not match")
+		}
+	})
+
+	t.Run("a named struct type does not match", func(t *testing.T) {
+		t.Parallel()
+		if golang.IsEmptyStruct(&node.TypeRef{TypeKind: node.TypeRefNamed, Name: "Empty"}) {
+			t.Fatalf("a named type must not match")
+		}
+	})
+
+	t.Run("nil does not match", func(t *testing.T) {
+		t.Parallel()
+		if golang.IsEmptyStruct(nil) {
+			t.Fatalf("nil must not match")
+		}
+	})
+}
+
+func TestIsVariadic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a variadic parameter matches", func(t *testing.T) {
+		t.Parallel()
+		if !golang.IsVariadic(&node.Param{Name: "keys", Variadic: true}) {
+			t.Fatalf("a variadic param must match")
+		}
+	})
+
+	t.Run("a fixed parameter does not match", func(t *testing.T) {
+		t.Parallel()
+		// Forwarding a variadic without its ellipsis passes the slice
+		// as one element: it type-checks against `...any` and silently
+		// records one argument where the caller passed several.
+		if golang.IsVariadic(&node.Param{Name: "id"}) {
+			t.Fatalf("a fixed param must not match")
+		}
+	})
+
+	t.Run("nil does not match", func(t *testing.T) {
+		t.Parallel()
+		if golang.IsVariadic(nil) {
+			t.Fatalf("nil must not match")
+		}
+	})
+}
+
+// TestInstantiation pins the third of Go's three type-parameter
+// spellings, alongside TypeParams (declaration) and TypeArgs (use).
+//
+// Mixing them produces code that either fails to compile or
+// compiles and asserts the wrong thing, and naming only two of the
+// three is what leaves a consumer inventing a name for the third.
+func TestInstantiation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("renders a concrete argument list", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.Instantiation("string", "int"); got != "[string, int]" {
+			t.Fatalf("Instantiation = %q, want [string, int]", got)
+		}
+	})
+
+	t.Run("renders a single argument", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.Instantiation("string"); got != "[string]" {
+			t.Fatalf("Instantiation = %q, want [string]", got)
+		}
+	})
+
+	t.Run("no arguments render nothing", func(t *testing.T) {
+		t.Parallel()
+		// A non-generic entry point must emit no bracket list at all;
+		// `[]` does not compile.
+		if got := golang.Instantiation(); got != "" {
+			t.Fatalf("Instantiation() = %q, want empty", got)
+		}
+	})
+
+	t.Run("agrees with TypeArgs on separator and brackets", func(t *testing.T) {
+		t.Parallel()
+		// The two forms appear side by side in one generated file —
+		// a declaration instantiated at concrete types, and a
+		// reference using the parameter names — so a difference in
+		// spelling reads as a bug in the generator.
+		s := &node.Struct{
+			Name: "Container", Package: "x",
+			TypeParams: []*node.TypeParam{{Name: "K"}, {Name: "V"}},
+		}
+		if got, want := golang.Instantiation("K", "V"), golang.TypeArgs(s); got != want {
+			t.Fatalf("Instantiation = %q, TypeArgs = %q; the spellings must agree", got, want)
+		}
+	})
+}
