@@ -184,7 +184,7 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 // Options.Package on the host file's import set via the
 // [emit.NewExternal] expression.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for m := range ctx.Reader.EmitMethods().All() {
 		if m.HasNegatedDirective(DirectiveName) {
 			continue

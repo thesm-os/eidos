@@ -20,7 +20,7 @@ func TestContext_ForBindsIdentityAndTarget(t *testing.T) {
 
 	t.Run("SetBy and Target return the constructor arguments", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		if got := c.SetBy(); got != "repogen" {
 			t.Fatalf("SetBy = %q, want %q", got, "repogen")
 		}
@@ -31,7 +31,7 @@ func TestContext_ForBindsIdentityAndTarget(t *testing.T) {
 
 	t.Run("Provenance stamps SetBy and (optionally) ID", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		bare := c.Provenance()
 		if bare.SetBy != "repogen" || bare.ID != "" {
 			t.Fatalf("Provenance() = %+v; want SetBy=repogen ID=empty", bare)
@@ -44,7 +44,7 @@ func TestContext_ForBindsIdentityAndTarget(t *testing.T) {
 
 	t.Run("WithTarget returns a copy without mutating the receiver", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		other := emit.Target{Dir: "audit", Filename: "audit.go", Package: "users"}
 		c2 := c.WithTarget(other)
 		if c.Target() != defaultTarget {

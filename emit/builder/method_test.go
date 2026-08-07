@@ -20,7 +20,7 @@ func TestMethodBuilder_ParamCallbackAndNamedReturn(t *testing.T) {
 
 	t.Run("Param with a callback runs it; named Return threads the name", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var m *emit.Method
 		c.Package("p", "p").
 			Struct("S", func(sb *builder.StructBuilder) {
@@ -49,7 +49,7 @@ func TestMethodBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs / Directive / TypeParam / Body / Receiver / Origin thread through", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		d := fixtureDirective()
 		pos := fixturePos()
 		origin := fixtureOrigin()

@@ -337,7 +337,7 @@ func TestManifest_RecordsBackendWrites(t *testing.T) {
 		// the store at manifest-write time and reads SetBy to
 		// attribute outputs.
 		gen := &recGen{name: "attrgen", generate: func(ctx *plugin.GeneratorContext) {
-			c := builder.For("attrgen", emit.Target{})
+			c := builder.For("attrgen").WithTarget(emit.Target{})
 			pkg := c.Package("x", "example.com/x")
 			pkg.Struct("X", func(b *builder.StructBuilder) {
 				b.Origin(src)
@@ -414,10 +414,10 @@ func TestManifest_RecordsBackendWrites(t *testing.T) {
 		// independent Contexts so manifest attribution must aggregate
 		// every distinct SetBy.
 		gen := &recGen{name: "host", generate: func(ctx *plugin.GeneratorContext) {
-			host := builder.For("host", emit.Target{})
-			fieldgen := builder.For("fieldgen", emit.Target{})
-			methgen := builder.For("methgen", emit.Target{})
-			weaver := builder.For("weaver", emit.Target{})
+			host := builder.For("host").WithTarget(emit.Target{})
+			fieldgen := builder.For("fieldgen").WithTarget(emit.Target{})
+			methgen := builder.For("methgen").WithTarget(emit.Target{})
+			weaver := builder.For("weaver").WithTarget(emit.Target{})
 			pkg := host.Package("x", "example.com/x")
 			pkg.Struct("S", func(b *builder.StructBuilder) {
 				b.Origin(srcStruct).Method("M", func(mb *builder.MethodBuilder) {
@@ -510,7 +510,7 @@ func TestManifest_RecordsBackendWrites(t *testing.T) {
 		}
 		nodePkg.Structs = []*node.Struct{src}
 		gen := &recGen{name: "rg", generate: func(ctx *plugin.GeneratorContext) {
-			c := builder.For("rg", emit.Target{})
+			c := builder.For("rg").WithTarget(emit.Target{})
 			pkg := c.Package("x", "example.com/x")
 			pkg.Struct("X", func(b *builder.StructBuilder) {
 				b.Origin(src)
@@ -588,7 +588,7 @@ func TestManifest_RecordsBackendWrites(t *testing.T) {
 			Structs: []*node.Struct{src},
 		}}
 		gen := &recGen{name: "rg", suffix: "_gen.go", generate: func(ctx *plugin.GeneratorContext) {
-			c := builder.For("rg", emit.Target{})
+			c := builder.For("rg").WithTarget(emit.Target{})
 			pkg := c.Package("x", "example.com/x")
 			pkg.Struct("X", func(b *builder.StructBuilder) {
 				b.Origin(src)
@@ -695,7 +695,7 @@ func TestManifest_RecordsBackendWrites(t *testing.T) {
 			Structs: []*node.Struct{src},
 		}}
 		gen := &recGen{name: "rg", suffix: "_gen.go", generate: func(ctx *plugin.GeneratorContext) {
-			c := builder.For("rg", emit.Target{})
+			c := builder.For("rg").WithTarget(emit.Target{})
 			pkg := c.Package("x", "example.com/x")
 			pkg.Struct("X", func(b *builder.StructBuilder) { b.Origin(src) })
 			out, err := pkg.Build()

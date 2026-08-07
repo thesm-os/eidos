@@ -260,7 +260,7 @@ var _ sdk.EmitNode = (*Type)(nil)
 // the active backend's template + funcmap pair produce the
 // rendered text.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for s := range ctx.Reader.Structs().All() {
 		if !s.HasPositiveDirective(DirectiveName) {
 			continue

@@ -171,7 +171,7 @@ func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Generate emits one validator per handler and a prebody call to it.
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for _, pending := range ctx.Store.Emit().PendingOriginSlots() {
 		host, ok := pending.Item.(*handlergen.Handler)
 		if !ok {

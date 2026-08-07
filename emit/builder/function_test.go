@@ -18,7 +18,7 @@ func TestFunctionBuilder_ParamsAndReturns(t *testing.T) {
 
 	t.Run("variadic param marks the underlying Param.Variadic", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var f *emit.Function
 		c.Package("io", "example.com/io").
 			Function("Sum", func(fb *builder.FunctionBuilder) {
@@ -41,7 +41,7 @@ func TestFunctionBuilder_ParamsAndReturns(t *testing.T) {
 
 	t.Run("Return accepts an optional name and stamps it on the slot", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var f *emit.Function
 		c.Package("io", "example.com/io").
 			Function("F", func(fb *builder.FunctionBuilder) {
@@ -62,7 +62,7 @@ func TestFunctionBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs / Directive / Target / TypeParam / Body / Origin thread through", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		other := otherTarget()
 		d := fixtureDirective()
 		pos := fixturePos()

@@ -123,7 +123,7 @@ func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 // pending list is how a contributor reaches a host value before
 // routing, and it is why this plugin must not declare [sdk.NodesOnly].
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for _, pending := range ctx.Store.Emit().PendingOriginSlots() {
 		stack, ok := pending.Item.(*middlewaregen.MiddlewareStack)
 		if !ok {

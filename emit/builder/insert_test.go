@@ -23,7 +23,7 @@ func TestInsertField(t *testing.T) {
 	// by the Before / After cases.
 	seed := func() *emit.Struct {
 		s := &emit.Struct{Name: "S"}
-		c := builder.For("seed", defaultTarget)
+		c := builder.For("seed").WithTarget(defaultTarget)
 		for _, name := range []string{"a", "b", "c"} {
 			if err := c.AppendField(s, &emit.Field{Name: name, Type: emit.Builtin("int")}, name); err != nil {
 				t.Fatalf("seed AppendField %q: %v", name, err)
@@ -73,7 +73,7 @@ func TestInsertField(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := seed()
-			c := builder.For("validation", defaultTarget)
+			c := builder.For("validation").WithTarget(defaultTarget)
 			if err := c.InsertField(s, tc.field, tc.pos); err != nil {
 				t.Fatalf("InsertField: %v", err)
 			}
@@ -87,7 +87,7 @@ func TestInsertField(t *testing.T) {
 	t.Run("InsertField wires Owner and provenance", func(t *testing.T) {
 		t.Parallel()
 		s := seed()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		f := &emit.Field{Name: "x", Type: emit.Builtin("int")}
 		if err := c.InsertField(s, f, builder.Before("b"), "validation/x"); err != nil {
 			t.Fatalf("InsertField: %v", err)
@@ -106,7 +106,7 @@ func TestInsertField(t *testing.T) {
 	t.Run("InsertField with missing anchor surfaces emit.ErrProvenanceNotFound", func(t *testing.T) {
 		t.Parallel()
 		s := seed()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		err := c.InsertField(s, &emit.Field{Name: "x", Type: emit.Builtin("int")}, builder.Before("nope"))
 		if err == nil {
 			t.Fatalf("expected error for missing anchor")
@@ -115,7 +115,7 @@ func TestInsertField(t *testing.T) {
 
 	t.Run("InsertField rejects non-Struct host", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		err := c.InsertField(&emit.Interface{Name: "I"}, &emit.Field{Name: "x"}, builder.Prepend())
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
@@ -124,7 +124,7 @@ func TestInsertField(t *testing.T) {
 
 	t.Run("InsertField nil host returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		err := c.InsertField(nil, &emit.Field{Name: "x"}, builder.Prepend())
 		if !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
@@ -134,7 +134,7 @@ func TestInsertField(t *testing.T) {
 	t.Run("invalid InsertPos discriminator returns ErrUnknownInsertPos", func(t *testing.T) {
 		t.Parallel()
 		s := seed()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		// Bypass the constructor and inject an out-of-range kind
 		// via a zero-value pointer dereference trick — actually
 		// the simplest path is to ask for an InsertPos we know is
@@ -156,8 +156,8 @@ func TestInsertMethod(t *testing.T) {
 
 	t.Run("Before targets the anchor across host kinds", func(t *testing.T) {
 		t.Parallel()
-		seed := builder.For("seed", defaultTarget)
-		ins := builder.For("validation", defaultTarget)
+		seed := builder.For("seed").WithTarget(defaultTarget)
+		ins := builder.For("validation").WithTarget(defaultTarget)
 
 		s := &emit.Struct{Name: "S"}
 		_ = seed.AppendMethod(s, &emit.Method{Name: "a"}, "a")
@@ -191,7 +191,7 @@ func TestInsertMethod(t *testing.T) {
 
 	t.Run("InsertMethod nil host returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		err := c.InsertMethod(nil, &emit.Method{Name: "x"}, builder.Prepend())
 		if !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
@@ -200,7 +200,7 @@ func TestInsertMethod(t *testing.T) {
 
 	t.Run("InsertMethod rejects unsupported host", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		err := c.InsertMethod(&emit.Function{Name: "F"}, &emit.Method{Name: "x"}, builder.Prepend())
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
@@ -214,7 +214,7 @@ func TestInsertMethod(t *testing.T) {
 func TestInsertEmbedVariantParamBodyTagFileSlots(t *testing.T) {
 	t.Parallel()
 
-	c := builder.For("audit", defaultTarget)
+	c := builder.For("audit").WithTarget(defaultTarget)
 
 	t.Run("InsertEmbed: struct and interface", func(t *testing.T) {
 		t.Parallel()

@@ -234,7 +234,7 @@ func TestGenerate_EmitSideInterface(t *testing.T) {
 		// mockgen runs after foundation generators, so an interface
 		// may exist only on the emit side. That path groups by the
 		// host emit package rather than by source package.
-		c := builder.For("fixture", emit.Target{})
+		c := builder.For("fixture").WithTarget(emit.Target{})
 		built, err := c.Package("users", "example.com/users").
 			Interface("Repo", func(i *builder.InterfaceBuilder) {
 				i.Method("Get", func(m *builder.MethodBuilder) {

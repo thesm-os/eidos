@@ -374,7 +374,7 @@ func (t *Tests) HasContent() bool {
 // `<basename>_sentinel_test.go` file via the standard
 // routing precedence.
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for pkg := range ctx.Reader.Packages().All() {
 		if !pkg.HasPositiveDirective(DirectiveName) {
 			continue

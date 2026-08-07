@@ -17,7 +17,7 @@ func TestFileBuilder_ImportsAndBlanks(t *testing.T) {
 
 	t.Run("Import and BlankImport append owner-wired imports", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var file *emit.File
 		c.Package("users", "example.com/users").
 			AddFile(emit.Target{}, func(fb *builder.FileBuilder) {
@@ -43,7 +43,7 @@ func TestFileBuilder_ImportsAndBlanks(t *testing.T) {
 
 	t.Run("zero target on AddFile() inherits the Context target", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var file *emit.File
 		c.Package("users", "example.com/users").
 			AddFile(emit.Target{}, func(fb *builder.FileBuilder) {
@@ -62,7 +62,7 @@ func TestFileBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs thread through; nested Import accessors", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		other := otherTarget()
 		d := fixtureDirective()
 		pos := fixturePos()

@@ -108,3 +108,44 @@ func TestOutputPackageSetter_NilMapIsUsable(t *testing.T) {
 		t.Fatalf("byTag[\"\"] on a nil map = %q, want the zero value", got)
 	}
 }
+
+func TestPrimaryPackage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the primary output's import path", func(t *testing.T) {
+		t.Parallel()
+		got, ok := emit.PrimaryPackage(map[string]string{"": "example.com/gen"})
+		if !ok || got != "example.com/gen" {
+			t.Fatalf("PrimaryPackage = (%q, %v), want (example.com/gen, true)", got, ok)
+		}
+	})
+
+	t.Run("reports no answer when the primary tag is absent", func(t *testing.T) {
+		t.Parallel()
+		// The map carries only tags that routed, so a run that
+		// recorded routing errors reaches dispatch without it.
+		got, ok := emit.PrimaryPackage(map[string]string{"test": "example.com/gen"})
+		if ok || got != "" {
+			t.Fatalf("PrimaryPackage = (%q, %v), want no answer", got, ok)
+		}
+	})
+
+	t.Run("reports no answer when the primary path is empty", func(t *testing.T) {
+		t.Parallel()
+		// Centralised routing cannot derive an import path without a
+		// module context. Empty means "not derivable", not "same
+		// package" — a caller rendering a bare reference on the
+		// strength of it names a package it never imported.
+		got, ok := emit.PrimaryPackage(map[string]string{"": ""})
+		if ok || got != "" {
+			t.Fatalf("PrimaryPackage = (%q, %v), want no answer", got, ok)
+		}
+	})
+
+	t.Run("reports no answer for a nil map", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := emit.PrimaryPackage(nil); ok {
+			t.Fatalf("a nil map must report no answer")
+		}
+	})
+}

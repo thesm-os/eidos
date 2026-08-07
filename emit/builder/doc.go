@@ -31,7 +31,7 @@
 //
 //	func (g *RepoGen) Generate(gctx *plugin.GeneratorContext) error {
 //	    target := emit.Target{Dir: "users", Filename: "repo_gen.go", Package: "users"}
-//	    c := builder.For(g.Name(), target)
+//	    c := builder.For(g.Name())
 //	    pkg := c.Package("users", "example.com/users").
 //	        Struct("UserRepo", func(s *builder.StructBuilder) {
 //	            s.Field("DB", emit.External("database/sql", "DB"), nil)
@@ -53,7 +53,7 @@
 // emits through the slot-append API on [Context], which stamps the
 // host's slot with `Provenance{SetBy: c.SetBy()}`:
 //
-//	c := builder.For("validation", target)
+//	c := builder.For("validation")
 //	if err := c.AppendField(userStruct, &emit.Field{
 //	    Name: "Email",
 //	    Type: emit.Builtin("string"),

@@ -142,7 +142,7 @@ func probeFuncs() template.FuncMap {
 // source-only fixture leaves the loop body unexecuted.
 func emitStoreWithMethod(t *testing.T, pkg, structName, methodName string) *store.Store {
 	t.Helper()
-	c := builder.For("fixture", emit.Target{})
+	c := builder.For("fixture").WithTarget(emit.Target{})
 	built, err := c.Package(pkg, pkg).
 		Struct(structName, func(s *builder.StructBuilder) {
 			s.Method(methodName, func(m *builder.MethodBuilder) {

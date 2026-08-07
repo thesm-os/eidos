@@ -388,7 +388,7 @@ var _ sdk.EmitNode = (*Tests)(nil)
 // diagnostic; the run continues and the offending enum
 // drops from the output set.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for e := range ctx.Reader.Enums().All() {
 		if !e.HasPositiveDirective(DirectiveName) {
 			continue

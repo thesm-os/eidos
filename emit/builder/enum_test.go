@@ -17,7 +17,7 @@ func TestEnumBuilder_VariantsCarryOwner(t *testing.T) {
 
 	t.Run("variants carry enum Owner", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var e *emit.Enum
 		c.Package("status", "example.com/status").
 			Enum("State", emit.Builtin("int"), func(eb *builder.EnumBuilder) {
@@ -44,7 +44,7 @@ func TestEnumBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs / Directive / Target / Origin thread through; nested Variant accessors", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		other := otherTarget()
 		d := fixtureDirective()
 		pos := fixturePos()

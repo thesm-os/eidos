@@ -26,7 +26,7 @@ var ErrUnsupportedHost = errors.New("builder: unsupported host kind")
 // through every decl built and every slot append performed during
 // that pass:
 //
-//	c := builder.For(p.Name(), target)
+//	c := builder.For(p.Name())
 //	pkg := c.Package("users", "example.com/users").
 //	    Struct("Repo", func(s *builder.StructBuilder) { … }).
 //	    Build()
@@ -49,20 +49,11 @@ type Context struct {
 // resolved Target from the framework default + per-decl origin +
 // per-source `+gen:out` directives + project / CLI overrides.
 //
-// The optional target argument is a test-fixture escape hatch:
-// pass a non-zero [emit.Target] to pre-stamp decls when driving
-// the builder directly in unit tests that bypass the Layout phase.
-// Production plugins never pass it.
-//
 // A plugin emitting into multiple files calls [Context.WithTarget]
 // to spawn additional Contexts per target rather than mutating the
 // receiver.
-func For(setBy string, target ...emit.Target) *Context {
-	c := &Context{setBy: setBy}
-	if len(target) > 0 {
-		c.target = target[0]
-	}
-	return c
+func For(setBy string) *Context {
+	return &Context{setBy: setBy}
 }
 
 // SetBy returns the plugin identifier this Context stamps onto every

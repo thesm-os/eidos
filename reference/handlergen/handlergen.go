@@ -194,7 +194,7 @@ func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Generate emits one handler per annotated struct.
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for src := range ctx.Reader.Structs().All() {
 		if !src.HasPositiveDirective(DirectiveName) {
 			continue

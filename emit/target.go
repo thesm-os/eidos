@@ -121,3 +121,28 @@ type OutputPackageSetter interface {
 	// The map is owned by the caller. Do not retain or mutate it.
 	SetOutputPackages(byTag map[string]string)
 }
+
+// PrimaryPackage returns the import path a plugin's primary output
+// routed to, and whether Layout resolved one.
+//
+// Folds the two ways [OutputPackageSetter.SetOutputPackages] says
+// "no answer" into one. The map carries only tags that routed, so
+// the primary tag may be absent entirely; and a path may be present
+// but empty, because centralised routing cannot derive an import
+// path without a module context. Both mean the same thing to a
+// caller — there is nothing to qualify a reference against — and
+// folding them here is what stops each implementor reasoning it out
+// again and one of them getting it wrong.
+//
+// A caller that skips on false leaves its provisional references in
+// place. That is the right default: a reference qualified against
+// the wrong package is a compile error naming the symbol, which is
+// a better failure than a bare name silently binding to whatever
+// else is in scope.
+func PrimaryPackage(byTag map[string]string) (string, bool) {
+	path, ok := byTag[""]
+	if !ok || path == "" {
+		return "", false
+	}
+	return path, true
+}

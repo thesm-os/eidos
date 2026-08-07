@@ -22,7 +22,7 @@ func TestAliasBuilder_MethodOnTrueAliasRecordsError(t *testing.T) {
 
 	t.Run("Method on a true alias records ErrAliasMethodForbidden", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var a *emit.Alias
 		pkg, err := c.Package("users", "example.com/users").
 			Alias("UserID", emit.Builtin("string"), func(ab *builder.AliasBuilder) {
@@ -43,7 +43,7 @@ func TestAliasBuilder_MethodOnTrueAliasRecordsError(t *testing.T) {
 
 	t.Run("Method on a named-type alias succeeds", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var a *emit.Alias
 		_, err := c.Package("users", "example.com/users").
 			NamedType("UserID", emit.Builtin("string"), func(ab *builder.AliasBuilder) {
@@ -68,7 +68,7 @@ func TestAliasBuilder_MethodWithCallbackRuns(t *testing.T) {
 
 	t.Run("non-nil method callback runs with method-builder", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var captured *emit.Method
 		c.Package("p", "p").
 			NamedType("UserID", emit.Builtin("string"), func(ab *builder.AliasBuilder) {
@@ -92,7 +92,7 @@ func TestAliasBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs / Directive / File / TypeParam / Origin thread through", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		other := otherTarget()
 		d := fixtureDirective()
 		pos := fixturePos()

@@ -20,7 +20,7 @@ func TestAppendField(t *testing.T) {
 
 	t.Run("appends field with Provenance.SetBy stamped", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		host := &emit.Struct{Name: "User", Package: "users", Target: defaultTarget}
 		err := c.AppendField(host, &emit.Field{Name: "Email", Type: emit.Builtin("string"), Tag: `validate:"email"`})
 		if err != nil {
@@ -44,7 +44,7 @@ func TestAppendField(t *testing.T) {
 
 	t.Run("optional id is recorded in Provenance.ID", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		host := &emit.Struct{Name: "User", Package: "users", Target: defaultTarget}
 		_ = c.AppendField(host, &emit.Field{Name: "Email", Type: emit.Builtin("string")}, "validation/email")
 		if prov := host.FieldsSlot().ProvenanceAt(0); prov.ID != "validation/email" {
@@ -54,7 +54,7 @@ func TestAppendField(t *testing.T) {
 
 	t.Run("nil host returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		err := c.AppendField(nil, &emit.Field{Name: "X", Type: emit.Builtin("int")})
 		if !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
@@ -63,7 +63,7 @@ func TestAppendField(t *testing.T) {
 
 	t.Run("non-struct host returns ErrUnsupportedHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("validation", defaultTarget)
+		c := builder.For("validation").WithTarget(defaultTarget)
 		err := c.AppendField(&emit.Interface{Name: "I"}, &emit.Field{Name: "X", Type: emit.Builtin("int")})
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
@@ -78,7 +78,7 @@ func TestAppendMethod(t *testing.T) {
 
 	t.Run("appends to *emit.Struct, *emit.Interface, and *emit.Alias", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("mockgen", defaultTarget)
+		c := builder.For("mockgen").WithTarget(defaultTarget)
 
 		s := &emit.Struct{Name: "Repo"}
 		if err := c.AppendMethod(s, &emit.Method{Name: "Get"}); err != nil {
@@ -107,7 +107,7 @@ func TestAppendMethod(t *testing.T) {
 
 	t.Run("unsupported host kind returns ErrUnsupportedHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("mockgen", defaultTarget)
+		c := builder.For("mockgen").WithTarget(defaultTarget)
 		err := c.AppendMethod(&emit.Function{Name: "F"}, &emit.Method{Name: "M"})
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
@@ -122,7 +122,7 @@ func TestAppendVariant(t *testing.T) {
 
 	t.Run("appends variant with Owner and Provenance wired", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("statusgen", defaultTarget)
+		c := builder.For("statusgen").WithTarget(defaultTarget)
 		e := &emit.Enum{Name: "State"}
 		err := c.AppendVariant(e, &emit.EnumVariant{Name: "Pending"})
 		if err != nil {
@@ -142,7 +142,7 @@ func TestAppendVariant(t *testing.T) {
 
 	t.Run("nil host returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("statusgen", defaultTarget)
+		c := builder.For("statusgen").WithTarget(defaultTarget)
 		if err := c.AppendVariant(nil, &emit.EnumVariant{Name: "X"}); !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
 		}
@@ -156,7 +156,7 @@ func TestAppendPrebody(t *testing.T) {
 
 	t.Run("appends Stmt on Function and Method", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("metricsgen", defaultTarget)
+		c := builder.For("metricsgen").WithTarget(defaultTarget)
 		stmt := emit.NewRawStmt(`start := time.Now()`)
 
 		f := &emit.Function{Name: "F"}
@@ -178,7 +178,7 @@ func TestAppendPrebody(t *testing.T) {
 
 	t.Run("unsupported host returns ErrUnsupportedHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("metricsgen", defaultTarget)
+		c := builder.For("metricsgen").WithTarget(defaultTarget)
 		err := c.AppendPrebody(&emit.Struct{Name: "S"}, emit.NewRawStmt(""))
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
@@ -193,7 +193,7 @@ func TestAppendFileSlots(t *testing.T) {
 
 	t.Run("Top / Bottom / Init / Import each carry SetBy", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("audit", defaultTarget)
+		c := builder.For("audit").WithTarget(defaultTarget)
 		file := &emit.File{Name: "users.go", Package: "users", Dir: "users"}
 
 		topDecl := &emit.Constant{Name: "K"}
@@ -228,7 +228,7 @@ func TestAppendFileSlots(t *testing.T) {
 
 	t.Run("nil file returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("audit", defaultTarget)
+		c := builder.For("audit").WithTarget(defaultTarget)
 		if err := c.AppendInit(nil, emit.NewRawStmt("")); !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
 		}
@@ -243,7 +243,7 @@ func TestAppendEmbed_AcceptedHosts(t *testing.T) {
 
 	t.Run("appends Embed on Struct and Interface; Owner wired", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("audit", defaultTarget)
+		c := builder.For("audit").WithTarget(defaultTarget)
 		s := &emit.Struct{Name: "S"}
 		if err := c.AppendEmbed(s, &emit.Embed{Type: emit.Builtin("Reader")}); err != nil {
 			t.Fatalf("AppendEmbed(struct) = %v", err)
@@ -263,7 +263,7 @@ func TestAppendEmbed_AcceptedHosts(t *testing.T) {
 
 	t.Run("unsupported host returns ErrUnsupportedHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("audit", defaultTarget)
+		c := builder.For("audit").WithTarget(defaultTarget)
 		err := c.AppendEmbed(&emit.Function{Name: "F"}, &emit.Embed{})
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
@@ -272,7 +272,7 @@ func TestAppendEmbed_AcceptedHosts(t *testing.T) {
 
 	t.Run("nil host returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("audit", defaultTarget)
+		c := builder.For("audit").WithTarget(defaultTarget)
 		if err := c.AppendEmbed(nil, &emit.Embed{}); !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
 		}
@@ -287,7 +287,7 @@ func TestAppendParamAndPostbody(t *testing.T) {
 
 	t.Run("AppendParam wires Owner on Function and Method", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("auth", defaultTarget)
+		c := builder.For("auth").WithTarget(defaultTarget)
 		f := &emit.Function{Name: "F"}
 		p := &emit.Param{Name: "ctx", Type: emit.External("context", "Context")}
 		if err := c.AppendParam(f, p); err != nil {
@@ -308,7 +308,7 @@ func TestAppendParamAndPostbody(t *testing.T) {
 
 	t.Run("AppendParam rejects unsupported host", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("auth", defaultTarget)
+		c := builder.For("auth").WithTarget(defaultTarget)
 		if err := c.AppendParam(&emit.Struct{}, &emit.Param{}); !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
 		}
@@ -316,7 +316,7 @@ func TestAppendParamAndPostbody(t *testing.T) {
 
 	t.Run("AppendPostbody appends Stmt on Function and Method", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("metricsgen", defaultTarget)
+		c := builder.For("metricsgen").WithTarget(defaultTarget)
 		stmt := emit.NewRawStmt(`metrics.Report()`)
 		f := &emit.Function{Name: "F"}
 		if err := c.AppendPostbody(f, stmt); err != nil {
@@ -336,7 +336,7 @@ func TestAppendParamAndPostbody(t *testing.T) {
 
 	t.Run("AppendPostbody rejects unsupported host", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("metricsgen", defaultTarget)
+		c := builder.For("metricsgen").WithTarget(defaultTarget)
 		if err := c.AppendPostbody(&emit.Struct{}, emit.NewRawStmt("")); !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
 		}
@@ -350,7 +350,7 @@ func TestAppendParamAndPostbody(t *testing.T) {
 func TestSlotHelpers_NilHostGuards(t *testing.T) {
 	t.Parallel()
 
-	c := builder.For("test", defaultTarget)
+	c := builder.For("test").WithTarget(defaultTarget)
 	cases := []struct {
 		name string
 		fn   func() error
@@ -378,7 +378,7 @@ func TestAppendFileSlots_NilGuards(t *testing.T) {
 
 	t.Run("nil file returns ErrNilHost for Top/Bottom/Import", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("audit", defaultTarget)
+		c := builder.For("audit").WithTarget(defaultTarget)
 		if err := c.AppendTop(nil, &emit.Constant{}); !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("AppendTop: expected ErrNilHost; got %v", err)
 		}
@@ -398,7 +398,7 @@ func TestAppendReturn(t *testing.T) {
 
 	t.Run("appends *emit.Return on Function and Method", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("errgen", defaultTarget)
+		c := builder.For("errgen").WithTarget(defaultTarget)
 
 		f := &emit.Function{Name: "Op"}
 		if err := c.AppendReturn(f, &emit.Return{Type: emit.Builtin("error")}); err != nil {
@@ -419,7 +419,7 @@ func TestAppendReturn(t *testing.T) {
 
 	t.Run("stamps Provenance.SetBy and optional ID", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("errgen", defaultTarget)
+		c := builder.For("errgen").WithTarget(defaultTarget)
 		f := &emit.Function{Name: "Op"}
 		if err := c.AppendReturn(f, &emit.Return{Type: emit.Builtin("error")}, "errgen/error"); err != nil {
 			t.Fatalf("AppendReturn returned %v", err)
@@ -432,7 +432,7 @@ func TestAppendReturn(t *testing.T) {
 
 	t.Run("nil host returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("errgen", defaultTarget)
+		c := builder.For("errgen").WithTarget(defaultTarget)
 		if err := c.AppendReturn(nil, &emit.Return{}); !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
 		}
@@ -440,7 +440,7 @@ func TestAppendReturn(t *testing.T) {
 
 	t.Run("unsupported host returns ErrUnsupportedHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("errgen", defaultTarget)
+		c := builder.For("errgen").WithTarget(defaultTarget)
 		err := c.AppendReturn(&emit.Struct{Name: "S"}, &emit.Return{Type: emit.Builtin("error")})
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
@@ -456,7 +456,7 @@ func TestAppendTag(t *testing.T) {
 
 	t.Run("appends Tag to the field's tags slot with SetBy", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("jsongen", defaultTarget)
+		c := builder.For("jsongen").WithTarget(defaultTarget)
 		f := &emit.Field{Name: "Email", Type: emit.Builtin("string")}
 		if err := c.AppendTag(f, &emit.Tag{Key: "json", Value: "email,omitempty"}); err != nil {
 			t.Fatalf("AppendTag = %v", err)
@@ -471,7 +471,7 @@ func TestAppendTag(t *testing.T) {
 
 	t.Run("nil host returns ErrNilHost", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("jsongen", defaultTarget)
+		c := builder.For("jsongen").WithTarget(defaultTarget)
 		if err := c.AppendTag(nil, &emit.Tag{Key: "json"}); !errors.Is(err, builder.ErrNilHost) {
 			t.Fatalf("expected ErrNilHost; got %v", err)
 		}

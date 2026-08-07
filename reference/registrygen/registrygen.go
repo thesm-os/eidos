@@ -249,7 +249,7 @@ var _ sdk.EmitNode = (*Registration)(nil)
 // each contribution's origin to a rendered file downstream;
 // the plugin itself sets no Target.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for s := range ctx.Reader.Structs().All() {
 		if !s.HasPositiveDirective(DirectiveName) {
 			continue

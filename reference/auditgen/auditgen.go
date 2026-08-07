@@ -115,7 +115,7 @@ func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 // A run without handlergen finds no handlers and emits nothing: no
 // orphan file, no partial output, no configuration needed to say so.
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for _, pending := range ctx.Store.Emit().PendingOriginSlots() {
 		host, ok := pending.Item.(*handlergen.Handler)
 		if !ok {

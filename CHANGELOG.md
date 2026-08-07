@@ -38,6 +38,27 @@ omitted unless they change what a caller can rely on.
   Migration: for the fresh-slice check, return `slices.Clone(...)` from the
   accessor. For the others, the failure message names the specific rule.
 
+- **`emit/builder.For` no longer takes a target.** The variadic `emit.Target`
+  argument was documented as a test-fixture escape hatch, and no production
+  caller ever passed a non-zero value — all twenty call sites across this
+  repository and the reference plugins passed `emit.Target{}`. Tests that
+  pre-stamp a target use `Context.WithTarget`, which is unchanged.
+
+  Migration: drop the second argument. `sdk.NewProvenance(Name)` likewise.
+
+- **`store.EmitView` gained `AppendOrigin` and `AppendOriginAs`, and `emit`
+  gained `PrimaryPackage`.** Every generator ends the same way — build one
+  value per output, stamp it, queue it against its origin so Layout can route
+  it — and each writing that out again is how the copies drift.
+
+  `PrimaryPackage` folds the two ways
+  `emit.OutputPackageSetter.SetOutputPackages` says "no answer": the primary
+  tag may be absent from a partial map, or present but empty because
+  centralised routing could not derive an import path. Both mean the same to a
+  caller, and folding them stops each implementor reasoning it out again.
+
+  `emit/builder` keeps `Base` and `Tagged`, which need no store.
+
 - **`node`: interface method sets resolve through embeds.** `node.MethodSet`
   walks an interface's embedded interfaces transitively;
   `store.Reader.MethodSet` supplies a resolver over the loaded graph.

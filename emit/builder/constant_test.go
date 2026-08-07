@@ -19,7 +19,7 @@ func TestConstantBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs / Directive / Target / Origin thread through", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		other := otherTarget()
 		d := fixtureDirective()
 		pos := fixturePos()

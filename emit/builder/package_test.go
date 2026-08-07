@@ -22,7 +22,7 @@ func TestPackageBuilder_AllDeclKindsLand(t *testing.T) {
 
 	t.Run("each decl method appends one entity to the package", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		pkg, err := c.Package("users", "example.com/users").
 			Struct("S", nil).
 			Interface("I", nil).
@@ -71,7 +71,7 @@ func TestPackageBuilder_AllDeclKindsLand(t *testing.T) {
 
 	t.Run("decls inherit the context target", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		pkg, err := c.Package("users", "example.com/users").
 			Struct("S", nil).
 			Function("F", nil).
@@ -95,7 +95,7 @@ func TestPackageBuilder_DocsAndNode(t *testing.T) {
 
 	t.Run("Docs appends lines on the underlying package", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		pkg, err := c.Package("p", "p").Docs("package docs").Build()
 		if err != nil {
 			t.Fatalf("Build returned %v", err)
@@ -107,7 +107,7 @@ func TestPackageBuilder_DocsAndNode(t *testing.T) {
 
 	t.Run("Node returns the underlying *emit.Package", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		b := c.Package("p", "p")
 		if b.Node() == nil {
 			t.Fatalf("Node returned nil")
@@ -116,7 +116,7 @@ func TestPackageBuilder_DocsAndNode(t *testing.T) {
 
 	t.Run("Err mirrors Build's error component", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		// A clean Package returns no error.
 		b := c.Package("p", "p")
 		if got := b.Err(); got != nil {
@@ -136,7 +136,7 @@ func TestPackageBuilder_File(t *testing.T) {
 
 	t.Run("decls built through File(tag) stamp OutputTag = tag", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		pkg, err := c.Package("p", "example.com/p").
 			Struct("Production", nil).
 			File("test").Struct("Helper", nil).
@@ -154,7 +154,7 @@ func TestPackageBuilder_File(t *testing.T) {
 
 	t.Run("File(tag) shares the underlying emit.Package with the parent", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		root := c.Package("p", "example.com/p")
 		sub := root.File("test")
 		if root.Node() != sub.Node() {
@@ -164,7 +164,7 @@ func TestPackageBuilder_File(t *testing.T) {
 
 	t.Run("File(\"\") is the identity form (returns the parent unchanged)", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		root := c.Package("p", "example.com/p")
 		if root.File("") != root {
 			t.Fatalf("File(\"\") should return the same *PackageBuilder; got a distinct pointer")
@@ -173,7 +173,7 @@ func TestPackageBuilder_File(t *testing.T) {
 
 	t.Run("File(tag) is memoised — same tag returns the same sub-context", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		root := c.Package("p", "example.com/p")
 		first := root.File("test")
 		second := root.File("test")
@@ -184,7 +184,7 @@ func TestPackageBuilder_File(t *testing.T) {
 
 	t.Run("nested File call overwrites the tag (not composed)", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		root := c.Package("p", "example.com/p")
 		nested := root.File("a").File("b")
 		// The sub-context for "b" should equal the sub-context
@@ -198,7 +198,7 @@ func TestPackageBuilder_File(t *testing.T) {
 
 	t.Run("decls built through nested File chain stamp the outer tag", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		pkg, err := c.Package("p", "example.com/p").
 			File("a").File("b").Struct("B", nil).
 			Build()
@@ -257,7 +257,7 @@ func TestPackageBuilder_File(t *testing.T) {
 		// via the package builder's recordErr; that record must
 		// be visible from the root's Build() even when the
 		// violation originated from a sub-context call.
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		_, err := c.Package("p", "example.com/p").
 			File("test").Alias("A", emit.Builtin("int"), func(ab *builder.AliasBuilder) {
 			ab.Method("Bad", nil)

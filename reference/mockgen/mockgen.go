@@ -204,7 +204,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		if !ok {
 			continue
 		}
-		c := builder.For(Name, emit.Target{})
+		c := builder.For(Name)
 		pkg := c.Package(srcPkg.Name+TestPackageSuffix, srcPkg.Path+TestPackageSuffix)
 		for _, si := range srcGroups[path] {
 			// Resolved rather than declared: a mock built from the
@@ -227,7 +227,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	emitGroups, emitOrder := groupEmitInterfaces(ctx)
 	for _, key := range emitOrder {
 		group := emitGroups[key]
-		c := builder.For(Name, emit.Target{})
+		c := builder.For(Name)
 		pkg := c.Package(group.pkgName+TestPackageSuffix, group.pkgPath+TestPackageSuffix)
 		for _, ei := range group.items {
 			p.emitForEmitInterface(pkg, ei)

@@ -17,7 +17,7 @@ func TestInterfaceBuilder_MethodsAndEmbeds(t *testing.T) {
 
 	t.Run("methods and embeds carry interface Owner", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var i *emit.Interface
 		c.Package("io", "example.com/io").
 			Interface("ReadWriter", func(ib *builder.InterfaceBuilder) {
@@ -49,7 +49,7 @@ func TestInterfaceBuilder_Accessors(t *testing.T) {
 	t.Run("Pos / Docs / Directive / Target / TypeParam / Origin thread through; nested Embed accessors",
 		func(t *testing.T) {
 			t.Parallel()
-			c := builder.For("test", defaultTarget)
+			c := builder.For("test").WithTarget(defaultTarget)
 			other := otherTarget()
 			d := fixtureDirective()
 			pos := fixturePos()

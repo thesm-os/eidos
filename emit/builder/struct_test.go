@@ -18,7 +18,7 @@ func TestStructBuilder_NestedShape(t *testing.T) {
 
 	t.Run("Field / Method / Embed / TypeParam wire Owner back-pointers", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("repogen", defaultTarget)
+		c := builder.For("repogen").WithTarget(defaultTarget)
 		var s *emit.Struct
 		c.Package("users", "example.com/users").
 			Struct("User", func(sb *builder.StructBuilder) {
@@ -69,7 +69,7 @@ func TestStructBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs / Directive / Target / TypeParam / Origin thread through", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		other := otherTarget()
 		d := fixtureDirective()
 		pos := fixturePos()

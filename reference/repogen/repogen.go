@@ -185,7 +185,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		if !ok {
 			continue
 		}
-		c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+		c := sdk.NewProvenance(Name)
 		pkg := c.Package(srcPkg.Name, srcPkg.Path)
 		for _, s := range groups[path] {
 			p.emitOne(pkg, s, emit.External(s.Package, s.Name))

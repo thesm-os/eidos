@@ -18,7 +18,7 @@ func TestImportBuilder_Accessors(t *testing.T) {
 
 	t.Run("Pos / Docs / Directive / Alias / Node thread through", func(t *testing.T) {
 		t.Parallel()
-		c := builder.For("test", defaultTarget)
+		c := builder.For("test").WithTarget(defaultTarget)
 		d := fixtureDirective()
 		pos := fixturePos()
 		var node *emit.Import

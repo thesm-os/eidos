@@ -297,7 +297,7 @@ func (t *Tests) SetOutputPackages(byTag map[string]string) {
 // diagnostic — a double with no behaviour to stand in for is
 // certainly a mistake, and emitting an empty struct would hide it.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
-	c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+	c := sdk.NewProvenance(Name)
 	for iface := range ctx.Reader.Interfaces().All() {
 		if !iface.HasPositiveDirective(DirectiveName) {
 			continue
