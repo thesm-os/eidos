@@ -123,6 +123,11 @@ const (
 // without importing go/types.
 const errorTypeName = "error"
 
+// nilLiteral is the zero spelling [buildFieldData] refuses.
+// Named rather than inlined because the refusal is a rule
+// about Go's untyped nil, not about the three characters.
+const nilLiteral = "nil"
+
 // PrefixKey is the directive keyword that pins (or kills)
 // the message prefix every sentinel's `.Error()` is
 // asserted to start with. Resolved per-package in
@@ -255,6 +260,10 @@ type Sentinel struct {
 // substring the format-string assertion looks for. IsError
 // is true when the field's type is the builtin `error`
 // interface.
+//
+// Only fields the rendered tests can actually exercise
+// reach this form — see [buildFieldData] for what is
+// dropped and why.
 type Field struct {
 	Name             string
 	TypeStr          string
@@ -455,7 +464,10 @@ func collectErrorTypes(pkg *node.Package) []ErrorType {
 			if !isExported(f.Name) {
 				continue
 			}
-			fd := buildFieldData(f)
+			fd, exercisable := buildFieldData(f)
+			if !exercisable {
+				continue
+			}
 			et.Fields = append(et.Fields, fd)
 			if fd.IsError && et.HasUnwrap && et.UnwrapField == "" {
 				et.UnwrapField = fd.Name
@@ -478,12 +490,24 @@ func collectErrorTypes(pkg *node.Package) []ErrorType {
 }
 
 // buildFieldData picks the rendered sample value and
-// format-check substring for one struct field based on its
-// type. Supported types: string, int, error. Unsupported
-// types still participate in the errors.As round-trip via
-// their zero value but contribute no format-check
-// substring.
-func buildFieldData(f *node.Field) Field {
+// format-check substring for one struct field, and reports
+// whether the rendered tests can exercise the field at all.
+//
+// string, int and error get a distinctive sample the format
+// assertion can also look for. Everything else falls back to
+// the type's zero literal, which the rendered test uses in
+// two positions Go constrains further than a composite
+// literal does: `want<F> := <sample>` needs a value with a
+// default type, and `target.<F> != want<F>` needs a
+// comparable one. The nil keyword satisfies neither — it has
+// no default type — so a field whose only derivable zero is
+// nil is dropped rather than rendered into a test that does
+// not compile.
+//
+// A dropped field costs one assertion. Rendering it costs
+// the whole file: the failure lands in the consumer's build
+// of generated code, which is the last place an author looks.
+func buildFieldData(f *node.Field) (Field, bool) {
 	fd := Field{Name: f.Name}
 	if f.Type != nil {
 		fd.TypeStr = f.Type.Name
@@ -501,12 +525,17 @@ func buildFieldData(f *node.Field) Field {
 		fd.SampleValue = "42"
 		fd.FormatCheckValue = "42"
 	default:
-		// Unsupported field type: pass the type's zero
-		// literal so errors.As still round-trips, but skip
-		// the format check (FormatCheckValue stays empty).
-		fd.SampleValue = zeroLiteralFor(fd.TypeStr)
+		// Read through the shared vocabulary rather than a
+		// private table: a partial copy answered "nil" for the
+		// widths it omitted, which is how `Code: nil` reached an
+		// int8 field.
+		zero, derivable := golang.ZeroLiteral(f.Type)
+		if !derivable || zero == nilLiteral {
+			return Field{}, false
+		}
+		fd.SampleValue = zero
 	}
-	return fd
+	return fd, true
 }
 
 // applyExternalRefs stamps [sdk.NewExternal] expressions
@@ -576,35 +605,45 @@ func hasMethod(s *node.Struct, name string, sigOK func(*node.Method) bool) bool 
 	return false
 }
 
+// returnsOnly reports whether m's single return slot is the
+// named builtin.
+//
+// The slot's type is what is asked, never the slot's binding
+// name. [node.Return] carries both, and the binding name is
+// empty for the anonymous form every `Error() string` in the
+// wild is written in — so reading it classifies no method as
+// anything.
+func returnsOnly(m *node.Method, typeName string) bool {
+	if len(m.Returns) != 1 || m.Returns[0] == nil {
+		return false
+	}
+	t := m.Returns[0].Type
+	return t != nil && t.Name == typeName && t.Package == ""
+}
+
 // returnsStringOnly reports whether m's signature is
 // `() string`.
 func returnsStringOnly(m *node.Method) bool {
-	if len(m.Params) != 0 || len(m.Returns) != 1 {
-		return false
-	}
-	return m.Returns[0] != nil && m.Returns[0].Name == "string"
+	return len(m.Params) == 0 && returnsOnly(m, "string")
 }
 
 // returnsErrorOnly reports whether m's signature is
 // `() error`.
 func returnsErrorOnly(m *node.Method) bool {
-	if len(m.Params) != 0 || len(m.Returns) != 1 {
-		return false
-	}
-	return m.Returns[0] != nil && m.Returns[0].Name == errorTypeName
+	return len(m.Params) == 0 && returnsOnly(m, errorTypeName)
 }
 
 // isErrorBoolSignature reports whether m's signature is
 // `(error) bool` — the standard `Is(error) bool` shape
 // [errors.Is] consults.
 func isErrorBoolSignature(m *node.Method) bool {
-	if len(m.Params) != 1 || len(m.Returns) != 1 {
+	if len(m.Params) != 1 {
 		return false
 	}
 	if m.Params[0].Type == nil || m.Params[0].Type.Name != errorTypeName {
 		return false
 	}
-	return m.Returns[0] != nil && m.Returns[0].Name == "bool"
+	return returnsOnly(m, "bool")
 }
 
 // isExported reports whether name follows Go's
@@ -661,27 +700,6 @@ func resolvePrefix(pkg *node.Package) (prefix string, emit bool) {
 		return "", false
 	}
 	return value, true
-}
-
-// zeroLiteralFor returns a Go zero-literal for the named
-// type. Used by [buildFieldData] when the field's type
-// isn't one of the explicitly-recognised shapes; the
-// rendered test still constructs the struct, just without
-// a meaningful sample value or format-check substring for
-// this field.
-func zeroLiteralFor(typeStr string) string {
-	switch typeStr {
-	case "bool":
-		return "false"
-	case "float32", "float64":
-		return "0"
-	case "byte", "rune", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr":
-		return "0"
-	default:
-		// Pointer / slice / map / chan / interface zero is
-		// nil.
-		return "nil"
-	}
 }
 
 // ErrUnused is documented for symmetry with the other
