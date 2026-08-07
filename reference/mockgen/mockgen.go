@@ -36,7 +36,6 @@ package mockgen
 
 import (
 	"errors"
-	"strconv"
 
 	"go.thesmos.sh/eidos/core/opt"
 	"go.thesmos.sh/eidos/emit"
@@ -531,14 +530,16 @@ func funcRefFor(s methodSig) emit.Ref {
 	return emit.FuncOf(params, s.returns)
 }
 
-// paramName returns the in-method identifier for parameter index i:
-// the source name when non-empty, or `arg<N>` when the source name
-// is empty so the dispatch body can reference the parameter.
+// paramName returns the in-method identifier for parameter index i.
+//
+// The rule — declared name where there is one, positional fallback
+// otherwise, keyword adjustment on top — is Go's and lives in
+// [refconv.ParamIdent]. The wrapper exists because [methodSig]
+// lowers both an emit-side and a source-side parameter list onto a
+// name-and-type pair, so there is no [node.Param] left to hand over
+// by the time the identifier is needed.
 func paramName(name string, i int) string {
-	if name != "" {
-		return name
-	}
-	return "arg" + strconv.Itoa(i)
+	return refconv.ParamIdent(&node.Param{Name: name}, i)
 }
 
 // dispatchBody returns the statement list for one Mock method's

@@ -13,21 +13,20 @@ import (
 
 // paramsOf lifts a method's parameters into rendered form.
 //
-// A parameter with no declared name gets a positional identifier so
-// the generated body can reference it when recording the call — the
-// same `arg<N>` fallback mockgen uses. The recorded-call field name
-// is the exported form of whichever identifier ends up in use.
+// Naming runs through [refconv.ParamIdents] rather than a local
+// fallback: the positional rule, the keyword adjustment, and the
+// uniqueness pass are Go's, not this generator's, and three
+// generators here had each written their own slice of them. The
+// recorded-call field name is the exported form of whichever
+// identifier ends up in use.
 func paramsOf(m *node.Method) []Param {
+	idents := refconv.ParamIdents(m.Params)
 	out := make([]Param, 0, len(m.Params))
 	for i, p := range m.Params {
-		name := p.Name
-		if name == "" {
-			name = "arg" + strconv.Itoa(i)
-		}
 		out = append(out, Param{
-			Name:  name,
+			Name:  idents[i],
 			Type:  refconv.FromNode(p.Type),
-			Field: naming.Pascal(name),
+			Field: naming.Pascal(idents[i]),
 		})
 	}
 	return out
@@ -60,43 +59,16 @@ func returnsOf(m *node.Method) []Return {
 // namedReturnsUsable reports whether the generated method may carry
 // the source's return names on its own signature.
 //
-// Propagation is all-or-nothing for two independent reasons, either
-// of which forces the unnamed form:
-//
-//   - Go requires a signature's results to be all named or all
-//     anonymous, and the emit layer enforces it — a mixed slice
-//     fails the render with [emit.ErrMixedNamedReturns]. A source
-//     signature reaches that state legitimately: `(_ User, err
-//     error)` is valid Go, and the blank identifier normalises to
-//     unnamed, so the model holds one named and one unnamed slot.
-//   - A return name that collides with the receiver identifier or
-//     with a parameter name does not compile. Renaming around it
-//     would break the correspondence the names exist to carry, so
-//     the whole signature drops back to anonymous results.
+// The rule itself is Go's and lives in [refconv.NamedReturnsUsable];
+// what this generator supplies is the occupied scope — its receiver
+// identifier plus the parameter identifiers it just chose, which is
+// knowledge no shared helper has.
 //
 // Falling back costs documentation on the generated signature and
 // nothing else; the recorded-call struct keeps its field names.
 func namedReturnsUsable(m *node.Method) bool {
-	if len(m.Returns) == 0 {
-		return false
-	}
-	taken := map[string]struct{}{receiverIdent: {}}
-	for i, p := range m.Params {
-		name := p.Name
-		if name == "" {
-			name = "arg" + strconv.Itoa(i)
-		}
-		taken[name] = struct{}{}
-	}
-	for _, r := range m.Returns {
-		if r.Name == "" {
-			return false
-		}
-		if _, clash := taken[r.Name]; clash {
-			return false
-		}
-	}
-	return true
+	taken := append([]string{receiverIdent}, refconv.ParamIdents(m.Params)...)
+	return refconv.NamedReturnsUsable(m.Returns, taken...)
 }
 
 // receiverIdent is the identifier the generated methods bind their
