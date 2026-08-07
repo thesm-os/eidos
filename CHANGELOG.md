@@ -13,55 +13,17 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+At v1.9.0 `lang/golang` was three files — `doc.go`, `golang.go`, `refconv.go` —
+exporting fourteen symbols, every one of which is still present and unchanged.
+Everything this release adds to that package is therefore new, not altered:
+upgrading from v1.9.0 requires no change to code that compiled against it.
+
+Some of those additions changed shape more than once before release. Those
+migrations matter only to a consumer who tracked `main` between tags, and are
+collected under *Migrating from an intermediate commit* at the end rather than
+listed as breaking changes nobody upgrading from a release can hit.
+
 ### Breaking
-
-- **`lang/golang`: `ComparableDeep` reports which type it could not reach.** The
-  second result changes from a `known bool` to `[]UnresolvedType`, and the
-  `EmbedProblem` vocabulary is renamed `ResolveProblem` — shared now by the
-  embed walks and the type walk, because the reasons are the same three facts
-  about the run whatever is being resolved. Its constants lose their `Embed`
-  prefix: `EmbedNotLoaded` becomes `NotLoaded`, `EmbedNoResolver` becomes
-  `NoResolver`, `EmbedTooDeep` becomes `TooDeep`, and `EmbedGeneric` becomes
-  `GenericEmbed`.
-
-  A caller that could only say "comparability is undetermined" left the author
-  to work out which of a struct's twelve fields was the problem. Every
-  unreachable field is now collected rather than only the first, because the
-  author has to make all of them reachable and reporting one per run turns that
-  into as many runs as there are fields.
-
-  Migration: `if !known` becomes `if len(problems) != 0`.
-
-- **`lang/golang`: the embed walks report which embeds failed, not whether any
-  did.** `FieldSet`, `PromotedFields`, `ExportedFieldSet` and `PromotedMethods`
-  return `[]UnresolvedEmbed` in place of their `bool` second result. The bool
-  said an answer was partial and erased which embed was missing and why, so a
-  caller could report only that something was wrong. Each entry now names the
-  embedding declaration, the embed as the author spelled it, its source
-  position, and one of `EmbedNoResolver`, `EmbedNotLoaded`, `EmbedGeneric` or
-  `EmbedTooDeep`.
-
-  Severity stays the caller's: a generator that must not emit a partial double
-  treats `EmbedNotLoaded` as an error, and one filling a documentation table
-  treats the same thing as a footnote.
-
-  Migration: `if !complete` becomes `if len(problems) != 0`.
-
-  Two behaviour changes ride along. A **generic embed is now refused rather
-  than promoted** — `Base[T]`'s members are typed in that declaration's type
-  parameters, so copying them across produced output naming identifiers not in
-  scope; the embed itself stays reachable by its own name and the refusal is
-  reported as `EmbedGeneric`. And `PromotedMethods` **applies Go's promotion
-  rules in full**: it now recurses instead of stopping at the first level, two
-  methods reachable at equal depth cancel rather than the first one winning,
-  and an embedded interface contributes its *flattened* set — so a struct
-  embedding `io.ReadCloser` has `Read` and `Close`, where before it had
-  neither, because `ReadCloser` declares no methods of its own.
-
-  `PromotedMethod` gained `Depth` and `Path` and replaced the `Through` field
-  with a `Through()` method returning the first hop, so the same fact has one
-  home. `Selector()` renders the explicit path a call needs when promotion
-  cancelled.
 
 - **`eidostest/plugintest`: `RunSuite` gained checks that existing plugins can
   fail.** This is the intended effect — each new check catches a defect class
@@ -533,22 +495,6 @@ omitted unless they change what a caller can rely on.
 
 ### Changed
 
-- **`lang/golang` predicates now answer as a union: the `go.*` stamp where a
-  frontend supplied one, the Go spelling otherwise.** `IsError` and
-  `IsContext` previously read the stamp alone, which is false on every graph
-  no Go frontend produced — a test fixture, a bridge from another source
-  language, a generator's own synthesised node. A generator asking which
-  return slot carries the error found none.
-
-  The spelling half is gated on `node.TypeRef.IsBuiltin`, so a qualified
-  `mypkg.error` cannot match. What remains is a type declared in the package
-  under generation and named `error`, which shadows the predeclared identifier;
-  every Go classifier in this repository already accepts the same risk.
-
-  Migration: none for a pipeline with a Go frontend. A consumer relying on the
-  narrower answer — asserting that an unstamped `error` reads as *not* the
-  builtin — now sees it recognised.
-
 - **`lang/golang` gained the zero-value and struct-tag spellings.**
   `ZeroLiteral` returns a type's zero as Go source and reports whether one is
   derivable at all — the second result is the point. A generator naming a field
@@ -759,6 +705,76 @@ omitted unless they change what a caller can rely on.
   are diagnostics, not a gate. The scaling cases are the ones worth reading —
   a code generator's risk is superlinear behaviour on a large workspace, not
   throughput.
+
+### Migrating from an intermediate commit
+
+Nothing here affects an upgrade from v1.9.0 — every symbol below arrived after
+that tag. These are the shape changes between untagged commits on `main`, kept
+because anyone who pinned one of them needs them.
+
+- **`lang/golang` predicates now answer as a union: the `go.*` stamp where a
+  frontend supplied one, the Go spelling otherwise.** `IsError` and
+  `IsContext` previously read the stamp alone, which is false on every graph
+  no Go frontend produced — a test fixture, a bridge from another source
+  language, a generator's own synthesised node. A generator asking which
+  return slot carries the error found none.
+
+  The spelling half is gated on `node.TypeRef.IsBuiltin`, so a qualified
+  `mypkg.error` cannot match. What remains is a type declared in the package
+  under generation and named `error`, which shadows the predeclared identifier;
+  every Go classifier in this repository already accepts the same risk.
+
+  Migration: none for a pipeline with a Go frontend. A consumer relying on the
+  narrower answer — asserting that an unstamped `error` reads as *not* the
+  builtin — now sees it recognised.
+
+- **`lang/golang`: the embed walks report which embeds failed, not whether any
+  did.** `FieldSet`, `PromotedFields`, `ExportedFieldSet` and `PromotedMethods`
+  return `[]UnresolvedEmbed` in place of their `bool` second result. The bool
+  said an answer was partial and erased which embed was missing and why, so a
+  caller could report only that something was wrong. Each entry now names the
+  embedding declaration, the embed as the author spelled it, its source
+  position, and one of `EmbedNoResolver`, `EmbedNotLoaded`, `EmbedGeneric` or
+  `EmbedTooDeep`.
+
+  Severity stays the caller's: a generator that must not emit a partial double
+  treats `EmbedNotLoaded` as an error, and one filling a documentation table
+  treats the same thing as a footnote.
+
+  Migration: `if !complete` becomes `if len(problems) != 0`.
+
+  Two behaviour changes ride along. A **generic embed is now refused rather
+  than promoted** — `Base[T]`'s members are typed in that declaration's type
+  parameters, so copying them across produced output naming identifiers not in
+  scope; the embed itself stays reachable by its own name and the refusal is
+  reported as `EmbedGeneric`. And `PromotedMethods` **applies Go's promotion
+  rules in full**: it now recurses instead of stopping at the first level, two
+  methods reachable at equal depth cancel rather than the first one winning,
+  and an embedded interface contributes its *flattened* set — so a struct
+  embedding `io.ReadCloser` has `Read` and `Close`, where before it had
+  neither, because `ReadCloser` declares no methods of its own.
+
+  `PromotedMethod` gained `Depth` and `Path` and replaced the `Through` field
+  with a `Through()` method returning the first hop, so the same fact has one
+  home. `Selector()` renders the explicit path a call needs when promotion
+  cancelled.
+
+- **`lang/golang`: `ComparableDeep` reports which type it could not reach.** The
+  second result changes from a `known bool` to `[]UnresolvedType`, and the
+  `EmbedProblem` vocabulary is renamed `ResolveProblem` — shared now by the
+  embed walks and the type walk, because the reasons are the same three facts
+  about the run whatever is being resolved. Its constants lose their `Embed`
+  prefix: `EmbedNotLoaded` becomes `NotLoaded`, `EmbedNoResolver` becomes
+  `NoResolver`, `EmbedTooDeep` becomes `TooDeep`, and `EmbedGeneric` becomes
+  `GenericEmbed`.
+
+  A caller that could only say "comparability is undetermined" left the author
+  to work out which of a struct's twelve fields was the problem. Every
+  unreachable field is now collected rather than only the first, because the
+  author has to make all of them reachable and reporting one per run turns that
+  into as many runs as there are fields.
+
+  Migration: `if !known` becomes `if len(problems) != 0`.
 
 ### Known limitations
 
