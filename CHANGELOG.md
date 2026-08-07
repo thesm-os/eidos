@@ -38,6 +38,45 @@ omitted unless they change what a caller can rely on.
   Migration: for the fresh-slice check, return `slices.Clone(...)` from the
   accessor. For the others, the failure message names the specific rule.
 
+- **`node`: interface method sets resolve through embeds.** `node.MethodSet`
+  walks an interface's embedded interfaces transitively;
+  `store.Reader.MethodSet` supplies a resolver over the loaded graph.
+
+  Reading `node.Interface.Methods` alone reads what the source typed, not what
+  the interface has, and the difference is invisible until the generated code
+  fails to compile: a double missing an embedded method does not satisfy the
+  interface it doubles, and the compiler reports that against the generated file
+  rather than against the run that produced it. Every generator reading
+  interface methods should move to `MethodSet`.
+
+  An embed that contributes nothing is reported rather than dropped, classified
+  as `ReasonUnresolved` (this run did not load it — legitimate for a narrow
+  run), `ReasonNonInterface`, `ReasonCyclic`, or `ReasonGeneric` (a
+  parameterised embed, refused because the model carries no way to substitute
+  its type arguments through the embedded signatures). `MethodSetResult.OK`
+  reports whether the set is complete; a generator emitting a type that must
+  satisfy the interface checks it.
+
+  Also new: `node.Declares`, `node.MethodByName`, `node.PointerReceiver`,
+  `node.FieldOfType`, `node.EmbedName`, `node.LocalName`,
+  `node.IsExportedName`, `node.IsConstraint`, and `store.Reader.Implementers`.
+
+  `EmbedName` is worth singling out: an embed by pointer carries its name on the
+  pointee, so reading the reference's own name yields the empty string and the
+  field is silently dropped from anything derived from it.
+
+- **`reference/stubgen` and `reference/mockgen` now double embedded methods.**
+  Both read `Interface.Methods` directly, so a stub or mock for an interface
+  embedding another was missing the embedded methods and did not satisfy the
+  interface it doubled — a compile error reported against the generated file
+  rather than the run. `stubgen` additionally rejected an interface composed
+  purely of embeds as "declares no methods".
+
+  Generated output changes for any interface with embeds: the double gains the
+  methods it was missing. An embed this run could not resolve is now reported as
+  a positioned diagnostic naming the embed and why, rather than silently
+  producing a short double.
+
 - **`pipeline.Build` now rejects a plugin that implements part of a
   multi-method optional capability.** A Go interface assertion is
   all-or-nothing, so a plugin declaring two of `plugin.TemplateProvider`'s three
