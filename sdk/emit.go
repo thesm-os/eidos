@@ -120,3 +120,51 @@ type Provenance = emitbuilder.Context
 //
 //nolint:gochecknoglobals // alias re-export of a stable factory.
 var NewProvenance = emitbuilder.For
+
+// EmitBase re-exports [emitbuilder.Base] — the origin node,
+// the plugin that made the value, and the position a
+// diagnostic about it should point at, built as one. A value
+// missing any of the three is one whose failures name the
+// wrong source line, or no line at all.
+//
+//nolint:gochecknoglobals // alias re-export of a stable factory.
+var EmitBase = emitbuilder.Base
+
+// EmitBaseTagged re-exports [emitbuilder.Tagged] — the same
+// base routed to a named output tag, returned by value so a
+// plugin building a primary output and a companion derives
+// the second from the first without disturbing it.
+//
+//nolint:gochecknoglobals // alias re-export of a stable factory.
+var EmitBaseTagged = emitbuilder.Tagged
+
+// EmitAppender is the [emitbuilder.Appender] port
+// [QueueEmit] writes through. `ctx.Store.Emit()` satisfies
+// it, so a plugin never names the type — it exists for the
+// test that substitutes a recording double for it.
+type EmitAppender = emitbuilder.Appender
+
+// QueueEmit re-exports [emitbuilder.Queue] — appends every
+// value to an origin's cross-cutting slot, stamping each with
+// provenance naming its kind and the declaration it came
+// from. The last four lines of every Generate, written once.
+//
+//nolint:gochecknoglobals // alias re-export of a stable factory.
+var QueueEmit = emitbuilder.Queue
+
+// QueueEmitAs re-exports [emitbuilder.QueueAs] — [QueueEmit]
+// for package-scoped output, which has no declaration of its
+// own and so is anchored on one the package happens to
+// contain while being identified by the package it is really
+// about.
+//
+//nolint:gochecknoglobals // alias re-export of a stable factory.
+var QueueEmitAs = emitbuilder.QueueAs
+
+// PrimaryPackage re-exports [emit.PrimaryPackage] — the
+// import path a plugin's primary output routed to, folding
+// the two ways [OutputPackageSetter] says "no answer" into
+// one. Callers implementing SetOutputPackages read it there.
+//
+//nolint:gochecknoglobals // alias re-export of a stable helper.
+var PrimaryPackage = emit.PrimaryPackage
