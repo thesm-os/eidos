@@ -207,7 +207,18 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		c := builder.For(Name, emit.Target{})
 		pkg := c.Package(srcPkg.Name+TestPackageSuffix, srcPkg.Path+TestPackageSuffix)
 		for _, si := range srcGroups[path] {
-			p.emitForSourceInterface(pkg, si, emit.External(si.Package, si.Name))
+			// Resolved rather than declared: a mock built from the
+			// declared methods alone is missing whatever the
+			// interface embeds, and does not satisfy the interface
+			// it mocks.
+			set := ctx.Reader.MethodSet(si)
+			for _, issue := range set.Issues {
+				name, _ := node.EmbedName(issue.Embed)
+				ctx.Diag.Errorf(si.Pos(),
+					"%s: interface %q embeds %q, which %s; the generated mock would be missing its methods",
+					Name, si.QName(), name, issue.Reason)
+			}
+			p.emitForSourceInterface(pkg, si, emit.External(si.Package, si.Name), set.Methods)
 		}
 		if err := buildAndAdd(ctx, pkg); err != nil {
 			return err
@@ -369,9 +380,10 @@ func (p *Plugin) emitForSourceInterface(
 	pkg *builder.PackageBuilder,
 	i *node.Interface,
 	ifaceRef emit.Ref,
+	methods []*node.Method,
 ) {
-	sigs := make([]methodSig, 0, len(i.Methods))
-	for _, m := range i.Methods {
+	sigs := make([]methodSig, 0, len(methods))
+	for _, m := range methods {
 		if m.HasNegatedDirective(DirectiveName) {
 			// Per-method opt-out: the directive on this source
 			// method skips it without affecting other methods on

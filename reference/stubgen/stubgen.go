@@ -302,15 +302,27 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		if !iface.HasPositiveDirective(DirectiveName) {
 			continue
 		}
-		if len(iface.Methods) == 0 {
+		// Resolved rather than declared: an interface composed
+		// purely of embeds declares nothing of its own, and reading
+		// Methods alone both rejects it here and — for a partly
+		// embedding one — emits a stub short the embedded methods,
+		// which does not satisfy the interface it doubles.
+		set := ctx.Reader.MethodSet(iface)
+		for _, issue := range set.Issues {
+			name, _ := node.EmbedName(issue.Embed)
 			ctx.Diag.Errorf(iface.Pos(),
-				"%s: interface %q carries +gen:%s but declares no methods; nothing to double",
+				"%s: interface %q embeds %q, which %s; the generated stub would be missing its methods",
+				Name, iface.QName(), name, issue.Reason)
+		}
+		if len(set.Methods) == 0 {
+			ctx.Diag.Errorf(iface.Pos(),
+				"%s: interface %q carries +gen:%s but has no methods; nothing to double",
 				Name, iface.QName(), DirectiveName)
 			continue
 		}
 
 		typeName := iface.Name + p.suffix()
-		methods := methodsOf(iface)
+		methods := methodsOf(iface.Name, set.Methods)
 
 		stub := &Stub{
 			BaseEmit: sdk.BaseEmit{
@@ -350,17 +362,21 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	return nil
 }
 
-// methodsOf lifts every method on iface into the rendered form both
-// outputs share. Free function rather than a method: the lifting
-// depends only on the source signature, not on plugin options.
-func methodsOf(iface *node.Interface) []Method {
-	out := make([]Method, 0, len(iface.Methods))
-	for _, m := range iface.Methods {
+// methodsOf lifts every method in the resolved set into the
+// rendered form both outputs share. Free function rather than a
+// method: the lifting depends only on the source signature, not on
+// plugin options.
+//
+// Takes the resolved set rather than the interface so an embedded
+// method is doubled like a declared one.
+func methodsOf(ifaceName string, methods []*node.Method) []Method {
+	out := make([]Method, 0, len(methods))
+	for _, m := range methods {
 		params := paramsOf(m)
 		named := namedReturnsUsable(m)
 		out = append(out, Method{
 			Name:         m.Name,
-			CallType:     iface.Name + m.Name + "Call",
+			CallType:     ifaceName + m.Name + "Call",
 			FuncField:    m.Name + "Func",
 			CallsField:   m.Name + "Calls",
 			Params:       params,

@@ -4,6 +4,7 @@
 package stubgen_test
 
 import (
+	"slices"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
@@ -321,6 +322,63 @@ func TestTests_SetOutputPackages(t *testing.T) {
 		tests.SetOutputPackages(map[string]string{"": ""})
 		if got := tests.StubRef.Pkg; got != before {
 			t.Fatalf("StubRef.Pkg = %q, want it unchanged at %q", got, before)
+		}
+	})
+}
+
+// TestGenerate_EmbeddedMethodsAreDoubled pins the resolution a stub
+// depends on to satisfy the interface it doubles.
+//
+// Reading the interface's declared methods alone produced a stub
+// short whatever the interface embedded — which compiles as a
+// standalone type and fails only where a consumer assigns it to the
+// interface, reported against the generated file. An interface
+// composed purely of embeds was worse: it declares nothing of its
+// own, so it was rejected outright as having no methods.
+func TestGenerate_EmbeddedMethodsAreDoubled(t *testing.T) {
+	t.Parallel()
+
+	// embedding builds Reader (declaring Read) plus a stub-annotated
+	// interface embedding it.
+	embedding := func(t *testing.T, declared ...string) *store.Store {
+		t.Helper()
+		b := storefixture.New().
+			Interface("Reader", func(i *storefixture.InterfaceBuilder) {
+				i.Method("Read", nil)
+			})
+		b = b.Interface("ReadCloser", func(i *storefixture.InterfaceBuilder) {
+			i.Directive(storefixture.Directive("stub"))
+			for _, m := range declared {
+				i.Method(m, nil)
+			}
+			i.Embed(storefixture.PkgNamed("example.com/test", "Reader"))
+		})
+		return b.Build()
+	}
+
+	t.Run("an embedded method is doubled alongside a declared one", func(t *testing.T) {
+		t.Parallel()
+		got := generate(t, stubgen.New(), embedding(t, "Close"))
+		if len(got) == 0 {
+			t.Fatalf("annotated interface queued no contribution")
+		}
+		stub, _ := split(t, got)
+		names := make([]string, 0, len(stub.Methods))
+		for _, m := range stub.Methods {
+			names = append(names, m.Name)
+		}
+		for _, want := range []string{"Read", "Close"} {
+			if !slices.Contains(names, want) {
+				t.Errorf("stub methods %v omit %q; a double missing it does not satisfy the interface", names, want)
+			}
+		}
+	})
+
+	t.Run("an interface composed purely of embeds is doubled", func(t *testing.T) {
+		t.Parallel()
+		got := generate(t, stubgen.New(), embedding(t))
+		if len(got) == 0 {
+			t.Fatalf("a purely-embedding interface queued no contribution")
 		}
 	})
 }
