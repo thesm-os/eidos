@@ -46,8 +46,8 @@ func methodNames(ms []golang.InterfaceMethod) []string {
 
 // reasons projects the classification of every unresolved embed, so a
 // test asserts on why a walk stopped rather than only that it did.
-func reasons(problems []golang.UnresolvedEmbed) []golang.EmbedProblem {
-	out := make([]golang.EmbedProblem, len(problems))
+func reasons(problems []golang.UnresolvedEmbed) []golang.ResolveProblem {
+	out := make([]golang.ResolveProblem, len(problems))
 	for i, p := range problems {
 		out[i] = p.Reason
 	}
@@ -224,7 +224,7 @@ func TestFieldSet(t *testing.T) {
 			Embeds: []*node.Embed{embed("x", "Missing", false)},
 		}
 		got, problems := golang.FieldSet(s, mapResolver{})
-		if len(problems) != 1 || problems[0].Reason != golang.EmbedNotLoaded {
+		if len(problems) != 1 || problems[0].Reason != golang.NotLoaded {
 			t.Fatalf("FieldSet problems = %+v, want one not-loaded", problems)
 		}
 		if problems[0].Written != "x.Missing" || problems[0].Host != "x.User" {
@@ -249,7 +249,7 @@ func TestFieldSet(t *testing.T) {
 		s := &node.Struct{Name: "User", Package: "x", Embeds: []*node.Embed{e}}
 
 		got, problems := golang.FieldSet(s, mapResolver{"x.Box": generic})
-		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedGeneric}) {
+		if !slices.Equal(reasons(problems), []golang.ResolveProblem{golang.GenericEmbed}) {
 			t.Fatalf("FieldSet problems = %v, want generic", reasons(problems))
 		}
 		// The embedded field itself stays reachable by its own name.
@@ -287,7 +287,7 @@ func TestFieldSet(t *testing.T) {
 		got, problems := golang.FieldSet(s, nil)
 		// Distinct from not-loaded: the same graph answers in full once
 		// a resolver is passed, so the caller's remedy is different.
-		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNoResolver}) {
+		if !slices.Equal(reasons(problems), []golang.ResolveProblem{golang.NoResolver}) {
 			t.Fatalf("FieldSet problems = %v, want no-resolver", reasons(problems))
 		}
 		if !slices.Equal(names(got), []string{"Name", "Base"}) {
@@ -407,7 +407,7 @@ func TestPromotedMethods(t *testing.T) {
 		t.Parallel()
 		s := &node.Struct{Name: "Wrapper", Embeds: []*node.Embed{embed("io", "Missing", false)}}
 		_, problems := golang.PromotedMethods(s, mapResolver{})
-		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNotLoaded}) {
+		if !slices.Equal(reasons(problems), []golang.ResolveProblem{golang.NotLoaded}) {
 			t.Fatalf("PromotedMethods problems = %v, want not-loaded", reasons(problems))
 		}
 	})
@@ -563,7 +563,7 @@ func TestMethodSet(t *testing.T) {
 			Methods: []*node.Method{{Name: "Save"}},
 		}
 		got, problems := golang.MethodSet(i, r)
-		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNotLoaded}) {
+		if !slices.Equal(reasons(problems), []golang.ResolveProblem{golang.NotLoaded}) {
 			t.Fatalf("MethodSet problems = %v, want not-loaded", reasons(problems))
 		}
 		if !slices.Equal(methodNames(got), []string{"Save"}) {
@@ -579,7 +579,7 @@ func TestMethodSet(t *testing.T) {
 		e.Type.TypeArgs = []*node.TypeRef{builtinRef("int")}
 		i := &node.Interface{Name: "Store", Package: "app", Embeds: []*node.Embed{e}}
 		_, problems := golang.MethodSet(i, r)
-		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedGeneric}) {
+		if !slices.Equal(reasons(problems), []golang.ResolveProblem{golang.GenericEmbed}) {
 			t.Fatalf("MethodSet problems = %v, want generic", reasons(problems))
 		}
 	})
@@ -770,7 +770,7 @@ func TestEmbedEdges(t *testing.T) {
 			}
 		}
 		_, problems := golang.FieldSet(r["x.L0"].(*node.Struct), r)
-		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedTooDeep}) {
+		if !slices.Equal(reasons(problems), []golang.ResolveProblem{golang.TooDeep}) {
 			t.Fatalf("FieldSet problems = %v, want too-deep", reasons(problems))
 		}
 	})
@@ -805,7 +805,7 @@ func TestEmbedEdges(t *testing.T) {
 		t.Parallel()
 		s := &node.Struct{Name: "W", Embeds: []*node.Embed{embed("x", "B", false)}}
 		_, problems := golang.PromotedMethods(s, nil)
-		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNoResolver}) {
+		if !slices.Equal(reasons(problems), []golang.ResolveProblem{golang.NoResolver}) {
 			t.Fatalf("PromotedMethods problems = %v, want no-resolver", reasons(problems))
 		}
 	})

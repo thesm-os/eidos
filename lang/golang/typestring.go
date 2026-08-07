@@ -239,7 +239,8 @@ func parseTypeRef(expr, srcPkg string, depth int) (emit.Ref, error) {
 		return nil, fmt.Errorf(
 			"%w: %q — declare a named type for a function, channel, "+
 				"generic instantiation or anonymous composite and name "+
-				"that instead", ErrBadTypeExpr, expr)
+				"that instead", ErrBadTypeExpr, expr,
+		)
 
 	default:
 		return RefForQualified(expr, srcPkg)

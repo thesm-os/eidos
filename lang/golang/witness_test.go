@@ -163,7 +163,8 @@ func TestSubstituteTypeParams(t *testing.T) {
 	t.Run("rewrites an external's type arguments", func(t *testing.T) {
 		t.Parallel()
 		got := golang.SubstituteTypeParams(
-			emit.External("example.com/x", "Box", emit.Builtin("T")), by)
+			emit.External("example.com/x", "Box", emit.Builtin("T")), by,
+		)
 		e := got.(*emit.ExternalRef)
 		if b, ok := e.TypeArgs[0].(*emit.BuiltinRef); !ok || b.Name != "string" {
 			t.Fatalf("type arg = %#v", e.TypeArgs[0])

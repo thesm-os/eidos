@@ -15,6 +15,23 @@ omitted unless they change what a caller can rely on.
 
 ### Breaking
 
+- **`lang/golang`: `ComparableDeep` reports which type it could not reach.** The
+  second result changes from a `known bool` to `[]UnresolvedType`, and the
+  `EmbedProblem` vocabulary is renamed `ResolveProblem` — shared now by the
+  embed walks and the type walk, because the reasons are the same three facts
+  about the run whatever is being resolved. Its constants lose their `Embed`
+  prefix: `EmbedNotLoaded` becomes `NotLoaded`, `EmbedNoResolver` becomes
+  `NoResolver`, `EmbedTooDeep` becomes `TooDeep`, and `EmbedGeneric` becomes
+  `GenericEmbed`.
+
+  A caller that could only say "comparability is undetermined" left the author
+  to work out which of a struct's twelve fields was the problem. Every
+  unreachable field is now collected rather than only the first, because the
+  author has to make all of them reachable and reporting one per run turns that
+  into as many runs as there are fields.
+
+  Migration: `if !known` becomes `if len(problems) != 0`.
+
 - **`lang/golang`: the embed walks report which embeds failed, not whether any
   did.** `FieldSet`, `PromotedFields`, `ExportedFieldSet` and `PromotedMethods`
   return `[]UnresolvedEmbed` in place of their `bool` second result. The bool
@@ -282,6 +299,62 @@ omitted unless they change what a caller can rely on.
   does not waive the no-Error-severity contract.
 
 ### Added
+
+- **`eidostest/golangtest` asserts on the Go a generator produced.** A set of
+  composable helpers, not a conformance suite — what a generator should emit is
+  that generator's business, and the one universal claim ("it must compile")
+  still needs the hand-written package the output references, which only the
+  fixture author has.
+
+  Three layers, each usable alone:
+
+  - **Is it valid Go?** `AssertCompiles`, `AssertVets`, and
+    `AssertSatisfies(type, iface)`, which compiles `var _ Iface =
+    (*Type)(nil)` beside the output. That last one catches the failures a
+    generated double has that still compile — a dropped variadic marker
+    declares `Print(args string)` where the interface wants `Print(args
+    ...string)`, and a method promoted through an embed can go missing
+    entirely. And `AssertTestsPass`, which compiles *and runs* a generated
+    `_test.go`: a generator whose output is a test suite has that suite as its
+    real contract, and asserting that a `t.Run` of some name exists passes just
+    as well when the check is empty.
+  - **Does it declare what I meant?** `AssertType`, `AssertFunc`,
+    `AssertMethod(...).Signature(...)`, `AssertField`, `AssertEmbeds`,
+    `AssertOrder`, `AssertPointerReceiver`, `AssertDoc`, plus `AssertSubtest` /
+    `AssertNoSubtest` / `AssertParallel` for generated test suites. They exist
+    for their failure messages as much as their subject matter: a missing
+    substring says a substring is missing, while `AssertMethod` says the method
+    exists with a different signature. They are also immune to gofmt's column
+    alignment, which a substring spelling a struct field is not.
+  - **What do consumers depend on?** `API()` and `AssertAPIGolden` render the
+    exported surface — sorted, comment-free, bodies dropped — so a golden over
+    it changes only when a consumer's code would have to. `AssertGolden`
+    normalises the header's `Command:` line, which every generator keeping a
+    byte golden had already written privately and identically.
+
+  Plus `AssertImportsOnly` (a generator's imports are API: one added breaks
+  every consumer whose module lacks it), `AssertGeneratedHeader` (the exact
+  `DO NOT EDIT` line tooling keys on), `AssertDocumented`, `AssertFormatted`,
+  and `WithGoVersion` (a template emitting a later release's syntax raises
+  every consumer's Go floor). `InFunc` / `InMethod` narrow a substring check to
+  one declaration, so "the method that cannot fail has no fault arm" is a
+  question rather than an occurrence count over the whole file.
+
+  Toolchain assertions shell out to `go` — seconds, not milliseconds. Build the
+  module once per fixture and let the structural assertions carry the
+  fine-grained work; a `Generated` caches its built module across assertions.
+
+- **`backend/golang` reports every unrenderable emit kind before rendering
+  starts.** `ErrTemplateMissing` already fired from the render site, but by then
+  the run is midway through a target: it names one kind, on one file, and stops.
+  A plugin that shipped no template at all — a misspelled `define`, a tree
+  rooted one directory too high, a kind renamed on one side only — surfaced as a
+  single confusing failure about whichever declaration sorted first, with every
+  other affected kind invisible until that one was fixed and the run repeated.
+  The whole set is now reported at once, each entry naming the contributing
+  plugin and what to check. Only plugin-defined kinds are checked: the core
+  `emit.` namespace renders its expressions and statements through dedicated
+  funcmap helpers that have no template and never will.
 
 - **`sdk/golang` is the plugin base every Go-generating plugin embeds.** A
   plugin declares six things before it generates anything — name, version,

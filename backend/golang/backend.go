@@ -117,6 +117,12 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 		ps.Errorf(position.Pos{}, "%v", err)
 		return nil
 	}
+	// Checked before anything renders: a kind with no template fails
+	// at its own render site otherwise, which reports one kind on one
+	// file and stops. See [reportUnrenderableKinds].
+	if reportUnrenderableKinds(ctx, ps, merged.tmpl) {
+		return nil
+	}
 	pluginOrder := pluginOrderFrom(ctx)
 	bridgeImports := collectBridgeImports(ctx.Store)
 	selfAliases := collectSelfPackages(ctx.Store)

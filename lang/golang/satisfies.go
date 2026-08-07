@@ -174,30 +174,63 @@ func underlyingOf(t *node.TypeRef, r Resolver, depth int) *node.TypeRef {
 // is, an array when its element is, and slices, maps and functions
 // never are.
 //
-// The second result is false when the walk hit a type the resolver
-// could not reach. A caller must not read the first result then —
-// an unreachable type is not evidence of comparability, and
-// emitting a map keyed on it produces a compile error in the
-// consumer's build.
-func ComparableDeep(t *node.TypeRef, r Resolver) (equalable, known bool) {
-	return comparableDeep(t, r, maxResolveDepth, map[string]struct{}{})
+// A non-empty second result means the walk hit a type it could not
+// reach, and the first must not be read: an unreachable type is not
+// evidence of comparability, and emitting a map keyed on it produces
+// a compile error in the consumer's build.
+//
+// Reported as [UnresolvedType] rather than as a bare `known` flag,
+// for the same reason the embed walks report [UnresolvedEmbed] — a
+// caller that can only say "comparability is undetermined" leaves the
+// author to find which of a struct's twelve fields was the problem.
+func ComparableDeep(t *node.TypeRef, r Resolver) (equalable bool, problems []UnresolvedType) {
+	eq, _, probs := comparableDeep(t, r, maxResolveDepth, map[string]struct{}{})
+	return eq, probs
+}
+
+// UnresolvedType names one type a walk could not reach.
+//
+// The type-side counterpart of [UnresolvedEmbed], sharing its
+// [ResolveProblem] vocabulary because the reasons are the same facts
+// about the run. It carries no host or position: a type reference
+// reached partway down a field walk has no source line of its own
+// that would help, and [UnresolvedType.Written] is what a reader
+// needs to find it.
+type UnresolvedType struct {
+	// Type is the reference the walk stopped at.
+	Type *node.TypeRef
+
+	// Written is the spelling a source author would recognise —
+	// `time.Time` rather than the full import path.
+	Written string
+
+	// Reason classifies the failure.
+	Reason ResolveProblem
+}
+
+// unresolvedType records one type a walk could not reach.
+func unresolvedType(t *node.TypeRef, reason ResolveProblem) UnresolvedType {
+	return UnresolvedType{Type: t, Written: Display(t), Reason: reason}
 }
 
 // comparableDeep is [ComparableDeep] with the recursion budget and
 // the cycle guard threaded through.
 func comparableDeep(
 	t *node.TypeRef, r Resolver, depth int, seen map[string]struct{},
-) (equalable, known bool) {
-	if t == nil || depth <= 0 {
-		return false, false
+) (equalable, known bool, problems []UnresolvedType) {
+	if t == nil {
+		return false, false, []UnresolvedType{unresolvedType(t, NotLoaded)}
+	}
+	if depth <= 0 {
+		return false, false, []UnresolvedType{unresolvedType(t, TooDeep)}
 	}
 	switch {
 	case t.IsSlice(), t.IsMap(), t.IsFunc():
-		return false, true
+		return false, true, nil
 	case t.IsPointer(), IsChannel(t):
 		// A pointer and a channel compare by identity whatever they
 		// point at, so the element is not walked.
-		return true, true
+		return true, true, nil
 	case t.IsArray():
 		return comparableDeep(t.Elem, r, depth-1, seen)
 	case t.IsAnonStruct():
@@ -208,23 +241,23 @@ func comparableDeep(
 		// because the code compiles; a run-time panic is the caller's
 		// to reason about, and refusing would rule out every
 		// interface-keyed map Go admits.
-		return true, true
+		return true, true, nil
 	case t.IsBuiltin(), t.IsTypeParam():
-		return true, true
+		return true, true, nil
 	}
 
 	key := QName(t)
 	if _, looping := seen[key]; looping {
-		return true, true
+		return true, true, nil
 	}
 	seen[key] = struct{}{}
 
 	if r == nil {
-		return false, false
+		return false, false, []UnresolvedType{unresolvedType(t, NoResolver)}
 	}
 	decl, found := r.Resolve(t)
 	if !found {
-		return false, false
+		return false, false, []UnresolvedType{unresolvedType(t, NotLoaded)}
 	}
 	switch v := decl.(type) {
 	case *node.Struct:
@@ -232,11 +265,11 @@ func comparableDeep(
 	case *node.Alias:
 		return comparableDeep(v.Target, r, depth-1, seen)
 	case *node.Interface:
-		return true, true
+		return true, true, nil
 	case *node.Enum:
-		return true, true
+		return true, true, nil
 	default:
-		return false, false
+		return false, false, []UnresolvedType{unresolvedType(t, NotLoaded)}
 	}
 }
 
@@ -247,23 +280,28 @@ func comparableDeep(
 // one unreachable field makes the answer unknown — the first
 // short-circuits, the second does not, because a later field may be
 // definitively uncomparable and that is the stronger answer.
+//
+// Every unreachable field is collected rather than only the first:
+// the author has to make all of them reachable, and reporting one
+// per run turns that into as many runs as there are fields.
 func fieldsComparable(
 	fields []*node.Field, r Resolver, depth int, seen map[string]struct{},
-) (equalable, known bool) {
+) (equalable, known bool, problems []UnresolvedType) {
 	known = true
 	for _, f := range fields {
 		if f == nil {
 			continue
 		}
-		ok, sure := comparableDeep(f.Type, r, depth-1, seen)
+		ok, sure, probs := comparableDeep(f.Type, r, depth-1, seen)
 		if sure && !ok {
-			return false, true
+			return false, true, nil
 		}
 		if !sure {
 			known = false
+			problems = append(problems, probs...)
 		}
 	}
-	return known, known
+	return known, known, problems
 }
 
 // RecommendedReceiver reports whether a type's methods should be

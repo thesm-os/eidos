@@ -4,6 +4,7 @@
 package golang_test
 
 import (
+	"strconv"
 	"testing"
 
 	"go.thesmos.sh/eidos/lang/golang"
@@ -207,9 +208,9 @@ func TestComparableDeep(t *testing.T) {
 			"map":   mapRef(builtinRef("string"), builtinRef("int")),
 			"func":  {TypeKind: node.TypeRefFunc},
 		} {
-			ok, known := golang.ComparableDeep(ref, mapResolver{})
-			if ok || !known {
-				t.Errorf("ComparableDeep(%s) = %v, %v", name, ok, known)
+			ok, problems := golang.ComparableDeep(ref, mapResolver{})
+			if ok || len(problems) != 0 {
+				t.Errorf("ComparableDeep(%s) = %v, %v", name, ok, len(problems) == 0)
 			}
 		}
 	})
@@ -218,8 +219,8 @@ func TestComparableDeep(t *testing.T) {
 		t.Parallel()
 		// Whatever it points at, so the element is not walked.
 		p := &node.TypeRef{TypeKind: node.TypeRefPointer, Elem: sliceRef(builtinRef("int"))}
-		if ok, known := golang.ComparableDeep(p, mapResolver{}); !ok || !known {
-			t.Fatalf("ComparableDeep(pointer) = %v, %v", ok, known)
+		if ok, problems := golang.ComparableDeep(p, mapResolver{}); !ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep(pointer) = %v, %v", ok, len(problems) == 0)
 		}
 	})
 
@@ -230,9 +231,9 @@ func TestComparableDeep(t *testing.T) {
 		bad := &node.Struct{Name: "Bad", Package: "x", Fields: []*node.Field{
 			field("Tags", sliceRef(builtinRef("string"))),
 		}}
-		ok, known := golang.ComparableDeep(namedTypeRef("x", "Bad"), mapResolver{"x.Bad": bad})
-		if ok || !known {
-			t.Fatalf("ComparableDeep = %v, %v; want a definite refusal", ok, known)
+		ok, problems := golang.ComparableDeep(namedTypeRef("x", "Bad"), mapResolver{"x.Bad": bad})
+		if ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep = %v, %v; want a definite refusal", ok, len(problems) == 0)
 		}
 		if !golang.Keyable(namedTypeRef("x", "Bad")) {
 			t.Fatalf("Keyable is expected to be the shallower, permissive answer")
@@ -244,9 +245,12 @@ func TestComparableDeep(t *testing.T) {
 		good := &node.Struct{Name: "Good", Package: "x", Fields: []*node.Field{
 			field("ID", builtinRef("string")), field("N", builtinRef("int")),
 		}}
-		ok, known := golang.ComparableDeep(namedTypeRef("x", "Good"), mapResolver{"x.Good": good})
-		if !ok || !known {
-			t.Fatalf("ComparableDeep = %v, %v", ok, known)
+		ok, problems := golang.ComparableDeep(
+			namedTypeRef("x", "Good"),
+			mapResolver{"x.Good": good},
+		)
+		if !ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep = %v, %v", ok, len(problems) == 0)
 		}
 	})
 
@@ -264,9 +268,9 @@ func TestComparableDeep(t *testing.T) {
 		t.Parallel()
 		// A caller must not read the first result: emitting a map keyed
 		// on it produces a compile error in the consumer's build.
-		ok, known := golang.ComparableDeep(namedTypeRef("x", "Opaque"), mapResolver{})
-		if ok || known {
-			t.Fatalf("ComparableDeep = %v, %v; want unknown", ok, known)
+		ok, problems := golang.ComparableDeep(namedTypeRef("x", "Opaque"), mapResolver{})
+		if ok || len(problems) == 0 {
+			t.Fatalf("ComparableDeep = %v, %v; want unknown", ok, len(problems) == 0)
 		}
 	})
 
@@ -278,9 +282,12 @@ func TestComparableDeep(t *testing.T) {
 			field("Opaque", namedTypeRef("x", "Missing")),
 			field("Tags", sliceRef(builtinRef("string"))),
 		}}
-		ok, known := golang.ComparableDeep(namedTypeRef("x", "Mixed"), mapResolver{"x.Mixed": mixed})
-		if ok || !known {
-			t.Fatalf("ComparableDeep = %v, %v; want a definite refusal", ok, known)
+		ok, problems := golang.ComparableDeep(
+			namedTypeRef("x", "Mixed"),
+			mapResolver{"x.Mixed": mixed},
+		)
+		if ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep = %v, %v; want a definite refusal", ok, len(problems) == 0)
 		}
 	})
 
@@ -288,17 +295,21 @@ func TestComparableDeep(t *testing.T) {
 		t.Parallel()
 		loop := &node.Struct{Name: "Node", Package: "x"}
 		loop.Fields = []*node.Field{
-			field("Next", &node.TypeRef{TypeKind: node.TypeRefPointer, Elem: namedTypeRef("x", "Node")}),
+			field(
+				"Next",
+				&node.TypeRef{TypeKind: node.TypeRefPointer, Elem: namedTypeRef("x", "Node")},
+			),
 		}
-		if _, known := golang.ComparableDeep(namedTypeRef("x", "Node"), mapResolver{"x.Node": loop}); !known {
+		_, problems := golang.ComparableDeep(namedTypeRef("x", "Node"), mapResolver{"x.Node": loop})
+		if len(problems) != 0 {
 			t.Fatalf("a self-referential struct must still resolve")
 		}
 	})
 
 	t.Run("nil is unknown", func(t *testing.T) {
 		t.Parallel()
-		if ok, known := golang.ComparableDeep(nil, mapResolver{}); ok || known {
-			t.Fatalf("ComparableDeep(nil) = %v, %v", ok, known)
+		if ok, problems := golang.ComparableDeep(nil, mapResolver{}); ok || len(problems) == 0 {
+			t.Fatalf("ComparableDeep(nil) = %v, %v", ok, len(problems) == 0)
 		}
 	})
 }
@@ -427,8 +438,8 @@ func TestSatisfiesEdges(t *testing.T) {
 			"interface": namedTypeRef("io", "Reader"),
 			"enum":      namedTypeRef("x", "Status"),
 		} {
-			if ok, known := golang.ComparableDeep(ref, r); !ok || !known {
-				t.Errorf("ComparableDeep(%s) = %v, %v", name, ok, known)
+			if ok, problems := golang.ComparableDeep(ref, r); !ok || len(problems) != 0 {
+				t.Errorf("ComparableDeep(%s) = %v, %v", name, ok, len(problems) == 0)
 			}
 		}
 	})
@@ -446,15 +457,17 @@ func TestSatisfiesEdges(t *testing.T) {
 	t.Run("a non-type declaration is unknown", func(t *testing.T) {
 		t.Parallel()
 		r := mapResolver{"x.F": &node.Function{Name: "F", Package: "x"}}
-		if ok, known := golang.ComparableDeep(namedTypeRef("x", "F"), r); ok || known {
-			t.Fatalf("ComparableDeep = %v, %v; want unknown", ok, known)
+		ok, problems := golang.ComparableDeep(namedTypeRef("x", "F"), r)
+		if ok || len(problems) == 0 {
+			t.Fatalf("ComparableDeep = %v, %d problem(s); want unknown", ok, len(problems))
 		}
 	})
 
 	t.Run("no resolver makes a named type unknown", func(t *testing.T) {
 		t.Parallel()
-		if ok, known := golang.ComparableDeep(namedTypeRef("x", "User"), nil); ok || known {
-			t.Fatalf("ComparableDeep = %v, %v; want unknown", ok, known)
+		ok, problems := golang.ComparableDeep(namedTypeRef("x", "User"), nil)
+		if ok || len(problems) == 0 {
+			t.Fatalf("ComparableDeep = %v, %d problem(s); want unknown", ok, len(problems))
 		}
 	})
 
@@ -463,16 +476,78 @@ func TestSatisfiesEdges(t *testing.T) {
 		st := &node.TypeRef{TypeKind: node.TypeRefAnonStruct, Fields: []*node.Field{
 			nil, field("Tags", sliceRef(builtinRef("string"))),
 		}}
-		if ok, known := golang.ComparableDeep(st, mapResolver{}); ok || !known {
-			t.Fatalf("ComparableDeep = %v, %v; want a definite refusal", ok, known)
+		if ok, problems := golang.ComparableDeep(st, mapResolver{}); ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep = %v, %v; want a definite refusal", ok, len(problems) == 0)
 		}
 	})
 
 	t.Run("a type parameter compares", func(t *testing.T) {
 		t.Parallel()
 		p := &node.TypeRef{TypeKind: node.TypeRefTypeParam, Name: "T"}
-		if ok, known := golang.ComparableDeep(p, mapResolver{}); !ok || !known {
-			t.Fatalf("ComparableDeep(T) = %v, %v", ok, known)
+		if ok, problems := golang.ComparableDeep(p, mapResolver{}); !ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep(T) = %v, %v", ok, len(problems) == 0)
+		}
+	})
+}
+
+func TestComparableDeepReportsWhatItCouldNotReach(t *testing.T) {
+	t.Parallel()
+
+	t.Run("names the type the walk stopped at", func(t *testing.T) {
+		t.Parallel()
+		// A caller that can only say "comparability is undetermined"
+		// leaves the author to find which of a struct's fields was the
+		// problem.
+		_, problems := golang.ComparableDeep(namedTypeRef("time", "Time"), mapResolver{})
+		if len(problems) != 1 || problems[0].Written != "time.Time" {
+			t.Fatalf("problems = %+v, want one naming time.Time", problems)
+		}
+		if problems[0].Reason != golang.NotLoaded {
+			t.Fatalf("reason = %q, want not-loaded", problems[0].Reason)
+		}
+	})
+
+	t.Run("distinguishes a missing resolver from a missing type", func(t *testing.T) {
+		t.Parallel()
+		// The same graph answers in full once a resolver is passed, so
+		// the caller's remedy is different.
+		_, problems := golang.ComparableDeep(namedTypeRef("x", "User"), nil)
+		if len(problems) != 1 || problems[0].Reason != golang.NoResolver {
+			t.Fatalf("problems = %+v, want no-resolver", problems)
+		}
+	})
+
+	t.Run("collects every unreachable field rather than the first", func(t *testing.T) {
+		t.Parallel()
+		// The author has to make all of them reachable; reporting one
+		// per run turns that into as many runs as there are fields.
+		s := &node.Struct{
+			Name: "Mixed", Package: "x",
+			Fields: []*node.Field{
+				{Name: "At", Type: namedTypeRef("time", "Time")},
+				{Name: "D", Type: namedTypeRef("time", "Duration")},
+			},
+		}
+		r := mapResolver{"x.Mixed": s}
+
+		_, problems := golang.ComparableDeep(namedTypeRef("x", "Mixed"), r)
+		if len(problems) != 2 {
+			t.Fatalf("problems = %+v, want one per unreachable field", problems)
+		}
+	})
+
+	t.Run("reports a chain past the budget", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{}
+		for i := range 14 {
+			name, next := "L"+strconv.Itoa(i), "L"+strconv.Itoa(i+1)
+			r["x."+name] = &node.Alias{
+				Name: name, Package: "x", Target: namedTypeRef("x", next),
+			}
+		}
+		_, problems := golang.ComparableDeep(namedTypeRef("x", "L0"), r)
+		if len(problems) != 1 || problems[0].Reason != golang.TooDeep {
+			t.Fatalf("problems = %+v, want too-deep", problems)
 		}
 	})
 }

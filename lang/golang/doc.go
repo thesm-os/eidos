@@ -40,10 +40,15 @@
 //     for an interface's embeds. Each walk returns
 //     []UnresolvedEmbed rather than a bool, because severity is the
 //     caller's policy: a generator that must not emit a partial
-//     double treats [EmbedNotLoaded] as an error, and one filling a
-//     documentation table treats it as a footnote.
+//     double treats [NotLoaded] as an error, and one filling a
+//     documentation table treats it as a footnote. [ResolveProblem]
+//     is shared with the type walks, so one switch covers both.
 //   - Satisfaction (satisfies.go): [Satisfies], [SameSignature],
 //     [UnderlyingOf], [ComparableDeep], [RecommendedReceiver].
+//     [ComparableDeep] reports []UnresolvedType on the same
+//     [ResolveProblem] vocabulary the embed walks use, so a caller
+//     names the field it could not reach rather than only that
+//     something was undetermined.
 //   - Enums (enum.go): [EnumFormOf], [VariantText], [EnumTexts],
 //     [DuplicateText], [ZeroVariant], [EnumValues],
 //     [OutOfRangeValue], [OutOfRangeText], [EnumMethods],

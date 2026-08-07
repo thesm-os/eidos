@@ -47,24 +47,30 @@ import (
 // hand-built fixture can — terminates in a generation pass.
 const maxEmbedDepth = 8
 
-// EmbedProblem classifies why a walk could not complete an embed.
-type EmbedProblem string
+// ResolveProblem classifies why a walk could not reach something.
+//
+// Shared by every walk here that resolves through a [Resolver] —
+// [FieldSet] and [MethodSet] over embeds, [ComparableDeep] over field
+// types — because the reasons are the same three facts about the run
+// whatever is being resolved, and a caller switching on them should
+// not have to learn a second spelling per walk.
+type ResolveProblem string
 
 const (
-	// EmbedNoResolver reports that the caller supplied no
+	// NoResolver reports that the caller supplied no
 	// [Resolver], so nothing past the first level is reachable at
-	// all. Distinct from [EmbedNotLoaded] because it is a fact about
+	// all. Distinct from [NotLoaded] because it is a fact about
 	// the call rather than about the run: the same graph answers in
 	// full once a resolver is passed.
-	EmbedNoResolver EmbedProblem = "no-resolver"
+	NoResolver ResolveProblem = "no-resolver"
 
-	// EmbedNotLoaded reports that the run never read the embed's
+	// NotLoaded reports that the run never read the embed's
 	// package. Resolution is against what the invocation loaded, so
 	// a run over one package cannot see a type declared in another,
 	// and the same source answers differently under a wider one.
-	EmbedNotLoaded EmbedProblem = "not-loaded"
+	NotLoaded ResolveProblem = "not-loaded"
 
-	// EmbedGeneric reports that the embed carries type arguments.
+	// GenericEmbed reports that the embed carries type arguments.
 	// Its members are typed in that declaration's type parameters
 	// rather than the embedder's, so copying them across produces
 	// output naming identifiers that are not in scope.
@@ -72,19 +78,19 @@ const (
 	// Reported rather than substituted: [SubstituteTypeParams] can
 	// do the rewrite, but only the caller knows whether the
 	// substituted form is what it means to emit.
-	EmbedGeneric EmbedProblem = "generic"
+	GenericEmbed ResolveProblem = "generic"
 
-	// EmbedTooDeep reports that the chain exceeded [maxEmbedDepth].
+	// TooDeep reports that the chain exceeded [maxEmbedDepth].
 	// No compiling source reaches it; a cyclic hand-built graph
 	// does, and this is what stops the walk rather than the run.
-	EmbedTooDeep EmbedProblem = "too-deep"
+	TooDeep ResolveProblem = "too-deep"
 )
 
 // UnresolvedEmbed names one embed a walk could not complete.
 //
 // Returned rather than reported, because severity is the caller's
 // policy and not a language fact: a generator that must not emit a
-// partial double treats [EmbedNotLoaded] as an error and refuses to
+// partial double treats [NotLoaded] as an error and refuses to
 // write anything, while one filling a documentation table treats the
 // same thing as a footnote. The package has no business importing a
 // diagnostic sink either — it is a leaf over the two IRs by design.
@@ -112,11 +118,11 @@ type UnresolvedEmbed struct {
 	Written string
 
 	// Reason classifies the failure.
-	Reason EmbedProblem
+	Reason ResolveProblem
 }
 
 // unresolved records one embed the walk could not follow.
-func unresolved(host string, e *node.Embed, reason EmbedProblem) UnresolvedEmbed {
+func unresolved(host string, e *node.Embed, reason ResolveProblem) UnresolvedEmbed {
 	return UnresolvedEmbed{
 		Host:    host,
 		Embed:   e,
@@ -203,18 +209,18 @@ func descend(
 ) (node.Node, bool) {
 	switch {
 	case depth+1 > maxEmbedDepth:
-		*problems = append(*problems, unresolved(host, e, EmbedTooDeep))
+		*problems = append(*problems, unresolved(host, e, TooDeep))
 		return nil, false
 	case r == nil:
-		*problems = append(*problems, unresolved(host, e, EmbedNoResolver))
+		*problems = append(*problems, unresolved(host, e, NoResolver))
 		return nil, false
 	case len(EmbedTarget(e).TypeArgs) > 0:
-		*problems = append(*problems, unresolved(host, e, EmbedGeneric))
+		*problems = append(*problems, unresolved(host, e, GenericEmbed))
 		return nil, false
 	}
 	decl, found := resolveEmbed(e, hostPkg, r)
 	if !found || nilDecl(decl) {
-		*problems = append(*problems, unresolved(host, e, EmbedNotLoaded))
+		*problems = append(*problems, unresolved(host, e, NotLoaded))
 		return nil, false
 	}
 	return decl, true
