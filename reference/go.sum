@@ -1,5 +1,5 @@
-go.thesmos.sh/eidos/backend/golang v1.7.1 h1:jTsM/yVe3r7A2W6LfRItBWwEIsee8pmv5unRC+8h6vc=
-go.thesmos.sh/eidos/backend/golang v1.7.1/go.mod h1:Kyy1nUpb5O06Bj6nE0XKCIBUcROqkkKAK8G8TErgAZQ=
+go.thesmos.sh/eidos/backend/golang v1.8.0 h1:vDq5O+VfjWv4zDx8OwzpfxFNlU/sGgjfWP1fv9Lrpg4=
+go.thesmos.sh/eidos/backend/golang v1.8.0/go.mod h1:zjeLFBV8VHWEAvjVd2wdmrMN0cwLu3g3Sfe1KbyxfXw=
 golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=
 golang.org/x/mod v0.38.0/go.mod h1:V6Xz0pq8TQ3dGqVQ1FVHuelZpAL0uNhSkk9ogYP3c40=
 golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
