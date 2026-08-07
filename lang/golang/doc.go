@@ -126,11 +126,22 @@
 //
 // # Boundary
 //
-// The package depends only on [node] and [emit] — it neither
-// reaches into a frontend (which would couple plugins to a
-// source-language choice) nor into the Go backend (which
-// would violate the depguard rule banning `plugins/` from
-// importing `backend/`). Future per-language packages
-// (`lang/rust`, `lang/typescript`) mirror this shape with
-// language-flavoured equivalents.
+// The package depends on [node], [emit], [core/meta] and
+// [core/naming] — all leaves over the standard library. It
+// reaches into neither a frontend (which would couple plugins to
+// a source-language choice) nor the Go backend (which would
+// violate the depguard rule banning `plugins/` from importing
+// `backend/`), and that is what lets every Go-speaking consumer
+// import it: the frontend that stamps the vocabulary, the backend
+// that reads it, and the plugins between them.
+//
+// The [core/naming] dependency is deliberate rather than
+// incidental. That package converts identifier case and says
+// explicitly that reserved words are "not handled here — callers
+// layer it on top, typically inside a language-specific frontend
+// or backend helper". [SafeIdent] is that layer, and it needs the
+// sanitiser underneath it.
+//
+// Future per-language packages (`lang/rust`, `lang/typescript`)
+// mirror this shape with language-flavoured equivalents.
 package golang

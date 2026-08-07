@@ -38,6 +38,18 @@ omitted unless they change what a caller can rely on.
   Migration: for the fresh-slice check, return `slices.Clone(...)` from the
   accessor. For the others, the failure message names the specific rule.
 
+- **`lang/golang`'s type-parameter helpers are keyed on the parameters, not the
+  declaration.** Five node kinds carry a type-parameter list — `Struct`,
+  `Interface`, `Function`, `Method`, `Alias` — and the rendering is identical
+  for all five, but `TypeParams`, `TypeArgs` and `SelfType` took only
+  `*node.Struct`. A generator working over interfaces could not reuse them and
+  wrote its own; one downstream consumer ended up with three copies.
+
+  New: `TypeParamsOf`, `IsGeneric`, `TypeParamDecls`, `TypeParamNames`,
+  `TypeParamRefs`, `SelfRef`. The three struct-shaped entry points remain and
+  now delegate, so there is one implementation rather than two that can
+  diverge.
+
 - **`lang/golang` gained the Go identifier rules `core/naming` defers to it.**
   `naming.Identifier` sanitises runes and states that reserved words are "not
   handled here — callers layer it on top, typically inside a language-specific

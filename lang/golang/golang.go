@@ -110,17 +110,7 @@ func MapValType(t *node.TypeRef) emit.Ref {
 // nil for non-generic structs so the template's
 // `renderTypeParams` call emits no bracket list.
 func TypeParams(s *node.Struct) []*emit.TypeParam {
-	if len(s.TypeParams) == 0 {
-		return nil
-	}
-	out := make([]*emit.TypeParam, len(s.TypeParams))
-	for i, p := range s.TypeParams {
-		out[i] = &emit.TypeParam{
-			Name:       p.Name,
-			Constraint: ConstraintFromNode(p.Constraint),
-		}
-	}
-	return out
+	return TypeParamDecls(s.TypeParams)
 }
 
 // TypeArgs returns the bracketed parameter-name use form for
@@ -129,14 +119,7 @@ func TypeParams(s *node.Struct) []*emit.TypeParam {
 // receiver / return / composite-literal type-arg threading
 // on each rendered method.
 func TypeArgs(s *node.Struct) string {
-	if len(s.TypeParams) == 0 {
-		return ""
-	}
-	names := make([]string, len(s.TypeParams))
-	for i, p := range s.TypeParams {
-		names[i] = p.Name
-	}
-	return "[" + strings.Join(names, ", ") + "]"
+	return TypeParamNames(s.TypeParams)
 }
 
 // SelfType returns the [emit.Ref] for s's own type
@@ -148,14 +131,7 @@ func TypeArgs(s *node.Struct) string {
 // `renderType` drops the package qualifier when the
 // rendered file lives in the source package.
 func SelfType(s *node.Struct) emit.Ref {
-	if len(s.TypeParams) == 0 {
-		return emit.External(s.Package, s.Name)
-	}
-	args := make([]emit.Ref, len(s.TypeParams))
-	for i, p := range s.TypeParams {
-		args[i] = emit.Builtin(p.Name)
-	}
-	return emit.External(s.Package, s.Name, args...)
+	return SelfRef(s.Package, s.Name, s.TypeParams)
 }
 
 // FuncMap returns the conventional template-side funcmap the
