@@ -9,28 +9,35 @@ import (
 	"go.thesmos.sh/eidos/node"
 )
 
-// Struct embedding: what an embedded type contributes to the type
-// that embeds it.
+// Embedding: what an embedded type contributes to the type that
+// embeds it.
 //
 // A generator reading `s.Fields` reads what the source typed, not
 // what the struct has. `struct{ Base; Name string }` has every
 // exported field of Base as well, reachable unqualified, and a
-// builder that offers a setter per declared field silently offers
-// none for them.
+// builder offering a setter per declared field silently offers none
+// for them. The same holds one declaration kind over: an interface
+// embedding two others has their methods too, and a generated double
+// missing one does not satisfy the interface it doubles.
 //
 // # Go's promotion rules, and which of them are answerable here
 //
-// A field promotes when it is reachable at a shallower depth than
+// A member promotes when it is reachable at a shallower depth than
 // any other of that name. Shallowest wins; a tie at equal depth
 // promotes neither, and both become unreachable without an explicit
-// qualifier. A declared field always shadows a promoted one,
-// because depth zero beats everything.
+// qualifier. A declared member always shadows a promoted one,
+// because depth zero beats everything. Fields and methods follow the
+// same rules, and both walks apply them.
 //
-// All three are implemented. What is not answerable without the
-// graph is what an embedded type *is* — the model records a name
-// and a package — so every function here that walks past the first
-// level takes a [Resolver] and reports what it could not reach
-// rather than guessing.
+// Interface embedding has none of that. A method set is a set, Go
+// admits overlapping embedded sets only where the signatures agree,
+// and there is nothing to shadow — so [MethodSet] takes the first
+// arrival and is right to.
+//
+// What is not answerable without the graph is what an embedded type
+// *is*: the model records a name and a package. Every function here
+// that walks past the first level takes a [Resolver] and reports
+// what it could not reach rather than guessing.
 
 // maxEmbedDepth bounds the promotion walk.
 //
@@ -39,6 +46,84 @@ import (
 // cyclic graph — which no compiling source produces and a
 // hand-built fixture can — terminates in a generation pass.
 const maxEmbedDepth = 8
+
+// EmbedProblem classifies why a walk could not complete an embed.
+type EmbedProblem string
+
+const (
+	// EmbedNoResolver reports that the caller supplied no
+	// [Resolver], so nothing past the first level is reachable at
+	// all. Distinct from [EmbedNotLoaded] because it is a fact about
+	// the call rather than about the run: the same graph answers in
+	// full once a resolver is passed.
+	EmbedNoResolver EmbedProblem = "no-resolver"
+
+	// EmbedNotLoaded reports that the run never read the embed's
+	// package. Resolution is against what the invocation loaded, so
+	// a run over one package cannot see a type declared in another,
+	// and the same source answers differently under a wider one.
+	EmbedNotLoaded EmbedProblem = "not-loaded"
+
+	// EmbedGeneric reports that the embed carries type arguments.
+	// Its members are typed in that declaration's type parameters
+	// rather than the embedder's, so copying them across produces
+	// output naming identifiers that are not in scope.
+	//
+	// Reported rather than substituted: [SubstituteTypeParams] can
+	// do the rewrite, but only the caller knows whether the
+	// substituted form is what it means to emit.
+	EmbedGeneric EmbedProblem = "generic"
+
+	// EmbedTooDeep reports that the chain exceeded [maxEmbedDepth].
+	// No compiling source reaches it; a cyclic hand-built graph
+	// does, and this is what stops the walk rather than the run.
+	EmbedTooDeep EmbedProblem = "too-deep"
+)
+
+// UnresolvedEmbed names one embed a walk could not complete.
+//
+// Returned rather than reported, because severity is the caller's
+// policy and not a language fact: a generator that must not emit a
+// partial double treats [EmbedNotLoaded] as an error and refuses to
+// write anything, while one filling a documentation table treats the
+// same thing as a footnote. The package has no business importing a
+// diagnostic sink either — it is a leaf over the two IRs by design.
+//
+// An empty slice means the answer is complete. That is the whole
+// contract: a caller that ignores it emits against a set that is
+// smaller than the truth rather than wrong, which is the failure
+// mode worth having but not one to ship silently.
+type UnresolvedEmbed struct {
+	// Host is the QName of the declaration that wrote the embed,
+	// which is not necessarily the one the caller asked about — an
+	// embed three levels down is attributed to its own embedder, so
+	// a diagnostic names the file the author would have to edit.
+	Host string
+
+	// Embed is the embed as written, carried for its position so a
+	// caller's diagnostic can point at the source line.
+	Embed *node.Embed
+
+	// Written is the embed spelled the way the author would
+	// recognise — `io.Closer` rather than the bare `Closer` the
+	// reference carries, or the full import path nobody reads. Any
+	// pointer is stripped, matching [EmbedTarget]: the pointer is a
+	// fact about the embedding, not about the type.
+	Written string
+
+	// Reason classifies the failure.
+	Reason EmbedProblem
+}
+
+// unresolved records one embed the walk could not follow.
+func unresolved(host string, e *node.Embed, reason EmbedProblem) UnresolvedEmbed {
+	return UnresolvedEmbed{
+		Host:    host,
+		Embed:   e,
+		Written: Display(EmbedTarget(e)),
+		Reason:  reason,
+	}
+}
 
 // EmbedIdent returns the field name an embedded type contributes,
 // and whether it was embedded by pointer.
@@ -76,6 +161,91 @@ func EmbedTarget(e *node.Embed) *node.TypeRef {
 	return Deref(e.Type)
 }
 
+// resolveEmbed resolves an embed's target, falling back to the
+// embedder's package for an in-package reference.
+//
+// The frontend records `type S struct{ Base }` with an empty package
+// on the reference, because that is how the source reads. A resolver
+// keyed by qualified name has nothing to look up until the gap is
+// closed, and closing it here rather than in every resolver is what
+// keeps a naive one correct.
+//
+// As-written is tried first, so a resolver that already handles the
+// bare form keeps answering exactly as it did.
+func resolveEmbed(e *node.Embed, hostPkg string, r Resolver) (node.Node, bool) {
+	target := EmbedTarget(e)
+	if target == nil || r == nil {
+		return nil, false
+	}
+	if decl, found := r.Resolve(target); found {
+		return decl, true
+	}
+	if target.Package != "" || hostPkg == "" {
+		return nil, false
+	}
+	local := *target
+	local.Package = hostPkg
+	return r.Resolve(&local)
+}
+
+// descend resolves one embed for a walk, recording why it could not.
+//
+// The four refusals are shared by every walk here so that a caller
+// reading [UnresolvedEmbed] gets the same vocabulary whichever
+// function produced it, and so that a new walk cannot quietly omit
+// one of them.
+func descend(
+	host, hostPkg string,
+	e *node.Embed,
+	depth int,
+	r Resolver,
+	problems *[]UnresolvedEmbed,
+) (node.Node, bool) {
+	switch {
+	case depth+1 > maxEmbedDepth:
+		*problems = append(*problems, unresolved(host, e, EmbedTooDeep))
+		return nil, false
+	case r == nil:
+		*problems = append(*problems, unresolved(host, e, EmbedNoResolver))
+		return nil, false
+	case len(EmbedTarget(e).TypeArgs) > 0:
+		*problems = append(*problems, unresolved(host, e, EmbedGeneric))
+		return nil, false
+	}
+	decl, found := resolveEmbed(e, hostPkg, r)
+	if !found || nilDecl(decl) {
+		*problems = append(*problems, unresolved(host, e, EmbedNotLoaded))
+		return nil, false
+	}
+	return decl, true
+}
+
+// nilDecl reports whether a resolved declaration is a typed nil.
+//
+// A [Resolver] is consumer-supplied, and one answering with
+// `(*node.Struct)(nil)` returns a node.Node that is not nil and
+// passes every type assertion the walks make — so the first
+// dereference panics inside the framework rather than in the code
+// that got it wrong.
+//
+// Folded into [descend] rather than checked before each use: to a
+// walk, a declaration it cannot read is indistinguishable from one
+// the run never loaded, and both deserve the same report.
+func nilDecl(n node.Node) bool {
+	switch v := n.(type) {
+	case *node.Struct:
+		return v == nil
+	case *node.Interface:
+		return v == nil
+	case *node.Enum:
+		return v == nil
+	case *node.Alias:
+		return v == nil
+	default:
+		return n == nil
+	}
+}
+
 // PromotedField is one field reachable through embedding, with the
 // path that reaches it.
 type PromotedField struct {
@@ -108,53 +278,103 @@ type PromotedField struct {
 // Selector renders the explicit path to the field — `Base.Meta.Name`
 // — which is what a composite literal or an unambiguous read needs.
 func (p PromotedField) Selector() string {
+	return selector(p.Path, p.Field.Name)
+}
+
+// PromotedMethod is one method reachable through embedding.
+type PromotedMethod struct {
+	// Method is the declaration itself, on whichever type declared
+	// it.
+	Method *node.Method
+
+	// Depth is how many embeds were traversed to reach it. Always
+	// at least one: a method the type declares itself is not
+	// promoted, and shadows every promoted one of that name.
+	Depth int
+
+	// Path is the embedded field names traversed to reach it, outer
+	// first.
+	Path []string
+
+	// ThroughPointer reports whether any embed on the path was by
+	// pointer.
+	//
+	// Embedding `T` promotes T's value-receiver methods onto `S` and
+	// its pointer-receiver methods onto `*S`; embedding `*T`
+	// promotes both onto both. The distinction decides whether a
+	// generated assertion may use the value form, and it is recorded
+	// rather than resolved here because only the caller knows which
+	// form it is about to emit.
+	ThroughPointer bool
+}
+
+// Selector renders the explicit path to the method —
+// `Base.Meta.Read` — which is what an unambiguous call needs when
+// two embeds at equal depth cancelled the promoted name.
+func (p PromotedMethod) Selector() string {
+	return selector(p.Path, p.Method.Name)
+}
+
+// Through returns the embed the source author wrote to reach this
+// member — the first hop, which is the one they can see in their own
+// file. Empty only for a zero value.
+func (p PromotedMethod) Through() string {
 	if len(p.Path) == 0 {
-		return p.Field.Name
+		return ""
+	}
+	return p.Path[0]
+}
+
+// selector joins an embed path and a member name into the explicit
+// Go selector that reaches it.
+func selector(path []string, name string) string {
+	if len(path) == 0 {
+		return name
 	}
 	var b strings.Builder
-	for _, seg := range p.Path {
+	for _, seg := range path {
 		b.WriteString(seg)
 		b.WriteByte('.')
 	}
-	b.WriteString(p.Field.Name)
+	b.WriteString(name)
 	return b.String()
 }
 
 // FieldSet returns every field reachable on s without an explicit
-// qualifier, and whether the walk completed.
+// qualifier, and every embed the walk could not complete.
 //
 // Go's promotion rules applied in full: a declared field shadows a
 // promoted one, a shallower promotion shadows a deeper one, and two
 // promotions at equal depth cancel — neither is reachable, so
 // neither appears.
 //
-// The second result is false when an embed named a type the
-// resolver could not reach. The answer is then smaller rather than
-// wrong, and a generator emitting against a partial field set
-// produces output missing setters rather than output naming fields
-// that do not exist — but it must not treat the partial answer as
-// complete, which is what the flag is for.
+// A non-empty second result means the set is smaller than the truth.
+// A generator emitting against a partial field set produces output
+// missing setters rather than output naming fields that do not
+// exist — but it must not treat the partial answer as complete,
+// which is what the slice is for. See [UnresolvedEmbed].
 //
 // Order is declaration order at each level, outer levels first, so
 // generated output is stable as an embedded type gains a field.
-func FieldSet(s *node.Struct, r Resolver) ([]PromotedField, bool) {
+func FieldSet(s *node.Struct, r Resolver) ([]PromotedField, []UnresolvedEmbed) {
 	if s == nil {
-		return nil, true
+		return nil, nil
 	}
 	// byName accumulates every candidate for a name across depths;
 	// the shadowing rules are applied once at the end, because a
 	// shallower candidate may be found after a deeper one.
 	byName := map[string][]PromotedField{}
 	order := []string{}
-	complete := collectFields(s, r, 0, nil, false, byName, &order, map[string]struct{}{})
+	problems := []UnresolvedEmbed{}
+	collectFields(s, r, 0, nil, false, byName, &order, map[string]struct{}{}, &problems)
 
 	out := make([]PromotedField, 0, len(order))
 	for _, name := range order {
-		if winner, ok := shallowestUnique(byName[name]); ok {
+		if winner, ok := shallowestUnique(byName[name], fieldDepth); ok {
 			out = append(out, winner)
 		}
 	}
-	return out, complete
+	return out, problems
 }
 
 // collectFields walks s and its embeds, recording every candidate
@@ -168,16 +388,14 @@ func collectFields(
 	byName map[string][]PromotedField,
 	order *[]string,
 	visited map[string]struct{},
-) bool {
-	if s == nil || depth > maxEmbedDepth {
-		return false
-	}
+	problems *[]UnresolvedEmbed,
+) {
 	// Guards a cycle. Illegal in Go — a struct cannot embed itself by
 	// value — and reachable through a pointer embed or a malformed
 	// graph, where it would otherwise not terminate.
 	if s.QName() != "" {
 		if _, looping := visited[s.QName()]; looping {
-			return true
+			return
 		}
 		visited[s.QName()] = struct{}{}
 	}
@@ -194,14 +412,14 @@ func collectFields(
 		})
 	}
 
-	complete := true
 	for _, e := range s.Embeds {
 		name, byPointer := EmbedIdent(e)
 		if name == "" {
 			continue
 		}
 		// The embedded field itself is reachable by its own name, and
-		// shadows anything promoted through it.
+		// shadows anything promoted through it. Recorded before the
+		// descent, so it survives an embed that cannot be followed.
 		if _, seen := byName[name]; !seen {
 			*order = append(*order, name)
 		}
@@ -212,54 +430,265 @@ func collectFields(
 			ThroughPointer: throughPointer,
 		})
 
-		if r == nil {
-			complete = false
-			continue
-		}
-		target, found := r.Resolve(EmbedTarget(e))
-		if !found {
-			complete = false
-			continue
-		}
-		inner, ok := target.(*node.Struct)
+		target, ok := descend(s.QName(), s.Package, e, depth, r, problems)
 		if !ok {
+			continue
+		}
+		inner, isStruct := target.(*node.Struct)
+		if !isStruct {
 			// An embedded interface contributes methods, not fields.
 			// See [PromotedMethods].
 			continue
 		}
-		next := make([]string, 0, len(path)+1)
-		next = append(next, path...)
-		next = append(next, name)
-		if !collectFields(inner, r, depth+1, next, throughPointer || byPointer, byName, order, visited) {
-			complete = false
-		}
+		collectFields(
+			inner, r, depth+1, extend(path, name),
+			throughPointer || byPointer, byName, order, visited, problems,
+		)
 	}
-	return complete
 }
 
-// shallowestUnique applies Go's promotion rules to one name's
-// candidates.
+// PromotedMethods returns the method set embedding contributes to s,
+// and every embed the walk could not complete.
 //
-// The shallowest wins; a tie at that depth promotes neither, since
-// Go makes an ambiguous selector an error rather than a choice.
-func shallowestUnique(candidates []PromotedField) (PromotedField, bool) {
-	if len(candidates) == 0 {
-		return PromotedField{}, false
+// A struct embedding `io.Reader` has `Read` and declares nothing, so
+// a generator asking what a struct implements has to walk the embeds
+// — which is the reason `go.embedsInterface` exists as a stamp and
+// this exists as the answer behind it.
+//
+// Promoted only: a method s declares itself is not in the result and
+// shadows every promoted one of its name, because depth zero beats
+// everything. Beyond that the same rules as [FieldSet] apply —
+// shallowest wins, equal depth cancels — so a name reachable through
+// two embeds at the same depth appears in neither Go's selector nor
+// this result.
+//
+// An embedded interface contributes its *flattened* set, so a struct
+// embedding `io.ReadCloser` has `Read` and `Close` even though
+// ReadCloser declares neither. That walk is [MethodSet], and its
+// unresolved embeds surface here too.
+func PromotedMethods(s *node.Struct, r Resolver) ([]PromotedMethod, []UnresolvedEmbed) {
+	if s == nil {
+		return nil, nil
 	}
-	best := candidates[0]
-	ties := 1
-	for _, c := range candidates[1:] {
-		switch {
-		case c.Depth < best.Depth:
-			best, ties = c, 1
-		case c.Depth == best.Depth:
-			ties++
+	declared := map[string]struct{}{}
+	for _, m := range s.Methods {
+		if m != nil {
+			declared[m.Name] = struct{}{}
 		}
 	}
-	if ties > 1 {
-		return PromotedField{}, false
+	byName := map[string][]PromotedMethod{}
+	order := []string{}
+	problems := []UnresolvedEmbed{}
+	collectMethods(
+		s, r, 0, nil, false, declared, byName, &order,
+		map[string]struct{}{}, &problems,
+	)
+
+	out := make([]PromotedMethod, 0, len(order))
+	for _, name := range order {
+		if winner, ok := shallowestUnique(byName[name], methodDepth); ok {
+			out = append(out, winner)
+		}
 	}
-	return best, true
+	return out, problems
+}
+
+// collectMethods walks s and its embeds, recording every candidate
+// for each method name.
+func collectMethods(
+	s *node.Struct,
+	r Resolver,
+	depth int,
+	path []string,
+	throughPointer bool,
+	declared map[string]struct{},
+	byName map[string][]PromotedMethod,
+	order *[]string,
+	visited map[string]struct{},
+	problems *[]UnresolvedEmbed,
+) {
+	if s.QName() != "" {
+		if _, looping := visited[s.QName()]; looping {
+			return
+		}
+		visited[s.QName()] = struct{}{}
+	}
+
+	for _, e := range s.Embeds {
+		name, byPointer := EmbedIdent(e)
+		if name == "" {
+			continue
+		}
+		target, ok := descend(s.QName(), s.Package, e, depth, r, problems)
+		if !ok {
+			continue
+		}
+		next := extend(path, name)
+		through := throughPointer || byPointer
+
+		record := func(m *node.Method) {
+			if m == nil || m.Name == "" {
+				return
+			}
+			// A method the struct declares itself shadows every promoted
+			// one, so a candidate for that name is never a winner and
+			// recording it would only make the tie count wrong.
+			if _, shadowed := declared[m.Name]; shadowed {
+				return
+			}
+			if _, seen := byName[m.Name]; !seen {
+				*order = append(*order, m.Name)
+			}
+			byName[m.Name] = append(byName[m.Name], PromotedMethod{
+				Method: m, Depth: depth + 1, Path: next, ThroughPointer: through,
+			})
+		}
+
+		if iface, isIface := target.(*node.Interface); isIface {
+			// An interface's own Methods are what it declared, not what
+			// it has; its embeds contribute too, and a struct embedding
+			// it gets the whole set.
+			flat, probs := MethodSet(iface, r)
+			*problems = append(*problems, probs...)
+			for _, im := range flat {
+				record(im.Method)
+			}
+			continue
+		}
+
+		for _, m := range methodsOfDecl(target) {
+			record(m)
+		}
+		if inner, isStruct := target.(*node.Struct); isStruct {
+			collectMethods(
+				inner, r, depth+1, next, through, declared,
+				byName, order, visited, problems,
+			)
+		}
+	}
+}
+
+// InterfaceMethod is one method in an interface's full set, with the
+// embed that contributed it.
+type InterfaceMethod struct {
+	// Method is the declaration itself.
+	Method *node.Method
+
+	// From is the embed the source wrote to reach it, empty for a
+	// method the interface declared inline. A method reached through
+	// a chain of embeds is attributed to the first hop rather than
+	// to whichever interface finally declared it, because the first
+	// hop is the one the author can see in their own file.
+	From string
+}
+
+// MethodSet returns an interface's full method set, flattened
+// through its embeds, and every embed the walk could not complete.
+//
+// A generator reading `iface.Methods` reads what the source typed. A
+// double missing a method inherited through an embed does not
+// satisfy the interface it doubles, and a suite missing one asserts
+// about a different interface than the one a consumer implements.
+//
+// Embedded methods come first, depth-first in the order the source
+// embeds them, then the interface's own — which is how the source
+// reads, and what keeps generated ordering stable as an embed gains
+// a method.
+//
+// # Why flatten rather than compose
+//
+// Generated output could mirror the source by embedding whatever was
+// generated for the embedded interfaces. It cannot: an embedded
+// interface need not carry the directive, so its output may not
+// exist. Embedding is a fact about the source rather than an opt-in,
+// so the method set is copied.
+//
+// # Duplicates
+//
+// Go admits overlapping embedded method sets only where the
+// signatures agree, so a repeat is the same method reached twice and
+// the first arrival is as good as any. There is no shadowing rule to
+// apply, which is the one way this differs from [PromotedMethods].
+func MethodSet(i *node.Interface, r Resolver) ([]InterfaceMethod, []UnresolvedEmbed) {
+	if i == nil {
+		return nil, nil
+	}
+	w := &ifaceWalk{
+		resolver: r,
+		seen:     map[string]struct{}{},
+		visited:  map[string]struct{}{},
+	}
+	w.collect(i, "", 0)
+	return w.out, w.problems
+}
+
+// ifaceWalk carries the state one [MethodSet] shares across its
+// recursion, so the recursive step takes what varies and nothing
+// else.
+type ifaceWalk struct {
+	resolver Resolver
+	seen     map[string]struct{}
+	visited  map[string]struct{}
+	out      []InterfaceMethod
+	problems []UnresolvedEmbed
+}
+
+// collect appends host's method set, recursing into its embeds first.
+//
+// from names the embed the caller is collecting on behalf of, so a
+// method reached through a chain is attributed to the embed the
+// source actually wrote.
+func (w *ifaceWalk) collect(host *node.Interface, from string, depth int) {
+	// Guards a cycle. Illegal in Go and unreachable from a real
+	// frontend, but a malformed graph should stop the walk rather
+	// than the run.
+	if host.QName() != "" {
+		if _, looping := w.visited[host.QName()]; looping {
+			return
+		}
+		w.visited[host.QName()] = struct{}{}
+	}
+
+	for _, e := range host.Embeds {
+		w.follow(host, e, from, depth)
+	}
+
+	for _, m := range host.Methods {
+		if m == nil || m.Name == "" {
+			continue
+		}
+		if _, dup := w.seen[m.Name]; dup {
+			continue
+		}
+		w.seen[m.Name] = struct{}{}
+		w.out = append(w.out, InterfaceMethod{Method: m, From: from})
+	}
+}
+
+// follow resolves one embed and recurses into it.
+func (w *ifaceWalk) follow(host *node.Interface, e *node.Embed, from string, depth int) {
+	name, _ := EmbedIdent(e)
+	if name == "" {
+		// A union term in type-set position is not an interface and
+		// carries no methods. Such a type is never a generation
+		// target, so it is skipped rather than reported.
+		return
+	}
+	target, ok := descend(host.QName(), host.Package, e, depth, w.resolver, &w.problems)
+	if !ok {
+		return
+	}
+	inner, isIface := target.(*node.Interface)
+	if !isIface {
+		// A named type in type-set position — `~int | MyInt` — is a
+		// constraint term rather than a method-set contribution.
+		return
+	}
+	attributed := from
+	if attributed == "" {
+		attributed = name
+	}
+	w.collect(inner, attributed, depth+1)
 }
 
 // PromotedFields returns only the fields reached through embedding
@@ -269,15 +698,15 @@ func shallowestUnique(candidates []PromotedField) (PromotedField, bool) {
 // offering a setter per declared field and one whole setter for
 // each embedded value needs to tell them apart, and a struct
 // literal sets an embedded value as a unit.
-func PromotedFields(s *node.Struct, r Resolver) ([]PromotedField, bool) {
-	all, complete := FieldSet(s, r)
+func PromotedFields(s *node.Struct, r Resolver) ([]PromotedField, []UnresolvedEmbed) {
+	all, problems := FieldSet(s, r)
 	out := make([]PromotedField, 0, len(all))
 	for _, f := range all {
 		if f.Depth > 0 {
 			out = append(out, f)
 		}
 	}
-	return out, complete
+	return out, problems
 }
 
 // ExportedFieldSet is [FieldSet] restricted to fields a generated
@@ -287,89 +716,67 @@ func PromotedFields(s *node.Struct, r Resolver) ([]PromotedField, bool) {
 // unexported fields are visible to the declaring package and to
 // nothing else, and a generator routed elsewhere that emitted a
 // setter for one produces a file that does not compile.
-func ExportedFieldSet(s *node.Struct, r Resolver) ([]PromotedField, bool) {
-	all, complete := FieldSet(s, r)
+func ExportedFieldSet(s *node.Struct, r Resolver) ([]PromotedField, []UnresolvedEmbed) {
+	all, problems := FieldSet(s, r)
 	out := make([]PromotedField, 0, len(all))
 	for _, f := range all {
 		if IsExported(f.Field.Name) {
 			out = append(out, f)
 		}
 	}
-	return out, complete
+	return out, problems
 }
 
-// PromotedMethods returns the method set an embedded type
-// contributes to s, and whether every embed resolved.
+// shallowestUnique applies Go's promotion rules to one name's
+// candidates.
 //
-// A struct embedding `io.Reader` has `Read` and declares nothing,
-// so a generator asking what a struct implements has to walk the
-// embeds — which is the reason `go.embedsInterface` exists as a
-// stamp and this exists as the answer behind it.
+// The shallowest wins; a tie at that depth promotes neither, since
+// Go makes an ambiguous selector an error rather than a choice.
 //
-// # The pointer rule
+// Generic over the candidate type because the rule turns on depth
+// alone, and fields and methods obey it identically — a second copy
+// keyed to the other type is a second chance to get the tie wrong.
 //
-// Embedding `T` promotes T's value-receiver methods onto `S` and
-// its pointer-receiver methods onto `*S`. Embedding `*T` promotes
-// both onto both. The distinction decides whether a generated
-// assertion may use the value form, and it is recorded on each
-// entry rather than resolved here, because only the caller knows
-// which form it is about to emit.
-func PromotedMethods(s *node.Struct, r Resolver) ([]PromotedMethod, bool) {
-	if s == nil {
-		return nil, true
-	}
-	seen := map[string]struct{}{}
-	for _, m := range s.Methods {
-		if m != nil {
-			seen[m.Name] = struct{}{}
-		}
-	}
-	out := []PromotedMethod{}
-	complete := true
-	for _, e := range s.Embeds {
-		name, byPointer := EmbedIdent(e)
-		if name == "" {
-			continue
-		}
-		if r == nil {
-			complete = false
-			continue
-		}
-		target, found := r.Resolve(EmbedTarget(e))
-		if !found {
-			complete = false
-			continue
-		}
-		for _, m := range methodsOfDecl(target) {
-			if m == nil {
-				continue
-			}
-			// A method the struct declares itself shadows the promoted
-			// one at depth zero, and Go resolves the selector to it.
-			if _, shadowed := seen[m.Name]; shadowed {
-				continue
-			}
-			seen[m.Name] = struct{}{}
-			out = append(out, PromotedMethod{
-				Method: m, Through: name, ThroughPointer: byPointer,
-			})
+// Requires at least one candidate. Both callers iterate an order
+// slice that only gains a name when the candidate map gains its
+// first entry for it, so an empty list cannot arise and a guard for
+// one would be a line no reader can account for.
+func shallowestUnique[T any](candidates []T, depthOf func(T) int) (T, bool) {
+	var zero T
+	best := candidates[0]
+	ties := 1
+	for _, c := range candidates[1:] {
+		switch {
+		case depthOf(c) < depthOf(best):
+			best, ties = c, 1
+		case depthOf(c) == depthOf(best):
+			ties++
 		}
 	}
-	return out, complete
+	if ties > 1 {
+		return zero, false
+	}
+	return best, true
 }
 
-// PromotedMethod is one method reached through embedding.
-type PromotedMethod struct {
-	// Method is the declaration itself.
-	Method *node.Method
+// fieldDepth and methodDepth are the depth accessors
+// [shallowestUnique] is keyed on.
+func fieldDepth(p PromotedField) int   { return p.Depth }
+func methodDepth(p PromotedMethod) int { return p.Depth }
 
-	// Through is the embedded field's name.
-	Through string
-
-	// ThroughPointer reports whether the embed was by pointer, which
-	// decides whether the method reaches the value form as well as
-	// the pointer form.
-	ThroughPointer bool
+// extend appends one segment to an embed path without aliasing the
+// caller's slice.
+//
+// # Allocation
+//
+// Always allocates. The walk hands the same path to every candidate
+// it records at a level, so a shared backing array would let a
+// sibling embed's append overwrite a path already stored on a
+// result.
+func extend(path []string, segment string) []string {
+	out := make([]string, 0, len(path)+1)
+	out = append(out, path...)
+	return append(out, segment)
 }
 
 // methodsOfDecl returns the methods a declaration carries.
@@ -377,11 +784,13 @@ type PromotedMethod struct {
 // A type switch because the model puts the list on each kind rather
 // than behind an accessor, and a caller resolving an embed does not
 // know which kind it reached.
+//
+// No interface case: an interface's own Methods are what it declared
+// rather than what it has, so [collectMethods] routes one through
+// [MethodSet] before reaching here.
 func methodsOfDecl(n node.Node) []*node.Method {
 	switch v := n.(type) {
 	case *node.Struct:
-		return v.Methods
-	case *node.Interface:
 		return v.Methods
 	case *node.Enum:
 		return v.Methods
@@ -398,22 +807,31 @@ func methodsOfDecl(n node.Node) []*node.Method {
 // Direct-only when r is nil, which is the honest partial answer: a
 // caller without the graph can see the first level and no further.
 func EmbedsType(s *node.Struct, qname string, r Resolver) bool {
+	return embedsType(s, qname, r, map[string]struct{}{})
+}
+
+// embedsType is [EmbedsType] with the cycle guard threaded through,
+// so a malformed graph terminates the search rather than the run.
+func embedsType(s *node.Struct, qname string, r Resolver, visited map[string]struct{}) bool {
 	if s == nil {
 		return false
 	}
+	if s.QName() != "" {
+		if _, looping := visited[s.QName()]; looping {
+			return false
+		}
+		visited[s.QName()] = struct{}{}
+	}
 	for _, e := range s.Embeds {
-		target := EmbedTarget(e)
-		if QName(target) == qname {
+		if QName(EmbedTarget(e)) == qname {
 			return true
 		}
-		if r == nil {
-			continue
-		}
-		decl, found := r.Resolve(target)
+		decl, found := resolveEmbed(e, s.Package, r)
 		if !found {
 			continue
 		}
-		if inner, ok := decl.(*node.Struct); ok && EmbedsType(inner, qname, r) {
+		inner, isStruct := decl.(*node.Struct)
+		if isStruct && embedsType(inner, qname, r, visited) {
 			return true
 		}
 	}

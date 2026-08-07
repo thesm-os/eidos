@@ -35,6 +35,25 @@ func names(fields []golang.PromotedField) []string {
 	return out
 }
 
+// methodNames projects a flattened interface method set's identifiers.
+func methodNames(ms []golang.InterfaceMethod) []string {
+	out := make([]string, len(ms))
+	for i, m := range ms {
+		out[i] = m.Method.Name
+	}
+	return out
+}
+
+// reasons projects the classification of every unresolved embed, so a
+// test asserts on why a walk stopped rather than only that it did.
+func reasons(problems []golang.UnresolvedEmbed) []golang.EmbedProblem {
+	out := make([]golang.EmbedProblem, len(problems))
+	for i, p := range problems {
+		out[i] = p.Reason
+	}
+	return out
+}
+
 func TestEmbedIdent(t *testing.T) {
 	t.Parallel()
 
@@ -105,9 +124,9 @@ func TestFieldSet(t *testing.T) {
 			Fields: []*node.Field{field("Name", builtinRef("string"))},
 			Embeds: []*node.Embed{embed("x", "Base", false)},
 		}
-		got, complete := golang.FieldSet(s, r)
-		if !complete {
-			t.Fatalf("FieldSet reported incomplete")
+		got, problems := golang.FieldSet(s, r)
+		if len(problems) != 0 {
+			t.Fatalf("FieldSet problems = %v", reasons(problems))
 		}
 		if !slices.Equal(names(got), []string{"Name", "Base", "ID", "created"}) {
 			t.Fatalf("FieldSet = %v", names(got))
@@ -196,17 +215,65 @@ func TestFieldSet(t *testing.T) {
 		}
 	})
 
-	t.Run("an unreachable embed makes the answer incomplete", func(t *testing.T) {
+	t.Run("an unreachable embed is reported by name and reason", func(t *testing.T) {
 		t.Parallel()
 		// The answer is smaller rather than wrong, and the caller must
 		// not treat it as complete.
-		s := &node.Struct{Name: "User", Embeds: []*node.Embed{embed("x", "Missing", false)}}
-		got, complete := golang.FieldSet(s, mapResolver{})
-		if complete {
-			t.Fatalf("FieldSet reported complete with an unresolved embed")
+		s := &node.Struct{
+			Name: "User", Package: "x",
+			Embeds: []*node.Embed{embed("x", "Missing", false)},
+		}
+		got, problems := golang.FieldSet(s, mapResolver{})
+		if len(problems) != 1 || problems[0].Reason != golang.EmbedNotLoaded {
+			t.Fatalf("FieldSet problems = %+v, want one not-loaded", problems)
+		}
+		if problems[0].Written != "x.Missing" || problems[0].Host != "x.User" {
+			t.Fatalf("problem = %+v, want it to name the embed and its embedder", problems[0])
 		}
 		if !slices.Equal(names(got), []string{"Missing"}) {
 			t.Fatalf("FieldSet = %v, want the embed itself", names(got))
+		}
+	})
+
+	t.Run("a generic embed is refused rather than substituted", func(t *testing.T) {
+		t.Parallel()
+		// Its fields are typed in the embedded declaration's type
+		// parameters, so copying them across names identifiers that are
+		// not in scope here.
+		generic := &node.Struct{
+			Name: "Box", Package: "x",
+			Fields: []*node.Field{field("Value", namedTypeRef("", "T"))},
+		}
+		e := embed("x", "Box", false)
+		e.Type.TypeArgs = []*node.TypeRef{builtinRef("int")}
+		s := &node.Struct{Name: "User", Package: "x", Embeds: []*node.Embed{e}}
+
+		got, problems := golang.FieldSet(s, mapResolver{"x.Box": generic})
+		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedGeneric}) {
+			t.Fatalf("FieldSet problems = %v, want generic", reasons(problems))
+		}
+		// The embedded field itself stays reachable by its own name.
+		if !slices.Equal(names(got), []string{"Box"}) {
+			t.Fatalf("FieldSet = %v, want only the embed itself", names(got))
+		}
+	})
+
+	t.Run("an in-package embed resolves against the embedder's package", func(t *testing.T) {
+		t.Parallel()
+		// The frontend records `type S struct{ Base }` with an empty
+		// package on the reference, because that is how the source
+		// reads. A resolver keyed by qualified name has nothing to look
+		// up until the gap is closed.
+		s := &node.Struct{
+			Name: "User", Package: "x",
+			Embeds: []*node.Embed{embed("", "Base", false)},
+		}
+		got, problems := golang.FieldSet(s, r)
+		if len(problems) != 0 {
+			t.Fatalf("FieldSet problems = %v", reasons(problems))
+		}
+		if !slices.Contains(names(got), "ID") {
+			t.Fatalf("FieldSet = %v, want the promoted ID", names(got))
 		}
 	})
 
@@ -217,9 +284,11 @@ func TestFieldSet(t *testing.T) {
 			Fields: []*node.Field{field("Name", builtinRef("string"))},
 			Embeds: []*node.Embed{embed("x", "Base", false)},
 		}
-		got, complete := golang.FieldSet(s, nil)
-		if complete {
-			t.Fatalf("FieldSet without a resolver must report incomplete")
+		got, problems := golang.FieldSet(s, nil)
+		// Distinct from not-loaded: the same graph answers in full once
+		// a resolver is passed, so the caller's remedy is different.
+		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNoResolver}) {
+			t.Fatalf("FieldSet problems = %v, want no-resolver", reasons(problems))
 		}
 		if !slices.Equal(names(got), []string{"Name", "Base"}) {
 			t.Fatalf("FieldSet = %v", names(got))
@@ -240,9 +309,9 @@ func TestFieldSet(t *testing.T) {
 
 	t.Run("nil is an empty complete set", func(t *testing.T) {
 		t.Parallel()
-		got, complete := golang.FieldSet(nil, r)
-		if len(got) != 0 || !complete {
-			t.Fatalf("FieldSet(nil) = %v, %v", got, complete)
+		got, problems := golang.FieldSet(nil, r)
+		if len(got) != 0 || len(problems) != 0 {
+			t.Fatalf("FieldSet(nil) = %v, %v", got, problems)
 		}
 	})
 }
@@ -300,12 +369,12 @@ func TestPromotedMethods(t *testing.T) {
 		t.Parallel()
 		// A struct embedding io.Reader has Read and declares nothing.
 		s := &node.Struct{Name: "Wrapper", Embeds: []*node.Embed{embed("io", "Reader", false)}}
-		got, complete := golang.PromotedMethods(s, r)
-		if !complete || len(got) != 1 || got[0].Method.Name != "Read" {
-			t.Fatalf("PromotedMethods = %+v, %v", got, complete)
+		got, problems := golang.PromotedMethods(s, r)
+		if len(problems) != 0 || len(got) != 1 || got[0].Method.Name != "Read" {
+			t.Fatalf("PromotedMethods = %+v, %v", got, problems)
 		}
-		if got[0].Through != "Reader" {
-			t.Fatalf("Through = %q, want Reader", got[0].Through)
+		if got[0].Through() != "Reader" || got[0].Selector() != "Reader.Read" {
+			t.Fatalf("Through = %q, Selector = %q", got[0].Through(), got[0].Selector())
 		}
 	})
 
@@ -334,19 +403,259 @@ func TestPromotedMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("an unreachable embed makes the answer incomplete", func(t *testing.T) {
+	t.Run("an unreachable embed is reported", func(t *testing.T) {
 		t.Parallel()
 		s := &node.Struct{Name: "Wrapper", Embeds: []*node.Embed{embed("io", "Missing", false)}}
-		if _, complete := golang.PromotedMethods(s, mapResolver{}); complete {
-			t.Fatalf("PromotedMethods reported complete with an unresolved embed")
+		_, problems := golang.PromotedMethods(s, mapResolver{})
+		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNotLoaded}) {
+			t.Fatalf("PromotedMethods problems = %v, want not-loaded", reasons(problems))
+		}
+	})
+
+	t.Run("an embedded interface contributes its flattened set", func(t *testing.T) {
+		t.Parallel()
+		// ReadCloser declares nothing of its own; a struct embedding it
+		// still has Read and Close, so taking its Methods verbatim would
+		// promote nothing at all.
+		closer := &node.Interface{
+			Name: "Closer", Package: "io", Methods: []*node.Method{{Name: "Close"}},
+		}
+		rc := &node.Interface{
+			Name: "ReadCloser", Package: "io",
+			Embeds: []*node.Embed{embed("io", "Reader", false), embed("io", "Closer", false)},
+		}
+		s := &node.Struct{Name: "W", Embeds: []*node.Embed{embed("io", "ReadCloser", false)}}
+
+		got, problems := golang.PromotedMethods(s, mapResolver{
+			"io.Reader": reader, "io.Closer": closer, "io.ReadCloser": rc,
+		})
+		if len(problems) != 0 {
+			t.Fatalf("PromotedMethods problems = %v", reasons(problems))
+		}
+		if len(got) != 2 || got[0].Method.Name != "Read" || got[1].Method.Name != "Close" {
+			t.Fatalf("PromotedMethods = %+v, want Read and Close", got)
+		}
+	})
+
+	t.Run("a method reached through two embeds at equal depth cancels", func(t *testing.T) {
+		t.Parallel()
+		// Go makes the ambiguous selector an error rather than a choice,
+		// so neither promotes and the caller must qualify explicitly.
+		other := &node.Interface{
+			Name: "Other", Package: "io", Methods: []*node.Method{{Name: "Read"}},
+		}
+		s := &node.Struct{
+			Name:   "W",
+			Embeds: []*node.Embed{embed("io", "Reader", false), embed("io", "Other", false)},
+		}
+		got, _ := golang.PromotedMethods(s, mapResolver{"io.Reader": reader, "io.Other": other})
+		if len(got) != 0 {
+			t.Fatalf("PromotedMethods = %+v, want no ambiguous Read", got)
+		}
+	})
+
+	t.Run("a shallower method wins over a deeper one", func(t *testing.T) {
+		t.Parallel()
+		deep := &node.Struct{
+			Name: "Deep", Package: "x", Methods: []*node.Method{{Name: "Read"}},
+		}
+		mid := &node.Struct{
+			Name: "Mid", Package: "x", Embeds: []*node.Embed{embed("x", "Deep", false)},
+		}
+		s := &node.Struct{
+			Name: "W", Package: "x",
+			Embeds: []*node.Embed{embed("io", "Reader", false), embed("x", "Mid", false)},
+		}
+		got, _ := golang.PromotedMethods(s, mapResolver{
+			"io.Reader": reader, "x.Mid": mid, "x.Deep": deep,
+		})
+		if len(got) != 1 || got[0].Depth != 1 || got[0].Through() != "Reader" {
+			t.Fatalf("PromotedMethods = %+v, want the depth-1 Read", got)
 		}
 	})
 
 	t.Run("nil is an empty complete set", func(t *testing.T) {
 		t.Parallel()
-		got, complete := golang.PromotedMethods(nil, r)
-		if len(got) != 0 || !complete {
-			t.Fatalf("PromotedMethods(nil) = %+v, %v", got, complete)
+		got, problems := golang.PromotedMethods(nil, r)
+		if len(got) != 0 || len(problems) != 0 {
+			t.Fatalf("PromotedMethods(nil) = %+v, %v", got, problems)
+		}
+	})
+}
+
+func TestMethodSet(t *testing.T) {
+	t.Parallel()
+
+	reader := &node.Interface{
+		Name: "Reader", Package: "io", Methods: []*node.Method{{Name: "Read"}},
+	}
+	closer := &node.Interface{
+		Name: "Closer", Package: "io", Methods: []*node.Method{{Name: "Close"}},
+	}
+	r := mapResolver{"io.Reader": reader, "io.Closer": closer}
+
+	t.Run("flattens embedded interfaces before declared methods", func(t *testing.T) {
+		t.Parallel()
+		// A double missing a method inherited through an embed does not
+		// satisfy the interface it doubles. Embedded first, in source
+		// order, keeps generated ordering stable as an embed grows.
+		i := &node.Interface{
+			Name: "Store", Package: "app",
+			Embeds:  []*node.Embed{embed("io", "Reader", false), embed("io", "Closer", false)},
+			Methods: []*node.Method{{Name: "Save"}},
+		}
+		got, problems := golang.MethodSet(i, r)
+		if len(problems) != 0 {
+			t.Fatalf("MethodSet problems = %v", reasons(problems))
+		}
+		if !slices.Equal(methodNames(got), []string{"Read", "Close", "Save"}) {
+			t.Fatalf("MethodSet = %v", methodNames(got))
+		}
+	})
+
+	t.Run("attributes a method to the embed the source wrote", func(t *testing.T) {
+		t.Parallel()
+		// Reached through a chain, the first hop is the one the author
+		// can see in their own file.
+		rc := &node.Interface{
+			Name: "ReadCloser", Package: "io",
+			Embeds: []*node.Embed{embed("io", "Reader", false)},
+		}
+		i := &node.Interface{
+			Name: "Store", Package: "app",
+			Embeds:  []*node.Embed{embed("io", "ReadCloser", false)},
+			Methods: []*node.Method{{Name: "Save"}},
+		}
+		got, _ := golang.MethodSet(i, mapResolver{"io.Reader": reader, "io.ReadCloser": rc})
+		if len(got) != 2 || got[0].From != "ReadCloser" {
+			t.Fatalf("MethodSet = %+v, want Read attributed to ReadCloser", got)
+		}
+		if got[1].From != "" {
+			t.Fatalf("From = %q for a declared method, want empty", got[1].From)
+		}
+	})
+
+	t.Run("an overlapping method appears once", func(t *testing.T) {
+		t.Parallel()
+		// Go admits overlapping embedded sets only where the signatures
+		// agree, so a repeat is the same method reached twice.
+		dup := &node.Interface{
+			Name: "Dup", Package: "io", Methods: []*node.Method{{Name: "Read"}},
+		}
+		i := &node.Interface{
+			Name:   "Both",
+			Embeds: []*node.Embed{embed("io", "Reader", false), embed("io", "Dup", false)},
+		}
+		got, _ := golang.MethodSet(i, mapResolver{"io.Reader": reader, "io.Dup": dup})
+		if !slices.Equal(methodNames(got), []string{"Read"}) {
+			t.Fatalf("MethodSet = %v, want one Read", methodNames(got))
+		}
+	})
+
+	t.Run("an unloaded embed is reported and contributes nothing", func(t *testing.T) {
+		t.Parallel()
+		// Output missing a method cannot stand in for the interface it
+		// describes, so the caller emits nothing rather than something
+		// partial.
+		i := &node.Interface{
+			Name: "Store", Package: "app",
+			Embeds:  []*node.Embed{embed("io", "Missing", false)},
+			Methods: []*node.Method{{Name: "Save"}},
+		}
+		got, problems := golang.MethodSet(i, r)
+		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNotLoaded}) {
+			t.Fatalf("MethodSet problems = %v, want not-loaded", reasons(problems))
+		}
+		if !slices.Equal(methodNames(got), []string{"Save"}) {
+			t.Fatalf("MethodSet = %v", methodNames(got))
+		}
+	})
+
+	t.Run("a generic embed is refused", func(t *testing.T) {
+		t.Parallel()
+		// Its methods name that interface's type parameters rather than
+		// this one's, which flattening does not substitute.
+		e := embed("io", "Reader", false)
+		e.Type.TypeArgs = []*node.TypeRef{builtinRef("int")}
+		i := &node.Interface{Name: "Store", Package: "app", Embeds: []*node.Embed{e}}
+		_, problems := golang.MethodSet(i, r)
+		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedGeneric}) {
+			t.Fatalf("MethodSet problems = %v, want generic", reasons(problems))
+		}
+	})
+
+	t.Run("a type-set term contributes no methods", func(t *testing.T) {
+		t.Parallel()
+		// `~int | MyInt` in an interface is a constraint term rather
+		// than a method-set contribution, and is never a generation
+		// target — so it is skipped rather than reported.
+		term := &node.Struct{Name: "MyInt", Package: "app"}
+		i := &node.Interface{
+			Name: "Ordered", Package: "app",
+			Embeds: []*node.Embed{{}, embed("app", "MyInt", false)},
+		}
+		got, problems := golang.MethodSet(i, mapResolver{"app.MyInt": term})
+		if len(got) != 0 || len(problems) != 0 {
+			t.Fatalf("MethodSet = %v, %v", methodNames(got), reasons(problems))
+		}
+	})
+
+	t.Run("a cycle terminates", func(t *testing.T) {
+		t.Parallel()
+		// Illegal in Go and unreachable from a real frontend, but a
+		// malformed graph should stop the walk rather than the run.
+		loop := &node.Interface{
+			Name: "Loop", Package: "app", Methods: []*node.Method{{Name: "Go"}},
+		}
+		loop.Embeds = []*node.Embed{embed("app", "Loop", false)}
+		got, _ := golang.MethodSet(loop, mapResolver{"app.Loop": loop})
+		if !slices.Equal(methodNames(got), []string{"Go"}) {
+			t.Fatalf("MethodSet = %v", methodNames(got))
+		}
+	})
+
+	t.Run("a nameless method is skipped", func(t *testing.T) {
+		t.Parallel()
+		// A malformed graph can carry one, and a method with no name has
+		// no signature to double.
+		i := &node.Interface{
+			Name: "Store", Package: "app",
+			Methods: []*node.Method{nil, {Name: ""}, {Name: "Save"}},
+		}
+		got, _ := golang.MethodSet(i, r)
+		if !slices.Equal(methodNames(got), []string{"Save"}) {
+			t.Fatalf("MethodSet = %v, want only Save", methodNames(got))
+		}
+	})
+
+	t.Run("nil is an empty complete set", func(t *testing.T) {
+		t.Parallel()
+		got, problems := golang.MethodSet(nil, r)
+		if len(got) != 0 || len(problems) != 0 {
+			t.Fatalf("MethodSet(nil) = %+v, %v", got, problems)
+		}
+	})
+}
+
+func TestPromotedMemberEdges(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a zero promoted method has no first hop", func(t *testing.T) {
+		t.Parallel()
+		// Exported, so a caller can hold one; Through indexing a path it
+		// never checked would panic on it.
+		var p golang.PromotedMethod
+		if p.Through() != "" {
+			t.Fatalf("Through = %q, want empty", p.Through())
+		}
+	})
+
+	t.Run("an embedded cycle terminates EmbedsType", func(t *testing.T) {
+		t.Parallel()
+		loop := &node.Struct{Name: "Loop", Package: "x"}
+		loop.Embeds = []*node.Embed{embed("x", "Loop", true)}
+		if golang.EmbedsType(loop, "x.Absent", mapResolver{"x.Loop": loop}) {
+			t.Fatalf("EmbedsType found a type the cycle does not embed")
 		}
 	})
 }
@@ -430,9 +739,9 @@ func TestEmbedEdges(t *testing.T) {
 	t.Run("an embed naming nothing is skipped", func(t *testing.T) {
 		t.Parallel()
 		s := &node.Struct{Name: "User", Embeds: []*node.Embed{{}}}
-		got, complete := golang.FieldSet(s, mapResolver{})
-		if len(got) != 0 || !complete {
-			t.Fatalf("FieldSet = %v, %v", names(got), complete)
+		got, problems := golang.FieldSet(s, mapResolver{})
+		if len(got) != 0 || len(problems) != 0 {
+			t.Fatalf("FieldSet = %v, %v", names(got), reasons(problems))
 		}
 	})
 
@@ -441,9 +750,9 @@ func TestEmbedEdges(t *testing.T) {
 		// An interface contributes methods; see PromotedMethods.
 		iface := &node.Interface{Name: "Reader", Package: "io"}
 		s := &node.Struct{Name: "W", Embeds: []*node.Embed{embed("io", "Reader", false)}}
-		got, complete := golang.FieldSet(s, mapResolver{"io.Reader": iface})
-		if !complete || !slices.Equal(names(got), []string{"Reader"}) {
-			t.Fatalf("FieldSet = %v, %v", names(got), complete)
+		got, problems := golang.FieldSet(s, mapResolver{"io.Reader": iface})
+		if len(problems) != 0 || !slices.Equal(names(got), []string{"Reader"}) {
+			t.Fatalf("FieldSet = %v, %v", names(got), reasons(problems))
 		}
 	})
 
@@ -460,8 +769,9 @@ func TestEmbedEdges(t *testing.T) {
 				Embeds: []*node.Embed{embed("x", next, false)},
 			}
 		}
-		if _, complete := golang.FieldSet(r["x.L0"].(*node.Struct), r); complete {
-			t.Fatalf("a chain past the budget must report incomplete")
+		_, problems := golang.FieldSet(r["x.L0"].(*node.Struct), r)
+		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedTooDeep}) {
+			t.Fatalf("FieldSet problems = %v, want too-deep", reasons(problems))
 		}
 	})
 
@@ -494,17 +804,87 @@ func TestEmbedEdges(t *testing.T) {
 	t.Run("promoted methods without a resolver are incomplete", func(t *testing.T) {
 		t.Parallel()
 		s := &node.Struct{Name: "W", Embeds: []*node.Embed{embed("x", "B", false)}}
-		if _, complete := golang.PromotedMethods(s, nil); complete {
-			t.Fatalf("PromotedMethods without a resolver must report incomplete")
+		_, problems := golang.PromotedMethods(s, nil)
+		if !slices.Equal(reasons(problems), []golang.EmbedProblem{golang.EmbedNoResolver}) {
+			t.Fatalf("PromotedMethods problems = %v, want no-resolver", reasons(problems))
+		}
+	})
+
+	t.Run("a deeper candidate found first still loses", func(t *testing.T) {
+		t.Parallel()
+		// Candidates arrive in embed order, so the shallower one is not
+		// necessarily seen first and the rule cannot be "keep the first".
+		deep := &node.Struct{
+			Name: "Deep", Package: "x", Methods: []*node.Method{{Name: "Do"}},
+		}
+		mid := &node.Struct{
+			Name: "Mid", Package: "x", Embeds: []*node.Embed{embed("x", "Deep", false)},
+		}
+		shallow := &node.Struct{
+			Name: "Shallow", Package: "x", Methods: []*node.Method{{Name: "Do"}},
+		}
+		s := &node.Struct{
+			Name: "W", Package: "x",
+			Embeds: []*node.Embed{embed("x", "Mid", false), embed("x", "Shallow", false)},
+		}
+		got, _ := golang.PromotedMethods(s, mapResolver{
+			"x.Mid": mid, "x.Deep": deep, "x.Shallow": shallow,
+		})
+		if len(got) != 1 || got[0].Depth != 1 || got[0].Through() != "Shallow" {
+			t.Fatalf("PromotedMethods = %+v, want the depth-1 Do", got)
+		}
+	})
+
+	t.Run("a nameless promoted method is skipped", func(t *testing.T) {
+		t.Parallel()
+		// A malformed graph can carry one, and a promoted member with
+		// no name has no selector to generate.
+		src := &node.Struct{
+			Name: "Src", Package: "x",
+			Methods: []*node.Method{nil, {Name: ""}, {Name: "Do"}},
+		}
+		s := &node.Struct{Name: "W", Package: "x", Embeds: []*node.Embed{embed("x", "Src", false)}}
+		got, _ := golang.PromotedMethods(s, mapResolver{"x.Src": src})
+		if len(got) != 1 || got[0].Method.Name != "Do" {
+			t.Fatalf("PromotedMethods = %+v, want only Do", got)
+		}
+	})
+
+	t.Run("a struct cycle terminates the method walk", func(t *testing.T) {
+		t.Parallel()
+		loop := &node.Struct{
+			Name: "Loop", Package: "x", Methods: []*node.Method{{Name: "Go"}},
+		}
+		loop.Embeds = []*node.Embed{embed("x", "Loop", true)}
+		got, _ := golang.PromotedMethods(loop, mapResolver{"x.Loop": loop})
+		if len(got) != 0 {
+			// Loop declares Go itself, so the promoted copy is shadowed;
+			// what matters is that the walk returned at all.
+			t.Fatalf("PromotedMethods = %+v", got)
+		}
+	})
+
+	t.Run("a resolver yielding a typed nil is survived", func(t *testing.T) {
+		t.Parallel()
+		// A resolver is consumer-supplied. One returning a nil *Struct
+		// as a non-nil node.Node passes the type assertion, and a walk
+		// that dereferenced it would panic inside the framework.
+		s := &node.Struct{Name: "W", Package: "x", Embeds: []*node.Embed{embed("x", "B", false)}}
+		r := mapResolver{"x.B": (*node.Struct)(nil)}
+		if got, _ := golang.PromotedMethods(s, r); len(got) != 0 {
+			t.Fatalf("PromotedMethods = %+v, want none", got)
+		}
+		if got, _ := golang.FieldSet(s, r); len(names(got)) != 1 {
+			t.Fatalf("FieldSet = %v, want only the embed itself", names(got))
 		}
 	})
 
 	t.Run("a nameless embed is skipped by the method walk too", func(t *testing.T) {
 		t.Parallel()
 		s := &node.Struct{Name: "W", Embeds: []*node.Embed{{}}}
-		got, complete := golang.PromotedMethods(s, mapResolver{})
-		if len(got) != 0 || !complete {
-			t.Fatalf("PromotedMethods = %+v, %v", got, complete)
+		got, problems := golang.PromotedMethods(s, mapResolver{})
+		if len(got) != 0 || len(problems) != 0 {
+			t.Fatalf("PromotedMethods = %+v, %v", got, reasons(problems))
 		}
 	})
 

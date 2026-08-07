@@ -34,9 +34,14 @@
 //     on types rather than on a return's binding name.
 //   - Embedding (embed.go): [EmbedIdent], [EmbedTarget],
 //     [FieldSet], [PromotedFields], [ExportedFieldSet],
-//     [PromotedMethods], [EmbedsType] — Go's promotion rules in
-//     full, since a generator reading `s.Fields` reads what the
-//     source typed rather than what the struct has.
+//     [PromotedMethods], [MethodSet], [EmbedsType] — Go's promotion
+//     rules in full, since a generator reading `s.Fields` reads what
+//     the source typed rather than what the struct has, and the same
+//     for an interface's embeds. Each walk returns
+//     []UnresolvedEmbed rather than a bool, because severity is the
+//     caller's policy: a generator that must not emit a partial
+//     double treats [EmbedNotLoaded] as an error, and one filling a
+//     documentation table treats it as a footnote.
 //   - Satisfaction (satisfies.go): [Satisfies], [SameSignature],
 //     [UnderlyingOf], [ComparableDeep], [RecommendedReceiver].
 //   - Enums (enum.go): [EnumFormOf], [VariantText], [EnumTexts],
