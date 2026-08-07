@@ -3,7 +3,7 @@ module go.thesmos.sh/eidos/cmd/eidos-reference
 go 1.26.5
 
 require (
-	go.thesmos.sh/eidos v1.9.0
+	go.thesmos.sh/eidos v1.10.0
 	go.thesmos.sh/eidos/backend/golang v1.7.1
 	go.thesmos.sh/eidos/bridge/protogo v1.5.2
 	go.thesmos.sh/eidos/cli v1.7.0
