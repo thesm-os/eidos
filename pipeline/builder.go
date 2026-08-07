@@ -475,10 +475,12 @@ func (b *Builder) Build() (*Pipeline, error) {
 	dups := b.validateNoDuplicateNames()
 	roles := b.validateRoleCounts()
 	options := b.applyAndValidateOptions()
-	structural := make([]error, 0, len(dups)+len(roles)+len(options))
+	partial := b.validatePartialCapabilities()
+	structural := make([]error, 0, len(dups)+len(roles)+len(options)+len(partial))
 	structural = append(structural, dups...)
 	structural = append(structural, roles...)
 	structural = append(structural, options...)
+	structural = append(structural, partial...)
 
 	if len(structural) > 0 {
 		b.emitErrors(structural)

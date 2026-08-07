@@ -22,14 +22,34 @@ import "go.thesmos.sh/eidos/priority"
 // [priority.Default] and run in registration order within that
 // bucket.
 type CapabilityProvider interface {
+	PrioritySource
+	ProvidesSource
+	RequiresSource
+}
+
+// PrioritySource is the bucket-declaring half of
+// [CapabilityProvider], declared separately so the pipeline can
+// distinguish a plugin that opted out of ordering from one that
+// tried to opt in and missed a method. See [TemplateSource] for the
+// reasoning; the failure here is a declared priority the pipeline
+// silently ignores.
+type PrioritySource interface {
 	// Priority returns the bucket the plugin runs in.
 	Priority() priority.Priority
+}
 
+// ProvidesSource is the capability-advertising half of
+// [CapabilityProvider].
+type ProvidesSource interface {
 	// Provides returns the capability names this plugin produces
 	// that other plugins may depend on. Returning nil indicates no
 	// declared capabilities.
 	Provides() []string
+}
 
+// RequiresSource is the capability-consuming half of
+// [CapabilityProvider].
+type RequiresSource interface {
 	// Requires returns the capability names this plugin consumes.
 	// The pipeline orders matching providers before this plugin
 	// within the same bucket; unresolved names within a bucket emit

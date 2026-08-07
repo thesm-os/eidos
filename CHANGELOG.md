@@ -38,6 +38,53 @@ omitted unless they change what a caller can rely on.
   Migration: for the fresh-slice check, return `slices.Clone(...)` from the
   accessor. For the others, the failure message names the specific rule.
 
+- **`pipeline.Build` now rejects a plugin that implements part of a
+  multi-method optional capability.** A Go interface assertion is
+  all-or-nothing, so a plugin declaring two of `plugin.TemplateProvider`'s three
+  methods satisfied neither the interface nor any consumer's check for it: the
+  backend's assertion failed, the plugin's templates were never parsed and its
+  funcmap entries never registered, and the rendered output came out short with
+  nothing reported. `plugintest` made the same assertion and *skipped* its
+  template checks, so the run stayed green on both sides.
+
+  `Build` returns `pipeline.ErrPartialCapability` naming the plugin, the methods
+  it declared, and the methods it did not. The same detection covers
+  `plugin.CapabilityProvider`, where the consequence is a declared `Priority`
+  the pipeline silently ignores.
+
+  Declaring **none** of a capability's methods is unaffected — opting out of
+  templates or of ordering stays free. No plugin in this repository is rejected
+  by the new check.
+
+  Migration: add the missing method. For `TemplateProvider` that is almost
+  always `TemplateOverrides(lang string) template.FuncMap` returning `nil`,
+  which is the method a plugin overriding nothing has no reason to write.
+
+- **`plugin`: `TemplateProvider` and `CapabilityProvider` are now composed from
+  single-method interfaces.** `TemplateSource`, `TemplateFuncSource`,
+  `TemplateOverrideSource`, `PrioritySource`, `ProvidesSource` and
+  `RequiresSource` are new exported interfaces. Both composites are unchanged,
+  so every current implementer still satisfies them; the halves exist so the
+  detection can probe them individually and distinguish "declared none of them"
+  from "declared some of them".
+
+  `plugin.Capabilities()` and `plugin.Gaps(p)` are new: the description of each
+  multi-method capability, and the partial-implementation detection over it.
+  They live beside the interfaces they describe so a method added to one cannot
+  leave the probe behind, and both `Build` and the conformance suite consume the
+  same detection rather than holding copies that could disagree.
+
+- **`eidostest/plugintest`: the check
+  `CapabilityProvider is implemented in full or not at all` is renamed
+  `optional capabilities are implemented in full or not at all` and now covers
+  `TemplateProvider` too.** Check names appear in adopters' test output, so the
+  rename is visible even though the contract only widened. A plugin declaring
+  part of `TemplateProvider` previously reached every template check's
+  skip-absent-capability path and reported green.
+
+  `ViolationPartialTemplateProvider` is a new exported `Violation` for driving
+  the widened check.
+
 - **`plugin.FrontendContext` gained a `Fingerprint` field.** Additive, so
   existing frontends compile unchanged. Frontends that cache a parsed node
   graph **must** fold it into their cache key — see Fixed, below, for why.

@@ -49,6 +49,15 @@ const (
 	// silently discarded. This shape has shipped twice in this repo.
 	ViolationPartialCapability Violation = "partial-capability"
 
+	// ViolationPartialTemplateProvider declares Templates and
+	// TemplateFuncs without TemplateOverrides. TemplateProvider is
+	// all-or-nothing, so the backend's type assertion fails and the
+	// plugin's entire template contribution is discarded — the
+	// rendered output comes out short with nothing reported. The
+	// omitted method is the one a plugin overriding nothing has no
+	// reason to write.
+	ViolationPartialTemplateProvider Violation = "partial-template-provider"
+
 	// ViolationUnstableProvides returns a freshly-shuffled Provides
 	// on each call, making the capability topo-sort non-deterministic.
 	ViolationUnstableProvides Violation = "unstable-provides"
@@ -133,6 +142,7 @@ func Violations() []Violation {
 		ViolationUnstableName,
 		ViolationNoRole,
 		ViolationPartialCapability,
+		ViolationPartialTemplateProvider,
 		ViolationUnstableProvides,
 		ViolationDuplicateDirective,
 		ViolationUnstableVersion,
@@ -173,6 +183,8 @@ func BrokenPlugin(v Violation) plugin.Plugin {
 		return &brokenNoRole{}
 	case ViolationPartialCapability:
 		return &brokenPartialCapability{name: base.PluginName}
+	case ViolationPartialTemplateProvider:
+		return &brokenPartialTemplateProvider{name: base.PluginName}
 	case ViolationUnstableProvides:
 		return &brokenUnstableProvides{FixturePlugin: base}
 	case ViolationDuplicateDirective:
@@ -263,6 +275,20 @@ func (p *brokenPartialCapability) Name() string { return p.name }
 func (*brokenPartialCapability) Generate(_ *plugin.GeneratorContext) error { return nil }
 
 func (*brokenPartialCapability) Priority() priority.Priority { return priority.GeneratorFoundation }
+
+// brokenPartialTemplateProvider ships templates and funcmap entries
+// but omits TemplateOverrides, and nothing else. It does not embed
+// [FixturePlugin] for the same reason as [brokenPartialCapability]:
+// the embedded methods would complete the interface.
+type brokenPartialTemplateProvider struct{ name string }
+
+func (p *brokenPartialTemplateProvider) Name() string { return p.name }
+
+func (*brokenPartialTemplateProvider) Generate(_ *plugin.GeneratorContext) error { return nil }
+
+func (*brokenPartialTemplateProvider) Templates(string) (fs.FS, bool) { return nil, false }
+
+func (*brokenPartialTemplateProvider) TemplateFuncs(string) template.FuncMap { return nil }
 
 // brokenUnstableProvides violates the deterministic-capability
 // contract and nothing else.

@@ -152,3 +152,21 @@ var ErrNoDefaultOutput = errors.New(
 var ErrUnscopedMultiOutputOverride = errors.New(
 	"pipeline: unscoped routing override pins a filename against a multi-output plugin",
 )
+
+// ErrPartialCapability is returned by [Builder.Build] when a plugin
+// implements some but not all methods of a multi-method optional
+// capability ([plugin.TemplateProvider],
+// [plugin.CapabilityProvider]).
+//
+// Go's interface assertion is all-or-nothing, so a plugin declaring
+// two of three methods satisfies neither the capability nor any
+// consumer's check for it. Before this error the whole contribution
+// vanished silently: the pipeline skipped the plugin, its templates
+// were never registered, and the rendered output came out short
+// with nothing reported. The conformance suite made the same
+// assertion and skipped its checks, so both sides stayed green.
+//
+// The wrapped message names the plugin and every missing method,
+// because the method name is the only actionable content — "partial
+// capability" alone tells an author nothing they can fix.
+var ErrPartialCapability = errors.New("pipeline: partial capability implementation")
