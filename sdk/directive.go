@@ -145,4 +145,12 @@ var (
 	// a schema with the same [DirectiveName] is already
 	// registered.
 	ErrSchemaConflict = directive.ErrSchemaConflict
+
+	// ErrEmptyKey is returned by [Parser.Parse] for a key/value
+	// pair whose key is empty (`+gen:repo =value`). It is a
+	// distinct failure from [ErrMalformedDirective] — the line is
+	// recognisably a directive, so a plugin reporting on its own
+	// syntax can tell "not a directive at all" from "a directive
+	// with a broken pair".
+	ErrEmptyKey = directive.ErrEmptyKey
 )

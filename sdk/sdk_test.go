@@ -4,10 +4,18 @@
 package sdk_test
 
 import (
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/kind"
+	"go.thesmos.sh/eidos/emit"
+	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/priority"
 	"go.thesmos.sh/eidos/sdk"
@@ -168,4 +176,183 @@ func TestDirectiveBuilderProxiesUnderlying(t *testing.T) {
 		t.Errorf("Schema.PositionalArgs length differs: facade=%d underlying=%d",
 			len(viaFacade.PositionalArgs), len(viaUnderlying.PositionalArgs))
 	}
+}
+
+// TestNodeKindsMatchUnderlying pins the source-kind re-exports to
+// node's values, and — the property the prefix exists for — pins
+// them as distinct from emit's identically-named constants.
+//
+// Every one of the eighteen source kinds shares a name with an emit
+// kind carrying a different value ("struct" against "emit.struct").
+// Re-exporting either set unprefixed would let an author reach for
+// one and receive the other, and both halves fail silently: a slot
+// constrained on a source kind accepts nothing an emit builder
+// produces, and a directive scoped to an emit kind matches no source
+// node, so the plugin never fires and nothing reports it.
+func TestNodeKindsMatchUnderlying(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		sdk  kind.Kind
+		node kind.Kind
+	}{
+		{"Package", sdk.NodeKindPackage, node.KindPackage},
+		{"File", sdk.NodeKindFile, node.KindFile},
+		{"Import", sdk.NodeKindImport, node.KindImport},
+		{"Struct", sdk.NodeKindStruct, node.KindStruct},
+		{"Interface", sdk.NodeKindInterface, node.KindInterface},
+		{"Method", sdk.NodeKindMethod, node.KindMethod},
+		{"Field", sdk.NodeKindField, node.KindField},
+		{"Function", sdk.NodeKindFunction, node.KindFunction},
+		{"Param", sdk.NodeKindParam, node.KindParam},
+		{"Return", sdk.NodeKindReturn, node.KindReturn},
+		{"TypeParam", sdk.NodeKindTypeParam, node.KindTypeParam},
+		{"TypeRef", sdk.NodeKindTypeRef, node.KindTypeRef},
+		{"Alias", sdk.NodeKindAlias, node.KindAlias},
+		{"Constant", sdk.NodeKindConstant, node.KindConstant},
+		{"Variable", sdk.NodeKindVariable, node.KindVariable},
+		{"Enum", sdk.NodeKindEnum, node.KindEnum},
+		{"EnumVariant", sdk.NodeKindEnumVariant, node.KindEnumVariant},
+		{"Embed", sdk.NodeKindEmbed, node.KindEmbed},
+	}
+
+	t.Run("each re-export equals its node constant", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range cases {
+			if tc.sdk != tc.node {
+				t.Errorf("NodeKind%s = %q, want %q", tc.name, tc.sdk, tc.node)
+			}
+		}
+	})
+
+	t.Run("the source set covers every node kind", func(t *testing.T) {
+		t.Parallel()
+		// Counted against node/kind.go itself rather than a literal,
+		// because a literal would need updating by the same commit
+		// that forgets the re-export. A kind added to node without a
+		// matching entry here leaves a directive unable to scope
+		// against it from sdk alone — the gap this set closed.
+		declared := declaredNodeKinds(t)
+		if len(cases) != declared {
+			t.Fatalf("re-exported %d source kinds, node/kind.go declares %d",
+				len(cases), declared)
+		}
+	})
+
+	t.Run("no source kind collides with its emit namesake", func(t *testing.T) {
+		t.Parallel()
+		emitKinds := map[string]kind.Kind{
+			"Package": emit.KindPackage, "File": emit.KindFile,
+			"Import": emit.KindImport, "Struct": emit.KindStruct,
+			"Interface": emit.KindInterface, "Method": emit.KindMethod,
+			"Field": emit.KindField, "Function": emit.KindFunction,
+			"Param": emit.KindParam, "Return": emit.KindReturn,
+			"TypeParam": emit.KindTypeParam, "TypeRef": emit.KindTypeRef,
+			"Alias": emit.KindAlias, "Constant": emit.KindConstant,
+			"Variable": emit.KindVariable, "Enum": emit.KindEnum,
+			"EnumVariant": emit.KindEnumVariant, "Embed": emit.KindEmbed,
+		}
+		for _, tc := range cases {
+			ek, ok := emitKinds[tc.name]
+			if !ok {
+				continue
+			}
+			if tc.sdk == ek {
+				t.Errorf("NodeKind%s and emit.Kind%s share the value %q; "+
+					"the prefix stops being a distinction", tc.name, tc.name, ek)
+			}
+		}
+	})
+}
+
+// TestEmitContractAliasesPreserveIdentity pins the emit-side
+// contracts as aliases rather than wrappers, so a plugin's own type
+// satisfies them without conversion and can assert so at compile
+// time.
+//
+//nolint:staticcheck // intentional redundant typing — see TestTypeAliasesPreserveIdentity
+func TestEmitContractAliasesPreserveIdentity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("emit contracts alias to the emit package", func(t *testing.T) {
+		t.Parallel()
+		var o1 sdk.OutputPackageSetter
+		var o2 emit.OutputPackageSetter = o1
+		_ = o2
+		var h1 sdk.SlotHost
+		var h2 emit.SlotHost = h1
+		_ = h2
+		var s1 *sdk.Slot
+		var s2 *emit.Slot = s1
+		_ = s2
+	})
+
+	t.Run("NewSlot builds a usable slot", func(t *testing.T) {
+		t.Parallel()
+		// The re-export exists so a plugin can define a slot for
+		// others to fill; a factory that returned nothing usable
+		// would satisfy the alias test and still be useless.
+		s := sdk.NewSlot("chain", "")
+		if s == nil {
+			t.Fatal("NewSlot returned nil")
+		}
+		if got := s.SlotName; got != "chain" {
+			t.Fatalf("Slot.Name = %q, want chain", got)
+		}
+	})
+}
+
+// TestErrEmptyKeyIsDistinct pins the fourth parser sentinel as
+// re-exported and as its own failure mode.
+func TestErrEmptyKeyIsDistinct(t *testing.T) {
+	t.Parallel()
+
+	t.Run("aliases the directive sentinel", func(t *testing.T) {
+		t.Parallel()
+		if !errors.Is(sdk.ErrEmptyKey, directive.ErrEmptyKey) {
+			t.Fatalf("sdk.ErrEmptyKey does not match directive.ErrEmptyKey")
+		}
+	})
+
+	t.Run("is distinguishable from a malformed directive", func(t *testing.T) {
+		t.Parallel()
+		// Re-exporting three of four sentinels left a plugin unable
+		// to tell "not a directive" from "a directive with a broken
+		// pair" through sdk alone.
+		if errors.Is(sdk.ErrEmptyKey, sdk.ErrMalformedDirective) {
+			t.Fatalf("ErrEmptyKey must not match ErrMalformedDirective")
+		}
+	})
+}
+
+// declaredNodeKinds counts the Kind constants node/kind.go declares,
+// read from the file so the count cannot drift from the source of
+// truth the way a hand-maintained literal would.
+func declaredNodeKinds(t *testing.T) int {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filepath.Join("..", "node", "kind.go"), nil, 0)
+	if err != nil {
+		t.Fatalf("parse node/kind.go: %v", err)
+	}
+	n := 0
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, name := range vs.Names {
+				if strings.HasPrefix(name.Name, "Kind") {
+					n++
+				}
+			}
+		}
+	}
+	return n
 }
