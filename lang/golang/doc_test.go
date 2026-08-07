@@ -1,7 +1,7 @@
 // Copyright Thesmos B.V. 2026
 // SPDX-License-Identifier: MIT
 
-package protogo_test
+package golang_test
 
 import (
 	"path/filepath"
@@ -12,7 +12,7 @@ import (
 )
 
 // TestDocAuditCoversEveryMetaKey pins that every meta key the
-// protogo bridge constructs from a literal string is mentioned
+// shared Go vocabulary declares from a literal string is mentioned
 // in the package's doc.go. A new key landing in code without a
 // corresponding doc.go entry fails this audit.
 func TestDocAuditCoversEveryMetaKey(t *testing.T) {

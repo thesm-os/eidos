@@ -5,6 +5,7 @@ package streamconsumer
 
 import (
 	"go.thesmos.sh/eidos/core/meta"
+	langgo "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 )
@@ -17,16 +18,15 @@ const Name = "streamconsumer"
 // Keys are resolved through the process-wide registry rather than
 // imported from `frontend/golang`, which the `plugins` depguard rule
 // denies — the pattern `shape.frontendMarker` already uses.
-// [meta.EnsureKey] returns the canonical singleton whichever package
-// registered the name first, so the accessor stays typed.
-//
-// The coupling is a string rather than an import: a typo here yields
-// a fact that is silently always absent, which is what
-// TestDetector_ReadsTheFrontendStamp exists to catch.
+// The Go vocabulary lives in lang/golang, which plugins may import
+// — depguard denies only `frontend/`. Reading the declaration
+// rather than re-registering the name by string is what makes a
+// rename a build failure instead of a fact that is silently always
+// absent.
 //
 //nolint:gochecknoglobals // cross-package registry-singleton keys
 var (
-	metaIsInterface = meta.EnsureKey("go.isInterface", meta.BoolParser)
+	metaIsInterface = langgo.MetaIsInterface
 
 	// MetaStreamType carries the consumed stream's type. It is not
 	// [shape.MetaKeyType]: recording `io.Reader` as a key is the

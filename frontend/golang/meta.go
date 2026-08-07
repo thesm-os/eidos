@@ -7,6 +7,7 @@ import (
 	"go/types"
 
 	"go.thesmos.sh/eidos/core/meta"
+	langgo "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
 
@@ -35,174 +36,33 @@ var (
 		meta.StringParser,
 	) //nolint:gochecknoglobals // cross-frontend registry-singleton key
 
-	// MetaIsChannel reports whether a [node.TypeRef] models a Go
-	// channel.
+	// The `go.*` keys moved to [lang/golang] so every Go-speaking
+	// consumer can import the declaration instead of re-declaring
+	// it by string. These aliases are the same registry singletons
+	// and keep existing readers compiling.
 	//
-	// Registered with [meta.EnsureKey] rather than [meta.NewKey]
-	// because the Go backend reads it too — depguard forbids a
-	// backend importing a frontend, so both sides resolve the same
-	// registry singleton by name. NewKey panics on a duplicate
-	// registration, so whichever package's init ran second would
-	// take the process down once both were linked into one binary.
-	MetaIsChannel = meta.EnsureKey(
-		"go.isChannel",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // shared registry-singleton key
-
-	// MetaChanDir carries the channel's directionality ("both",
-	// "send", or "recv"). Shared with the Go backend on the same
-	// terms as [MetaIsChannel].
-	MetaChanDir = meta.EnsureKey(
-		"go.chanDir",
-		meta.StringParser,
-	) //nolint:gochecknoglobals // shared registry-singleton key
-
-	// MetaChanElem stamps the printed source form of a channel's
-	// element type ("int", "context.Context", "*pkg.Type"). The
-	// element type also rides on the channel ref's first type
-	// argument; the meta stamp is the templates-friendly view, the
-	// type arg is the structured one.
-	MetaChanElem = meta.NewKey(
-		"go.chanElem",
-		meta.StringParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsContext reports that the carrying node references the
-	// `context.Context` interface.
-	MetaIsContext = meta.NewKey(
-		"go.isContext",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsError reports that the carrying node references the
-	// predeclared `error` interface.
-	MetaIsError = meta.NewKey(
-		"go.isError",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsStringer reports that the carrying node's type
-	// implements `fmt.Stringer`.
-	MetaIsStringer = meta.NewKey(
-		"go.isStringer",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsComparable reports that the carrying node's type
-	// satisfies Go's `comparable` constraint.
-	MetaIsComparable = meta.NewKey(
-		"go.isComparable",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsInterface reports that the carrying ref's underlying
-	// type is an interface, type parameters excluded.
-	//
-	// The node IR deliberately keeps no Go-specific type-kind
-	// variants, so a named ref carries a package and an identifier
-	// and nothing about what they resolve to: `io.Reader` and
-	// `time.Duration` are indistinguishable to a plugin. Plugins
-	// that must tell a collaborator or a stream from a plain value
-	// read this key rather than resolving names themselves, which
-	// they cannot do for types outside the loaded packages.
-	//
-	// A type parameter is not reported, even though its constraint
-	// is an interface — `K comparable` is a key, not a
-	// collaborator, and treating it as one misroutes every generic
-	// signature.
-	MetaIsInterface = meta.NewKey(
-		"go.isInterface",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaEmbedsInterface reports that a [node.Struct] embeds at
-	// least one interface (Go's promotion-by-embedding case).
-	MetaEmbedsInterface = meta.NewKey(
-		"go.embedsInterface",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsEmptyInterface reports that a [node.Interface] declares
-	// no methods and no embeds — Go's empty-interface form.
-	MetaIsEmptyInterface = meta.NewKey(
-		"go.isEmptyInterface",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsConstraintInterface reports that a [node.Interface]
-	// declares at least one type-set entry or `~T` approximate
-	// term — i.e. the interface is intended as a generic-
-	// constraint declaration rather than a method-set contract.
-	MetaIsConstraintInterface = meta.NewKey(
-		"go.isConstraintInterface",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaUnderlyingKind records the kind of the underlying type
-	// for a [node.Alias] — one of "basic", "func", "map", "slice",
-	// "array", "pointer", "chan". The value names the type's kind,
-	// not the type itself: an alias to `int` carries "basic", not
-	// "int". Struct and interface underlying types never reach this
-	// key because [convertTypeSpec] routes them to [node.Struct] /
-	// [node.Interface] instead of an alias; see [underlyingKindOf]
-	// for the empty-string fallback on shapes outside the set.
-	MetaUnderlyingKind = meta.NewKey(
-		"go.underlyingKind",
-		meta.StringParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsIterSeq reports that a [node.Function]'s return type
-	// is `iter.Seq[T]`.
-	MetaIsIterSeq = meta.NewKey(
-		"go.isIterSeq",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIsIterSeq2 reports that a [node.Function]'s return type
-	// is `iter.Seq2[K, V]`.
-	MetaIsIterSeq2 = meta.NewKey(
-		"go.isIterSeq2",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIterKeyType stamps the printed source form of an
-	// `iter.Seq2`'s key-type parameter.
-	MetaIterKeyType = meta.NewKey(
-		"go.iterKeyType",
-		meta.StringParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIterValueType stamps the printed source form of an
-	// `iter.Seq` / `iter.Seq2`'s value-type parameter.
-	MetaIterValueType = meta.NewKey(
-		"go.iterValueType",
-		meta.StringParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaIotaValue stamps the numeric value a typed constant
-	// resolves to, and is forwarded onto the [node.EnumVariant] that
-	// [promoteAliasToEnum] builds from that constant. Named for the
-	// iota-driven enum case it exists to serve; [stampConstantMeta]
-	// stamps every constant whose value is an integer exactly
-	// representable as an int64, iota-derived or not.
-	MetaIotaValue = meta.NewKey(
-		"go.iotaValue",
-		meta.IntParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaReceiverIsPointer reports that a [node.Method] is
-	// declared on a pointer receiver (`func (*T) Foo()`).
-	MetaReceiverIsPointer = meta.NewKey(
-		"go.receiverIsPointer",
-		meta.BoolParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
-
-	// MetaConstraintTerms records the disjunctive type-set terms a
-	// Go generic constraint declares (the `~int | ~string` form).
-	MetaConstraintTerms = meta.NewKey(
-		"go.constraintTerms",
-		constraintTermsParser,
-	) //nolint:gochecknoglobals // typed registry-singleton key
+	// Deprecated: use the identically-named key in
+	// go.thesmos.sh/eidos/lang/golang. Removed no earlier than the
+	// next minor release.
+	MetaIsChannel             = langgo.MetaIsChannel             //nolint:gochecknoglobals // re-exported registry singleton
+	MetaChanDir               = langgo.MetaChanDir               //nolint:gochecknoglobals // re-exported registry singleton
+	MetaChanElem              = langgo.MetaChanElem              //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsContext             = langgo.MetaIsContext             //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsError               = langgo.MetaIsError               //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsStringer            = langgo.MetaIsStringer            //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsComparable          = langgo.MetaIsComparable          //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsInterface           = langgo.MetaIsInterface           //nolint:gochecknoglobals // re-exported registry singleton
+	MetaEmbedsInterface       = langgo.MetaEmbedsInterface       //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsEmptyInterface      = langgo.MetaIsEmptyInterface      //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsConstraintInterface = langgo.MetaIsConstraintInterface //nolint:gochecknoglobals // re-exported registry singleton
+	MetaUnderlyingKind        = langgo.MetaUnderlyingKind        //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsIterSeq             = langgo.MetaIsIterSeq             //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIsIterSeq2            = langgo.MetaIsIterSeq2            //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIterKeyType           = langgo.MetaIterKeyType           //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIterValueType         = langgo.MetaIterValueType         //nolint:gochecknoglobals // re-exported registry singleton
+	MetaIotaValue             = langgo.MetaIotaValue             //nolint:gochecknoglobals // re-exported registry singleton
+	MetaReceiverIsPointer     = langgo.MetaReceiverIsPointer     //nolint:gochecknoglobals // re-exported registry singleton
+	MetaConstraintTerms       = langgo.MetaConstraintTerms       //nolint:gochecknoglobals // re-exported registry singleton
 )
 
 // MetaTagPrefix is the per-key namespace under which struct-tag
@@ -211,25 +71,12 @@ var (
 // `go.tag.json="id"` and `go.tag.db="id_col"`.
 const MetaTagPrefix = "go.tag."
 
-// constraintTermsParser is the [meta.Parser] for
-// [MetaConstraintTerms]. The body shape mirrors the JSON wire form
-// documented on [ConstraintTerm].
-func constraintTermsParser(raw string) ([]ConstraintTerm, error) {
-	return unmarshalConstraintTerms(raw)
-}
-
 // ConstraintTerm carries one disjunctive type-set term from a Go
-// generic constraint, mirroring the type-checker's [types.Term]
-// view in a JSON-friendly shape.
-type ConstraintTerm struct {
-	// Type is the term's [node.TypeRef].
-	Type *node.TypeRef `json:"type,omitempty"`
-
-	// Approximate reports whether the term carries Go's `~`
-	// operator (any type whose underlying type is Type) or names
-	// the type exactly.
-	Approximate bool `json:"approximate,omitempty"`
-}
+// generic constraint.
+//
+// Deprecated: use [lang/golang.ConstraintTerm]. Removed no earlier
+// than the next minor release.
+type ConstraintTerm = langgo.ConstraintTerm
 
 // stampFrontendMarker records the cross-frontend provenance marker
 // on pkg's meta bag. Every package the Go frontend emits carries
@@ -262,17 +109,4 @@ func chanDirString(d types.ChanDir) string {
 	default:
 		return "both"
 	}
-}
-
-// unmarshalConstraintTerms decodes a JSON-encoded slice of
-// [ConstraintTerm] from raw.
-func unmarshalConstraintTerms(raw string) ([]ConstraintTerm, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	var out []ConstraintTerm
-	if err := jsonUnmarshalString(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }

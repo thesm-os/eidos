@@ -6,6 +6,7 @@ package golang_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 // stampingSurfaceDigest pins the set of metadata keys this frontend
 // declares. Update it in the same commit that bumps FrontendVersion,
 // never on its own.
-const stampingSurfaceDigest = "57c51eeeb0a4870c70161773a03c39a8457efcad2ab1f01245731d94b8ef4a37"
+const stampingSurfaceDigest = "ae06f50771b3a05ffc8d178b98febc5dbf9e365a0596025222abbad89cf69f97"
 
 // TestFrontendVersion_TracksStampingSurface fails when the set of
 // metadata keys this frontend stamps changes without FrontendVersion
@@ -41,13 +42,32 @@ const stampingSurfaceDigest = "57c51eeeb0a4870c70161773a03c39a8457efcad2ab1f0124
 //     update the digest, in one commit;
 //   - a key moved between files, or a call became non-literal ->
 //     update the digest alone and say so in the commit body.
+//
+// The surface is deliberately over-inclusive. It spans the whole
+// shared `go.*` vocabulary in lang/golang, which also holds the
+// three render keys a bridge stamps rather than this frontend — so
+// adding one of those bumps this digest too. That is the safe
+// direction: over-invalidating costs a re-parse, while
+// under-invalidating serves a cached graph that predates the key.
 func TestFrontendVersion_TracksStampingSurface(t *testing.T) {
 	t.Parallel()
 
+	// Both directories: the `go.*` vocabulary this frontend stamps
+	// is declared in lang/golang so every Go-speaking consumer can
+	// import it, and docaudit sees only literal declarations — so
+	// scanning this package alone would report the one key still
+	// declared here and leave the guard blind to the nineteen it
+	// actually stamps.
 	keys, err := docaudit.MetaKeys(packageSourceDir(t))
 	if err != nil {
 		t.Fatalf("collecting declared meta keys: %v", err)
 	}
+	vocab, err := docaudit.MetaKeys(langGolangSourceDir(t))
+	if err != nil {
+		t.Fatalf("collecting the shared Go vocabulary: %v", err)
+	}
+	keys = append(keys, vocab...)
+	slices.Sort(keys)
 	if len(keys) == 0 {
 		t.Fatal("no metadata keys found; the guard is mis-wired and would pass for any change")
 	}

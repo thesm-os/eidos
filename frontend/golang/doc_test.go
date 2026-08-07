@@ -64,3 +64,15 @@ func packageSourceDir(t *testing.T) string {
 	}
 	return filepath.Dir(file)
 }
+
+// langGolangSourceDir returns the absolute path of the lang/golang
+// package source, where the shared `go.*` meta vocabulary is
+// declared.
+//
+// Resolved from this file's own location rather than by import
+// path, for the same reason as [packageSourceDir]: sibling tests
+// pivot the working directory while loading fixtures.
+func langGolangSourceDir(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(packageSourceDir(t), "..", "..", "lang", "golang")
+}

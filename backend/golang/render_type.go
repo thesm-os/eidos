@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/emit"
+	langgo "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
 
@@ -223,40 +223,18 @@ func (s *renderState) chanElem(r emit.Ref, origin *node.TypeRef) (string, error)
 		ErrUnsupportedRef, origin.Name)
 }
 
-// goIsChannelKey is the Go frontend's `go.isChannel` marker.
-// [meta.EnsureKey] resolves to the same registry singleton as the
-// frontend's declaration, so the backend reads the fact without
-// importing the frontend — which depguard forbids outright.
-//
-//nolint:gochecknoglobals // cross-package registry-singleton key
-var goIsChannelKey = meta.EnsureKey("go.isChannel", meta.BoolParser)
-
-// goChanDirKey is the Go frontend's `go.chanDir` stamp, carrying
-// "both", "send" or "recv".
-//
-//nolint:gochecknoglobals // cross-package registry-singleton key
-var goChanDirKey = meta.EnsureKey("go.chanDir", meta.StringParser)
-
-// goTypeKey is the bridge-stamped `go.type` meta key shared
-// across every cross-language Go-targeting bridge. [meta.EnsureKey]
-// resolves to the same registry singleton regardless of the
-// declaring package.
-//
-//nolint:gochecknoglobals // cross-package registry-singleton key
-var goTypeKey = meta.EnsureKey("go.type", meta.StringParser)
-
-// goNameKey is the bridge-stamped `go.name` meta key shared
-// across every cross-language Go-targeting bridge. Lives at this
-// site so render-site lookups don't need to reach into a
-// bridge plugin's exported constants.
-//
-//nolint:gochecknoglobals // cross-package registry-singleton key
-var goNameKey = meta.EnsureKey("go.name", meta.StringParser)
-
-// goImportKey is the bridge-stamped `go.import` meta key.
-//
-//nolint:gochecknoglobals // cross-package registry-singleton key
-var goImportKey = meta.EnsureKey("go.import", meta.StringParser)
+// The `go.*` keys the render site reads are declared once in
+// lang/golang. They were re-declared here by string because
+// depguard forbids a backend importing a frontend — which cost the
+// compile-time link to the declaration, and left five keys to drift
+// independently.
+var (
+	goIsChannelKey = langgo.MetaIsChannel //nolint:gochecknoglobals // shared registry singleton
+	goChanDirKey   = langgo.MetaChanDir   //nolint:gochecknoglobals // shared registry singleton
+	goTypeKey      = langgo.MetaGoType    //nolint:gochecknoglobals // shared registry singleton
+	goNameKey      = langgo.MetaGoName    //nolint:gochecknoglobals // shared registry singleton
+	goImportKey    = langgo.MetaGoImport  //nolint:gochecknoglobals // shared registry singleton
+)
 
 // registerBridgeImport pulls the bridge-stamped go.import meta
 // off r's source-side origin and registers it on the host
