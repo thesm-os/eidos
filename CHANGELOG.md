@@ -15,6 +15,37 @@ omitted unless they change what a caller can rely on.
 
 ### Breaking
 
+- **`lang/golang`: the embed walks report which embeds failed, not whether any
+  did.** `FieldSet`, `PromotedFields`, `ExportedFieldSet` and `PromotedMethods`
+  return `[]UnresolvedEmbed` in place of their `bool` second result. The bool
+  said an answer was partial and erased which embed was missing and why, so a
+  caller could report only that something was wrong. Each entry now names the
+  embedding declaration, the embed as the author spelled it, its source
+  position, and one of `EmbedNoResolver`, `EmbedNotLoaded`, `EmbedGeneric` or
+  `EmbedTooDeep`.
+
+  Severity stays the caller's: a generator that must not emit a partial double
+  treats `EmbedNotLoaded` as an error, and one filling a documentation table
+  treats the same thing as a footnote.
+
+  Migration: `if !complete` becomes `if len(problems) != 0`.
+
+  Two behaviour changes ride along. A **generic embed is now refused rather
+  than promoted** — `Base[T]`'s members are typed in that declaration's type
+  parameters, so copying them across produced output naming identifiers not in
+  scope; the embed itself stays reachable by its own name and the refusal is
+  reported as `EmbedGeneric`. And `PromotedMethods` **applies Go's promotion
+  rules in full**: it now recurses instead of stopping at the first level, two
+  methods reachable at equal depth cancel rather than the first one winning,
+  and an embedded interface contributes its *flattened* set — so a struct
+  embedding `io.ReadCloser` has `Read` and `Close`, where before it had
+  neither, because `ReadCloser` declares no methods of its own.
+
+  `PromotedMethod` gained `Depth` and `Path` and replaced the `Through` field
+  with a `Through()` method returning the first hop, so the same fact has one
+  home. `Selector()` renders the explicit path a call needs when promotion
+  cancelled.
+
 - **`eidostest/plugintest`: `RunSuite` gained checks that existing plugins can
   fail.** This is the intended effect — each new check catches a defect class
   that was previously silent — but a plugin that passed before may go red on
@@ -251,6 +282,59 @@ omitted unless they change what a caller can rely on.
   does not waive the no-Error-severity contract.
 
 ### Added
+
+- **`sdk/golang` is the plugin base every Go-generating plugin embeds.** A
+  plugin declares six things before it generates anything — name, version,
+  priority bucket, capabilities, directives, and per-language outputs plus
+  templates — of which nine of the ten methods are identical for every Go
+  generator apart from the values they return. `NewGenerator(name, templates,
+  outputs...)` takes the three a generator cannot omit and chains the rest;
+  `NewPlugin(name)` is the same for a plugin shipping no templates. `Build()`
+  freezes the declaration into a `*Base` the plugin embeds.
+
+  Written out per plugin, those methods drift. The set this replaces had
+  sixteen copies of the language dispatch and two of them tested the language
+  marker against a local constant rather than `golang.Language` — a plugin
+  that silently emitted nothing, with no diagnostic, because the string did
+  not match.
+
+  `Builder` and `Base` are separate types on purpose: a single mutable type
+  would leave a plugin's declared outputs and template tree writable for the
+  life of the process, from any goroutine holding the plugin. `Build()` panics
+  on a malformed declaration — an empty name, outputs with no template tree, an
+  output with no suffix, a duplicate output tag — because it runs inside a
+  plugin's `New` and so fires at process start on the first test that
+  constructs the plugin.
+
+  Note the trade-off before adopting it: a plugin that writes its own
+  capability methods stops compiling when the pipeline adds one, and its author
+  decides what the new method answers. Embedding `Base` keeps it compiling
+  against a default chosen in a file the plugin author does not read. `Base`
+  answers the value meaning *not provided* for anything unset — nil, and
+  `sdk.DefaultPriority`, which is the bucket a plugin implementing no
+  capability already occupies — and `TestBaseSatisfiesExactly` pins the
+  provider set so a new interface method fails loudly there instead.
+
+- **`lang/golang.MethodSet` flattens an interface's method set through its
+  embeds.** A generator reading `iface.Methods` reads what the source typed. A
+  double missing a method inherited through an embed does not satisfy the
+  interface it doubles, and a suite missing one asserts about a different
+  interface than the one a consumer implements. Embedded methods come first,
+  depth-first in source order, then the interface's own, so generated ordering
+  is stable as an embed gains a method.
+
+- **`emit/builder.Queue` and `QueueAs` append a plugin's emit values to an
+  origin's slot.** The last four lines of every `Generate`, written once:
+  stamp each value with provenance naming its kind and the declaration it came
+  from, then append. They write through a new `Appender` port that
+  `store.EmitView` satisfies structurally, so the builder stays a leaf over the
+  emit model. A nil value is skipped; a nil origin is `ErrNilOrigin`.
+
+- **`sdk` now re-exports the emit-queueing helpers.** `EmitBase`,
+  `EmitBaseTagged`, `QueueEmit`, `QueueEmitAs`, `PrimaryPackage` and the
+  `EmitAppender` port. `Base`, `Tagged` and `PrimaryPackage` already existed in
+  `emit/builder` and `emit`; nothing in `sdk` pointed at them, so plugin
+  authors reimplemented all three rather than finding them.
 
 - **`lang/golang` is now the complete Go vocabulary a generator needs.** A Go
   generator does four things in order — asks questions of a source
