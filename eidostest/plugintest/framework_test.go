@@ -758,3 +758,108 @@ func TestAssertTemplateFuncsResolve(t *testing.T) {
 		}
 	})
 }
+
+// backendExtraPlugin ships one template calling whatever body it is
+// given, and registers no funcmap of its own — so every name the
+// template calls has to come from the backend.
+type backendExtraPlugin struct{ body string }
+
+func (backendExtraPlugin) Name() string                            { return "extragen" }
+func (backendExtraPlugin) Generate(*plugin.GeneratorContext) error { return nil }
+
+func (p backendExtraPlugin) Templates(lang string) (fs.FS, bool) {
+	if lang != plugintest.ConformanceLanguage {
+		return nil, false
+	}
+	return fstest.MapFS{
+		"templates/golang/extragen.x.tmpl": &fstest.MapFile{Data: []byte(p.body)},
+	}, true
+}
+
+func (backendExtraPlugin) TemplateFuncs(string) template.FuncMap     { return nil }
+func (backendExtraPlugin) TemplateOverrides(string) template.FuncMap { return nil }
+
+// TestReservedTemplateFuncs_CoversWhatTemplatesCall pins the
+// relationship between the assertion's argument and the names a
+// template may legally call.
+//
+// The seed carried the reserved dispatch helpers and the shared
+// lang/golang bundle and not the backend's overrideable extras, so a
+// plugin calling `camel` failed its own suite against a template that
+// renders correctly — and the diagnostic said the backend does not
+// provide the name, which sends the author to register it themselves
+// and collide with the backend's entry.
+//
+// The drift tests in backend/golang guard the mirrored name lists.
+// This pins the other half: that the assembled map is what the
+// assertion actually needs, which is the join those tests cannot see.
+func TestReservedTemplateFuncs_CoversWhatTemplatesCall(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a template calling backend extras resolves", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(fake,
+			backendExtraPlugin{body: `{{ define "extragen.x" }}` +
+				`{{ camel .Name }}{{ pascal .Name }}{{ metaStr . "k" }}{{ join .Parts "," }}` +
+				`{{ end }}`},
+			plugintest.ReservedTemplateFuncs(plugintest.ConformanceLanguage),
+			plugintest.ConformanceLanguage)
+		if fake.failed {
+			t.Fatalf("a template calling backend-provided helpers was reported unresolved: %v",
+				fake.errs)
+		}
+	})
+
+	t.Run("a template calling the shared conventions resolves", func(t *testing.T) {
+		t.Parallel()
+		fake := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(fake,
+			backendExtraPlugin{body: `{{ define "extragen.x" }}` +
+				`{{ if isSlice .Type }}{{ selfType . }}{{ end }}{{ end }}`},
+			plugintest.ReservedTemplateFuncs(plugintest.ConformanceLanguage),
+			plugintest.ConformanceLanguage)
+		if fake.failed {
+			t.Fatalf("a template calling lang/golang helpers was reported unresolved: %v",
+				fake.errs)
+		}
+	})
+
+	t.Run("a misspelled call is still reported", func(t *testing.T) {
+		t.Parallel()
+		// The check has to stay able to fail: a seed wide enough to
+		// resolve everything would pass every plugin and assert
+		// nothing.
+		fake := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(fake,
+			backendExtraPlugin{body: `{{ define "extragen.x" }}{{ camle .Name }}{{ end }}`},
+			plugintest.ReservedTemplateFuncs(plugintest.ConformanceLanguage),
+			plugintest.ConformanceLanguage)
+		if !fake.failed {
+			t.Fatal("a call to a name nobody provides was not reported")
+		}
+	})
+
+	t.Run("the names accessors are each a proper subset of the map", func(t *testing.T) {
+		t.Parallel()
+		// The defect this closes was reading the two as a matched
+		// pair. They are halves, and passing either alone is what
+		// produced the false failure.
+		full := plugintest.ReservedTemplateFuncs(plugintest.ConformanceLanguage)
+		for _, name := range plugintest.ReservedTemplateFuncNames() {
+			if _, ok := full[name]; !ok {
+				t.Errorf("reserved name %q missing from ReservedTemplateFuncs", name)
+			}
+		}
+		for _, name := range plugintest.OverrideableTemplateFuncNames() {
+			if _, ok := full[name]; !ok {
+				t.Errorf("overrideable name %q missing from ReservedTemplateFuncs", name)
+			}
+		}
+		reserved := len(plugintest.ReservedTemplateFuncNames())
+		if len(full) <= reserved {
+			t.Fatalf("ReservedTemplateFuncs has %d entries and the reserved half alone has %d; "+
+				"the map is not wider than its parts", len(full), reserved)
+		}
+	})
+}

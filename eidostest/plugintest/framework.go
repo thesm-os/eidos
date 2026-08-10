@@ -790,6 +790,8 @@ var overrideableFuncNames = []string{
 
 // OverrideableTemplateFuncNames returns the backend funcmap names a
 // plugin may legally register over, as a fresh slice.
+// Not the argument [AssertTemplateFuncsResolve] takes — this is one
+// half of it. [ReservedTemplateFuncs] is that argument.
 func OverrideableTemplateFuncNames() []string { return slices.Clone(overrideableFuncNames) }
 
 // ReservedTemplateFuncNames returns the reserved funcmap names this
@@ -799,6 +801,8 @@ func OverrideableTemplateFuncNames() []string { return slices.Clone(overrideable
 // above still matches the set it actually reserves. A backend whose
 // reserved set grows without this one growing leaves plugin authors a
 // name the suite calls legal and the backend rejects at merge time.
+// Not the argument [AssertTemplateFuncsResolve] takes — this is the
+// canonical half only. [ReservedTemplateFuncs] is that argument.
 func ReservedTemplateFuncNames() []string { return slices.Clone(reservedFuncNames) }
 
 // assertTemplateFuncsAvoidReservedNames pins that a
@@ -1015,6 +1019,36 @@ func parseStubbing(name string, body []byte, seed template.FuncMap) (*template.T
 	return nil, stubbed, fmt.Errorf("template references more than %d undefined functions",
 		maxStubbedTemplateFuncs)
 }
+
+// ReservedTemplateFuncs returns the funcmap
+// [AssertTemplateFuncsResolve] takes for lang — every name a plugin
+// template may call without registering it.
+//
+// Three sets, and a caller assembling them by hand gets the third
+// wrong: the reserved dispatch and import-collection entries, the
+// backend's overrideable naming, meta-read, string and debug helpers,
+// and the shared lang/golang conventions layered on top. Passing only
+// [ReservedTemplateFuncNames] reports every call into the other two as
+// unresolved, which fails a plugin for a template that renders
+// correctly and reads as a defect in the plugin rather than in the
+// argument.
+//
+// Values are inert placeholders. The assertion parses with them and
+// calls none, and the real entries are methods on a per-target render
+// state — `render` and `renderType` collect the file's imports as
+// they go — so a copy bound to a throwaway state would render
+// something and register the imports nowhere.
+//
+// Assembled from this package's own mirrors rather than from a
+// backend, which it may not import. `backend/golang` owns a drift
+// test per mirror, so a set that grows there without growing here
+// fails on that side.
+//
+// A language no backend in this repo claims yields the reserved
+// entries alone, which is the honest answer: the suite knows what the
+// framework reserves everywhere and what the Go backend adds, and
+// nothing about a backend it has never seen.
+func ReservedTemplateFuncs(lang string) template.FuncMap { return reservedFuncMap(lang) }
 
 // reservedFuncMap returns the backend's reserved names as a funcmap
 // of stubs.
