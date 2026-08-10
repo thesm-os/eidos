@@ -4,6 +4,7 @@
 package golang
 
 import (
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -108,6 +109,47 @@ func enumFallbackType(e *node.Enum) *node.TypeRef {
 		return e.Underlying
 	}
 	return &node.TypeRef{TypeKind: node.TypeRefNamed, Name: typeInt}
+}
+
+// ForeignVariants returns, sorted, the import paths of packages
+// declaring constants of e's type outside e's own package.
+//
+// A fact about eidos's own frontend that a consumer otherwise has to
+// know: constants are coalesced into an enum only within one package,
+// so a `const Extra cfg.Status = 3` declared in another package stays
+// a loose [node.Constant] and never reaches [node.Enum.Variants]. It
+// is legal Go, and every generated answer about the set is then
+// confidently false — `IsValid` rejects a declared value, an arity
+// check pins a count that is not the truth, and `String` falls to the
+// numeric fallback for a variant that has a name.
+//
+// Paths rather than the constants themselves, because there is
+// nothing useful to do with them: a generator cannot fold a foreign
+// constant into a set it does not own, so what it needs is a
+// diagnostic naming where to look. Sorted so that diagnostic is
+// stable across runs; map iteration order would make the same source
+// produce two different messages.
+//
+// A pure function over a slice rather than a store query, so the
+// caller keeps its [store.Reader] and this package stays below it.
+func ForeignVariants(e *node.Enum, constants []*node.Constant) []string {
+	if e == nil {
+		return nil
+	}
+	want := e.QName()
+	seen := make(map[string]struct{})
+	for _, c := range constants {
+		if c == nil || c.Package == e.Package {
+			continue
+		}
+		if QName(c.Type) == want {
+			seen[c.Package] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // EnumFormOf decides how the enum's variants render as text.

@@ -28,6 +28,43 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`lang/golang.SequenceOf` answers a method's range-over-func return in one
+  call.** The four existing iterator accessors each return nil for a
+  non-sequence, so every generator offering a `Yields` helper wrote the same nil
+  guard around them — and the guard is load-bearing, because `FromNode`
+  propagates nil rather than refusing it, so a template that skipped the branch
+  rendered a nil ref and failed at the backend naming the file rather than the
+  method. `Sequence`'s zero value reads as "not a sequence", and the sole-return
+  rule is stated where it belongs: a method returning `(iter.Seq[V], error)` is
+  not one a helper can generate against, because the helper would have to invent
+  a value for the error before it could iterate.
+
+- **`lang/golang.SentinelSubject` decomposes `Err<Subject>`** — the third side of
+  a pair that was two. `SentinelName` composed and `IsSentinelName` matched;
+  nothing read a subject back out, so a caller wrote
+  `strings.TrimPrefix(name, "Err")`, which turns `Errors` into `ors` and `Err`
+  into the empty string. Both are valid identifiers, so both compile, and the
+  emitted message names a subject the author never wrote. Gated on
+  `IsSentinelName`, so the three symbols cannot disagree about a name between
+  them. Reachable from a template as `<prefix>sentinelSubject`.
+
+- **`lang/golang.IsWellFormedLiteral` + `ErrMalformedLiteral`** validate text a
+  generator stamps into source as a value expression. Deliberately shallow: it
+  refuses what would produce a file the toolchain cannot *parse* — an empty
+  value, an unterminated string, raw string or rune literal — and passes named
+  constants, conversions and qualified identifiers to the consumer's compiler,
+  which can resolve them. The failure it prevents is the one with no
+  attribution: an unbalanced quote fails as a syntax error somewhere else in a
+  file the author never wrote.
+
+- **`lang/golang.ForeignVariants` reports the packages declaring constants of an
+  enum's type outside its own.** A fact about eidos's own frontend that a
+  consumer otherwise has to know: constants coalesce into an enum only within
+  one package, so `const Extra cfg.Status = 3` declared elsewhere never reaches
+  `Variants`. It is legal Go, and every generated answer about the set is then
+  confidently false — `IsValid` rejects a declared value and `String` falls to
+  the numeric fallback for a variant that has a name.
+
 - **`lang/golang` resolves a source-level qualifier against the file that wrote
   the import.** `QualifierOf`, `ImportForQualifier`, `FileOf` and
   `ResolveQualified` answer what `RefForQualified` cannot: that one reads

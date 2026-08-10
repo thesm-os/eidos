@@ -4,6 +4,7 @@
 package golang_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -236,6 +237,75 @@ func TestStructTag(t *testing.T) {
 		t.Parallel()
 		if got := golang.StructTag(); got != "" {
 			t.Fatalf("StructTag() = %q, want empty", got)
+		}
+	})
+}
+
+// TestIsWellFormedLiteral pins the line between what this refuses and
+// what it hands to the consumer's compiler.
+//
+// The failure it prevents is the one with no attribution: an
+// unbalanced quote stamped into generated source does not fail at the
+// directive that carried it, it fails as a syntax error somewhere else
+// in a file the author never wrote.
+func TestIsWellFormedLiteral(t *testing.T) {
+	t.Parallel()
+
+	accepted := []struct{ name, src string }{
+		{"an integer", "42"},
+		{"a negative float", "-1.5"},
+		{"a quoted string", `"hello"`},
+		{"a string carrying an escaped quote", `"say \"hi\""`},
+		{"a raw string", "`raw`"},
+		{"a raw string carrying a quote", "`he said \"hi\"`"},
+		{"a rune", `'a'`},
+		{"an escaped rune", `'\n'`},
+		{"a quote rune", `'\''`},
+		{"a named constant", "MaxRetries"},
+		{"a qualified constant", "time.Second"},
+		{"a conversion", "time.Duration(5)"},
+		{"a composite literal", `map[string]int{"a": 1}`},
+		{"a concatenation", `"a" + "b"`},
+		{"a boolean", "true"},
+		{"nil", "nil"},
+	}
+	for _, tc := range accepted {
+		t.Run("accepts "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Everything the check cannot resolve goes to the compiler,
+			// which can. Refusing these would reject values authors
+			// legitimately write.
+			if err := golang.IsWellFormedLiteral(tc.src); err != nil {
+				t.Fatalf("IsWellFormedLiteral(%q) = %v, want accepted", tc.src, err)
+			}
+		})
+	}
+
+	refused := []struct{ name, src string }{
+		{"an empty value", ""},
+		{"whitespace only", "   "},
+		{"an unterminated string", `"hello`},
+		{"an unterminated raw string", "`raw"},
+		{"an unterminated rune", `'a`},
+		{"a string closed only by an escaped quote", `"hi\"`},
+	}
+	for _, tc := range refused {
+		t.Run("refuses "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := golang.IsWellFormedLiteral(tc.src)
+			if !errors.Is(err, golang.ErrMalformedLiteral) {
+				t.Fatalf("IsWellFormedLiteral(%q) = %v, want ErrMalformedLiteral", tc.src, err)
+			}
+		})
+	}
+
+	t.Run("a rune's escaped quote does not close it early", func(t *testing.T) {
+		t.Parallel()
+		// The character the private copies forgot. Read as closing, the
+		// remainder of the value is scanned as if unquoted and a later
+		// quote pairs with nothing.
+		if err := golang.IsWellFormedLiteral(`'\''`); err != nil {
+			t.Fatalf("IsWellFormedLiteral: %v", err)
 		}
 	})
 }

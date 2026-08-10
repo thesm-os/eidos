@@ -181,7 +181,7 @@ func WithName(field string) string { return "With" + ExportedName(field) }
 // The convention every Go codebase follows and the one a sentinel
 // detector matches on, so a generator emitting an error variable
 // under any other name produces one nothing finds.
-func SentinelName(subject string) string { return "Err" + ExportedName(subject) }
+func SentinelName(subject string) string { return sentinelPrefix + ExportedName(subject) }
 
 // IsSentinelName reports whether ident is spelled as a sentinel error
 // variable — the matcher [SentinelName]'s own documentation refers to
@@ -196,9 +196,40 @@ func SentinelName(subject string) string { return "Err" + ExportedName(subject) 
 // names nothing in particular — and admitting it would classify a
 // package's own generic error variable as a sentinel for a type.
 func IsSentinelName(ident string) bool {
-	rest, found := strings.CutPrefix(ident, "Err")
+	rest, found := strings.CutPrefix(ident, sentinelPrefix)
 	return found && rest != "" && IsExported(rest)
 }
+
+// SentinelSubject strips the sentinel prefix from an error
+// variable's identifier, returning the subject and whether the name
+// carried one. A name that is not a sentinel is returned whole.
+//
+// The third side of a pair that was two: [SentinelName] composes,
+// [IsSentinelName] matches, and nothing read a subject back out — so
+// a generator wanting one wrote `strings.TrimPrefix(name, "Err")`,
+// which turns `Errors` into `ors` and `Err` into the empty string.
+// Both are valid Go identifiers, so both compile, and the emitted
+// message names a subject the author never wrote.
+//
+// Gated on [IsSentinelName] rather than on the prefix alone, which
+// is what makes those two cases fall out: the same rule that decides
+// a name *is* a sentinel decides what its subject is, so the three
+// cannot disagree about a name between them. An unexported
+// `errNotFound` is therefore not a sentinel here — [SentinelName]
+// cannot compose one, and reporting a subject for a name this
+// package could not have produced would claim a round trip that
+// does not hold.
+func SentinelSubject(ident string) (subject string, prefixed bool) {
+	if !IsSentinelName(ident) {
+		return ident, false
+	}
+	return strings.TrimPrefix(ident, sentinelPrefix), true
+}
+
+// sentinelPrefix is the `Err` every sentinel identifier opens with,
+// named once so the composer, the matcher and the decomposer read
+// the same three characters.
+const sentinelPrefix = "Err"
 
 // ParseFuncName composes a parse function's identifier —
 // `Parse<Type>`.

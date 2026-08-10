@@ -585,3 +585,77 @@ func TestIsSentinelName(t *testing.T) {
 		}
 	})
 }
+
+// TestSentinelSubject pins the third side of a pair that was two, and
+// the round trip that makes the three one rule.
+func TestSentinelSubject(t *testing.T) {
+	t.Parallel()
+
+	t.Run("strips the prefix from a sentinel", func(t *testing.T) {
+		t.Parallel()
+		subject, prefixed := golang.SentinelSubject("ErrNotFound")
+		if !prefixed || subject != "NotFound" {
+			t.Fatalf("SentinelSubject = %q, %v; want NotFound, true", subject, prefixed)
+		}
+	})
+
+	t.Run("round-trips against SentinelName", func(t *testing.T) {
+		t.Parallel()
+		// The property the three symbols exist to hold. Composed by one
+		// rule and decomposed by another, a generator emits variables
+		// its own detector cannot see.
+		for _, subject := range []string{"gone", "NotFound", "url_path", "Conflict"} {
+			name := golang.SentinelName(subject)
+			back, prefixed := golang.SentinelSubject(name)
+			if !prefixed || golang.SentinelName(back) != name {
+				t.Fatalf("SentinelName(%q) = %q, back to %q (%v) — round trip broken",
+					subject, name, back, prefixed)
+			}
+		}
+	})
+
+	t.Run("a name that merely starts with Err is returned whole", func(t *testing.T) {
+		t.Parallel()
+		// TrimPrefix turns Errors into ors, which is a valid identifier
+		// and therefore compiles — with a subject the author never
+		// wrote in every message that interpolates it.
+		subject, prefixed := golang.SentinelSubject("Errors")
+		if prefixed || subject != "Errors" {
+			t.Fatalf("SentinelSubject(Errors) = %q, %v; want Errors, false", subject, prefixed)
+		}
+	})
+
+	t.Run("bare Err carries no subject", func(t *testing.T) {
+		t.Parallel()
+		// TrimPrefix yields the empty string here, which renders as
+		// nothing at all wherever the subject is interpolated.
+		subject, prefixed := golang.SentinelSubject("Err")
+		if prefixed || subject != "Err" {
+			t.Fatalf("SentinelSubject(Err) = %q, %v; want Err, false", subject, prefixed)
+		}
+	})
+
+	t.Run("an unexported error variable is not a sentinel", func(t *testing.T) {
+		t.Parallel()
+		// SentinelName cannot compose one, so reporting a subject for
+		// it would claim a round trip that does not hold.
+		subject, prefixed := golang.SentinelSubject("errNotFound")
+		if prefixed || subject != "errNotFound" {
+			t.Fatalf("SentinelSubject(errNotFound) = %q, %v; want it returned whole", subject, prefixed)
+		}
+	})
+
+	t.Run("agrees with IsSentinelName on every input", func(t *testing.T) {
+		t.Parallel()
+		// One rule, three symbols. A disagreement here is a name one
+		// half classifies as a sentinel and the other decomposes as
+		// though it were not.
+		for _, ident := range []string{"ErrNotFound", "Errors", "Err", "errNotFound", "", "Err_"} {
+			_, prefixed := golang.SentinelSubject(ident)
+			if prefixed != golang.IsSentinelName(ident) {
+				t.Fatalf("SentinelSubject(%q) prefixed=%v but IsSentinelName=%v",
+					ident, prefixed, golang.IsSentinelName(ident))
+			}
+		}
+	})
+}

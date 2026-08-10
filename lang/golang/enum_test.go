@@ -676,3 +676,90 @@ func TestEnumFallback(t *testing.T) {
 		}
 	})
 }
+
+// TestForeignVariants pins the frontend fact a consumer otherwise has
+// to know: constants coalesce into an enum only within one package.
+//
+// A `const Extra cfg.Status = 3` in another package is legal Go and
+// never reaches Variants, so every generated answer about the set is
+// then confidently false — and nothing in the run says so.
+func TestForeignVariants(t *testing.T) {
+	t.Parallel()
+
+	status := func() *node.Enum {
+		return &node.Enum{Name: "Status", Package: "example.com/cfg", Underlying: builtinRef("int")}
+	}
+	constOf := func(pkg, name string, typ *node.TypeRef) *node.Constant {
+		return &node.Constant{Name: name, Package: pkg, Type: typ}
+	}
+	cfgStatus := func() *node.TypeRef { return namedTypeRef("example.com/cfg", "Status") }
+
+	t.Run("names the packages declaring constants of the type elsewhere", func(t *testing.T) {
+		t.Parallel()
+		got := golang.ForeignVariants(status(), []*node.Constant{
+			constOf("example.com/other", "StatusExtra", cfgStatus()),
+			constOf("example.com/third", "StatusMore", cfgStatus()),
+		})
+		if !slices.Equal(got, []string{"example.com/other", "example.com/third"}) {
+			t.Fatalf("ForeignVariants = %v", got)
+		}
+	})
+
+	t.Run("sorts, so the diagnostic is the same on every run", func(t *testing.T) {
+		t.Parallel()
+		// Map iteration order would make one source produce two
+		// different messages, which reads as the source having changed.
+		got := golang.ForeignVariants(status(), []*node.Constant{
+			constOf("example.com/zulu", "A", cfgStatus()),
+			constOf("example.com/alpha", "B", cfgStatus()),
+		})
+		if !slices.IsSorted(got) {
+			t.Fatalf("ForeignVariants = %v, want sorted", got)
+		}
+	})
+
+	t.Run("reports one package once however many constants it declares", func(t *testing.T) {
+		t.Parallel()
+		got := golang.ForeignVariants(status(), []*node.Constant{
+			constOf("example.com/other", "A", cfgStatus()),
+			constOf("example.com/other", "B", cfgStatus()),
+		})
+		if len(got) != 1 {
+			t.Fatalf("ForeignVariants = %v, want one entry", got)
+		}
+	})
+
+	t.Run("ignores the enum's own package", func(t *testing.T) {
+		t.Parallel()
+		// A constant beside the enum was coalesced into it, or was
+		// deliberately left out; either way it is not the cross-package
+		// blindness this reports.
+		got := golang.ForeignVariants(status(), []*node.Constant{
+			constOf("example.com/cfg", "StatusDraft", cfgStatus()),
+		})
+		if got != nil {
+			t.Fatalf("ForeignVariants = %v, want nil", got)
+		}
+	})
+
+	t.Run("ignores a constant of another type", func(t *testing.T) {
+		t.Parallel()
+		got := golang.ForeignVariants(status(), []*node.Constant{
+			constOf("example.com/other", "Limit", builtinRef("int")),
+			constOf("example.com/other", "Tier", namedTypeRef("example.com/cfg", "Level")),
+		})
+		if got != nil {
+			t.Fatalf("ForeignVariants = %v, want nil — neither constant is of Status", got)
+		}
+	})
+
+	t.Run("survives a nil enum and a nil entry", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.ForeignVariants(nil, []*node.Constant{constOf("x", "A", cfgStatus())}); got != nil {
+			t.Fatalf("ForeignVariants(nil) = %v", got)
+		}
+		if got := golang.ForeignVariants(status(), []*node.Constant{nil}); got != nil {
+			t.Fatalf("ForeignVariants with a nil entry = %v", got)
+		}
+	})
+}

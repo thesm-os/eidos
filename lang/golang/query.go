@@ -3,7 +3,10 @@
 
 package golang
 
-import "go.thesmos.sh/eidos/node"
+import (
+	"go.thesmos.sh/eidos/emit"
+	"go.thesmos.sh/eidos/node"
+)
 
 // The signature and type queries a Go generator composes before it
 // decides what to emit.
@@ -290,6 +293,69 @@ func IteratorSecond(t *node.TypeRef) *node.TypeRef {
 // rather than a key.
 func IteratorYieldsError(t *node.TypeRef) bool {
 	return IteratorOfType(t) == Seq2Iterator && IsError(t.TypeArgs[1])
+}
+
+// Sequence is a method's range-over-func return, in the form a
+// render site uses.
+//
+// The zero value reads as "not a sequence" — [Sequence.Kind] is
+// [NotIterator] and every ref is nil — so a template branching on it
+// needs no separate presence flag.
+type Sequence struct {
+	// Kind classifies the shape, or is [NotIterator] when the method
+	// returns none.
+	Kind Iterator
+
+	// Elem is the value a caller collects: a Seq's element, or a
+	// Seq2's first argument. Nil unless Kind is set.
+	Elem emit.Ref
+
+	// Second is a Seq2's second argument — the key, or the error in
+	// the failable spelling. Nil for a Seq and for no sequence.
+	Second emit.Ref
+
+	// YieldsError reports the `iter.Seq2[V, error]` spelling, the one
+	// shape where a generated helper can usefully append a terminal
+	// failure rather than a key.
+	YieldsError bool
+
+	// Source is the return's own type reference, kept so a caller
+	// needing the source-side meta — a stamp, a position — does not
+	// have to re-find the return it just asked about.
+	Source *node.TypeRef
+}
+
+// SequenceOf reports m's sole return as a sequence, or the zero
+// [Sequence] when it returns none.
+//
+// Sole return only, and that is a judgement rather than a
+// simplification: a method returning `(iter.Seq[V], error)` is not a
+// sequence a helper can generate against, because the helper would
+// have to invent a value for the error before it could iterate. Every
+// generator that reached for this arrived at the same rule
+// independently, which is the argument for stating it once here.
+//
+// One call replaces the four accessors plus the nil guard around
+// them. The guard is load-bearing and easy to omit: [FromNode]
+// documents that it propagates nil rather than refusing it, so a
+// template that skipped the branch renders a nil ref and fails at the
+// backend, naming the file rather than the method.
+func SequenceOf(m *node.Method) Sequence {
+	if m == nil || len(m.Returns) != 1 || m.Returns[0] == nil {
+		return Sequence{}
+	}
+	t := m.Returns[0].Type
+	kind := IteratorOfType(t)
+	if kind == NotIterator {
+		return Sequence{}
+	}
+	return Sequence{
+		Kind:        kind,
+		Elem:        FromNode(IteratorElem(t)),
+		Second:      FromNode(IteratorSecond(t)),
+		YieldsError: IteratorYieldsError(t),
+		Source:      t,
+	}
 }
 
 // IsBuiltinNamed reports whether t is the unqualified builtin

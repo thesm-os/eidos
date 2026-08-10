@@ -90,7 +90,22 @@ func QueryFuncMap(prefix string) template.FuncMap {
 		prefix + "zeroLiteral": TemplateZeroLiteral,
 		prefix + "formatVerb":  FormatVerb,
 		prefix + "quote":       Quote,
+		prefix + "sequenceOf":  SequenceOf,
 	}
+}
+
+// TemplateSentinelSubject is [SentinelSubject] in the shape a
+// template can install — the subject alone.
+//
+// text/template rejects the `(string, bool)` signature at
+// registration. The flag is dropped rather than travelling as an
+// error because there is no failure here: a name carrying no prefix
+// is returned whole, which is exactly what a template interpolating
+// a subject wants. A caller that needs to *distinguish* the two
+// branches asks [IsSentinelName], which a template can also call.
+func TemplateSentinelSubject(ident string) string {
+	subject, _ := SentinelSubject(ident)
+	return subject
 }
 
 // TemplateZeroLiteral is [ZeroLiteral] in the shape a template can
@@ -138,6 +153,7 @@ func ConventionFuncMap(prefix string) template.FuncMap {
 		prefix + "setterName":        SetterName,
 		prefix + "withName":          WithName,
 		prefix + "sentinelName":      SentinelName,
+		prefix + "sentinelSubject":   TemplateSentinelSubject,
 		prefix + "parseFuncName":     ParseFuncName,
 		prefix + "doc":               Doc,
 		prefix + "deprecatedDoc":     DeprecatedDoc,

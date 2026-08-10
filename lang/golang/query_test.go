@@ -6,6 +6,7 @@ package golang_test
 import (
 	"testing"
 
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
@@ -616,6 +617,102 @@ func TestNilableNamedInterface(t *testing.T) {
 		golang.MetaIsInterface.Set(r.EnsureMeta(), true, "test")
 		if !golang.Nilable(r) {
 			t.Fatalf("a stamped interface must read as nilable")
+		}
+	})
+}
+
+// TestSequenceOf pins the compound over the four iterator accessors,
+// including the nil guard every private copy carried because
+// FromNode propagates nil rather than refusing it.
+func TestSequenceOf(t *testing.T) {
+	t.Parallel()
+
+	seq := func(args ...*node.TypeRef) *node.TypeRef {
+		name := "Seq"
+		if len(args) == 2 {
+			name = "Seq2"
+		}
+		r := namedTypeRef("iter", name)
+		r.TypeArgs = args
+		return r
+	}
+	returning := func(types ...*node.TypeRef) *node.Method {
+		m := &node.Method{Name: "All"}
+		for _, t := range types {
+			m.Returns = append(m.Returns, &node.Return{Type: t})
+		}
+		return m
+	}
+
+	t.Run("reports a Seq's element and no second", func(t *testing.T) {
+		t.Parallel()
+		got := golang.SequenceOf(returning(seq(builtinRef("int"))))
+		if got.Kind != golang.SeqIterator {
+			t.Fatalf("Kind = %q, want seq", got.Kind)
+		}
+		if b, ok := got.Elem.(*emit.BuiltinRef); !ok || b.Name != "int" {
+			t.Fatalf("Elem = %#v, want the int builtin", got.Elem)
+		}
+		if got.Second != nil || got.YieldsError {
+			t.Fatalf("a Seq reported a second slot: %+v", got)
+		}
+	})
+
+	t.Run("reports a Seq2's key alongside its value", func(t *testing.T) {
+		t.Parallel()
+		got := golang.SequenceOf(returning(seq(builtinRef("string"), builtinRef("int"))))
+		if got.Kind != golang.Seq2Iterator || got.Second == nil {
+			t.Fatalf("SequenceOf = %+v, want a seq2 carrying both", got)
+		}
+		if got.YieldsError {
+			t.Fatal("a Seq2 keyed by int is not the failable spelling")
+		}
+	})
+
+	t.Run("flags the failable spelling", func(t *testing.T) {
+		t.Parallel()
+		// The one shape where a generated helper can usefully append a
+		// terminal failure rather than a key.
+		got := golang.SequenceOf(returning(seq(builtinRef("int"), builtinRef("error"))))
+		if !got.YieldsError {
+			t.Fatalf("SequenceOf = %+v, want YieldsError", got)
+		}
+	})
+
+	t.Run("keeps the source ref for the meta a caller may want", func(t *testing.T) {
+		t.Parallel()
+		ret := seq(builtinRef("int"))
+		if got := golang.SequenceOf(returning(ret)); got.Source != ret {
+			t.Fatalf("Source = %+v, want the return's own ref", got.Source)
+		}
+	})
+
+	t.Run("a sequence beside an error is not a sequence", func(t *testing.T) {
+		t.Parallel()
+		// The judgement stated in the docblock: a helper generated
+		// against (iter.Seq[V], error) would have to invent a value for
+		// the error before it could iterate.
+		got := golang.SequenceOf(returning(seq(builtinRef("int")), builtinRef("error")))
+		if got.Kind != golang.NotIterator || got.Elem != nil {
+			t.Fatalf("SequenceOf = %+v, want the zero Sequence", got)
+		}
+	})
+
+	t.Run("the zero value reads as not a sequence", func(t *testing.T) {
+		t.Parallel()
+		// A template branching on Kind needs no separate presence flag,
+		// and — the guard the private copies carried — no ref is nil
+		// only because FromNode passed a nil through.
+		for _, m := range []*node.Method{
+			nil,
+			returning(),
+			returning(builtinRef("string")),
+			returning(nil),
+		} {
+			got := golang.SequenceOf(m)
+			if got.Kind != golang.NotIterator || got.Elem != nil || got.Second != nil || got.Source != nil {
+				t.Fatalf("SequenceOf(%+v) = %+v, want the zero Sequence", m, got)
+			}
 		}
 	})
 }
