@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/eidostest/plugintest"
+	"go.thesmos.sh/eidos/lang/golang"
 )
 
 // TestReservedFuncNames_MirroredByConformanceSuite pins the two
@@ -58,6 +59,65 @@ func TestReservedFuncNames_MirroredByConformanceSuite(t *testing.T) {
 			missingFrom(want, got), missingFrom(got, want),
 		)
 	})
+}
+
+// TestOverrideableFuncNames_MirroredByConformanceSuite is the twin of
+// the reserved drift check, for the other half of what the backend
+// brings.
+//
+// It exists because the reserved check could not have caught the gap
+// it guards: that one compares the reserved list against the reserved
+// set, and the overrideable entries appear in neither. A plugin
+// calling `camel` — provided at render, documented as available —
+// failed its own conformance suite against a template that renders
+// correctly, and nothing in this file objected.
+func TestOverrideableFuncNames_MirroredByConformanceSuite(t *testing.T) {
+	t.Parallel()
+
+	t.Run("both sets are non-empty", func(t *testing.T) {
+		t.Parallel()
+		if n := len(backendOwnedExtras()); n == 0 {
+			t.Errorf("the backend owns no overrideable names; the drift check below would be vacuous")
+		}
+		if n := len(plugintest.OverrideableTemplateFuncNames()); n == 0 {
+			t.Errorf("the conformance mirror is empty; the drift check below would be vacuous")
+		}
+	})
+
+	t.Run("the conformance mirror matches the backend's own overrideable set", func(t *testing.T) {
+		t.Parallel()
+
+		// extrasFuncMap layers golang.FuncMap on top of the entries
+		// this package owns. Only the owned half is mirrored: the
+		// suite seeds the shared bundle from lang/golang directly,
+		// which is importable from both sides, and copying it into a
+		// mirror would make a third place for the same names to
+		// disagree.
+		want := slices.Sorted(maps.Keys(backendOwnedExtras()))
+		got := plugintest.OverrideableTemplateFuncNames()
+		if slices.Equal(got, want) {
+			return
+		}
+		t.Errorf(
+			"plugintest.OverrideableTemplateFuncNames() has drifted from the backend's "+
+				"overrideable set;\n"+
+				"  registered here but unseeded by the suite: %v\n"+
+				"  seeded by the suite but not registered here: %v\n"+
+				"update overrideableFuncNames in eidostest/plugintest/framework.go to match",
+			missingFrom(want, got), missingFrom(got, want),
+		)
+	})
+}
+
+// backendOwnedExtras returns the overrideable entries this package
+// declares itself — extrasFuncMap minus the shared lang/golang bundle
+// it layers on top.
+func backendOwnedExtras() map[string]any {
+	out := maps.Clone(extrasFuncMap())
+	for name := range golang.FuncMap() {
+		delete(out, name)
+	}
+	return out
 }
 
 // missingFrom returns the elements of a that b does not contain, in

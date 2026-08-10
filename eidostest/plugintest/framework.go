@@ -748,6 +748,50 @@ var reservedFuncNames = []string{
 	"slot",
 }
 
+// overrideableFuncNames mirrors the backend's *overrideable* funcmap
+// entries — case conversion, string helpers, metadata access,
+// provenance lookup.
+//
+// A second copy for a second category, and the distinction is the
+// backend's own (`backend/golang/doc.go`): registering a reserved name
+// is rejected at merge, registering an overrideable one is allowed and
+// wins. The conformance suite needs both for a different reason — a
+// template may *call* either, so a seed carrying only the reserved
+// half reports every call into this set as unresolved and fails a
+// plugin for doing exactly what the templates documentation
+// prescribes.
+//
+// Mirrored rather than imported for the same reason as
+// [reservedFuncNames]: this package may not depend on a backend.
+// `backend/golang` owns the drift test for both copies, because only
+// that side can read the authoritative sets.
+var overrideableFuncNames = []string{
+	"camel",
+	"coalesce",
+	"default",
+	"explain",
+	"exported",
+	"hasMeta",
+	"join",
+	"lower",
+	"meta",
+	"metaBool",
+	"metaEq",
+	"metaStr",
+	"origin",
+	"pascal",
+	"screaming",
+	"snake",
+	"split",
+	"title",
+	"trim",
+	"upper",
+}
+
+// OverrideableTemplateFuncNames returns the backend funcmap names a
+// plugin may legally register over, as a fresh slice.
+func OverrideableTemplateFuncNames() []string { return slices.Clone(overrideableFuncNames) }
+
 // ReservedTemplateFuncNames returns the reserved funcmap names this
 // suite checks plugin contributions against, sorted.
 //
@@ -1000,6 +1044,9 @@ func reservedFuncMap(lang string) template.FuncMap {
 	}
 	if lang == ConformanceLanguage {
 		for name := range golang.FuncMap() {
+			fm[name] = func(_ ...any) any { return nil }
+		}
+		for _, name := range overrideableFuncNames {
 			fm[name] = func(_ ...any) any { return nil }
 		}
 	}
