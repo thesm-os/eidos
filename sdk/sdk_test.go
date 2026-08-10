@@ -360,3 +360,54 @@ func declaredKindsIn(t *testing.T, pkg string) int {
 	}
 	return n
 }
+
+// A façade that re-exports a type and withholds the constructor that
+// makes it is a façade a caller leaves. These three were the last of
+// those: `Sink`, `Store` and `StoreReader` were all reachable while
+// `diag.New`, `store.New` and `store.NewReader` were not, so a test
+// assembling a phase context by hand imported past the façade for one
+// call apiece.
+func TestConstructorsMatchTheirTypes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("makes a diagnostic sink", func(t *testing.T) {
+		t.Parallel()
+		//nolint:staticcheck // the redundant type is the identity assertion.
+		var got *sdk.Sink = sdk.NewSink()
+		if got == nil {
+			t.Fatal("NewSink returned nil")
+		}
+	})
+
+	t.Run("makes a store and a reader over it", func(t *testing.T) {
+		t.Parallel()
+		// The pairing is the point: a plugin's test needs both to build
+		// a context, and the reader is also the Resolver `lang/golang`
+		// asks for.
+		//nolint:staticcheck // the redundant type is the identity assertion.
+		var s *sdk.Store = sdk.NewStore()
+		if s == nil {
+			t.Fatal("NewStore returned nil")
+		}
+		//nolint:staticcheck // the redundant type is the identity assertion.
+		var r *sdk.StoreReader = sdk.NewStoreReader(s)
+		if r == nil {
+			t.Fatal("NewStoreReader returned nil")
+		}
+	})
+
+	t.Run("assembles a phase context without leaving the facade", func(t *testing.T) {
+		t.Parallel()
+		// The whole claim, spelled as the thing it enables. Every type
+		// and every constructor below comes from this package.
+		s := sdk.NewStore()
+		ctx := &sdk.GeneratorContext{
+			Store:  s,
+			Reader: sdk.NewStoreReader(s),
+			Diag:   sdk.NewSink(),
+		}
+		if ctx.Reader == nil || ctx.Diag == nil {
+			t.Fatalf("context = %+v", ctx)
+		}
+	})
+}

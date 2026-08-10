@@ -132,3 +132,81 @@ func TestDriver(t *testing.T) {
 		}
 	})
 }
+
+// dualRolePlugin annotates and generates, and records which halves
+// ran. A plugin shaped like this satisfies [plugin.Generator] on its
+// own, so it type-checks as a Driver argument whether or not its
+// annotator half is ever registered.
+type dualRolePlugin struct {
+	name string
+	log  *generatorLog
+}
+
+func (p *dualRolePlugin) Name() string { return p.name }
+
+func (p *dualRolePlugin) Annotate(*plugin.AnnotatorContext) error {
+	p.log.record(p.name + ":annotate")
+	return nil
+}
+
+func (p *dualRolePlugin) Generate(*plugin.GeneratorContext) error {
+	p.log.record(p.name + ":generate")
+	return nil
+}
+
+// A plugin that stamps in Annotate and reads its own stamps in
+// Generate loses half its behaviour when only one role is registered
+// — and loses it silently, because the pipeline iterates a list the
+// plugin is absent from rather than failing to find something it was
+// told to run.
+func TestDriverRegistersEveryRole(t *testing.T) {
+	t.Parallel()
+
+	t.Run("runs both halves of a dual-role plugin", func(t *testing.T) {
+		t.Parallel()
+		log := &generatorLog{}
+		golangtest.Driver(t, renderBackend(), renderPkg(),
+			&dualRolePlugin{name: "weaver", log: log}).
+			Build().
+			Run("./...")
+
+		got := log.snapshot()
+		if !slices.Contains(got, "weaver:annotate") {
+			t.Fatalf("ran %v; the annotator half never ran, so a generator "+
+				"reading its own stamps would read nothing", got)
+		}
+		if !slices.Contains(got, "weaver:generate") {
+			t.Fatalf("ran %v, want the generator half too", got)
+		}
+	})
+
+	t.Run("annotates before it generates", func(t *testing.T) {
+		t.Parallel()
+		// Registration order is not the contract — the pipeline's phase
+		// order is — but a generator reading what it stamped depends on
+		// it, so it is worth stating.
+		log := &generatorLog{}
+		golangtest.Driver(t, renderBackend(), renderPkg(),
+			&dualRolePlugin{name: "weaver", log: log}).
+			Build().
+			Run("./...")
+
+		got := log.snapshot()
+		if !slices.Equal(got, []string{"weaver:annotate", "weaver:generate"}) {
+			t.Fatalf("ran %v, want annotate then generate", got)
+		}
+	})
+
+	t.Run("leaves a generator-only plugin alone", func(t *testing.T) {
+		t.Parallel()
+		log := &generatorLog{}
+		golangtest.Driver(t, renderBackend(), renderPkg(),
+			&recordingGenerator{name: "plain", log: log}).
+			Build().
+			Run("./...")
+
+		if got := log.snapshot(); !slices.Equal(got, []string{"plain"}) {
+			t.Fatalf("ran %v, want the generator once", got)
+		}
+	})
+}

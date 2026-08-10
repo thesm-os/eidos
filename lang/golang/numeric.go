@@ -214,3 +214,34 @@ func ParseStringValue(raw string) (string, bool) {
 	}
 	return v, true
 }
+
+// ParseFloatValue reads a constant's recorded value as a float.
+//
+// The counterpart to [ParseIntValue] for a set declared over
+// `float32` or `float64`. An integral literal parses too — `1` is a
+// legal `float64` value and a frontend records it as written — so a
+// caller trying the integer form first and this second gets the
+// narrower answer where one exists.
+//
+// False for the exact-rational spelling a type checker folds a
+// division into: `1/2` is recorded verbatim, and reading it as a
+// float would silently pick one of the two readings Go's constant
+// arithmetic distinguishes.
+func ParseFloatValue(raw string) (float64, bool) {
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// FormatFloatValue renders a float as the Go source a generator
+// writes.
+//
+// `strconv.FormatFloat` with `'g'` and the shortest round-tripping
+// precision, which is the spelling [FormatVerb] already picks for
+// these types — so a probe and the failure message that reports it
+// agree rather than differing in the last digit.
+func FormatFloatValue(v float64) string {
+	return strconv.FormatFloat(v, 'g', -1, 64)
+}

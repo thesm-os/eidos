@@ -338,3 +338,84 @@ func IsIotaDerived(e *node.Enum) bool {
 func EnumTextLiteral(e *node.Enum, v *node.EnumVariant) string {
 	return strconv.Quote(VariantText(e, v))
 }
+
+// EnumFloatValues returns every variant's declared value as a float,
+// and whether all of them read.
+//
+// [EnumValues] for a set declared over `float32` or `float64`. Split
+// rather than generalised because [node.EnumVariant.Value] is source
+// text and the model does not record which kind it was written in: a
+// generic form would still try one parse and fall back to the other,
+// which is this branch spelled less plainly.
+//
+// All-or-nothing for the same reason as the integer form — a bound
+// derived from part of a set is a bound over the variants that
+// happened to parse.
+func EnumFloatValues(e *node.Enum) ([]float64, bool) {
+	if e == nil || len(e.Variants) == 0 {
+		return nil, false
+	}
+	out := make([]float64, 0, len(e.Variants))
+	for _, v := range e.Variants {
+		if v == nil {
+			return nil, false
+		}
+		n, ok := ParseFloatValue(v.Value)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, n)
+	}
+	return out, true
+}
+
+// OutOfRangeFloat returns a value outside a float-valued set as Go
+// source, and whether one could be derived.
+//
+// Easier than the integer case, and the reason it is a separate
+// function rather than an arm of one: an integer set can exhaust its
+// type, so [NextOutOfRange] walks down looking for a gap. A float set
+// cannot — the largest declared value plus one is always outside it
+// and always representable — so there is no walk and no saturation
+// case to report.
+//
+// False for a set that is not float-valued, which includes an
+// integer set: a caller wanting either asks [OutOfRangeLiteral].
+func OutOfRangeFloat(e *node.Enum) (string, bool) {
+	if EnumFormOf(e) == FormValue || !isFloatEnum(e) {
+		return "", false
+	}
+	values, ok := EnumFloatValues(e)
+	if !ok {
+		return "", false
+	}
+	return FormatFloatValue(slices.Max(values) + 1), true
+}
+
+// OutOfRangeLiteral returns a value past the declared set as Go
+// source, whatever numeric kind the set is declared in.
+//
+// The form a generator wants: a probe is rendered into source, so the
+// caller needs text rather than an `int64` it must then spell — and
+// asking which numeric kind the set is declared in, before asking for
+// a value outside it, is a question about the library rather than
+// about the enum.
+//
+// Integer first, because an integral literal parses as a float too
+// and the narrower reading is the one a set declared over `int` means.
+func OutOfRangeLiteral(e *node.Enum) (string, bool) {
+	if v, ok := OutOfRangeValue(e); ok {
+		return strconv.FormatInt(v, 10), true
+	}
+	return OutOfRangeFloat(e)
+}
+
+// isFloatEnum reports whether e is declared over a float type.
+//
+// Read from the underlying type rather than inferred from the values,
+// because `1` and `2` parse as floats and a set declared over `int`
+// must not answer here — [OutOfRangeLiteral] would then return a
+// float spelling for an integer set.
+func isFloatEnum(e *node.Enum) bool {
+	return e != nil && IsFloat(e.Underlying)
+}

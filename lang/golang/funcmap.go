@@ -154,8 +154,288 @@ func AllFuncMap(prefix string) template.FuncMap {
 	out := template.FuncMap{}
 	for _, bundle := range []template.FuncMap{
 		SigFuncMap(prefix), QueryFuncMap(prefix), ConventionFuncMap(prefix),
+		EnumFuncMap(prefix), ShapeFuncMap(prefix), EmbedFuncMap(prefix),
+		GenericsFuncMap(prefix),
 	} {
 		maps.Copy(out, bundle)
 	}
 	return out
+}
+
+// EnumFuncMap returns the enum vocabulary under the given prefix.
+//
+//	{{ eidosVariantText .Enum .Variant }} -> us-east
+//	{{ eidosZeroVariant .Enum }}          -> the variant at zero, or nil
+//	{{ eidosOutOfRange .Enum }}           -> 4
+//
+// The bundle whose absence cost the most. An enum generator reaches
+// for six of these, and without a bundle each one becomes a Go
+// function on the plugin whose whole body is the call plus a reshape
+// — which is where a generator re-decides something this package
+// already decided. One that paired the underlying type with a format
+// verb by hand, and drifted from [FormatVerb], printed
+// `%!d(float64=0.5)` in a consumer's repository.
+func EnumFuncMap(prefix string) template.FuncMap {
+	return template.FuncMap{
+		prefix + "enumForm":       EnumFormOf,
+		prefix + "enumUnderlying": EnumUnderlying,
+		prefix + "variantText":    VariantText,
+		prefix + "enumTexts":      EnumTexts,
+		prefix + "enumTextLit":    EnumTextLiteral,
+		prefix + "duplicateText":  TemplateDuplicateText,
+		prefix + "zeroVariant":    TemplateZeroVariant,
+		prefix + "outOfRange":     TemplateOutOfRange,
+		prefix + "outOfRangeText": TemplateOutOfRangeText,
+		prefix + "enumMethods":    EnumMethods,
+		prefix + "enumDeclares":   EnumDeclares,
+		prefix + "isIotaDerived":  IsIotaDerived,
+	}
+}
+
+// ShapeFuncMap returns the standard-library shape matchers under the
+// given prefix.
+//
+//	{{ if eidosImplementsStringer .Type }} … {{ end }}
+//	{{ if eidosIsErrorMethod .Method }} … {{ end }}
+//
+// Thirty-five predicates over a method or a method set, none of them
+// previously reachable. A template branching on whether a type
+// already declares `String` is the case: without this the plugin
+// answers in Go and parks a bool on an emit value, which is a field
+// carrying a question rather than an answer.
+func ShapeFuncMap(prefix string) template.FuncMap {
+	return template.FuncMap{
+		prefix + "isErrorMethod":       IsErrorMethod,
+		prefix + "isUnwrapMethod":      IsUnwrapMethod,
+		prefix + "isIsMethod":          IsIsMethod,
+		prefix + "isAsMethod":          IsAsMethod,
+		prefix + "isStringMethod":      IsStringMethod,
+		prefix + "isWriteMethod":       IsWriteMethod,
+		prefix + "isReadMethod":        IsReadMethod,
+		prefix + "isCloseMethod":       IsCloseMethod,
+		prefix + "isScanMethod":        IsScanMethod,
+		prefix + "isValuerMethod":      IsValuerMethod,
+		prefix + "isEqualMethod":       IsEqualMethod,
+		prefix + "isCompareMethod":     IsCompareMethod,
+		prefix + "isCloneMethod":       IsCloneMethod,
+		prefix + "isResetMethod":       IsResetMethod,
+		prefix + "isValidateMethod":    IsValidateMethod,
+		prefix + "isLenMethod":         IsLenMethod,
+		prefix + "isLessMethod":        IsLessMethod,
+		prefix + "isSwapMethod":        IsSwapMethod,
+		prefix + "implementsError":     ImplementsError,
+		prefix + "implementsStringer":  ImplementsStringer,
+		prefix + "implementsWriter":    ImplementsWriter,
+		prefix + "implementsReader":    ImplementsReader,
+		prefix + "implementsSorter":    ImplementsSorter,
+		prefix + "isMarshalBinary":     IsMarshalBinary,
+		prefix + "isUnmarshalBinary":   IsUnmarshalBinary,
+		prefix + "isMarshalText":       IsMarshalText,
+		prefix + "isUnmarshalText":     IsUnmarshalText,
+		prefix + "isMarshalJSON":       IsMarshalJSON,
+		prefix + "isUnmarshalJSON":     IsUnmarshalJSON,
+		prefix + "isGobEncode":         IsGobEncode,
+		prefix + "isGobDecode":         IsGobDecode,
+		prefix + "codecs":              Codecs,
+		prefix + "isByteSliceAny":      IsByteSliceAny,
+		prefix + "recommendedReceiver": RecommendedReceiver,
+		prefix + "sameSignature":       SameSignature,
+	}
+}
+
+// EmbedFuncMap returns the embedding and satisfaction helpers under
+// the given prefix.
+//
+//	{{ range eidosPromotedFields .Struct nil }} … {{ end }}
+//
+// Every entry takes a [Resolver], which a template cannot construct —
+// it is passed the one the plugin was handed, or nil for the
+// first-level answer. That is why these are here rather than folded
+// into [QueryFuncMap]: the resolver argument is the thing a template
+// has to be given, and grouping them says so.
+func EmbedFuncMap(prefix string) template.FuncMap {
+	return template.FuncMap{
+		prefix + "embedIdent":        TemplateEmbedIdent,
+		prefix + "embedTarget":       EmbedTarget,
+		prefix + "fieldSet":          TemplateFieldSet,
+		prefix + "promotedFields":    TemplatePromotedFields,
+		prefix + "exportedFieldSet":  TemplateExportedFieldSet,
+		prefix + "promotedMethods":   TemplatePromotedMethods,
+		prefix + "embedsType":        EmbedsType,
+		prefix + "underlyingOf":      UnderlyingOf,
+		prefix + "comparableDeep":    TemplateComparableDeep,
+		prefix + "satisfies":         TemplateSatisfies,
+		prefix + "receiverIsPointer": ReceiverIsPointerDecl,
+	}
+}
+
+// GenericsFuncMap returns the type-parameter and witness helpers
+// under the given prefix.
+//
+//	{{ eidosTypeParamNames .TypeParams }} -> K, V
+//	{{ eidosWitnessUse .TypeParams }}     -> [string, int]
+//
+// A generic double's entry point is written at concrete types, and
+// choosing them is what [Witnesses] does. A template appending the
+// instantiation is the natural spelling; without the bundle the
+// plugin renders the bracket list in Go and hands over a string,
+// which is the one shape that cannot be checked against the type
+// parameters it was derived from.
+func GenericsFuncMap(prefix string) template.FuncMap {
+	return template.FuncMap{
+		prefix + "typeParamsOf":   TypeParamsOf,
+		prefix + "typeParamDecls": TypeParamDecls,
+		prefix + "typeParamNames": TypeParamNames,
+		prefix + "typeParamRefs":  TypeParamRefs,
+		prefix + "selfRef":        SelfRef,
+		prefix + "witnesses":      Witnesses,
+		prefix + "witnessNames":   WitnessNames,
+		prefix + "witnessUse":     WitnessUse,
+		prefix + "isGeneric":      IsGeneric,
+	}
+}
+
+// TemplateZeroVariant is [ZeroVariant] in the shape a template can
+// install.
+//
+// A `(T, bool)` signature panics at registration, so the absence
+// travels as a nil the template tests with `{{ if }}` rather than as
+// an error: an enum whose zero is not a declared variant is the
+// ordinary case — a typed-iota set starting at one — not a failure.
+func TemplateZeroVariant(e *node.Enum) *node.EnumVariant {
+	v, ok := ZeroVariant(e)
+	if !ok {
+		return nil
+	}
+	return v
+}
+
+// TemplateOutOfRange is [OutOfRangeLiteral] in the shape a template
+// can install.
+//
+// Empty rather than an error, for the same reason: a set saturating
+// its type has no value outside it, and a generator's correct
+// response is to omit the probe rather than to abort the render.
+func TemplateOutOfRange(e *node.Enum) string {
+	lit, ok := OutOfRangeLiteral(e)
+	if !ok {
+		return ""
+	}
+	return lit
+}
+
+// TemplateOutOfRangeText is [OutOfRangeText] in the shape a template
+// can install. Empty when the declared set already carries the
+// marker, which is the one case a probe would assert the opposite of
+// what it means.
+func TemplateOutOfRangeText(e *node.Enum) string {
+	text, ok := OutOfRangeText(e)
+	if !ok {
+		return ""
+	}
+	return text
+}
+
+// TemplateFieldSet is [FieldSet] in the shape a template can install
+// — and the pattern its three siblings below follow.
+//
+// Each returns `(T, error)` where the library returns
+// `(T, []UnresolvedEmbed)`, and the error is non-nil exactly when the
+// walk could not complete. That is the loud failure and the right
+// one: the slice says the answer is smaller than the truth, and a
+// template rendering it anyway emits a builder short a setter or a
+// double short a method — which the consumer's compiler reports
+// against generated code. A caller that wants to decide for itself
+// holds the graph and calls the library form.
+func TemplateFieldSet(s *node.Struct, r Resolver) ([]PromotedField, error) {
+	out, problems := FieldSet(s, r)
+	return out, embedWalkError("FieldSet", problems)
+}
+
+// TemplatePromotedFields is [PromotedFields] for a template.
+func TemplatePromotedFields(s *node.Struct, r Resolver) ([]PromotedField, error) {
+	out, problems := PromotedFields(s, r)
+	return out, embedWalkError("PromotedFields", problems)
+}
+
+// TemplateExportedFieldSet is [ExportedFieldSet] for a template.
+func TemplateExportedFieldSet(s *node.Struct, r Resolver) ([]PromotedField, error) {
+	out, problems := ExportedFieldSet(s, r)
+	return out, embedWalkError("ExportedFieldSet", problems)
+}
+
+// TemplatePromotedMethods is [PromotedMethods] for a template.
+func TemplatePromotedMethods(s *node.Struct, r Resolver) ([]PromotedMethod, error) {
+	out, problems := PromotedMethods(s, r)
+	return out, embedWalkError("PromotedMethods", problems)
+}
+
+// TemplateComparableDeep is [ComparableDeep] for a template.
+//
+// The error carries the same weight as the walks above: an
+// unreachable type is not evidence of comparability, and a template
+// keying a map on the answer would emit one the consumer cannot
+// compile.
+func TemplateComparableDeep(t *node.TypeRef, r Resolver) (bool, error) {
+	equalable, problems := ComparableDeep(t, r)
+	if len(problems) == 0 {
+		return equalable, nil
+	}
+	return false, fmt.Errorf("%w: ComparableDeep could not reach %s",
+		ErrIncompleteWalk, problems[0].Written)
+}
+
+// embedWalkError renders an incomplete walk as the error a template
+// aborts on, naming the first embed and how many followed it.
+func embedWalkError(walk string, problems []UnresolvedEmbed) error {
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s could not reach %s in %s (%s), and %d other(s)",
+		ErrIncompleteWalk, walk, problems[0].Written, problems[0].Host,
+		problems[0].Reason, len(problems)-1)
+}
+
+// ErrIncompleteWalk is returned by a template-shaped walk that could
+// not resolve every embed or type it needed.
+//
+// Distinct from [ErrNoZeroValue] because the remedy differs: a zero
+// this package cannot derive needs a caller holding the graph, while
+// an incomplete walk usually means the run was narrower than the
+// declaration — the package carrying the embed was not loaded.
+var ErrIncompleteWalk = errors.New("golang: walk did not complete")
+
+// TemplateSatisfies is [Satisfies] for a template — the verdict
+// alone.
+//
+// The missing-method detail is dropped rather than raised as an
+// error, because false is an ordinary answer here: a template asking
+// whether a type satisfies an interface is branching, not failing. A
+// caller wanting to name what is missing is writing a diagnostic, and
+// a template is the wrong place to write one.
+func TemplateSatisfies(have, want []*node.Method) bool {
+	ok, _ := Satisfies(have, want)
+	return ok
+}
+
+// TemplateEmbedIdent is [EmbedIdent] for a template — the contributed
+// field name, empty when the embed names none.
+//
+// The pointer half is dropped because a template asking for the name
+// is spelling a selector, and whether the embed was by pointer does
+// not change it. [EmbedIdent] answers both for a caller allocating.
+func TemplateEmbedIdent(e *node.Embed) string {
+	name, _ := EmbedIdent(e)
+	return name
+}
+
+// TemplateDuplicateText is [DuplicateText] for a template — the
+// colliding text, empty when the set has none.
+//
+// A collision makes one variant unreachable through Parse, so a
+// template usually branches on it to withhold the round-trip check
+// rather than to abort.
+func TemplateDuplicateText(e *node.Enum) string {
+	text, _ := DuplicateText(e)
+	return text
 }

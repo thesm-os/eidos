@@ -58,3 +58,20 @@ const (
 	// pipeline emits this on a recovered panic.
 	SeverityInternal = diag.Internal
 )
+
+// NewSink returns a capturing diagnostic sink — [diag.New].
+//
+// A plugin never makes one: the pipeline hands it a [Sink] on every
+// phase context. A plugin's *tests* do, and the type was reachable
+// here while the constructor was not, so a test asserting on what a
+// plugin reported imported `core/diag` for one call and reached past
+// the façade this package's own doc tells plugin authors to stay
+// inside.
+//
+// [eidostest/plugintest.Annotate] and its siblings drive a plugin and
+// return the sink already, which is the shorter path for a test whose
+// subject is what the plugin reported. This is for a test assembling
+// a context itself.
+//
+//nolint:gochecknoglobals // alias re-export of a stable factory.
+var NewSink = diag.New

@@ -5,6 +5,8 @@ package golang_test
 
 import (
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
@@ -407,6 +409,169 @@ func TestEnumNilAndEdges(t *testing.T) {
 		t.Parallel()
 		if golang.IsIotaDerived(numericEnum()) {
 			t.Fatalf("IsIotaDerived = true for an empty enum")
+		}
+	})
+}
+
+// A float-backed enum used to lose its out-of-range probe silently:
+// every value went through ParseIntValue, the first non-integer
+// returned false for the whole set, and the generator dropped the
+// subtest that catches a missing `default:`. The rest of the library
+// was already float-aware — FormatVerb picks %g for these types — so
+// one half of the numeric vocabulary answered and the other did not.
+func TestFloatEnumValues(t *testing.T) {
+	t.Parallel()
+
+	ratio := func() *node.Enum {
+		return &node.Enum{
+			Name: "Ratio", Package: "x",
+			Underlying: builtinRef("float64"),
+			Variants: []*node.EnumVariant{
+				{Name: "RatioQuarter", Value: "0.25"},
+				{Name: "RatioHalf", Value: "0.5"},
+				{Name: "RatioFull", Value: "1.0"},
+			},
+		}
+	}
+
+	t.Run("reads every declared value", func(t *testing.T) {
+		t.Parallel()
+		got, ok := golang.EnumFloatValues(ratio())
+		if !ok || !slices.Equal(got, []float64{0.25, 0.5, 1.0}) {
+			t.Fatalf("EnumFloatValues = %v, %v", got, ok)
+		}
+	})
+
+	t.Run("declines the set when one value does not read", func(t *testing.T) {
+		t.Parallel()
+		// All-or-nothing: a bound over the variants that happened to
+		// parse is a bound over a set the source does not declare. The
+		// exact-rational spelling a type checker folds a division into
+		// is the case that reaches this.
+		e := ratio()
+		e.Variants[1].Value = "1/2"
+		if _, ok := golang.EnumFloatValues(e); ok {
+			t.Fatal("EnumFloatValues read a set carrying an exact rational")
+		}
+	})
+
+	t.Run("derives a value past the largest", func(t *testing.T) {
+		t.Parallel()
+		// No walk and no saturation case: a float set cannot exhaust
+		// its type, so the largest plus one is always outside it.
+		got, ok := golang.OutOfRangeFloat(ratio())
+		if !ok || got != "2" {
+			t.Fatalf("OutOfRangeFloat = %q, %v; want 2", got, ok)
+		}
+	})
+
+	t.Run("spells it the way FormatVerb prints it", func(t *testing.T) {
+		t.Parallel()
+		// The probe and the failure message reporting it have to agree,
+		// or a check reads as failing on a digit the generator chose.
+		e := ratio()
+		e.Variants = append(e.Variants, &node.EnumVariant{Name: "RatioOdd", Value: "2.5"})
+		got, _ := golang.OutOfRangeFloat(e)
+		if got != "3.5" {
+			t.Fatalf("OutOfRangeFloat = %q, want 3.5", got)
+		}
+	})
+
+	t.Run("declines an integer set", func(t *testing.T) {
+		t.Parallel()
+		// `1` and `2` parse as floats, so the guard is the declared
+		// underlying type — otherwise an int enum gets a float spelling.
+		e := &node.Enum{
+			Name: "Status", Package: "x",
+			Underlying: builtinRef("int"),
+			Variants:   []*node.EnumVariant{{Name: "A", Value: "1"}},
+		}
+		if _, ok := golang.OutOfRangeFloat(e); ok {
+			t.Fatal("OutOfRangeFloat answered for an integer set")
+		}
+	})
+
+	t.Run("declines a string set", func(t *testing.T) {
+		t.Parallel()
+		e := &node.Enum{
+			Name: "Region", Package: "x",
+			Underlying: builtinRef("string"),
+			Variants:   []*node.EnumVariant{{Name: "US", Value: `"us-east"`}},
+		}
+		if _, ok := golang.OutOfRangeFloat(e); ok {
+			t.Fatal("OutOfRangeFloat answered for a string set")
+		}
+	})
+}
+
+// The form a generator wants: a probe is rendered into source, so
+// asking which numeric kind the set is declared in before asking for
+// a value outside it is a question about the library rather than
+// about the enum.
+func TestOutOfRangeLiteral(t *testing.T) {
+	t.Parallel()
+
+	t.Run("answers for an integer set", func(t *testing.T) {
+		t.Parallel()
+		e := &node.Enum{
+			Name: "Status", Package: "x",
+			Underlying: builtinRef("int"),
+			Variants: []*node.EnumVariant{
+				{Name: "Draft", Value: "1"}, {Name: "Published", Value: "2"},
+			},
+		}
+		if got, ok := golang.OutOfRangeLiteral(e); !ok || got != "3" {
+			t.Fatalf("OutOfRangeLiteral = %q, %v; want 3", got, ok)
+		}
+	})
+
+	t.Run("answers for a float set", func(t *testing.T) {
+		t.Parallel()
+		e := &node.Enum{
+			Name: "Ratio", Package: "x",
+			Underlying: builtinRef("float64"),
+			Variants: []*node.EnumVariant{
+				{Name: "Half", Value: "0.5"}, {Name: "Full", Value: "1"},
+			},
+		}
+		if got, ok := golang.OutOfRangeLiteral(e); !ok || got != "2" {
+			t.Fatalf("OutOfRangeLiteral = %q, %v; want 2", got, ok)
+		}
+	})
+
+	t.Run("takes the integer reading where both parse", func(t *testing.T) {
+		t.Parallel()
+		// `1` and `2` are legal floats. A set declared over int means
+		// the narrower one, and answering `3` rather than `3` spelled
+		// as a float is what keeps the probe's type right.
+		e := &node.Enum{
+			Name: "Status", Package: "x",
+			Underlying: builtinRef("int8"),
+			Variants:   []*node.EnumVariant{{Name: "A", Value: "1"}},
+		}
+		got, _ := golang.OutOfRangeLiteral(e)
+		if strings.Contains(got, ".") {
+			t.Fatalf("OutOfRangeLiteral = %q, want an integer spelling", got)
+		}
+	})
+
+	t.Run("declines a set saturating its type", func(t *testing.T) {
+		t.Parallel()
+		// The integer path reports no value outside the set, and the
+		// float path declines an integer set — so neither answers,
+		// which is the honest result.
+		e := &node.Enum{
+			Name: "Full", Package: "x",
+			Underlying: builtinRef("int8"),
+			Variants:   make([]*node.EnumVariant, 0, 256),
+		}
+		for i := -128; i <= 127; i++ {
+			e.Variants = append(e.Variants, &node.EnumVariant{
+				Name: "V" + strconv.Itoa(i+128), Value: strconv.Itoa(i),
+			})
+		}
+		if got, ok := golang.OutOfRangeLiteral(e); ok {
+			t.Fatalf("OutOfRangeLiteral = %q for a saturated set", got)
 		}
 	})
 }

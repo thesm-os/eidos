@@ -33,6 +33,39 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`lang/golang`: the enum vocabulary answers for float-backed sets** (#1).
+  `EnumValues` parsed every variant through `ParseIntValue` and returned false
+  for the whole set on the first non-integer, so `OutOfRangeValue` returned
+  nothing and the generated out-of-range probe was silently dropped — leaving a
+  suite that checks every declared variant is valid and never checks that an
+  undeclared one is rejected, which is the half that catches a missing
+  `default:`. `EnumFloatValues`, `OutOfRangeFloat` and `ParseFloatValue` answer
+  for those sets; `OutOfRangeLiteral` answers for either kind as source text,
+  taking the integer reading where both parse.
+
+  The rest of the library was already float-aware — `FormatVerb` returns `%g`
+  for these types — so one half of the numeric vocabulary answered and the
+  other did not, with nothing marking the difference.
+
+- **`lang/golang`: four more funcmap bundles** (#4). `AllFuncMap` reached 37 of
+  163 exported functions, so a generator needing the enum vocabulary, the shape
+  matchers, the embed walks or the witness helpers could reach none of them from
+  a template and grew a Go adapter per call. `EnumFuncMap`, `ShapeFuncMap`,
+  `EmbedFuncMap` and `GenericsFuncMap` join the union.
+
+  Where a signature does not suit `text/template` it travels in the shape that
+  does, and the choice between them is the point: an incomplete embed walk is
+  an `error` and aborts the render, because rendering a partial field set emits
+  a builder short a setter. An absent zero variant is an empty value the
+  template tests with `{{ if }}`, because a typed-iota set starting at one is
+  the ordinary case rather than a failure.
+
+- **`sdk.NewSink`, `sdk.NewStore` and `sdk.NewStoreReader`** (#5). The
+  diagnostic and store *types* were aliased and the constructors that make them
+  were not, so a test assembling a phase context by hand imported `core/diag`
+  and `store` for one call apiece — leaving the façade in exactly the case it
+  was written for.
+
 - **`sdk` is now the whole surface a plugin names.** A plugin had to know where
   each part of the framework lived: `node` for the source model, `emit` and
   `emit/builder` for output, `core/meta` to state a fact, `core/diag` to report
@@ -79,6 +112,15 @@ omitted unless they change what a caller can rely on.
   identifiers and was reaching past the uniqueness pass.
 
 ### Fixed
+
+- **`eidostest/golangtest.Driver` dropped the annotator half of a dual-role
+  plugin** (#7). It registered every plugin it was given as a generator only. A
+  plugin that annotates and generates satisfies `plugin.Generator` on its own,
+  so it type-checked and the parameter looked honoured — while the pipeline
+  iterated an annotator list the plugin was absent from, the generator then read
+  metadata nothing had stamped, and the output came out short with no
+  diagnostic. Every role a plugin implements is now registered, which is what
+  the CLI does, so a test agrees with a real run by default.
 
 - **`node.MethodSet` reported a type-set term as a failed embed.** An
   interface's `Embeds` list holds two unrelated things — types whose methods it

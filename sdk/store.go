@@ -106,3 +106,28 @@ var (
 	// only place the two meet.
 	ErrUnknownSlotName = store.ErrUnknownSlotName
 )
+
+// NewStore returns an empty store — [store.New].
+//
+// A plugin never makes one; the pipeline owns the graph and hands it
+// over on the phase context. A plugin's tests make one constantly,
+// and [eidostest/storefixture] is the path worth taking — it builds
+// the declarations too. This is for the case that has none: a test
+// pinning what a plugin does with an empty graph, which is the
+// conformance suites' first fixture and a real shape a run reaches.
+//
+//nolint:gochecknoglobals // alias re-export of a stable factory.
+var NewStore = store.New
+
+// NewStoreReader returns a reader over s — [store.NewReader].
+//
+// Named for the type rather than for the function it re-exports, for
+// the reason [StoreReader] gives: a bare `Reader` in a Go façade reads
+// as an [io.Reader], and a plugin author scanning this package for
+// what to pass a `Resolver` should not have to disambiguate.
+//
+// The reader is the resolver `lang/golang` asks for, so a test
+// building a context by hand gets both from this one call.
+//
+//nolint:gochecknoglobals // alias re-export of a stable factory.
+var NewStoreReader = store.NewReader
