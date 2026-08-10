@@ -294,3 +294,57 @@ func TestBuilder_PackageNode(t *testing.T) {
 		}
 	})
 }
+
+// TestBuilder_PackageName covers the case Go allows and
+// [storefixture.Builder.Package] cannot express.
+func TestBuilder_PackageName(t *testing.T) {
+	t.Parallel()
+
+	fixture := func() *node.Package {
+		return storefixture.New().
+			Package("v2", "example.com/api/v2").
+			Struct("User", nil).
+			PackageName("api").
+			PackageNode()
+	}
+
+	t.Run("sets the declared name", func(t *testing.T) {
+		t.Parallel()
+		if got := fixture().Name; got != "api" {
+			t.Fatalf("Name = %q, want api", got)
+		}
+	})
+
+	t.Run("leaves the import path alone", func(t *testing.T) {
+		t.Parallel()
+		// The disagreement under test: `example.com/api/v2` declaring
+		// `package api` is legal and common, and a generator composing
+		// an alias from one while a file references the other is the
+		// bug a fixture wants to reproduce.
+		if got := fixture().Path; got != "example.com/api/v2" {
+			t.Fatalf("Path = %q, want the path untouched", got)
+		}
+	})
+
+	t.Run("does not retarget a declaration's source file", func(t *testing.T) {
+		t.Parallel()
+		// Package retargets, which is right when the fixture is being
+		// renamed and wrong here: it would move the declarations into
+		// a directory named after the package clause.
+		if got := fixture().Structs[0].Pos().File; got != "v2/user.go" {
+			t.Fatalf("declaration file = %q, want it left in v2/", got)
+		}
+	})
+
+	t.Run("Package still retargets, so the two stay distinguishable", func(t *testing.T) {
+		t.Parallel()
+		pkg := storefixture.New().
+			Package("v2", "example.com/api/v2").
+			Struct("User", nil).
+			Package("api", "example.com/api").
+			PackageNode()
+		if got := pkg.Structs[0].Pos().File; got != "api/user.go" {
+			t.Fatalf("Package left the declaration at %q; it should retarget", got)
+		}
+	})
+}

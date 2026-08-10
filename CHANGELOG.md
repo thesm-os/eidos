@@ -28,6 +28,32 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`eidostest/storefixture` gains the three enum hooks a fixture could not
+  spell.** `EnumBuilder.Variant` takes an optional callback and a new
+  `VariantBuilder` carries `Pos` / `Docs` / `Directive` — the last is why it
+  exists, because a per-variant text override is the highest-precedence layer of
+  the rule deciding what a variant renders as, and it is authored on the variant.
+  Until now that layer was reachable only through a real frontend, where every
+  other layer was already covered. `EnumBuilder.Method` declares a method on the
+  enum's type, the hook `StructBuilder` and `InterfaceBuilder` already carried;
+  `Builder.GoSource` already projected one, so no fixture had reached that arm.
+  `Builder.PackageName` sets the declared name without touching the import path
+  or retargeting any declaration's file, for the case Go allows and
+  `Builder.Package` cannot express — `example.com/api/v2` declaring `package api`.
+
+  The existing two-argument `Variant(name, value)` form is unchanged; the
+  callback is variadic.
+
+- **The shape mixins name their KV parameters.** Each of the seven mixins
+  carrying parameters now exports a constant — `bounded.ParamLimit`,
+  `orderafter.ParamFn`, `readafterwrite.ParamWrite`, `scope.ParamName`,
+  `timeout.ParamDuration`, `validates.ParamFn`, `wrappedvia.ParamFn` — with
+  `Params` composed from it. A consumer reaching for one otherwise writes
+  `Params[0]`, which is a position rather than a key: reordering the list, or
+  adding a parameter ahead of it, silently changes what every such call site
+  reads. The mixins' own tests spelled the key as a literal and now use the
+  constant.
+
 - **`pipeline.Builder.WithPlugins` registers each plugin under every role it
   implements** — the dispatch the CLI performs on a consumer's flat plugin slice,
   and until now the only place it existed. A binary assembling its own plugin set

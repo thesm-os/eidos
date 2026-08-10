@@ -34,7 +34,15 @@ func projectionFixture() *storefixture.Builder {
 		Enum("Status", func(e *storefixture.EnumBuilder) {
 			e.Underlying(storefixture.Named("int")).
 				Variant("StatusDraft", "").
-				Variant("StatusLive", "")
+				Variant("StatusLive", "", func(v *storefixture.VariantBuilder) {
+					v.Docs("StatusLive is published.")
+				})
+			// printEnum already projected an enum's methods; until
+			// EnumBuilder could declare one, no fixture reached that
+			// arm and the round trip never compiled it.
+			e.Method("String", func(m *storefixture.MethodBuilder) {
+				m.Return(storefixture.Named("string"))
+			})
 		}).
 		Struct("User", func(s *storefixture.StructBuilder) {
 			s.Docs("User is the entity a repository stores.")

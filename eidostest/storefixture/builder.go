@@ -111,6 +111,9 @@ func New() *Builder {
 // generated output into the old package's directory. A position set
 // explicitly through a sub-builder's Pos is never rewritten; see
 // [StructBuilder.Pos].
+//
+// Reach for [Builder.PackageName] where the directory and the
+// declared name deliberately differ, which retargets nothing.
 func (b *Builder) Package(name, path string) *Builder {
 	old := b.pkg.Name
 	b.pkg.Name = name
@@ -152,6 +155,27 @@ func (b *Builder) Package(name, path string) *Builder {
 		a.Package = path
 		retargetPos(&a.SourcePos, old, name, a.Name)
 	}
+	return b
+}
+
+// PackageName sets the package's declared name without touching its
+// import path or retargeting any declaration's synthetic source file.
+//
+// For the case Go allows and [Builder.Package] cannot express: a
+// directory whose name and whose `package` clause deliberately differ
+// — `example.com/gen/shopv1` declaring `package shopv1` is the
+// convention, but `example.com/api/v2` declaring `package api` is
+// legal and common, and a generator composing an import alias from
+// one while a file references the other is exactly the bug a fixture
+// wants to reproduce.
+//
+// Package rewrites both halves and retargets every declaration's
+// file, which is right when the fixture is being renamed and wrong
+// here: retargeting would move the declarations into a directory
+// named after the package clause, which is the disagreement under
+// test.
+func (b *Builder) PackageName(name string) *Builder {
+	b.pkg.Name = name
 	return b
 }
 
@@ -291,7 +315,7 @@ func (b *Builder) Enum(name string, fn func(*EnumBuilder)) *Builder {
 		Name:     name,
 		Package:  b.pkg.Path,
 	}
-	eb := &EnumBuilder{e: e}
+	eb := &EnumBuilder{e: e, pkgPath: b.pkg.Path, file: e.SourcePos.File}
 	if fn != nil {
 		fn(eb)
 	}

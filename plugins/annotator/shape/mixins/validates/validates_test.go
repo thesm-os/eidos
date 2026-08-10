@@ -38,7 +38,7 @@ func TestMixin(t *testing.T) {
 			Functions: []*sdk.Function{host, validator},
 		})
 
-		got, _ := shape.MixinParamKey(validates.Name, "fn").Get(host.Meta())
+		got, _ := shape.MixinParamKey(validates.Name, validates.ParamFn).Get(host.Meta())
 		if got != "x.ValidateInput" {
 			t.Fatalf("fn param = %q, want %q", got, "x.ValidateInput")
 		}

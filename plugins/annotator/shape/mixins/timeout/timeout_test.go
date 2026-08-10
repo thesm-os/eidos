@@ -37,7 +37,7 @@ func TestMixin(t *testing.T) {
 		mixintest.AssertParam(t, bag, timeout.Name, "duration", "5s")
 		// Belt and braces: confirm the value really sits under
 		// the per-mixin param key the contract documents.
-		if got, _ := shape.MixinParamKey(timeout.Name, "duration").Get(bag); got != "5s" {
+		if got, _ := shape.MixinParamKey(timeout.Name, timeout.ParamDuration).Get(bag); got != "5s" {
 			t.Fatalf("MixinParamKey resolved %q, want %q", got, "5s")
 		}
 	})

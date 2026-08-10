@@ -38,7 +38,7 @@ func TestMixin(t *testing.T) {
 			Functions: []*sdk.Function{host, inner},
 		})
 
-		got, _ := shape.MixinParamKey(wrappedvia.Name, "fn").Get(host.Meta())
+		got, _ := shape.MixinParamKey(wrappedvia.Name, wrappedvia.ParamFn).Get(host.Meta())
 		if got != "x.Delegate" {
 			t.Fatalf("fn param = %q, want %q", got, "x.Delegate")
 		}
