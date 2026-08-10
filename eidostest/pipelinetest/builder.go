@@ -101,6 +101,23 @@ func (b *Builder) WithBackend(p plugin.Backend) *Builder {
 	return b
 }
 
+// WithPlugins registers each plugin under every role it implements,
+// mirroring [pipeline.Builder.WithPlugins] and therefore the dispatch
+// the CLI performs on a consumer's flat plugin slice.
+//
+// The registration a test wants by default, because it is the one a
+// real run performs: a dual-role plugin registered under one role
+// leaves the other silently dead, and every assertion about the
+// resulting output passes against a run that did less than it looked
+// like it did.
+//
+// Do not follow it with a role-typed setter for the same plugin —
+// that registers it twice within one role, which Build rejects.
+func (b *Builder) WithPlugins(ps ...plugin.Plugin) *Builder {
+	b.inner.WithPlugins(ps...)
+	return b
+}
+
 // WithDirective registers one or more directive schemas with the
 // pipeline's directive registry. Mirrors [pipeline.Builder.WithDirective].
 func (b *Builder) WithDirective(schemas ...directive.Schema) *Builder {

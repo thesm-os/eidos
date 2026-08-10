@@ -1029,3 +1029,103 @@ func TestBuilder_UnhashablePluginDoesNotPanic(t *testing.T) {
 		}
 	})
 }
+
+// TestBuilder_WithPlugins pins the dispatch the CLI performs, which
+// until now existed only inside the CLI.
+func TestBuilder_WithPlugins(t *testing.T) {
+	t.Parallel()
+
+	t.Run("registers a dual-role plugin under both roles", func(t *testing.T) {
+		t.Parallel()
+		// The silent failure the method exists for: a plugin that
+		// annotates and generates satisfies Generator on its own, so
+		// registering only that half type-checks and leaves the
+		// annotator dead. The run then reports success with short
+		// output and no diagnostic.
+		p := &recordingDualPlugin{name: "dual"}
+		pipe, err := pipeline.New().
+			WithFrontend(&recFE{name: "fe"}).
+			WithPlugins(p).
+			WithBackend(&recBE{name: "be", lang: "stub"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if err := pipe.Run(t.Context(), "./..."); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if !p.asAnnotator || !p.asGenerator {
+			t.Fatalf("annotated=%v generated=%v; want the pipeline to invoke both halves",
+				p.asAnnotator, p.asGenerator)
+		}
+	})
+
+	t.Run("registers a plugin implementing no role nowhere", func(t *testing.T) {
+		t.Parallel()
+		// Not rejected here: the existing role-count errors report it
+		// at Build alongside every other configuration problem, so a
+		// caller has one place to look rather than two.
+		if _, err := pipeline.New().WithPlugins(&rolelessPlugin{name: "inert"}).Build(); err == nil {
+			t.Fatal("a set with no frontend and no backend built")
+		}
+	})
+
+	t.Run("registers several plugins in one call", func(t *testing.T) {
+		t.Parallel()
+		if _, err := pipeline.New().
+			WithPlugins(&stubFE{name: "fe"}, &stubGen{name: "gen"}, &stubBE{name: "be"}).
+			Build(); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+	})
+
+	t.Run("a role-typed setter beside it double-registers", func(t *testing.T) {
+		t.Parallel()
+		// Worth pinning because the migration path invites it: a
+		// caller adding WithPlugins to an existing WithGenerator call
+		// registers the plugin twice within one role, which Build
+		// rejects as a duplicate name.
+		g := &stubGen{name: "gen"}
+		_, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithGenerator(g).
+			WithPlugins(g).
+			WithBackend(&stubBE{name: "be"}).
+			Build()
+		if err == nil {
+			t.Fatal("registering one plugin twice within a role built")
+		}
+	})
+}
+
+// recordingDualPlugin implements two roles and records which halves
+// the pipeline invoked, which is the observable consequence of the
+// dispatch under test: a plugin registered under one role only has
+// its other half silently skipped.
+type recordingDualPlugin struct {
+	name        string
+	asAnnotator bool
+	asGenerator bool
+}
+
+// Name returns the configured plugin identifier.
+func (p *recordingDualPlugin) Name() string { return p.name }
+
+// Annotate satisfies [plugin.Annotator] and records the invocation.
+func (p *recordingDualPlugin) Annotate(*plugin.AnnotatorContext) error {
+	p.asAnnotator = true
+	return nil
+}
+
+// Generate satisfies [plugin.Generator] and records the invocation.
+func (p *recordingDualPlugin) Generate(*plugin.GeneratorContext) error {
+	p.asGenerator = true
+	return nil
+}
+
+// rolelessPlugin implements [plugin.Plugin] and no role interface.
+type rolelessPlugin struct{ name string }
+
+// Name returns the configured plugin identifier.
+func (p *rolelessPlugin) Name() string { return p.name }

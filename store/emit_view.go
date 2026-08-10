@@ -5,6 +5,8 @@ package store
 
 import (
 	"fmt"
+	"iter"
+	"maps"
 	"sync"
 	"sync/atomic"
 
@@ -666,4 +668,55 @@ func (v *EmitView) PendingOriginSlots() []PendingOriginSlot {
 	out := make([]PendingOriginSlot, len(v.pendingOriginSlots))
 	copy(out, v.pendingOriginSlots)
 	return out
+}
+
+// PendingOfType yields every queued contribution whose item is a T,
+// paired with the origin it is anchored on, in registration order.
+//
+// The walk a cross-cutting generator writes to find what an earlier
+// one queued: it holds no reference to the producing plugin, so the
+// emit kind is the only handle it has on the contribution. Seven
+// callers in this workspace wrote the type switch, and each one also
+// paid for a full copy of the pending slice — [PendingOriginSlots]
+// snapshots under the lock, which is right for Layout draining it and
+// wasteful for a filter that discards most of what it copied.
+//
+// A sequence rather than a slice so the copy is not made at all. The
+// pending list is read under the view's lock for the duration of the
+// range, which is what makes the snapshot unnecessary; a consumer that
+// queues from inside the loop deadlocks, and queueing while walking
+// what is already queued is not a thing a generator has cause to do.
+//
+// Registration order is load-bearing: a host contributing twice for
+// one origin means the two to arrive in the order it queued them.
+func PendingOfType[T emit.Node](v *EmitView) iter.Seq2[node.Node, T] {
+	return func(yield func(node.Node, T) bool) {
+		if v == nil {
+			return
+		}
+		v.pendingOriginSlotsMu.Lock()
+		defer v.pendingOriginSlotsMu.Unlock()
+		for _, slot := range v.pendingOriginSlots {
+			item, ok := slot.Item.(T)
+			if !ok {
+				continue
+			}
+			if !yield(slot.Origin, item) {
+				return
+			}
+		}
+	}
+}
+
+// PendingByOrigin indexes [PendingOfType] by origin.
+//
+// What a contributor keyed to a single host wants: one lookup per
+// origin rather than a scan per origin, which is the difference
+// between linear and quadratic over a package. Later contributions for
+// one origin overwrite earlier ones — reach for [PendingOfType] where
+// a host may contribute more than once and both matter.
+//
+// The map is the caller's; mutating it does not touch the view.
+func PendingByOrigin[T emit.Node](v *EmitView) map[node.Node]T {
+	return maps.Collect(PendingOfType[T](v))
 }

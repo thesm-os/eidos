@@ -3,7 +3,11 @@
 
 package sdk
 
-import "go.thesmos.sh/eidos/store"
+import (
+	"iter"
+
+	"go.thesmos.sh/eidos/store"
+)
 
 // The store, re-exported as the types a plugin names — not as a
 // way to make one.
@@ -72,6 +76,42 @@ type Bucket[T any] = store.Bucket[T]
 // prevent: the contributing plugin reports success, and its
 // contribution never reaches a file.
 type PendingOriginSlot = store.PendingOriginSlot
+
+// PendingOfType yields every queued contribution whose item is a T,
+// paired with the origin it is anchored on, in registration order.
+//
+// The walk a cross-cutting generator writes to find what an earlier
+// one queued. It holds no reference to the producing plugin, so the
+// emit kind is the only handle it has — and seven callers in this
+// workspace wrote the same type switch over
+// [EmitView.PendingOriginSlots], each also paying for that
+// accessor's full copy of the pending list before discarding most of
+// what it copied.
+//
+// Declared rather than aliased, unlike everything else in this
+// façade: Go has no alias form for a generic function, so the
+// forwarding call below is the only spelling available. It adds no
+// behaviour — [store.PendingOfType] is the implementation, and this
+// exists so a plugin never has to name the package beneath the
+// façade to reach it.
+func PendingOfType[T EmitNode](v *EmitView) iter.Seq2[Node, T] {
+	return store.PendingOfType[T](v)
+}
+
+// PendingByOrigin indexes [PendingOfType] by origin — one lookup per
+// origin rather than a scan per origin, which is the difference
+// between linear and quadratic over a package.
+//
+// Later contributions for one origin overwrite earlier ones, which
+// is what a contributor keyed to a single host wants. Reach for
+// [PendingOfType] where a host may contribute more than once and
+// both matter.
+//
+// Declared rather than aliased for the same reason as
+// [PendingOfType].
+func PendingByOrigin[T EmitNode](v *EmitView) map[Node]T {
+	return store.PendingByOrigin[T](v)
+}
 
 // The failure modes the store returns to a plugin. Every one is
 // reachable from a call a plugin makes — adding a package,

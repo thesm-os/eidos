@@ -159,3 +159,49 @@ func TestStoreSentinelsAreDistinct(t *testing.T) {
 		}
 	})
 }
+
+// TestPendingFilters pins that the façade's two declared functions
+// forward rather than reimplement.
+//
+// Everything else in this package is a type alias, which cannot
+// diverge. Go has no alias form for a generic function, so these two
+// are declarations — and a declaration is a thing that can drift.
+func TestPendingFilters(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T) (*sdk.EmitView, sdk.Node) {
+		t.Helper()
+		v := store.New().Emit()
+		origin := &node.Struct{Name: "User"}
+		err := v.AppendOriginSlot(
+			origin, "top", &sdk.EmitStruct{Name: "UserStub"}, sdk.EmitProvenance{})
+		if err != nil {
+			t.Fatalf("AppendOriginSlot: %v", err)
+		}
+		return v, origin
+	}
+
+	t.Run("PendingOfType agrees with the store's own", func(t *testing.T) {
+		t.Parallel()
+		v, origin := build(t)
+		var seen int
+		for got, item := range sdk.PendingOfType[*sdk.EmitStruct](v) {
+			seen++
+			if got != origin || item.Name != "UserStub" {
+				t.Fatalf("yielded %+v, %+v", got, item)
+			}
+		}
+		if seen != 1 {
+			t.Fatalf("yielded %d contributions, want 1", seen)
+		}
+	})
+
+	t.Run("PendingByOrigin agrees with the store's own", func(t *testing.T) {
+		t.Parallel()
+		v, origin := build(t)
+		got := sdk.PendingByOrigin[*sdk.EmitStruct](v)
+		if len(got) != 1 || got[origin].Name != "UserStub" {
+			t.Fatalf("PendingByOrigin = %+v", got)
+		}
+	})
+}

@@ -398,6 +398,45 @@ func (b *Builder) WithBackend(p plugin.Backend) *Builder {
 	return b
 }
 
+// WithPlugins registers each plugin under every role it implements.
+//
+// The dispatch the CLI performs on a consumer's flat plugin slice,
+// and until now the only place it existed. A binary assembling its
+// own plugin set had to reproduce the four type assertions to answer
+// the one question that matters about that set — does it build —
+// or take a dependency on eidos/cli from a package that needs
+// nothing else from it.
+//
+// Registering under *every* role is the whole behaviour. A plugin
+// that annotates and generates satisfies [plugin.Generator] on its
+// own, so passing it to [Builder.WithGenerator] type-checks and looks
+// honoured; the annotator half is then silently dead, the generator
+// reads metadata nothing stamped, and the run reports success with
+// short output. The four role-typed setters remain for a caller
+// registering a single plugin under a single role deliberately.
+//
+// A plugin implementing no role is registered nowhere rather than
+// rejected here, so the existing role-count errors report it at
+// [Builder.Build] alongside every other configuration problem — one
+// place a caller has to check, rather than two.
+func (b *Builder) WithPlugins(ps ...plugin.Plugin) *Builder {
+	for _, p := range ps {
+		if f, ok := p.(plugin.Frontend); ok {
+			b.WithFrontend(f)
+		}
+		if a, ok := p.(plugin.Annotator); ok {
+			b.WithAnnotator(a)
+		}
+		if g, ok := p.(plugin.Generator); ok {
+			b.WithGenerator(g)
+		}
+		if bk, ok := p.(plugin.Backend); ok {
+			b.WithBackend(bk)
+		}
+	}
+	return b
+}
+
 // WithSink configures the destination sink the backend writes
 // through. Repeated calls replace the previous sink; combine with
 // [sink.NewMulti] to fan out to multiple sinks.

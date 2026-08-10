@@ -5,6 +5,7 @@ package store_test
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 
@@ -869,6 +870,113 @@ func TestEmitView_AppendOriginSlot(t *testing.T) {
 		)
 		if !errors.Is(err, store.ErrFrozen) {
 			t.Fatalf("got %v, want ErrFrozen", err)
+		}
+	})
+}
+
+// TestPendingFilters pins the walk seven callers wrote by hand, and
+// the two properties that differ between the sequence and the map.
+func TestPendingFilters(t *testing.T) {
+	t.Parallel()
+
+	origin := func(name string) *node.Struct { return &node.Struct{Name: name} }
+	queue := func(v *store.EmitView, o node.Node, item emit.Node) {
+		t.Helper()
+		if err := v.AppendOriginSlot(o, "top", item, emit.Provenance{}); err != nil {
+			t.Fatalf("AppendOriginSlot: %v", err)
+		}
+	}
+
+	t.Run("yields only contributions of the requested kind", func(t *testing.T) {
+		t.Parallel()
+		// The handle a cross-cutting generator has on what an earlier
+		// one queued: it holds no reference to the producing plugin,
+		// so the emit kind is all it can key on.
+		v := store.New().Emit()
+		a, b := origin("A"), origin("B")
+		queue(v, a, &emit.Struct{Name: "AStub"})
+		queue(v, b, &emit.Function{Name: "helper"})
+
+		var names []string
+		for _, item := range store.PendingOfType[*emit.Struct](v) {
+			names = append(names, item.Name)
+		}
+		if !slices.Equal(names, []string{"AStub"}) {
+			t.Fatalf("PendingOfType yielded %v, want only the struct", names)
+		}
+	})
+
+	t.Run("pairs each item with the origin it was anchored on", func(t *testing.T) {
+		t.Parallel()
+		v := store.New().Emit()
+		a := origin("A")
+		queue(v, a, &emit.Struct{Name: "AStub"})
+		for got := range store.PendingOfType[*emit.Struct](v) {
+			if got != node.Node(a) {
+				t.Fatalf("origin = %+v, want the node the contribution named", got)
+			}
+		}
+	})
+
+	t.Run("preserves registration order", func(t *testing.T) {
+		t.Parallel()
+		// Load-bearing: a host contributing twice for one origin means
+		// the two to arrive in the order it queued them.
+		v := store.New().Emit()
+		a := origin("A")
+		queue(v, a, &emit.Struct{Name: "first"})
+		queue(v, a, &emit.Struct{Name: "second"})
+
+		var names []string
+		for _, item := range store.PendingOfType[*emit.Struct](v) {
+			names = append(names, item.Name)
+		}
+		if !slices.Equal(names, []string{"first", "second"}) {
+			t.Fatalf("PendingOfType yielded %v, want registration order", names)
+		}
+	})
+
+	t.Run("stops when the caller stops", func(t *testing.T) {
+		t.Parallel()
+		// A sequence that ignored the yield result would keep walking
+		// under the view's lock after the caller had left.
+		v := store.New().Emit()
+		queue(v, origin("A"), &emit.Struct{Name: "first"})
+		queue(v, origin("B"), &emit.Struct{Name: "second"})
+
+		var seen int
+		for range store.PendingOfType[*emit.Struct](v) {
+			seen++
+			break
+		}
+		if seen != 1 {
+			t.Fatalf("saw %d items after breaking, want 1", seen)
+		}
+	})
+
+	t.Run("the map keeps the last contribution per origin", func(t *testing.T) {
+		t.Parallel()
+		// What a contributor keyed to a single host wants; reach for
+		// the sequence where a host may contribute more than once and
+		// both matter.
+		v := store.New().Emit()
+		a := origin("A")
+		queue(v, a, &emit.Struct{Name: "first"})
+		queue(v, a, &emit.Struct{Name: "second"})
+
+		byOrigin := store.PendingByOrigin[*emit.Struct](v)
+		if len(byOrigin) != 1 || byOrigin[a].Name != "second" {
+			t.Fatalf("PendingByOrigin = %+v, want the last contribution", byOrigin)
+		}
+	})
+
+	t.Run("a nil view yields nothing rather than panicking", func(t *testing.T) {
+		t.Parallel()
+		for range store.PendingOfType[*emit.Struct](nil) {
+			t.Fatal("a nil view yielded a contribution")
+		}
+		if got := store.PendingByOrigin[*emit.Struct](nil); len(got) != 0 {
+			t.Fatalf("PendingByOrigin(nil) = %+v", got)
 		}
 	})
 }

@@ -10,6 +10,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"text/template"
@@ -919,13 +920,35 @@ func assertTemplatesParse(tb testing.TB, p plugin.Plugin, languages ...string) {
 // reaching it is reported as a parse failure rather than silently
 // accepted.
 func parsePermissively(name string, body []byte) (*template.Template, error) {
+	parsed, _, err := parseStubbing(name, body, nil)
+	return parsed, err
+}
+
+// parseStubbing is [parsePermissively] with a starting funcmap and a
+// record of what it had to invent.
+//
+// Seeding the map is what turns one mechanism into two checks. With no
+// seed, every name gets stubbed and the parse judges syntax alone —
+// which is what conformance wants, because the real funcmap is merged
+// later and rejecting `imp` here would be wrong. Seeded with the names
+// that *will* be merged, whatever still needs stubbing is a name
+// nobody brings, and that is a render-time failure found at commit
+// time instead.
+//
+// The stubbed names come back sorted, so a report over several
+// templates is stable rather than ordered by whichever parse error
+// text/template happened to produce first.
+func parseStubbing(name string, body []byte, seed template.FuncMap) (*template.Template, []string, error) {
 	fm := template.FuncMap{}
+	maps.Copy(fm, seed)
 	stub := func(_ ...any) any { return nil }
+	var stubbed []string
 
 	for range maxStubbedTemplateFuncs {
 		parsed, err := template.New(name).Funcs(fm).Parse(string(body))
 		if err == nil {
-			return parsed, nil
+			slices.Sort(stubbed)
+			return parsed, stubbed, nil
 		}
 		m := undefinedFuncPattern.FindStringSubmatch(err.Error())
 		if m == nil {
@@ -934,12 +957,104 @@ func parsePermissively(name string, body []byte) (*template.Template, error) {
 			// template was malformed on sight" from "it parsed until a
 			// function was stubbed in", which is the difference between
 			// an author's typo and a bad interaction with the funcmap.
-			return nil, fmt.Errorf("after stubbing %d undefined function(s): %w", len(fm), err)
+			return nil, stubbed, fmt.Errorf("after stubbing %d undefined function(s): %w", len(stubbed), err)
 		}
 		fm[m[1]] = stub
+		stubbed = append(stubbed, m[1])
 	}
-	return nil, fmt.Errorf("template references more than %d undefined functions",
+	return nil, stubbed, fmt.Errorf("template references more than %d undefined functions",
 		maxStubbedTemplateFuncs)
+}
+
+// AssertTemplateFuncsResolve fails for every function a shipped
+// template calls that nothing in the run provides — neither the
+// plugin's own TemplateFuncs or TemplateOverrides, nor the reserved
+// set the backend registers.
+//
+// The gap between the two checks that already exist.
+// `assertFuncMapsBind` asks whether a registered *name* is a legal
+// identifier, and the parse check deliberately stubs every unresolved
+// call so it can judge syntax alone. Neither asks the question that
+// actually fails a render: are the names a template calls ones
+// somebody brings? A template calling a function nobody registers
+// parses, ships, and fails midway through Render in the consumer's
+// build, naming the merged tree rather than the file.
+//
+// The alternative every generator reached for is a hand-maintained
+// list of names asserted present in the funcmap, which drifts in the
+// safe direction: a template calling a name nobody listed still ships.
+// This reads the call sites from the parser itself, so the list cannot
+// fall behind the templates.
+//
+// reserved is the backend's own funcmap for lang — `render`, `imp`,
+// `slot` and the rest. It is a parameter rather than a lookup because
+// this package may not import a backend, and the caller is the only
+// side that knows which one will render its output.
+//
+// Skips a plugin that ships no templates for lang, which is not a
+// failure: a Go generator asked about Rust legitimately brings
+// nothing.
+func AssertTemplateFuncsResolve(
+	tb testing.TB,
+	p plugin.Plugin,
+	reserved template.FuncMap,
+	lang string,
+) {
+	tb.Helper()
+
+	tp, ok := any(p).(plugin.TemplateProvider)
+	if !ok {
+		skipAbsentCapability(tb, "plugin.TemplateProvider")
+		return
+	}
+	fsys, declared := tp.Templates(lang)
+	if !declared || fsys == nil {
+		return
+	}
+
+	known := template.FuncMap{}
+	maps.Copy(known, reserved)
+	maps.Copy(known, tp.TemplateFuncs(lang))
+	maps.Copy(known, tp.TemplateOverrides(lang))
+
+	entries, err := collectTemplateFiles(fsys)
+	if err != nil {
+		tb.Errorf("TemplateProvider.Templates(%q): walking the filesystem failed: %v", lang, err)
+		return
+	}
+	for _, name := range entries {
+		body, readErr := fs.ReadFile(fsys, name)
+		if readErr != nil {
+			tb.Errorf("TemplateProvider.Templates(%q): reading %s failed: %v", lang, name, readErr)
+			continue
+		}
+		// A parse failure is already reported by the parse check, and
+		// repeating it here would name one defect twice. What the
+		// stubbed names say is still worth reading: a template that
+		// failed to parse after stubbing may have done so *because* of
+		// what it called.
+		_, stubbed, parseErr := parseStubbing(name, body, known)
+		if len(stubbed) > 0 {
+			tb.Errorf("TemplateProvider.Templates(%q): %s calls %s, which neither the plugin's "+
+				"TemplateFuncs or TemplateOverrides nor the backend's reserved set provides; "+
+				"the backend would surface this midway through Render",
+				lang, name, strings.Join(quoteAll(stubbed), ", "))
+			continue
+		}
+		if parseErr != nil {
+			continue
+		}
+	}
+}
+
+// quoteAll quotes each name so a report listing several reads as a
+// list rather than as one run-on identifier.
+func quoteAll(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = strconv.Quote(n)
+	}
+	return out
 }
 
 // maxStubbedTemplateFuncs bounds the stub-and-retry loop in

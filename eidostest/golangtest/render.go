@@ -76,22 +76,14 @@ func DriverOf(
 	}
 	b := pipelinetest.New(tb).WithFrontend(pipelinetest.FromNodes(pkgs...))
 	for _, g := range gens {
-		b = b.WithGenerator(g)
 		// Registered under every role it implements, which is what the
 		// CLI does — so a test agrees with a real run by default.
 		//
-		// A plugin that annotates and generates satisfies
-		// [plugin.Generator] on its own, so passing one here type-checks
-		// and the parameter looks honoured. Registering only the
-		// generator half leaves the annotator silently dead: the
-		// pipeline iterates its annotator list, does not find the
-		// plugin, and the generator then reads metadata nothing
-		// stamped. Output comes out short, no diagnostic is written,
-		// and every assertion about what was produced passes against
-		// it.
-		if a, ok := g.(plugin.Annotator); ok {
-			b = b.WithAnnotator(a)
-		}
+		// Delegated to [pipelinetest.Builder.WithPlugins] rather than
+		// spelled here: this package held the only copy of that rule
+		// for a while, and one rule stated twice is how the annotator
+		// half of a dual-role plugin goes missing in the first place.
+		b = b.WithPlugins(g)
 	}
 	return b.WithBackend(backend)
 }

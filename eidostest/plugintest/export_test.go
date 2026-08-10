@@ -33,6 +33,7 @@ var (
 	AssertTemplatesParse                  = assertTemplatesParse
 	AssertTemplateFuncsAvoidReservedNames = assertTemplateFuncsAvoidReservedNames
 	AssertStableFuncMap                   = assertStableFuncMap
+	AssertSetBuilds                       = assertSetBuilds
 
 	// Annotator-suite assertions.
 	AssertAnnotateEmptyStoreDoesNotPanic    = assertAnnotateEmptyStoreDoesNotPanic

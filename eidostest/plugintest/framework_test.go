@@ -628,3 +628,133 @@ func TestRunSuiteFor_ProbesTheCallersLanguage(t *testing.T) {
 		}
 	})
 }
+
+// tmplPlugin is a template provider whose template body and funcmap
+// the caller supplies, so a case varies exactly one of the two.
+type tmplPlugin struct {
+	plugintest.FixturePlugin
+	body      string
+	funcs     template.FuncMap
+	overrides template.FuncMap
+}
+
+func (p *tmplPlugin) Templates(lang string) (fs.FS, bool) {
+	if lang != plugintest.ConformanceLanguage {
+		return nil, false
+	}
+	return fstest.MapFS{"t.tmpl": &fstest.MapFile{Data: []byte(p.body)}}, true
+}
+
+func (p *tmplPlugin) TemplateFuncs(string) template.FuncMap     { return p.funcs }
+func (p *tmplPlugin) TemplateOverrides(string) template.FuncMap { return p.overrides }
+
+// newTmplPlugin returns a provider shipping body and registering
+// funcs, named so a report names it.
+func newTmplPlugin(body string, funcs template.FuncMap) *tmplPlugin {
+	p := &tmplPlugin{FixturePlugin: *plugintest.NewFixturePlugin(), body: body, funcs: funcs}
+	p.PluginName = "tmpl"
+	return p
+}
+
+// TestAssertTemplateFuncsResolve pins the check that closes the gap
+// between "this name is bindable" and "this name is bound".
+//
+// A template calling a function nobody registers parses, ships, and
+// fails midway through Render in the consumer's build — naming the
+// merged template tree rather than the file that called it.
+func TestAssertTemplateFuncsResolve(t *testing.T) {
+	t.Parallel()
+
+	reserved := template.FuncMap{"render": func(any) string { return "" }}
+
+	t.Run("accepts a call the plugin registers", func(t *testing.T) {
+		t.Parallel()
+		f := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(f,
+			newTmplPlugin(`{{ mine . }}`, template.FuncMap{"mine": func(any) string { return "" }}),
+			reserved, plugintest.ConformanceLanguage)
+		if f.failed {
+			t.Fatalf("a registered call was reported:\n%s", joinFake(f))
+		}
+	})
+
+	t.Run("accepts a call the backend reserves", func(t *testing.T) {
+		t.Parallel()
+		// The reason the parse check stubs everything: a plugin
+		// legitimately calls the backend's own funcmap, which it does
+		// not register itself.
+		f := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(f,
+			newTmplPlugin(`{{ render . }}`, nil), reserved, plugintest.ConformanceLanguage)
+		if f.failed {
+			t.Fatalf("a reserved call was reported:\n%s", joinFake(f))
+		}
+	})
+
+	t.Run("accepts a call an override provides", func(t *testing.T) {
+		t.Parallel()
+		p := newTmplPlugin(`{{ swapped . }}`, nil)
+		p.overrides = template.FuncMap{"swapped": func(any) string { return "" }}
+		f := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(f, p, reserved, plugintest.ConformanceLanguage)
+		if f.failed {
+			t.Fatalf("an overridden call was reported:\n%s", joinFake(f))
+		}
+	})
+
+	t.Run("reports a call nobody provides", func(t *testing.T) {
+		t.Parallel()
+		f := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(f,
+			newTmplPlugin(`{{ absent . }}`, nil), reserved, plugintest.ConformanceLanguage)
+		if !f.failed {
+			t.Fatal("an unresolvable call was accepted")
+		}
+		if got := joinFake(f); !strings.Contains(got, `"absent"`) {
+			t.Fatalf("report does not name the function:\n%s", got)
+		}
+	})
+
+	t.Run("names every unresolvable call, not just the first", func(t *testing.T) {
+		t.Parallel()
+		// A hand-maintained list drifts one name at a time; a report
+		// that stopped at the first would too.
+		f := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(f,
+			newTmplPlugin(`{{ alpha . }}{{ beta . }}`, nil), reserved, plugintest.ConformanceLanguage)
+		got := joinFake(f)
+		for _, want := range []string{`"alpha"`, `"beta"`} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("report does not name %s:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("finds a call in a pipeline and an assignment position", func(t *testing.T) {
+		t.Parallel()
+		// Read from the parser rather than by pattern, which is what
+		// makes these positions cost nothing to support.
+		f := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(f,
+			newTmplPlugin(`{{ $x := piped . | chained }}{{ $x }}`, nil),
+			reserved, plugintest.ConformanceLanguage)
+		got := joinFake(f)
+		for _, want := range []string{`"piped"`, `"chained"`} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("report does not name %s:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("says nothing about a language the plugin does not target", func(t *testing.T) {
+		t.Parallel()
+		// A Go generator asked about Rust brings nothing, which is not
+		// a failure.
+		f := newFakeT()
+		plugintest.AssertTemplateFuncsResolve(f,
+			newTmplPlugin(`{{ absent . }}`, nil), reserved, "rust")
+		if f.failed {
+			t.Fatalf("an untargeted language was reported:\n%s", joinFake(f))
+		}
+	})
+}

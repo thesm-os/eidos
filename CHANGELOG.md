@@ -28,6 +28,47 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`pipeline.Builder.WithPlugins` registers each plugin under every role it
+  implements** — the dispatch the CLI performs on a consumer's flat plugin slice,
+  and until now the only place it existed. A binary assembling its own plugin set
+  had to reproduce the four type assertions to answer the one question that
+  matters about that set — does it build — or depend on `eidos/cli` from a package
+  that needs nothing else from it. `eidostest/pipelinetest.Builder` mirrors it,
+  and `golangtest.DriverOf` now delegates to it rather than keeping the second
+  copy of that rule this repo had.
+
+  Registering under *every* role is the behaviour: a plugin that annotates and
+  generates satisfies `plugin.Generator` on its own, so registering only that half
+  type-checks and leaves the annotator silently dead. Do not follow `WithPlugins`
+  with a role-typed setter for the same plugin — that registers it twice within
+  one role, which `Build` rejects.
+
+- **`plugintest.RunSetSuite` asserts a whole plugin set, not one plugin.** Every
+  suite this package shipped was single-plugin, and every property they check is
+  one a plugin can satisfy while the set it ships in does not: two plugins with
+  one name, two declaring the same directive schema, two providing one capability
+  in one bucket. The checks are the pipeline's own — the set is registered on a
+  real builder, with stubs filling only the frontend and backend roles it does not
+  claim, so a generator-only bundle is testable without a binary. An unprovided
+  `Requires` is deliberately *not* a fault: the pipeline documents that it ignores
+  one, and asserting closure would fail sets that run correctly.
+
+- **`plugintest.AssertTemplateFuncsResolve` catches a template calling a function
+  nobody registers.** `assertFuncMapsBind` asked whether a registered *name* is a
+  legal identifier and the parse check deliberately stubs every unresolved call,
+  so neither asked the question that actually fails a render. Such a template
+  parses, ships, and fails midway through `Render` in the consumer's build. The
+  alternative every generator reached for is a hand-maintained list of names,
+  which drifts in the safe direction; this reads the call sites from the parser
+  itself, so it cannot fall behind the templates.
+
+- **`store.PendingOfType` / `PendingByOrigin`, re-exported through `sdk`**, filter
+  queued origin-slot contributions by emit kind. Seven callers in this workspace
+  wrote the same type switch over `PendingOriginSlots`, each also paying for that
+  accessor's full copy of the pending list before discarding most of what it
+  copied; the sequence form makes no copy at all. These are declared rather than
+  aliased in `sdk` because Go has no alias form for a generic function.
+
 - **`lang/golang.SequenceOf` answers a method's range-over-func return in one
   call.** The four existing iterator accessors each return nil for a
   non-sequence, so every generator offering a `Yields` helper wrote the same nil
