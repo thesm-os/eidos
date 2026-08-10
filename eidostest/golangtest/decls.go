@@ -5,6 +5,7 @@ package golangtest
 
 import (
 	"go/ast"
+	"go/token"
 	"slices"
 	"strings"
 	"testing"
@@ -22,8 +23,14 @@ type Decl struct {
 	recv  string
 	fn    *ast.FuncDecl
 	spec  *ast.TypeSpec
+	value *ast.ValueSpec
 	found bool
 }
+
+// Source returns the file the declaration was found in, so a chain
+// that establishes a declaration exists can carry on narrowing into
+// it without looking the file up again.
+func (d *Decl) Source() *Source { return d.src }
 
 // AssertType fails when the file declares no type of that name.
 func (s *Source) AssertType(tb testing.TB, name string) *Decl {
@@ -92,6 +99,43 @@ func (s *Source) AssertNoMethod(tb testing.TB, recv, name string) *Source {
 	tb.Helper()
 	if s.funcDecl(recv, name) != nil {
 		tb.Errorf("golangtest: %s declares method %s.%s, which it must not", s.path, recv, name)
+	}
+	return s
+}
+
+// AssertVar fails when the file declares no package-level var of that
+// name.
+//
+// The declaration a registry, a sentinel block or a middleware chain
+// generator emits as its whole output, and the one kind this package
+// could not name: a test whose subject is `var Chain = […]` had to
+// reach it obliquely, through an ordering assertion or a file-wide
+// substring, neither of which distinguishes a var from a const or
+// from a mention in a comment.
+//
+// A const of the same name is diagnosed rather than accepted: the two
+// are not interchangeable to a consumer, who can take the address of
+// one and not the other.
+func (s *Source) AssertVar(tb testing.TB, name string) *Decl {
+	tb.Helper()
+	if spec, _ := s.valueSpec(name); spec != nil {
+		return &Decl{src: s, name: name, value: spec, found: true}
+	}
+	if s.declaresConst(name) {
+		tb.Errorf("golangtest: %s declares no var %q, but does declare a const of that name",
+			s.path, name)
+		return &Decl{src: s, name: name}
+	}
+	tb.Errorf("golangtest: %s declares no var %q; it declares %v", s.path, name, s.varNames())
+	return &Decl{src: s, name: name}
+}
+
+// AssertNoVar fails when the file declares a package-level var of
+// that name.
+func (s *Source) AssertNoVar(tb testing.TB, name string) *Source {
+	tb.Helper()
+	if spec, _ := s.valueSpec(name); spec != nil {
+		tb.Errorf("golangtest: %s declares var %q, which it must not", s.path, name)
 	}
 	return s
 }
@@ -177,7 +221,7 @@ func (d *Decl) Signature(tb testing.TB, want string) *Decl {
 		return d
 	}
 	if d.fn == nil {
-		tb.Errorf("golangtest: %s %q is a type, which has no signature", d.src.path, d.name)
+		tb.Errorf("golangtest: %s %q is %s, which has no signature", d.src.path, d.name, d.kind())
 		return d
 	}
 	got := strings.TrimPrefix(render(d.fn.Type), "func")
@@ -232,6 +276,28 @@ func (d *Decl) AssertDoc(tb testing.TB, substr string) *Decl {
 	return d
 }
 
+// AssertDocLacks fails when the declaration's doc comment contains
+// substr.
+//
+// The half [Decl.AssertDoc] cannot state. A generator that withholds
+// a check must not go on promising it: documentation that describes a
+// guarantee the emitted code stopped making is worse than none, since
+// a reader stops looking for the guarantee elsewhere. Nothing else
+// sees it — the code is correct, the doc is a comment, and every
+// structural assertion passes.
+func (d *Decl) AssertDocLacks(tb testing.TB, substr string) *Decl {
+	tb.Helper()
+	if !d.found {
+		return d
+	}
+	doc := d.docText()
+	if strings.Contains(doc, substr) {
+		tb.Errorf("golangtest: %s %s doc contains %q, which it must not\n--- doc ---\n%s",
+			d.src.path, d.qualified(), substr, doc)
+	}
+	return d
+}
+
 // docText returns the declaration's doc comment.
 func (d *Decl) docText() string {
 	switch {
@@ -239,15 +305,26 @@ func (d *Decl) docText() string {
 		return d.fn.Doc.Text()
 	case d.spec != nil && d.spec.Doc != nil:
 		return d.spec.Doc.Text()
-	case d.spec != nil:
-		// A single-spec `type T struct{…}` hangs its comment on the
-		// GenDecl rather than the spec, which is the shape every
-		// generated declaration takes.
+	case d.value != nil && d.value.Doc != nil:
+		return d.value.Doc.Text()
+	case d.spec != nil, d.value != nil:
+		// A single-spec `type T struct{…}` or `var X = …` hangs its
+		// comment on the GenDecl rather than the spec, which is the
+		// shape every generated declaration takes.
 		if doc := d.src.genDeclDoc(d.name); doc != "" {
 			return doc
 		}
 	}
 	return ""
+}
+
+// kind spells what a declaration is, for a message explaining why the
+// question asked of it does not apply.
+func (d *Decl) kind() string {
+	if d.value != nil {
+		return "a variable"
+	}
+	return "a type"
 }
 
 // qualified names the declaration the way a reader would write it.
@@ -282,21 +359,88 @@ func (s *Source) typeSpec(name string) *ast.TypeSpec {
 	return nil
 }
 
+// valueSpec returns the spec declaring the named package-level var,
+// and the position of the name within it — which is what says how the
+// spec's initialisers line up against its names.
+func (s *Source) valueSpec(name string) (*ast.ValueSpec, int) {
+	for _, d := range s.file.Decls {
+		gen, ok := d.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, isValue := spec.(*ast.ValueSpec)
+			if !isValue {
+				continue
+			}
+			if i := slices.IndexFunc(vs.Names, func(n *ast.Ident) bool {
+				return n.Name == name
+			}); i >= 0 {
+				return vs, i
+			}
+		}
+	}
+	return nil, 0
+}
+
+// declaresConst reports whether the file declares a constant of that
+// name, so asking for a var can say which of the two it found.
+func (s *Source) declaresConst(name string) bool {
+	return slices.Contains(s.valueNames(token.CONST), name)
+}
+
+// varNames lists every package-level var the file declares.
+func (s *Source) varNames() []string { return s.valueNames(token.VAR) }
+
+// valueNames lists every name declared by one kind of value
+// declaration.
+func (s *Source) valueNames(tok token.Token) []string {
+	var out []string
+	for _, d := range s.file.Decls {
+		gen, ok := d.(*ast.GenDecl)
+		if !ok || gen.Tok != tok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			if vs, isValue := spec.(*ast.ValueSpec); isValue {
+				for _, n := range vs.Names {
+					out = append(out, n.Name)
+				}
+			}
+		}
+	}
+	return out
+}
+
 // genDeclDoc returns the doc comment on the GenDecl wrapping a named
-// type spec.
+// spec.
 func (s *Source) genDeclDoc(name string) string {
 	for _, d := range s.file.Decls {
 		gen, ok := d.(*ast.GenDecl)
 		if !ok || gen.Doc == nil {
 			continue
 		}
-		for _, spec := range gen.Specs {
-			if ts, isType := spec.(*ast.TypeSpec); isType && ts.Name.Name == name {
-				return gen.Doc.Text()
-			}
+		if slices.Contains(specNames(gen), name) {
+			return gen.Doc.Text()
 		}
 	}
 	return ""
+}
+
+// specNames lists the names a grouped declaration's specs introduce.
+func specNames(gen *ast.GenDecl) []string {
+	var out []string
+	for _, spec := range gen.Specs {
+		switch sp := spec.(type) {
+		case *ast.TypeSpec:
+			out = append(out, sp.Name.Name)
+		case *ast.ValueSpec:
+			for _, n := range sp.Names {
+				out = append(out, n.Name)
+			}
+		}
+	}
+	return out
 }
 
 // structType returns the named type's struct body, reporting when the

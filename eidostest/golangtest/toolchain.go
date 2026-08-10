@@ -19,6 +19,12 @@ import (
 // cross-package reference is worth checking.
 const allPackages = "./..."
 
+// goBuild names the subcommand every assertion whose question is
+// "does this type-check" runs. The answer each of them wants is the
+// compiler's exit status rather than anything it produces, so none of
+// them needs an install or a link step.
+const goBuild = "build"
+
 // AssertCompiles fails when the generated files do not build.
 //
 // The assertion every other one in this package is a proxy for. A
@@ -39,7 +45,7 @@ const allPackages = "./..."
 // [Generated] pay the setup once.
 func (g *Generated) AssertCompiles(tb testing.TB) *Generated {
 	tb.Helper()
-	g.run(tb, "build", []string{"build", allPackages})
+	g.run(tb, "build", []string{goBuild, allPackages})
 	return g
 }
 
@@ -94,23 +100,159 @@ func (g *Generated) AssertTestsPass(tb testing.TB) *Generated {
 // [Generated.WithSource] is for.
 func (g *Generated) AssertSatisfies(tb testing.TB, typeName, iface string) *Generated {
 	tb.Helper()
+	return g.AssertSatisfiesAll(tb, Satisfaction{Type: typeName, Interface: iface})
+}
+
+// Satisfaction is one "this type implements that interface" claim.
+type Satisfaction struct {
+	// Type is the generated type, named as the primary output's
+	// package spells it. Checked in its pointer form, which is the
+	// form a generated double is handed round as.
+	Type string
+
+	// Interface is the interface it must satisfy, spelled as the
+	// primary output's package sees it — qualified for one from
+	// elsewhere, whose declaring file has to be reachable.
+	Interface string
+}
+
+// AssertSatisfiesAll proves several satisfaction claims in one build.
+//
+// A generator emitting one double per interface makes N of these
+// claims per run, and [Generated.AssertSatisfies] pays a fresh module
+// directory for each — the extra file bypasses the cache, so N claims
+// cost N builds for what is one file of N lines. At a second or three
+// apiece that is the difference between a suite that keeps the
+// assertion and one that drops it.
+func (g *Generated) AssertSatisfiesAll(tb testing.TB, claims ...Satisfaction) *Generated {
+	tb.Helper()
+	if len(claims) == 0 {
+		tb.Errorf("golangtest: AssertSatisfiesAll was given no claims, so it proves nothing")
+		return g
+	}
+	pkg, dir := g.primaryPackage(tb)
+	if pkg == "" {
+		return g
+	}
+	g.runWith(tb, "satisfies", []string{goBuild, allPackages}, satisfactionFile(pkg, dir, claims))
+	return g
+}
+
+// AssertDoesNotSatisfy fails when the generated type *does* implement
+// the named interface.
+//
+// The direction that carries the weight for a detector or a
+// heuristic. [Generated.AssertSatisfies] proves one type passes;
+// what a shape detector actually claims is that every near miss does
+// not, and a near miss is by construction something that looks right.
+// A frontend records a variadic parameter by its element type, so
+// `Write(p ...[]byte)` reaches a projection spelled exactly like
+// `Write(p []byte)` — and a detector that accepted it wrote an
+// io.Writer conformance for a type no consumer can pass to one. No
+// structural assertion sees that: the shape is right, the names are
+// right, and only the compiler knows the method sets differ.
+//
+// The build is run twice, and that is the point. A satisfaction file
+// that fails to compile is not evidence of anything on its own — a
+// misspelled interface, a support package that stopped compiling, an
+// import the fixture forgot all fail it just as well, and each of
+// them makes this assertion pass for the wrong reason. So the output
+// must build without the assertion first, and the failure that
+// follows must be the type checker rejecting the assignment rather
+// than any other kind.
+func (g *Generated) AssertDoesNotSatisfy(tb testing.TB, typeName, iface string) *Generated {
+	tb.Helper()
+	pkg, dir := g.primaryPackage(tb)
+	if pkg == "" {
+		return g
+	}
+	if out, err := g.exec(tb, []string{goBuild, allPackages}); err != nil {
+		tb.Errorf("golangtest: the generated output does not build on its own, so a failing "+
+			"%s/%s assertion would prove nothing about their method sets: %v\n"+
+			"--- go build ---\n%s%s", typeName, iface, err, out, g.listing())
+		return g
+	}
+
+	claims := []Satisfaction{{Type: typeName, Interface: iface}}
+	out, err := g.exec(tb, []string{goBuild, allPackages}, satisfactionFile(pkg, dir, claims))
+	switch {
+	case err == nil:
+		tb.Errorf("golangtest: *%s implements %s, which it must not — a near miss the "+
+			"projection was supposed to reject type-checks as the real thing%s",
+			typeName, iface, g.listing())
+	case !strings.Contains(out, notImplementedMarker):
+		tb.Errorf("golangtest: the %s/%s assertion failed to build for a reason other than "+
+			"the method set, so it says nothing about whether %s implements %s: %v\n"+
+			"--- go build ---\n%s%s", typeName, iface, typeName, iface, err, out, g.listing())
+	}
+	return g
+}
+
+// notImplementedMarker is the phrase the type checker uses when an
+// assignment fails on the method set rather than on anything else —
+// `*T does not implement I (wrong type for method M)`, and the
+// missing-method and pointer-receiver variants of the same sentence.
+//
+// Matching on the compiler's prose is unlovely, but the alternative
+// is treating every build failure as proof of non-satisfaction, which
+// is the vacuity [Generated.AssertDoesNotSatisfy] exists to close. A
+// toolchain that reworded this fails the assertion loudly rather than
+// passing it quietly, which is the right way round for the mistake to
+// go.
+const notImplementedMarker = "does not implement"
+
+// satisfactionFile writes the file that makes the compiler answer a
+// satisfaction question.
+//
+// Landed in the primary output's own directory and package, because
+// both names are resolved from there: an unexported type could not be
+// named from anywhere else, and an interface from elsewhere is
+// spelled qualified against that file's imports.
+func satisfactionFile(pkg, dir string, claims []Satisfaction) File {
+	var b strings.Builder
+	fmt.Fprintf(&b, "package %s\n", pkg)
+	for _, c := range claims {
+		fmt.Fprintf(&b, "\n// Written by golangtest to ask whether %s implements %s.\n",
+			c.Type, c.Interface)
+		fmt.Fprintf(&b, "var _ %s = (*%s)(nil)\n", c.Interface, c.Type)
+	}
+	return File{
+		Path: filepath.ToSlash(filepath.Join(dir, satisfiesFilename)),
+		Src:  []byte(b.String()),
+	}
+}
+
+// satisfiesFilename names the file golangtest writes its satisfaction
+// assertions into. Prefixed so it cannot collide with generated
+// output, and named in failures so a reader knows which lines the
+// generator did not write.
+const satisfiesFilename = "golangtest_satisfies.go"
+
+// AssertInterfaceSatisfies fails when the generated *interface* does
+// not cover the named one.
+//
+// A generator that emits an interface is making a promise to a
+// consumer who already has one: their hand-written port, the
+// framework's, the standard library's. Nothing else states that
+// relation — [Generated.AssertSatisfies] takes the pointer form of a
+// concrete type, which an interface has no useful version of, so
+// every plugin in this position hand-wrote `var _ Contract =
+// (Generated)(nil)` into a support file, where the failure surfaces
+// as a compile error attributed to the fixture rather than as a named
+// assertion.
+func (g *Generated) AssertInterfaceSatisfies(tb testing.TB, iface, contract string) *Generated {
+	tb.Helper()
 	pkg, dir := g.primaryPackage(tb)
 	if pkg == "" {
 		return g
 	}
 	assertion := File{
-		Path: filepath.ToSlash(filepath.Join(dir, "golangtest_satisfies.go")),
-		Src: fmt.Appendf(
-			nil,
-			"package %s\n\n// Written by golangtest to prove %s implements %s.\nvar _ %s = (*%s)(nil)\n",
-			pkg,
-			typeName,
-			iface,
-			iface,
-			typeName,
-		),
+		Path: filepath.ToSlash(filepath.Join(dir, satisfiesFilename)),
+		Src: fmt.Appendf(nil,
+			"package %s\n\n// Written by golangtest to prove %s covers %s.\nvar _ %s = (%s)(nil)\n",
+			pkg, iface, contract, contract, iface),
 	}
-	g.runWith(tb, "satisfies", []string{"build", allPackages}, assertion)
+	g.runWith(tb, "satisfies", []string{goBuild, allPackages}, assertion)
 	return g
 }
 
@@ -154,6 +296,22 @@ func (g *Generated) run(tb testing.TB, label string, args []string) {
 // assertion's file would build something the caller did not ask for.
 func (g *Generated) runWith(tb testing.TB, label string, args []string, extra ...File) {
 	tb.Helper()
+	if out, err := g.exec(tb, args, extra...); err != nil {
+		tb.Errorf("golangtest: go %s failed on the generated output: %v\n"+
+			"--- go %s ---\n%s%s", label, err, label, out, g.listing())
+	}
+}
+
+// exec assembles the module and runs one go subcommand in it,
+// returning what it printed rather than reporting.
+//
+// Split out from [Generated.runWith] for the assertions whose subject
+// is the failure itself: [Generated.AssertDoesNotSatisfy] needs to
+// read the output and decide whether the compiler rejected the method
+// set or something else entirely, which it cannot do once the failure
+// has already been reported as the test's.
+func (g *Generated) exec(tb testing.TB, args []string, extra ...File) (string, error) {
+	tb.Helper()
 	dir := g.moduleDir(tb, len(extra) == 0)
 	for _, f := range extra {
 		writeFile(tb, dir, f)
@@ -170,17 +328,33 @@ func (g *Generated) runWith(tb testing.TB, label string, args []string, extra ..
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 
-	if err := cmd.Run(); err != nil {
-		tb.Errorf("golangtest: go %s failed on the generated output: %v\n"+
-			"--- go %s ---\n%s%s", label, err, label, out.String(), g.listing())
-	}
+	err := cmd.Run()
+	return out.String(), err
 }
 
 // moduleDir returns the directory holding the assembled module,
 // reusing a previous one when the caller allows it.
+//
+// The cache is keyed on the TB that filled it, because [testing.TB.TempDir]
+// ties the directory's lifetime to that TB: a fixture shared across
+// sibling subtests — one asserting the output compiles, the next that
+// it vets, which is how this package's own docs say to spend the
+// budget — has the first subtest's directory removed before the second
+// runs, and reusing the path would run `go` in a directory that no
+// longer exists. Rebuilding for a new TB costs a few file writes; the
+// `go` invocation that dominates the cost happens either way.
+//
+// Held under the lock for its whole length rather than around the
+// cache read alone: two parallel subtests arriving together would
+// otherwise each assemble a directory and race to record it, and the
+// one whose record lost would still be running `go` in a directory
+// nothing was tracking. The `go` invocation stays outside the lock,
+// so parallel subtests overlap on the seconds that matter.
 func (g *Generated) moduleDir(tb testing.TB, cacheable bool) string {
 	tb.Helper()
-	if cacheable && g.built != "" {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if cacheable && g.built != "" && g.builtFor == tb {
 		return g.built
 	}
 	dir := tb.TempDir()
@@ -197,7 +371,7 @@ func (g *Generated) moduleDir(tb testing.TB, cacheable bool) string {
 		writeFile(tb, dir, f)
 	}
 	if cacheable {
-		g.built = dir
+		g.built, g.builtFor = dir, tb
 	}
 	return dir
 }

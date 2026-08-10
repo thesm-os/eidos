@@ -134,6 +134,95 @@ func TestTestFuncNames(t *testing.T) {
 	})
 }
 
+func TestExportedName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("exports an unexported identifier", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.ExportedName("value"); got != "Value" {
+			t.Fatalf("ExportedName = %q, want Value", got)
+		}
+	})
+
+	t.Run("preserves initialisms", func(t *testing.T) {
+		t.Parallel()
+		// The reason a generator must not hand-roll this: upper-casing
+		// the first rune yields `Url_path`, and title-casing per word
+		// yields `UrlPath`. Both compile and both read as foreign in a
+		// file beside hand-written Go.
+		if got := golang.ExportedName("url_path"); got != "URLPath" {
+			t.Fatalf("ExportedName = %q, want URLPath", got)
+		}
+	})
+
+	t.Run("an already-exported identifier is unchanged", func(t *testing.T) {
+		t.Parallel()
+		// Source field names arrive exported more often than not, and a
+		// generator applies this unconditionally. A conversion that was
+		// not idempotent would rewrite `URLPath` to `UrlPath` on the
+		// way through and break the correspondence to the source.
+		for _, name := range []string{"URLPath", "Value", "Result0"} {
+			if got := golang.ExportedName(name); got != name {
+				t.Fatalf("ExportedName(%q) = %q, want unchanged", name, got)
+			}
+		}
+	})
+
+	t.Run("empty input yields empty", func(t *testing.T) {
+		t.Parallel()
+		// No fallback is invented here: a slot with no derivable name
+		// is the caller's problem, and stubgen's positional `Result0`
+		// is one answer among several.
+		if got := golang.ExportedName(""); got != "" {
+			t.Fatalf("ExportedName(%q) = %q, want empty", "", got)
+		}
+	})
+
+	t.Run("converts case and nothing else", func(t *testing.T) {
+		t.Parallel()
+		// Documented explicitly because the result is not guaranteed to
+		// be a legal identifier: an illegal rune survives, and a
+		// digit-leading name cannot be exported at all. A caller with
+		// untrusted input sanitises first.
+		if got := golang.ExportedName("foo$bar"); got != "Foo$bar" {
+			t.Fatalf("ExportedName = %q, want the illegal rune preserved", got)
+		}
+		if got := golang.ExportedName("2fast"); got != "2fast" {
+			t.Fatalf("ExportedName = %q, want the digit-leading name unchanged", got)
+		}
+		if got := golang.ExportedName(golang.SafeIdent("foo$bar")); got != "FooBar" {
+			t.Fatalf("ExportedName(SafeIdent(...)) = %q, want FooBar", got)
+		}
+	})
+
+	t.Run("the convention wrappers are built on it", func(t *testing.T) {
+		t.Parallel()
+		// The general case and the specific wrappers must not fork:
+		// one of them regressing to a naive upper-casing would give a
+		// generator two spellings of the same field.
+		const field = "url_path"
+		exported := golang.ExportedName(field)
+		if got := golang.GetterName(field); got != exported {
+			t.Fatalf("GetterName = %q, want %q", got, exported)
+		}
+		if got := golang.SetterName(field); got != "Set"+exported {
+			t.Fatalf("SetterName = %q, want Set%s", got, exported)
+		}
+		if got := golang.WithName(field); got != "With"+exported {
+			t.Fatalf("WithName = %q, want With%s", got, exported)
+		}
+		if got := golang.SentinelName(field); got != "Err"+exported {
+			t.Fatalf("SentinelName = %q, want Err%s", got, exported)
+		}
+		if got := golang.ParseFuncName(field); got != "Parse"+exported {
+			t.Fatalf("ParseFuncName = %q, want Parse%s", got, exported)
+		}
+		if got := golang.ConstructorName(field); got != "New"+exported {
+			t.Fatalf("ConstructorName = %q, want New%s", got, exported)
+		}
+	})
+}
+
 func TestIdentifierConventions(t *testing.T) {
 	t.Parallel()
 

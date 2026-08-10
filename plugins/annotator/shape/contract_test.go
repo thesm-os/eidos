@@ -7,10 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // txContract is the canonical multi-role test contract used by
@@ -45,7 +43,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := contractFn(
 			"Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV: map[string]string{
@@ -67,12 +65,12 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := contractFn(
 			"Mixed",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin", "commit": "C"},
 			},
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"outbox"},
 				KV:   map[string]string{"role": "append", "subscribe": "Sub"},
@@ -96,7 +94,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		// readerFunc carries a reader signature so the reader
 		// detector also fires; both stamps must land.
 		fn := readerFunc("Find")
-		fn.DirectiveList = []*directive.Directive{
+		fn.DirectiveList = []*sdk.Directive{
 			{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
@@ -121,7 +119,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := contractFn(
 			"X",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"never-registered"},
 				KV:   map[string]string{"role": "any"},
@@ -138,7 +136,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := contractFn(
 			"Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"commit": "Commit"},
@@ -154,7 +152,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := contractFn(
 			"Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name:    shape.ContractDirectiveName,
 				Args:    []string{"tx"},
 				KV:      map[string]string{"role": "begin"},
@@ -171,7 +169,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := contractFn(
 			"Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV: map[string]string{
@@ -193,12 +191,12 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := contractFn(
 			"Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin"},
 			},
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin"},
@@ -210,10 +208,10 @@ func TestContract_DirectiveStamping(t *testing.T) {
 
 	t.Run("method-bound contracts stamp the same as free functions", func(t *testing.T) {
 		t.Parallel()
-		m := &node.Method{
+		m := &sdk.Method{
 			Name: "Begin",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					{
 						Name: shape.ContractDirectiveName,
 						Args: []string{"tx"},
@@ -222,7 +220,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 				},
 			},
 		}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{m}}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{m}}
 		runAnnotate(t, shape.New().Contracts(txContract()), pkgWithStruct(s))
 
 		assertContracts(t, m.Meta(), []string{"tx"})
@@ -235,7 +233,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		if got := shape.Contracts(nil); got != nil {
 			t.Fatalf("Contracts(nil) = %v, want nil", got)
 		}
-		if got := shape.Contracts(meta.NewBag()); got != nil {
+		if got := shape.Contracts(sdk.NewBag()); got != nil {
 			t.Fatalf("Contracts(empty) = %v, want nil", got)
 		}
 	})
@@ -251,7 +249,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 			Params: []string{"isolation"},
 		}
 		fn := contractFn("Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin", "isolation": "serializable"},
@@ -288,7 +286,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 // `break` apart, which is precisely why the mutants survived.
 //
 // The first guard's third arm — `d == nil` — gets no row of its
-// own: [store.NodeView] dereferences every directive as it indexes
+// own: [sdk.NodeView] dereferences every directive as it indexes
 // a package, so a nil entry panics before any annotator sees it.
 // That arm is defence-in-depth for hand-built nodes, and the two
 // rows above it already cover the `continue` all three arms share.
@@ -299,18 +297,18 @@ func TestContract_DecliningDirectiveDoesNotStopTheRest(t *testing.T) {
 		name string
 		// leading declines for one specific reason; the trailing
 		// directive appended in the body must be stamped regardless.
-		leading *directive.Directive
+		leading *sdk.Directive
 	}{
 		{
 			name: "a shape directive above a contract does not drop the contract",
-			leading: &directive.Directive{
+			leading: &sdk.Directive{
 				Name: shape.DirectiveName,
 				Args: []string{"reader"},
 			},
 		},
 		{
 			name: "a negated contract does not drop the contract below it",
-			leading: &directive.Directive{
+			leading: &sdk.Directive{
 				Name:    shape.ContractDirectiveName,
 				Args:    []string{"tx"},
 				KV:      map[string]string{"role": "begin"},
@@ -319,7 +317,7 @@ func TestContract_DecliningDirectiveDoesNotStopTheRest(t *testing.T) {
 		},
 		{
 			name: "an unregistered contract name does not drop the contract below it",
-			leading: &directive.Directive{
+			leading: &sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"never-registered"},
 				KV:   map[string]string{"role": "begin"},
@@ -327,7 +325,7 @@ func TestContract_DecliningDirectiveDoesNotStopTheRest(t *testing.T) {
 		},
 		{
 			name: "a contract directive without role= does not drop the contract below it",
-			leading: &directive.Directive{
+			leading: &sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"commit": "Commit"},
@@ -340,7 +338,7 @@ func TestContract_DecliningDirectiveDoesNotStopTheRest(t *testing.T) {
 			fn := contractFn(
 				"Append",
 				tc.leading,
-				&directive.Directive{
+				&sdk.Directive{
 					Name: shape.ContractDirectiveName,
 					Args: []string{"outbox"},
 					KV:   map[string]string{"role": "append", "subscribe": "Sub"},
@@ -371,16 +369,16 @@ func TestContract_DecliningDirectiveDoesNotStopTheRest(t *testing.T) {
 // contractFn returns a free-function node carrying the supplied
 // directives — used by every test that exercises directive-driven
 // contract stamping.
-func contractFn(name string, dirs ...*directive.Directive) *node.Function {
-	return &node.Function{
+func contractFn(name string, dirs ...*sdk.Directive) *sdk.Function {
+	return &sdk.Function{
 		Name: name, Package: "x",
-		BaseNode: node.BaseNode{DirectiveList: dirs},
+		BaseNode: sdk.BaseNode{DirectiveList: dirs},
 	}
 }
 
 // assertContracts fails the test when the contract list stamped
 // on bag does not deep-equal want.
-func assertContracts(t *testing.T, bag *meta.Bag, want []string) {
+func assertContracts(t *testing.T, bag *sdk.Bag, want []string) {
 	t.Helper()
 	got := shape.Contracts(bag)
 	if !reflect.DeepEqual(got, want) {

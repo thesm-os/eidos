@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package enum is the production multi-output generator for
-// idiomatic enum types. A source [node.Enum] (e.g. a Go
+// idiomatic enum types. A source [sdk.Enum] (e.g. a Go
 // `type Status int` plus its grouped const variants) drives
 // the generation of two files: a per-source-basename file
 // carrying the production API surface (`String`, `Parse<Type>`,
@@ -16,23 +16,23 @@
 // [Tests] emit values, and the [Plugin.Generate] pass that
 // walks annotated source enums and queues one contribution
 // against each output. Per-language behaviour — the file
-// suffix and tag pair, the embedded template tree, the
-// funcmap entries — lives in the sibling `enum_<lang>.go`
-// adapter. Adding a new target language ships a
-// `templates/<lang>/...` template tree and an
-// `enum_<lang>.go` adapter; the dispatchers below route by
-// language to the matching adapter without further changes
-// to this file.
+// suffix and tag pair, the embedded template tree — lives in
+// the sibling `enum_<lang>.go` adapter, which [New] hands to
+// the embedded [sdkgo.Base]. The base answers the declaration
+// methods for Go and reports *not provided* for every other
+// language, so a second target language ships a
+// `templates/<lang>/...` tree, an `enum_<lang>.go` adapter,
+// and the per-language dispatch the base does not model.
 //
 // # Source detection
 //
-// The plugin opts in on each source [node.Enum] carrying a
-// `+gen:enum` directive. The enum's [node.EnumVariant] list
+// The plugin opts in on each source [sdk.Enum] carrying a
+// `+gen:enum` directive. The enum's [sdk.EnumVariant] list
 // supplies the rendered string-form for each variant, with
 // two resolution layers stacked low-to-high:
 //
-//  1. Default: the variant's [node.EnumVariant.Name] with
-//     the enum's [node.Enum.Name] prefix stripped when
+//  1. Default: the variant's [sdk.EnumVariant.Name] with
+//     the enum's [sdk.Enum.Name] prefix stripped when
 //     present and [Options.StripPrefix] is true (the
 //     default). So `StatusActive` on `type Status int`
 //     renders as the string `"Active"`.
@@ -68,14 +68,11 @@ package enum
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"strconv"
 	"strings"
-	"text/template"
 
-	"go.thesmos.sh/eidos/lang/golang"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -100,7 +97,7 @@ const Capability = "enum"
 // enum types.
 const DirectiveName sdk.DirectiveName = "enum"
 
-// SlotName is the [emit.File] slot the plugin appends its
+// SlotName is the [sdk.EmitFile] slot the plugin appends its
 // rendered [API] / [Tests] emit values into. `top` renders
 // the content between the package clause and the first core
 // decl — the natural placement for whole methods +
@@ -121,7 +118,7 @@ const KindAPI sdk.Kind = "enum.api"
 const KindTests sdk.Kind = "enum.test"
 
 // ErrEnumHasNoVariants is recorded as a diagnostic when an
-// annotated source enum carries no [node.EnumVariant]
+// annotated source enum carries no [sdk.EnumVariant]
 // entries — the plugin has nothing to render against. The
 // run continues; the offending enum is skipped.
 var ErrEnumHasNoVariants = errors.New("enum: source enum has no variants")
@@ -136,8 +133,8 @@ var ErrEnumHasNoVariants = errors.New("enum: source enum has no variants")
 type Options struct {
 	// StripPrefix toggles the default name-to-string
 	// resolution rule: when true (the default), a variant
-	// whose [node.EnumVariant.Name] starts with the enum's
-	// [node.Enum.Name] renders with the prefix stripped
+	// whose [sdk.EnumVariant.Name] starts with the enum's
+	// [sdk.Enum.Name] renders with the prefix stripped
 	// (e.g. `StatusActive` → `"Active"`). The
 	// `+gen:value <override>` directive on a variant
 	// overrides both branches.
@@ -160,6 +157,7 @@ type Options struct {
 // through [New] so the embedded [sdk.Holder] binds to the
 // options field.
 type Plugin struct {
+	*sdkgo.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -168,39 +166,39 @@ type Plugin struct {
 // holder bound. The pipeline overlays caller-supplied
 // option values via [Plugin.SetOptions] (promoted from
 // [sdk.Holder]) at Build time.
+//
+// The foundation bucket runs before the composition and
+// cross-cutting buckets, so a downstream plugin discovering
+// the emitted API can read it during its own Generate pass.
+//
+// [Capability] is published so a consumer can declare a
+// documentary dependency on enum-API generation through its
+// own Requires list. Nothing is required in return: the
+// plugin reads source nodes only and has no upstream plugin
+// dependency.
+//
+// No template helper is registered. The templates reach only
+// the canonical `renderExpr` / `external` entries and the
+// shared Go-convention bundle, both of which the base already
+// carries — so there is nothing here for a `.tmpl` to call
+// under this plugin's name prefix.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplatesFS, GoOutputs()...).
+		Version(Version).
+		Priority(sdk.GeneratorFoundation).
+		Provides(Capability).
+		Directives(directives()...).
+		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the foundation generator
-// bucket. Foundation runs before composition / cross-cutting
-// buckets so downstream plugins discovering the emitted API
-// can read it during their own Generate pass.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorFoundation }
-
-// Provides advertises [Capability] so consumers can declare
-// a documentary dependency on enum-API generation through
-// their own `Requires` list.
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires returns nil — the enum plugin reads only source
-// nodes and has no upstream plugin dependency.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares the `+gen:enum` schema on source enum
+// directives declares the `+gen:enum` schema on source enum
 // types.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(node.KindEnum).
+			On(sdk.NodeKindEnum).
 			Describe(
 				"Opts the host enum type in for String / Parse / " +
 					"MarshalJSON / UnmarshalJSON generation.",
@@ -208,38 +206,6 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 			Build(),
 	}
 }
-
-// Outputs dispatches to the per-language adapter for the
-// requested language. Adding a new language adds an arm
-// here; the unknown-language path returns nil.
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == golang.Language {
-		return GoOutputs()
-	}
-	return nil
-}
-
-// Templates dispatches to the per-language adapter's
-// embedded template tree.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang == golang.Language {
-		return GoTemplates()
-	}
-	return nil, false
-}
-
-// TemplateFuncs dispatches to the per-language adapter's
-// funcmap.
-func (*Plugin) TemplateFuncs(lang string) template.FuncMap {
-	if lang == golang.Language {
-		return GoFuncMap()
-	}
-	return nil
-}
-
-// TemplateOverrides returns nil — no per-language adapter
-// currently overrides a canonical funcmap entry.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Variant is one rendered enum variant — the source-side
 // const identifier plus the resolved string form the
@@ -377,13 +343,13 @@ var _ sdk.EmitNode = (*Tests)(nil)
 // for each opted-in enum, queues one [API] contribution
 // against the primary output and one [Tests] contribution
 // against the test-tagged output. The Layout phase resolves
-// each contribution's [emit.Target] via the per-output
+// each contribution's [sdk.EmitTarget] via the per-output
 // routing pipeline; the rendered files appear alongside the
 // source enum's file by default and follow project / CLI
 // overrides otherwise.
 //
 // Source enums without `+gen:enum` are skipped silently.
-// Annotated enums with no [node.EnumVariant] entries
+// Annotated enums with no [sdk.EnumVariant] entries
 // surface [ErrEnumHasNoVariants] as a positioned
 // diagnostic; the run continues and the offending enum
 // drops from the output set.
@@ -447,11 +413,11 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 
 // underlyingName returns the enum's underlying type name, or the
 // empty string when the source model declares none. Frontends that
-// produce typeless enums leave [node.Enum.Underlying] nil, and an
+// produce typeless enums leave [sdk.Enum.Underlying] nil, and an
 // enum with no stated underlying type is treated as numeric —
 // the historical behaviour, and the only one a Go const group
 // without an explicit type can have.
-func underlyingName(e *node.Enum) string {
+func underlyingName(e *sdk.Enum) string {
 	if !e.HasUnderlying() {
 		return ""
 	}
@@ -461,7 +427,7 @@ func underlyingName(e *node.Enum) string {
 // collectVariants returns the variant list for e with each
 // variant's StringValue resolved through the three-layer rule
 // documented on [Plugin.resolveStringValue].
-func (p *Plugin) collectVariants(e *node.Enum, underlying string) []Variant {
+func (p *Plugin) collectVariants(e *sdk.Enum, underlying string) []Variant {
 	out := make([]Variant, 0, len(e.Variants))
 	for _, v := range e.Variants {
 		out = append(out, Variant{
@@ -494,7 +460,7 @@ func (p *Plugin) collectVariants(e *node.Enum, underlying string) []Variant {
 // and rendering `String()` as `"1"` would be worse than the
 // identifier. For a numeric enum the identifier is the only sensible
 // textual form.
-func (p *Plugin) resolveStringValue(typeName, underlying string, v *node.EnumVariant) string {
+func (p *Plugin) resolveStringValue(typeName, underlying string, v *sdk.EnumVariant) string {
 	if override := v.Directive(sdk.ValueDirective); override != nil && len(override.Args) > 0 {
 		return override.Args[0]
 	}
@@ -510,13 +476,13 @@ func (p *Plugin) resolveStringValue(typeName, underlying string, v *node.EnumVar
 // declaredStringValue returns the unquoted constant value of a
 // string-valued enum variant, reporting false for every other case.
 //
-// [node.EnumVariant.Value] holds the verbatim source form — go/types'
+// [sdk.EnumVariant.Value] holds the verbatim source form — go/types'
 // ExactString — so a string constant arrives quoted (`"us-east"`,
 // eight characters) while an integer arrives bare (`1`). Using the
 // value unquoted would render `return "\"us-east\""`, which compiles
 // and is wrong, so an unquote failure falls back to the identifier
 // rather than emitting a literal nobody wrote.
-func declaredStringValue(underlying string, v *node.EnumVariant) (string, bool) {
+func declaredStringValue(underlying string, v *sdk.EnumVariant) (string, bool) {
 	if underlying != "string" || v.Value == "" {
 		return "", false
 	}

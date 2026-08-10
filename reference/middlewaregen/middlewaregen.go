@@ -5,12 +5,10 @@ package middlewaregen
 
 import (
 	"fmt"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -56,8 +54,6 @@ const ChainSlot = "chain"
 // nothing and fails nowhere.
 const Kind sdk.Kind = "middlewaregen.stack"
 
-const langGo = "golang"
-
 // DefaultSuffix is the chain variable's name suffix when unset.
 const DefaultSuffix = "Middleware"
 
@@ -81,63 +77,32 @@ type Options struct {
 // middleware with no handler to wrap is not a partial result, it is a
 // wrong one.
 type Plugin struct {
+	*sdkgo.Base
 	*sdk.Holder[Options]
 	opts Options
 }
 
 // New returns a plugin with the options holder bound.
+//
+// The foundation bucket is not a preference: this plugin must run
+// before any contributor, and cross-bucket ordering is the only
+// ordering the framework honours between buckets. Provides publishes
+// the label contributors name in Requires to order themselves after
+// it within a bucket; it Requires nothing itself.
+//
+// It registers no template helper of its own. The shared Go helpers
+// (fieldType, elemType, typeArgs, …) are already in the bundle [Base]
+// merges under this plugin's prefix, so re-declaring them through
+// [sdkgo.Builder.Funcs] would only shadow them with themselves.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, GoOutputs()...).
+		Version(Version).
+		Priority(sdk.GeneratorFoundation).
+		Provides(Capability).
+		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
-
-// Name satisfies [sdk.Plugin].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the foundation bucket: it must run
-// before any contributor, and cross-bucket ordering is the only
-// ordering the framework honours between buckets.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorFoundation }
-
-// Provides publishes the capability contributors order against.
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires reports no dependencies.
-func (*Plugin) Requires() []string { return nil }
-
-// Outputs declares the single file this plugin owns.
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == langGo {
-		return GoOutputs()
-	}
-	return nil
-}
-
-// Templates ships the stack template.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang == langGo {
-		return GoTemplates()
-	}
-	return nil, false
-}
-
-// TemplateFuncs contributes nothing.
-//
-// The shared Go helpers (fieldType, elemType, typeArgs, …) are already
-// merged into the backend's overrideable funcmap, so a plugin that
-// returns them here re-registers names that exist. TemplateFuncs is
-// for *new* registrations and a duplicate is a Build-time
-// ErrTemplateFuncCollision — meaning two plugins that both contribute
-// the shared map cannot appear in the same pipeline. Return nil unless
-// the plugin has a helper of its own.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides replaces nothing.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 func (p *Plugin) suffix() string {
 	if p.opts.Suffix != "" {
@@ -166,9 +131,9 @@ type MiddlewareStack struct {
 	// HandlerRef is the type the chain's functions wrap. Held as a
 	// ref rather than a rendered string so the backend registers the
 	// import and the template carries no import block.
-	HandlerRef emit.Ref
+	HandlerRef sdk.Ref
 
-	chain *emit.Slot
+	chain *sdk.Slot
 }
 
 // Kind binds this value to its template.
@@ -189,26 +154,26 @@ func (*MiddlewareStack) Kind() sdk.Kind { return Kind }
 // with [backend/golang.ErrTemplateMissing] naming a kind rather than a
 // plugin. Constrain the slot when every contribution is the same shape;
 // leave it open when contributors bring their own templates.
-func (s *MiddlewareStack) Chain() *emit.Slot {
+func (s *MiddlewareStack) Chain() *sdk.Slot {
 	if s.chain == nil {
-		s.chain = emit.NewSlot(ChainSlot, "")
+		s.chain = sdk.NewSlot(ChainSlot, "")
 		s.chain.Owner = s
 	}
 	return s.chain
 }
 
-// Slot satisfies [emit.SlotHost] so the backend's `slot` template
+// Slot satisfies [sdk.SlotHost] so the backend's `slot` template
 // helper reaches the chain by name. Any other name returns an empty
 // unconstrained slot rather than nil, so a template asking for a slot
 // this kind does not have renders nothing instead of failing.
-func (s *MiddlewareStack) Slot(name string) *emit.Slot {
+func (s *MiddlewareStack) Slot(name string) *sdk.Slot {
 	if name == ChainSlot {
 		return s.Chain()
 	}
-	return emit.NewSlot(name, "")
+	return sdk.NewSlot(name, "")
 }
 
-var _ emit.SlotHost = (*MiddlewareStack)(nil)
+var _ sdk.SlotHost = (*MiddlewareStack)(nil)
 
 // Generate emits one stack per annotated struct.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
@@ -225,7 +190,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			},
 			VarName:    src.Name + p.suffix(),
 			TypeName:   src.Name,
-			HandlerRef: emit.External("net/http", "Handler"),
+			HandlerRef: sdk.External("net/http", "Handler"),
 		}
 		if err := ctx.Store.Emit().AppendOriginSlot(
 			src, SlotName, stack, c.Provenance(Name+".stack."+src.Name),

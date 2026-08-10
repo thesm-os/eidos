@@ -6,9 +6,9 @@ package compositewriter_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/compositewriter"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,14 +24,14 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_Matches(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Set", Package: "x",
-		Params: []*node.Param{
+		Params: []*sdk.Param{
 			dt.Param("ctx", dt.Ctx()),
 			dt.Param("k", dt.Named("string")),
 			dt.Param("v", dt.Qualified("x", "Article")),
 		},
-		Returns: node.AnonReturns(dt.Err()),
+		Returns: sdk.AnonReturns(dt.Err()),
 	}
 	bag := dt.RunFn(t, compositewriter.Detector(), fn)
 	dt.AssertShape(t, bag, compositewriter.Name, "string", "x.Article")
@@ -41,36 +41,36 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"one non-ctx param (Writer territory)", &node.Function{
+		{"one non-ctx param (Writer territory)", &sdk.Function{
 			Name: "Save", Package: "x",
-			Params:  []*node.Param{dt.Param("v", dt.Qualified("x", "Article"))},
-			Returns: node.AnonReturns(dt.Err()),
+			Params:  []*sdk.Param{dt.Param("v", dt.Qualified("x", "Article"))},
+			Returns: sdk.AnonReturns(dt.Err()),
 		}},
-		{"three non-ctx params (MultiArgWriter territory)", &node.Function{
+		{"three non-ctx params (MultiArgWriter territory)", &sdk.Function{
 			Name: "Save", Package: "x",
-			Params: []*node.Param{
+			Params: []*sdk.Param{
 				dt.Param("a", dt.Named("string")),
 				dt.Param("b", dt.Named("string")),
 				dt.Param("c", dt.Named("string")),
 			},
-			Returns: node.AnonReturns(dt.Err()),
+			Returns: sdk.AnonReturns(dt.Err()),
 		}},
-		{"no error return", &node.Function{
+		{"no error return", &sdk.Function{
 			Name: "Set", Package: "x",
-			Params: []*node.Param{
+			Params: []*sdk.Param{
 				dt.Param("k", dt.Named("string")),
 				dt.Param("v", dt.Qualified("x", "Article")),
 			},
 		}},
-		{"with-result variant", &node.Function{
+		{"with-result variant", &sdk.Function{
 			Name: "Set", Package: "x",
-			Params: []*node.Param{
+			Params: []*sdk.Param{
 				dt.Param("k", dt.Named("string")),
 				dt.Param("v", dt.Qualified("x", "Article")),
 			},
-			Returns: node.AnonReturns(
+			Returns: sdk.AnonReturns(
 				dt.Qualified("x", "Result"),
 				dt.Err(),
 			),

@@ -233,7 +233,7 @@ func TestNodeKindsMatchUnderlying(t *testing.T) {
 		// that forgets the re-export. A kind added to node without a
 		// matching entry here leaves a directive unable to scope
 		// against it from sdk alone — the gap this set closed.
-		declared := declaredNodeKinds(t)
+		declared := declaredKindsIn(t, "node")
 		if len(cases) != declared {
 			t.Fatalf("re-exported %d source kinds, node/kind.go declares %d",
 				len(cases), declared)
@@ -326,15 +326,19 @@ func TestErrEmptyKeyIsDistinct(t *testing.T) {
 	})
 }
 
-// declaredNodeKinds counts the Kind constants node/kind.go declares,
+// declaredKindsIn counts the Kind constants pkg/kind.go declares,
 // read from the file so the count cannot drift from the source of
 // truth the way a hand-maintained literal would.
-func declaredNodeKinds(t *testing.T) int {
+//
+// Shared by the source-kind and emit-kind coverage checks: both
+// sets have to stay complete, and a per-set copy of this parse
+// would be one more thing to forget.
+func declaredKindsIn(t *testing.T, pkg string) int {
 	t.Helper()
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filepath.Join("..", "node", "kind.go"), nil, 0)
+	f, err := parser.ParseFile(fset, filepath.Join("..", pkg, "kind.go"), nil, 0)
 	if err != nil {
-		t.Fatalf("parse node/kind.go: %v", err)
+		t.Fatalf("parse %s/kind.go: %v", pkg, err)
 	}
 	n := 0
 	for _, decl := range f.Decls {

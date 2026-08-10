@@ -4,15 +4,19 @@
 package stubgen_test
 
 import (
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/opt"
+	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/reference/stubgen"
+	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -34,14 +38,14 @@ func TestConformance(t *testing.T) {
 		plugintest.RunGeneratorSuite(t, stubgen.New(), []plugintest.GeneratorFixture{
 			{
 				Name: "package with no annotated interface",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return storefixture.New().Interface("Plain", nil).Build()
 				},
 			},
 			{
 				Name: "annotated interface with one method",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return storefixture.New().
 						Interface("Store", func(i *storefixture.InterfaceBuilder) {
@@ -110,24 +114,42 @@ func TestTemplates_ShippedForGoOnly(t *testing.T) {
 		}
 	})
 
-	// The plugin contributes no funcmap entries for any language.
+	// Every helper the plugin publishes is namespaced.
 	//
-	// It used to return the shared lang/golang helpers here, and this
-	// subtest asserted that as the contract. Both were wrong: the
-	// backend already merges that map into its overrideable bucket, so
-	// returning it re-registers existing names — a Build-time
-	// ErrTemplateFuncCollision. The practical effect was that stubgen
-	// could not appear in a pipeline beside any other plugin that
-	// shipped templates and did the same, which is exactly what
-	// happened when the middlewaregen composition set arrived.
-	t.Run("funcmap contributes nothing, for any language", func(t *testing.T) {
+	// The plugin once returned the shared lang/golang helpers here
+	// under their bare names, which re-registered names the backend
+	// already holds — a Build-time ErrTemplateFuncCollision that kept
+	// stubgen out of any pipeline beside another plugin doing the
+	// same, exactly what happened when the middlewaregen composition
+	// set arrived. The base publishes the same bundle under the
+	// plugin's own prefix, so no name it contributes can collide.
+	t.Run("every published helper carries the plugin's prefix", func(t *testing.T) {
 		t.Parallel()
-		for _, lang := range []string{"golang", "rust", ""} {
-			if got := stubgen.New().TemplateFuncs(lang); got != nil {
-				t.Errorf("TemplateFuncs(%q) = %v, want nil; the shared helpers come from "+
-					"the backend and re-registering them collides at Build", lang, got)
+		got := stubgen.New().TemplateFuncs("golang")
+		if len(got) == 0 {
+			t.Fatalf("TemplateFuncs(golang) is empty; the shared Go bundle is missing")
+		}
+		for name := range got {
+			if !strings.HasPrefix(name, stubgen.Name+"_") {
+				t.Errorf("TemplateFuncs published %q unprefixed; an unnamespaced helper "+
+					"collides with the backend's own at Build", name)
 			}
 		}
+	})
+
+	t.Run("a non-Go language gets no funcmap", func(t *testing.T) {
+		t.Parallel()
+		for _, lang := range []string{"rust", ""} {
+			if got := stubgen.New().TemplateFuncs(lang); got != nil {
+				t.Errorf("TemplateFuncs(%q) = %v, want nil", lang, got)
+			}
+		}
+	})
+
+	// The two templates call only the backend's canonical renderers,
+	// so there is nothing to specialise.
+	t.Run("no canonical entry is replaced", func(t *testing.T) {
+		t.Parallel()
 		if got := stubgen.New().TemplateOverrides("golang"); got != nil {
 			t.Fatalf("TemplateOverrides = %v; the plugin replaces no canonical entry", got)
 		}
@@ -195,7 +217,7 @@ func TestGenerate_AnnotatedButEmptyIsReported(t *testing.T) {
 		Build()
 
 	d := diag.New()
-	if err := stubgen.New().Generate(&plugin.GeneratorContext{
+	if err := stubgen.New().Generate(&sdk.GeneratorContext{
 		Store: s, Reader: store.NewReader(s), Diag: d,
 	}); err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -223,11 +245,21 @@ func TestGenerate_SuffixOption(t *testing.T) {
 	}
 }
 
-// storeFixture returns a store holding one `+gen:stub` interface with
-// a named-return method, an unnamed-return method, and a void method
-// — the three shapes the signature rules discriminate on.
-func storeFixture(t *testing.T) *store.Store {
-	t.Helper()
+// storeBuilder holds the one `+gen:stub` interface every fixture in
+// this file works from, spanning the shapes the generator
+// discriminates on: a named-return method taking a cross-package
+// type, an anonymous multi-return, a variadic tail, a parameter that
+// collides with the receiver identifier, unnamed parameters, and a
+// void method.
+//
+// Shared between the unit tests, which take the [sdk.Store], and
+// the render suite, which takes the [sdk.Package] — so a signature
+// shape added here is exercised by both rather than by whichever
+// fixture the author happened to edit. The Go the generated double
+// is built against is projected from this same builder by
+// [storefixture.Builder.GoSource], so a signature changed here
+// cannot leave a hand-written support package behind.
+func storeBuilder() *storefixture.Builder {
 	return storefixture.New().
 		Interface("Store", func(i *storefixture.InterfaceBuilder) {
 			i.Directive(storefixture.Directive("stub"))
@@ -241,15 +273,39 @@ func storeFixture(t *testing.T) *store.Store {
 				m.Return(storefixture.Slice(storefixture.Named("string")))
 				m.Return(storefixture.Named("error"))
 			})
+			// A variadic tail: dropping the marker produces a double
+			// that compiles and satisfies nothing.
+			i.Method("Put", func(m *storefixture.MethodBuilder) {
+				m.Param("id", storefixture.Named("string"))
+				m.Variadic("opts", storefixture.Named("string"))
+				m.Return(storefixture.Named("error"))
+			})
+			// A parameter spelled like the receiver identifier the
+			// stub type's name would otherwise yield.
+			i.Method("Recv", func(m *storefixture.MethodBuilder) {
+				m.Param("s", storefixture.Named("string"))
+				m.Return(storefixture.Named("error"))
+			})
+			// Unnamed parameters, which the source is free to leave
+			// out and the generated body cannot.
+			i.Method("Anon", func(m *storefixture.MethodBuilder) {
+				m.Param("", storefixture.Named("int"))
+				m.Param("", storefixture.Named("string"))
+			})
 			i.Method("Close", nil)
-		}).
-		Build()
+		})
+}
+
+// storeFixture returns a store holding the [storeBuilder] interface.
+func storeFixture(t *testing.T) *sdk.Store {
+	t.Helper()
+	return storeBuilder().Build()
 }
 
 // generate drives p over s and returns the queued contributions.
-func generate(t *testing.T, p *stubgen.Plugin, s *store.Store) []store.PendingOriginSlot {
+func generate(t *testing.T, p *stubgen.Plugin, s *sdk.Store) []sdk.PendingOriginSlot {
 	t.Helper()
-	if err := p.Generate(&plugin.GeneratorContext{
+	if err := p.Generate(&sdk.GeneratorContext{
 		Store: s, Reader: store.NewReader(s), Diag: diag.New(),
 	}); err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -259,7 +315,7 @@ func generate(t *testing.T, p *stubgen.Plugin, s *store.Store) []store.PendingOr
 
 // split separates the queued contributions into the primary stub and
 // the tagged companion, failing when either is absent.
-func split(t *testing.T, pending []store.PendingOriginSlot) (*stubgen.Stub, *stubgen.Tests) {
+func split(t *testing.T, pending []sdk.PendingOriginSlot) (*stubgen.Stub, *stubgen.Tests) {
 	t.Helper()
 	var (
 		stub  *stubgen.Stub
@@ -279,7 +335,7 @@ func split(t *testing.T, pending []store.PendingOriginSlot) (*stubgen.Stub, *stu
 	return stub, tests
 }
 
-// TestTests_SetOutputPackages pins the [emit.OutputAware] half of
+// TestTests_SetOutputPackages pins the [sdk.OutputPackageSetter] half of
 // the plugin: the companion's reference to the stub follows wherever
 // Layout routed the primary output, which is the one fact Generate
 // cannot know.
@@ -340,7 +396,7 @@ func TestGenerate_EmbeddedMethodsAreDoubled(t *testing.T) {
 
 	// embedding builds Reader (declaring Read) plus a stub-annotated
 	// interface embedding it.
-	embedding := func(t *testing.T, declared ...string) *store.Store {
+	embedding := func(t *testing.T, declared ...string) *sdk.Store {
 		t.Helper()
 		b := storefixture.New().
 			Interface("Reader", func(i *storefixture.InterfaceBuilder) {
@@ -380,5 +436,237 @@ func TestGenerate_EmbeddedMethodsAreDoubled(t *testing.T) {
 		if len(got) == 0 {
 			t.Fatalf("a purely-embedding interface queued no contribution")
 		}
+	})
+}
+
+// renderStore drives one full pipeline over [storeBuilder] and adopts
+// everything it produced, with the interface it describes projected
+// alongside so the output can be built the way a consumer will build
+// it.
+//
+// The support package is projected rather than written out because
+// none of the generated output compiles without it — the primary
+// declares methods against these signatures and the companion asserts
+// satisfaction of this exact interface — and a hand-written copy
+// would be bound to the fixture only by review. Add a method to
+// [storeBuilder] and the stale copy would fail as a compile error
+// inside a throwaway module, naming code nobody wrote.
+//
+// One run per fixture rather than one per assertion: [golangtest]
+// caches the module it assembles, and every toolchain assertion
+// shells out to `go`.
+func renderStore(t *testing.T) *golangtest.Generated {
+	t.Helper()
+	return golangtest.Render(t, backendgolang.New(), storeBuilder().PackageNode(), stubgen.New()).
+		WithSource(golangtest.GoFile(storeBuilder().GoSource()))
+}
+
+// TestRendered_ToolchainAcceptsTheDouble is the assertion every
+// structural check in this file is a proxy for.
+//
+// Each of these caught something the plugin's own tests could not
+// see. `go build` alone did not: it skips `_test.go`, and the primary
+// output compiles as a standalone type no matter what its method set
+// looks like. Vetting the companion is what surfaced a variadic
+// marker dropped from the generated signature — a double declaring
+// `Put(string, string)` against an interface wanting
+// `Put(string, ...string)` — and running the generated suite is what
+// surfaced a delegate closure whose parameter shadowed the counter
+// the suite asserts on.
+func TestRendered_ToolchainAcceptsTheDouble(t *testing.T) {
+	t.Parallel()
+
+	gen := renderStore(t)
+
+	// Deliberately one subtest and deliberately serial. A Generated
+	// caches its assembled module under the testing.TB that first
+	// built it, so splitting these across subtests would leave the
+	// later ones pointed at a TempDir the earlier one had removed.
+	gen.AssertCompiles(t)
+	gen.AssertVets(t)
+	gen.AssertTestsPass(t)
+	gen.AssertSatisfies(t, "StoreStub", "Store")
+}
+
+// TestRendered_PrimaryDeclaresTheDouble pins the shape of the
+// generated stub: the recorded-call structs, the func and calls
+// fields, and the method signatures that have to mirror the source's.
+//
+// Structural rather than substring throughout — a field spelled as a
+// substring carries whatever column padding gofmt applied across its
+// neighbours, so adding an unrelated method to the interface would
+// break an assertion about this one.
+func TestRendered_PrimaryDeclaresTheDouble(t *testing.T) {
+	t.Parallel()
+
+	src := renderStore(t).Primary(t)
+
+	t.Run("the file is machine-written, formatted and documented", func(t *testing.T) {
+		t.Parallel()
+		src.AssertGeneratedHeader(t).
+			AssertFormatted(t).
+			AssertDocumented(t).
+			AssertPackage(t, "test")
+	})
+
+	t.Run("only the packages the signatures name are imported", func(t *testing.T) {
+		t.Parallel()
+		// A generator's import set is part of its API: emitting a new
+		// one is a breaking change for every consumer whose module
+		// does not already require it, and invisible here, where it
+		// always resolves.
+		src.AssertImportsOnly(t, "context")
+	})
+
+	t.Run("every method has a func field and a recorded-call slice", func(t *testing.T) {
+		t.Parallel()
+		src.AssertField(t, "StoreStub", "GetFunc", "func(context.Context, string) (string, error)").
+			AssertField(t, "StoreStub", "ListFunc", "func() ([]string, error)").
+			AssertField(t, "StoreStub", "CloseFunc", "func()").
+			AssertField(t, "StoreStub", "GetCalls", "[]StoreGetCall").
+			AssertField(t, "StoreStub", "CloseCalls", "[]StoreCloseCall")
+	})
+
+	t.Run("recorded-call fields carry the source's declared names", func(t *testing.T) {
+		t.Parallel()
+		// The source's return names are the documentation a
+		// recorded-call struct exists to preserve; unnamed slots fall
+		// back to positional.
+		src.AssertField(t, "StoreGetCall", "Ctx", "context.Context").
+			AssertField(t, "StoreGetCall", "ID", "string").
+			AssertField(t, "StoreGetCall", "Item", "string").
+			AssertField(t, "StoreGetCall", "Err", "error").
+			AssertField(t, "StoreListCall", "Result0", "[]string").
+			AssertField(t, "StoreListCall", "Result1", "error")
+	})
+
+	t.Run("the generated methods mirror the source signatures", func(t *testing.T) {
+		t.Parallel()
+		src.AssertMethod(t, "StoreStub", "Get").
+			Signature(t, "(ctx context.Context, id string) (item string, err error)").
+			AssertPointerReceiver(t, true)
+		src.AssertMethod(t, "StoreStub", "List").Signature(t, "() ([]string, error)")
+		src.AssertMethod(t, "StoreStub", "Close").Signature(t, "()")
+		// A source that named nothing still needs identifiers in the
+		// generated body, which fall back to positional.
+		src.AssertMethod(t, "StoreStub", "Anon").Signature(t, "(arg0 int, arg1 string)")
+	})
+
+	t.Run("a variadic tail survives into every position it appears in", func(t *testing.T) {
+		t.Parallel()
+		// The four spellings disagree, and each one that drops the
+		// marker produces something that compiles: the declaration
+		// wants `...string`, the func field's type wants it too, the
+		// delegate call wants the spread, and the recorded field
+		// wants the slice the parameter actually is inside the body.
+		src.AssertMethod(t, "StoreStub", "Put").Signature(t, "(id string, opts ...string) error")
+		src.AssertField(t, "StoreStub", "PutFunc", "func(string, ...string) error")
+		src.AssertField(t, "StorePutCall", "Opts", "[]string")
+		src.InMethod(t, "StoreStub", "Put").AssertContains(t, "opts...")
+	})
+
+	t.Run("a parameter named after the receiver moves the receiver", func(t *testing.T) {
+		t.Parallel()
+		// The source names the parameter and the generator names the
+		// receiver, so the receiver is what gives way. Rendering both
+		// as `s` made every `s.<Field>` in the body resolve to the
+		// parameter, which does not compile.
+		src.AssertMethod(t, "StoreStub", "Recv").Signature(t, "(s string) error")
+		src.InMethod(t, "StoreStub", "Recv").
+			AssertNotContains(t, "s.RecvFunc(").
+			AssertContains(t, ".RecvFunc(s)")
+	})
+
+	t.Run("a recorded-call struct precedes the double that holds it", func(t *testing.T) {
+		t.Parallel()
+		// Slot ordering is otherwise invisible: a struct rendered
+		// after the type whose field names it still compiles.
+		src.AssertOrder(t, "StoreGetCall", "StoreStub")
+	})
+
+	t.Run("the exported surface is what consumers were promised", func(t *testing.T) {
+		t.Parallel()
+		// The review surface. Every line of a diff here is one a
+		// consumer of the generated double would have to react to.
+		golangtest.AssertAPIGolden(t, src, filepath.Join("testdata", "store_stub.api"))
+	})
+}
+
+// TestRendered_CompanionProvesTheDouble pins the generated test
+// suite, whose contract is what it asserts rather than what it says.
+//
+// [Generated.AssertTestsPass] is the half that proves the suite
+// passes; these are the half that proves it is there at all — a
+// generator that silently stopped emitting a per-method check would
+// leave a suite that passes trivially.
+func TestRendered_CompanionProvesTheDouble(t *testing.T) {
+	t.Parallel()
+
+	src := renderStore(t).Suffixed(t, stubgen.GoTestSuffix)
+
+	t.Run("the suite lands in the external test package", func(t *testing.T) {
+		t.Parallel()
+		// The framework keys the shift off the filename. Landing in
+		// the source package instead would let the suite reach
+		// private state and stop proving the double works from
+		// outside, which is the only place a consumer holds it.
+		src.AssertPackage(t, "test_test").
+			AssertGeneratedHeader(t).
+			AssertFormatted(t).
+			AssertImportsOnly(t, "context", "testing", "example.com/test")
+	})
+
+	t.Run("one recording check per interface method", func(t *testing.T) {
+		t.Parallel()
+		want := []string{
+			"TestStoreStubRecordsGet",
+			"TestStoreStubRecordsList",
+			"TestStoreStubRecordsPut",
+			"TestStoreStubRecordsRecv",
+			"TestStoreStubRecordsAnon",
+			"TestStoreStubRecordsClose",
+		}
+		got := src.TestFuncs()
+		for _, name := range want {
+			if !slices.Contains(got, name) {
+				t.Errorf("companion declares no %s; it declares %v", name, got)
+			}
+		}
+		if len(got) != len(want) {
+			t.Errorf("companion declares %d tests, want %d: %v", len(got), len(want), got)
+		}
+	})
+
+	t.Run("every generated test goes parallel", func(t *testing.T) {
+		t.Parallel()
+		// This suite runs in every consumer's CI, once per annotated
+		// interface. A serial one taxes each of them for the life of
+		// the generator and nobody will look at generated code for
+		// the cause.
+		for _, name := range src.TestFuncs() {
+			src.AssertParallel(t, name)
+		}
+	})
+
+	t.Run("the satisfaction proof names both types qualified", func(t *testing.T) {
+		t.Parallel()
+		// The companion is always the external test package of the
+		// primary, so neither type is ever in scope unqualified.
+		// A bare name would bind to whatever else was in scope.
+		body := string(src.Bytes())
+		if want := "var _ test.Store = (*test.StoreStub)(nil)"; !strings.Contains(body, want) {
+			t.Errorf("companion does not carry %q\n%s", want, body)
+		}
+	})
+
+	t.Run("a delegate closure declares its parameters blank", func(t *testing.T) {
+		t.Parallel()
+		// The closure ignores its arguments, and the source's own
+		// identifiers would otherwise land in a scope holding the
+		// counter the suite asserts on: an interface method taking a
+		// parameter called `called` produced a suite that incremented
+		// the parameter and failed at run time.
+		src.InFunc(t, "TestStoreStubRecordsPut").
+			AssertContains(t, "func(_ string, _ ...string) error")
 	})
 }

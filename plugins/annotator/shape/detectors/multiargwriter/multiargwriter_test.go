@@ -6,9 +6,9 @@ package multiargwriter_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/multiargwriter"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,15 +24,15 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_MatchesThreeArgs(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Record", Package: "x",
-		Params: []*node.Param{
+		Params: []*sdk.Param{
 			dt.Param("ctx", dt.Ctx()),
 			dt.Param("a", dt.Named("string")),
 			dt.Param("b", dt.Named("string")),
 			dt.Param("c", dt.Named("string")),
 		},
-		Returns: node.AnonReturns(dt.Err()),
+		Returns: sdk.AnonReturns(dt.Err()),
 	}
 	bag := dt.RunFn(t, multiargwriter.Detector(), fn)
 	dt.AssertShape(t, bag, multiargwriter.Name, "", "")
@@ -42,19 +42,19 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"two args (CompositeWriter territory)", &node.Function{
+		{"two args (CompositeWriter territory)", &sdk.Function{
 			Name: "Set", Package: "x",
-			Params: []*node.Param{
+			Params: []*sdk.Param{
 				dt.Param("k", dt.Named("string")),
 				dt.Param("v", dt.Qualified("x", "Article")),
 			},
-			Returns: node.AnonReturns(dt.Err()),
+			Returns: sdk.AnonReturns(dt.Err()),
 		}},
-		{"no error return", &node.Function{
+		{"no error return", &sdk.Function{
 			Name: "Record", Package: "x",
-			Params: []*node.Param{
+			Params: []*sdk.Param{
 				dt.Param("a", dt.Named("string")),
 				dt.Param("b", dt.Named("string")),
 				dt.Param("c", dt.Named("string")),

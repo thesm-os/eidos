@@ -484,3 +484,73 @@ func TestTags_Tombstoned(t *testing.T) {
 		}
 	})
 }
+
+func TestRefIsEmptyInterface(t *testing.T) {
+	t.Parallel()
+
+	anon := func(methods []*node.Method, embeds []*node.Embed) *node.TypeRef {
+		r := &node.TypeRef{TypeKind: node.TypeRefAnonInterface, Methods: methods, Embeds: embeds}
+		r.EnsureMeta()
+		return r
+	}
+
+	t.Run("a written-out interface{} is empty", func(t *testing.T) {
+		t.Parallel()
+		if !golang.RefIsEmptyInterface(anon(nil, nil)) {
+			t.Fatal("interface{} reported as non-empty")
+		}
+	})
+
+	t.Run("the predeclared any is empty", func(t *testing.T) {
+		t.Parallel()
+		// `any` reaches a generator as a builtin named ref, carrying no
+		// package — the spelling a parameter list uses far more often
+		// than the written-out form.
+		if !golang.RefIsEmptyInterface(namedTypeRef("", "any")) {
+			t.Fatal("any reported as non-empty")
+		}
+	})
+
+	t.Run("an anonymous interface declaring a method is not empty", func(t *testing.T) {
+		t.Parallel()
+		if golang.RefIsEmptyInterface(anon([]*node.Method{{Name: "Read"}}, nil)) {
+			t.Fatal("interface{ Read() } reported as empty")
+		}
+	})
+
+	t.Run("an anonymous interface embedding a type is not empty", func(t *testing.T) {
+		t.Parallel()
+		// Embedding is how a constraint spells its type set, so an
+		// interface with no methods can still constrain something.
+		if golang.RefIsEmptyInterface(anon(nil, []*node.Embed{{Type: namedTypeRef("fmt", "Stringer")}})) {
+			t.Fatal("interface{ Stringer } reported as empty")
+		}
+	})
+
+	t.Run("a named interface is not empty even when it declares nothing", func(t *testing.T) {
+		t.Parallel()
+		// The documented false negative, pinned so it stays deliberate:
+		// the ref carries a package and an identifier and nothing about
+		// what they resolve to, and this function does not resolve names.
+		// Callers that must know look the declaration up.
+		if golang.RefIsEmptyInterface(namedTypeRef("example.com/x", "Anything")) {
+			t.Fatal("a named ref was resolved; this function answers on spelling only")
+		}
+	})
+
+	t.Run("a non-interface ref is not empty", func(t *testing.T) {
+		t.Parallel()
+		if golang.RefIsEmptyInterface(namedTypeRef("", "string")) {
+			t.Fatal("string reported as the empty interface")
+		}
+	})
+
+	t.Run("a nil ref is not empty", func(t *testing.T) {
+		t.Parallel()
+		// A generator walking an incomplete graph reaches this rather
+		// than panicking mid-render.
+		if golang.RefIsEmptyInterface(nil) {
+			t.Fatal("nil reported as the empty interface")
+		}
+	})
+}

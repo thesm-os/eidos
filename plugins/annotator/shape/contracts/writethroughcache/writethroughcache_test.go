@@ -6,10 +6,9 @@ package writethroughcache_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/writethroughcache"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract(t *testing.T) {
@@ -23,20 +22,20 @@ func TestContract(t *testing.T) {
 
 	t.Run("pipeline round-trip back-stamps backing partner", func(t *testing.T) {
 		t.Parallel()
-		cache := &node.Function{
+		cache := &sdk.Function{
 			Name: "Get", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					contracttest.HostDirective(writethroughcache.Name, "cache", map[string]string{
 						"backing": "GetFromDB",
 					}),
 				},
 			},
 		}
-		backing := &node.Function{Name: "GetFromDB", Package: "x"}
-		pkg := &node.Package{
+		backing := &sdk.Function{Name: "GetFromDB", Package: "x"}
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{cache, backing},
+			Functions: []*sdk.Function{cache, backing},
 		}
 		diags := contracttest.RunPipeline(t, writethroughcache.Contract(), pkg)
 		contracttest.AssertNoErrorDiag(t, diags)

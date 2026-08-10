@@ -15,32 +15,29 @@
 // directive schema, the [Options] surface, the [Type]
 // emit value, and the [Plugin.Generate] pass that walks
 // annotated source structs and queues one contribution per
-// match. The contribution carries the raw [node.Struct], the
+// match. The contribution carries the raw [sdk.Struct], the
 // option-resolved [Type.Suffix], and the verbatim
 // `defaults=` directive value — every classification /
 // identifier-convention / directive-parsing rule is deferred
 // to the active backend's language.
 //
-// Each supported language ships its own sibling file
-// (`builder_<lang>.go`) that owns the per-language output
-// suffix, the embedded template tree, and the funcmap entries
-// the template consumes. The dispatchers below
-// ([Plugin.Outputs], [Plugin.Templates], [Plugin.TemplateFuncs])
-// route by language to the matching adapter. Adding a new
-// target language is a two-step extension: ship a
-// `builder_<lang>.go` adapter and a `templates/<lang>/...`
-// template tree. No code in this file changes beyond the
-// dispatch switch.
+// The Go adapter ships as the sibling `builder_go.go`,
+// owning the output suffix, the embedded template tree, and
+// the one template helper the template consumes. [sdkgo.Base]
+// answers the declaration methods and keys every one of them
+// to Go, so a second target language is more than an extra
+// adapter file: it needs `builder_<lang>.go`, a
+// `templates/<lang>/...` tree, and Outputs / Templates /
+// TemplateFuncs redeclared on [Plugin] to dispatch across
+// both. Nothing in the neutral core below changes for it.
 package builder
 
 import (
 	"fmt"
-	"io/fs"
 	"text/template"
 
-	"go.thesmos.sh/eidos/lang/golang"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -70,14 +67,14 @@ const DirectiveName sdk.DirectiveName = "builder"
 // module-path conventions.
 const DefaultsKey = "defaults"
 
-// SlotName is the [emit.File] slot the plugin appends its
+// SlotName is the [sdk.EmitFile] slot the plugin appends its
 // rendered [Type] emit values into. `top` renders the
 // content between the package clause and the first core decl
 // — the natural placement for a self-contained method-and-
 // function block. Universal across target languages.
 const SlotName = "top"
 
-// KindType is the plugin-defined [emit.Node.Kind] every
+// KindType is the plugin-defined [sdk.EmitNode.Kind] every
 // [Type] emit value reports. Universal across target
 // languages; the matching template per language lives at
 // `templates/<lang>/builder.type.tmpl`.
@@ -101,9 +98,10 @@ type Options struct {
 }
 
 // Plugin is the fluent-builder generator. Zero value is
-// unusable; go through [New] so the embedded [opt.Holder]
+// unusable; go through [New] so the embedded [sdk.Holder]
 // binds to the options field.
 type Plugin struct {
+	*sdkgo.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -112,41 +110,47 @@ type Plugin struct {
 // bound. The pipeline overlays caller-supplied option values
 // via [Plugin.SetOptions] (promoted from [sdk.Holder]) at
 // Build time.
+//
+// The foundation bucket runs ahead of the composition and
+// cross-cutting buckets, so a plugin walking the
+// post-generation emit graph finds the builder types this pass
+// queued.
+//
+// [Capability] is published so a consumer can declare a
+// documentary dependency on builder generation through its own
+// Requires list. Nothing is required in return: the plugin
+// reads source nodes only and has no upstream plugin
+// dependency.
+//
+// [GoDefaultsExpr] is the plugin's one template helper, and
+// the base registers it under the plugin's name prefix — so
+// the template calls it as `builder_defaultsExpr`. The
+// shape-classification and identifier-convention helpers the
+// same template reaches for are canonical backend entries and
+// stay unprefixed. No backend builtin is replaced; the
+// template renders through the canonical set as it stands.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplatesFS, GoOutputs()...).
+		Version(Version).
+		Priority(sdk.GeneratorFoundation).
+		Provides(Capability).
+		Directives(directives()...).
+		Funcs(template.FuncMap{"defaultsExpr": GoDefaultsExpr}).
+		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the foundation generator
-// bucket so composition / cross-cutting plugins see emitted
-// builder types when they iterate the post-generation emit
-// graph.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorFoundation }
-
-// Provides advertises [Capability].
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires returns nil — the builder plugin reads source
-// nodes only.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares the `+gen:builder` / `-gen:builder`
+// directives declares the `+gen:builder` / `-gen:builder`
 // schema on source struct types. The optional `defaults=`
 // keyword arg pins the explicit factory function the
 // additional `New<Name>WithDefaults` constructor seeds from;
 // parsing of the value is delegated to the active language's
 // funcmap.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(node.KindStruct).
+			On(sdk.NodeKindStruct).
 			AllowedKeys(DefaultsKey).
 			Describe(
 				"Opts the host struct in for fluent-builder generation. " +
@@ -161,48 +165,6 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 	}
 }
 
-// Outputs dispatches to the per-language adapter for the
-// requested language. Adding a new language adds a `case`
-// arm; the unknown-language path returns nil so the
-// framework's "no Outputs for this language" semantics
-// continues to apply.
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == golang.Language {
-		return GoOutputs()
-	}
-	return nil
-}
-
-// Templates dispatches to the per-language adapter's embedded
-// template tree. The Go backend reads the returned filesystem
-// once at Build time to register every `*.tmpl` under
-// `templates/<lang>/`.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang == golang.Language {
-		return GoTemplates()
-	}
-	return nil, false
-}
-
-// TemplateFuncs dispatches to the per-language adapter's
-// funcmap. The funcmap holds every language-specific
-// classification, identifier-convention, and directive-arg
-// parsing rule the matching template tree consumes — so
-// adding a language is a self-contained per-language
-// extension.
-func (*Plugin) TemplateFuncs(lang string) template.FuncMap {
-	if lang == golang.Language {
-		return GoFuncMap()
-	}
-	return nil
-}
-
-// TemplateOverrides returns nil — no per-language adapter
-// currently overrides a canonical funcmap entry. Adding an
-// override later means registering it on the per-language
-// adapter and dispatching here.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
-
 // Type is the plugin-defined emit kind the rendered
 // emit value reports. The matching `builder.type.tmpl`
 // template in each language tree renders it as the full
@@ -211,7 +173,7 @@ func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 // [New<Name>From], per-field setters, [Mutate], [Clone], and
 // [Build].
 //
-// The struct is intentionally minimal: a raw [node.Struct]
+// The struct is intentionally minimal: a raw [sdk.Struct]
 // pointer the template walks, an option-derived suffix, and
 // the verbatim `defaults=` directive value. All shape
 // detection and identifier-convention rules live in the
@@ -220,11 +182,11 @@ func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 type Type struct {
 	sdk.BaseEmit
 
-	// Source is the raw source [node.Struct] the template
+	// Source is the raw source [sdk.Struct] the template
 	// walks. The active language's funcmap classifies field
 	// shapes, projects exported fields, and lifts type
 	// parameters / arguments from this single root.
-	Source *node.Struct
+	Source *sdk.Struct
 
 	// Suffix is the option-resolved suffix appended to the
 	// source struct's name to form the builder identifier
@@ -297,7 +259,7 @@ func (p *Plugin) suffix() string {
 // defaultsValue returns the raw `defaults=` value on s's
 // directive, or the empty string when the keyword arg is
 // absent. Parsing happens in the active language's funcmap.
-func defaultsValue(s *node.Struct) string {
+func defaultsValue(s *sdk.Struct) string {
 	d := s.Directive(DirectiveName)
 	if d == nil {
 		return ""

@@ -1,0 +1,8 @@
+package test
+
+func (*UserRepo) Delete(ctx context.Context, id string) error
+func (*UserRepo) Get(ctx context.Context, id string) (*User, error)
+func (*UserRepo) List(ctx context.Context) ([]*User, error)
+func (*UserRepo) Save(ctx context.Context, value *User) error
+type UserRepo struct{}
+type UserRepository interface{Delete(ctx context.Context, id string) error; Get(ctx context.Context, id string) (*User, error); List(ctx context.Context) ([]*User, error); Save(ctx context.Context, value *User) error}

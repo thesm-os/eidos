@@ -44,11 +44,16 @@
 //     foundation bucket, so the handler exists to contribute to; before
 //     the cross-cutting and finalize contributors, so validation
 //     precedes them in the rendered prebody.
-//   - **The contributed call degrades to nothing without handlergen.**
-//     The entry is appended to the host's emit value rather than routed
-//     by origin, so a run without the host contributes nothing. The
-//     `_validate.go` output still lands — it is this plugin's own, and
-//     depends on no one.
+//   - **Both halves degrade to nothing without handlergen.** The entry
+//     is appended to the host's emit value rather than routed by
+//     origin, so a run without the host contributes nothing — and the
+//     validator does not land either, because Generate discovers its
+//     subjects by walking the emit graph for handlergen's Handler
+//     values. Declaring an [sdk.Output] of one's own buys the right to
+//     name a file, not a reason to write one: no handler means nothing
+//     to validate, so a run without the host produces no file at all
+//     rather than an orphan holding a validator for a handler that was
+//     never generated.
 //   - **TemplateFuncs returns nil.** The shared Go helpers are already
 //     in the backend's overrideable funcmap; contributing them again is
 //     a Build-time collision.

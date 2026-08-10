@@ -7,10 +7,7 @@ import (
 	"maps"
 	"slices"
 
-	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Mixin is one orthogonal invariant assertion that decorates a
@@ -73,7 +70,7 @@ type MixinValidator func(attachments []MixinAttachment) []MixinViolation
 // across the store.
 type MixinAttachment struct {
 	// Host is the callable the mixin is attached to.
-	Host node.Node
+	Host sdk.Node
 
 	// Params maps the mixin's KV parameter keys to their stamped
 	// values. Sibling-param values are qualified names after the
@@ -86,7 +83,7 @@ type MixinAttachment struct {
 // diagnostic against the host node.
 type MixinViolation struct {
 	// Host is the node the diagnostic attaches to.
-	Host node.Node
+	Host sdk.Node
 
 	// Message is the human-readable violation summary.
 	Message string
@@ -109,7 +106,7 @@ type MixinViolation struct {
 // Multiple `+gen:mixin` directives on one callable stack: each
 // one appends to [MetaMixins] and stamps its parameters under
 // its own per-mixin namespace.
-const MixinDirectiveName = directive.Name("mixin")
+const MixinDirectiveName = sdk.DirectiveName("mixin")
 
 // MetaMixins is the per-callable list of mixins decorating the
 // callable. Populated by [Plugin.applyMixins] each time a
@@ -118,17 +115,17 @@ const MixinDirectiveName = directive.Name("mixin")
 // callable, then read the per-mixin param keys.
 //
 //nolint:gochecknoglobals // registry-singleton key
-var MetaMixins = meta.EnsureKey("shape.mixins", meta.StringListParser)
+var MetaMixins = sdk.EnsureKey("shape.mixins", sdk.StringListParser)
 
 // MixinParamKey returns the typed meta key carrying a mixin's
 // KV parameter value — stamped at `shape.mixin.<name>.<param>`.
-// Constructed on demand via [meta.EnsureKey] so multiple
+// Constructed on demand via [sdk.EnsureKey] so multiple
 // per-mixin sub-packages referencing the same name resolve to
 // one canonical key.
-func MixinParamKey(name, param string) meta.Key[string] {
-	return meta.EnsureKey(
+func MixinParamKey(name, param string) sdk.Key[string] {
+	return sdk.EnsureKey(
 		"shape.mixin."+name+"."+param,
-		meta.StringParser,
+		sdk.StringParser,
 	)
 }
 
@@ -149,12 +146,12 @@ const mixinStampedBy = PluginName + ".mixin"
 // validator enforces the schema (mandatory name, negation, KV
 // shape) at Build time — with one exception it owns outright:
 // parameters paired with several names. That constraint is
-// conditional on the arg count, which [directive.Schema] cannot
+// conditional on the arg count, which [sdk.DirectiveSchema] cannot
 // express, and it has to be checked while the directive is intact,
 // so it lives here. See [Plugin.reportAmbiguousMixinParams].
 
 func (p *Plugin) applyMixins(
-	host node.Node, bag *meta.Bag, dirs []*directive.Directive, sink *diag.PluginSink,
+	host sdk.Node, bag *sdk.Bag, dirs []*sdk.Directive, sink *sdk.PluginSink,
 ) {
 	for _, d := range dirs {
 		// Negation is denied by the schema and a missing name is
@@ -208,7 +205,7 @@ func (p *Plugin) applyMixins(
 //
 // The name is not stamped, so downstream consumers never observe a
 // mixin the pipeline cannot describe.
-func reportUnregisteredMixin(host node.Node, name string, sink *diag.PluginSink) {
+func reportUnregisteredMixin(host sdk.Node, name string, sink *sdk.PluginSink) {
 	sink.Errorf(host.Pos(),
 		"shape.mixin: %q is not registered with this pipeline. Check the spelling, "+
 			"register the mixin, or — if it was meant as a parameter — note that mixin "+
@@ -223,7 +220,7 @@ func reportUnregisteredMixin(host node.Node, name string, sink *diag.PluginSink)
 // guessing an owner would fabricate meta under a namespace the
 // other mixins never declared.
 func (*Plugin) reportAmbiguousMixinParams(
-	host node.Node, d *directive.Directive, sink *diag.PluginSink,
+	host sdk.Node, d *sdk.Directive, sink *sdk.PluginSink,
 ) {
 	keys := slices.Sorted(maps.Keys(d.KV))
 	sink.Errorf(host.Pos(),
@@ -237,7 +234,7 @@ func (*Plugin) reportAmbiguousMixinParams(
 // appendMixin adds name to the [MetaMixins] list on bag,
 // preserving insertion order and skipping duplicates. Idempotent:
 // repeated calls with the same name leave the list unchanged.
-func appendMixin(bag *meta.Bag, name string) {
+func appendMixin(bag *sdk.Bag, name string) {
 	current, _ := MetaMixins.Get(bag)
 	if slices.Contains(current, name) {
 		return
@@ -256,7 +253,7 @@ func appendMixin(bag *meta.Bag, name string) {
 //	    limit, _ := shape.MixinParamKey(name, "limit").Get(m.Meta())
 //	    // …
 //	}
-func Mixins(bag *meta.Bag) []string {
+func Mixins(bag *sdk.Bag) []string {
 	if bag == nil {
 		return nil
 	}

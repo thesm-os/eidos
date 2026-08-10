@@ -4,12 +4,15 @@
 package golangtest
 
 import (
+	"fmt"
 	"path"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
 	"go.thesmos.sh/eidos/lang/golang"
 )
@@ -35,6 +38,16 @@ type File struct {
 	ImportPath string
 }
 
+// GoFile is a [File] over a Go source constant.
+//
+// Sugar, but the kind worth having: every fixture's support package
+// is a raw string literal, and spelling the struct and the []byte
+// conversion at each one buries the source — which is the part a
+// reader has to check against the generated output — in punctuation.
+func GoFile(path, src string) File {
+	return File{Path: path, Src: []byte(src)}
+}
+
 // Dir returns the directory portion of the file's path, empty at the
 // module root.
 func (f File) Dir() string {
@@ -52,16 +65,27 @@ func (f File) IsTest() bool { return strings.HasSuffix(f.Path, "_test.go") }
 // Generated is the set of files one run produced, plus the context
 // needed to build them.
 //
-// Not safe for concurrent use: it caches a built module directory
-// across assertions, which is what keeps a fixture's toolchain cost
-// to one setup rather than one per subtest.
+// Configure it — [Generated.WithSource] and its siblings — before
+// handing it to anything; from then on its assertions are safe to run
+// from parallel subtests. That matters because the shape this
+// package's own docs prescribe, one fixture spent across several
+// subtests, is exactly the shape that races on the cached module
+// directory, and a test author should not have to discover the rule
+// "keep every toolchain assertion in one subtest" by reading `-race`
+// output about a package they did not write.
 type Generated struct {
 	files      []File
 	support    []File
 	modulePath string
 	goVersion  string
 	baseModule string
-	built      string
+
+	// mu guards the built-module cache only. The `go` invocation
+	// itself runs outside it, so parallel subtests still overlap on
+	// the seconds rather than serialising on them.
+	mu       sync.Mutex
+	built    string
+	builtFor testing.TB
 }
 
 // Rendered adopts every file a pipeline run produced.
@@ -71,8 +95,16 @@ type Generated struct {
 // into a subpackage is built the way a consumer will build it rather
 // than flattened into one directory where the cross-package
 // reference it emits would resolve for the wrong reason.
+//
+// A run that recorded an error stops the test here. [pipelinetest]
+// deliberately swallows the "had errors" disposition so a test about
+// diagnostics can inspect them, which means a plugin that panicked or
+// bailed leaves an empty sink — and every assertion downstream of an
+// empty sink passes, having looked at nothing. A test asserting on
+// diagnostics holds the pipeline directly and never reaches this.
 func Rendered(tb testing.TB, p *pipelinetest.Pipeline) *Generated {
 	tb.Helper()
+	assertRunSucceeded(tb, p)
 	g := &Generated{}
 	for target, body := range p.Sink().Files() {
 		name := target.Filename
@@ -90,6 +122,29 @@ func Rendered(tb testing.TB, p *pipelinetest.Pipeline) *Generated {
 	// a failing test reporting the same thing.
 	slices.SortFunc(g.files, func(a, b File) int { return strings.Compare(a.Path, b.Path) })
 	return g
+}
+
+// assertRunSucceeded stops the test when the run that produced these
+// files recorded an error diagnostic.
+//
+// Reported before anything is adopted, because the failure a caller
+// would otherwise see is `no file at "x.gen.go"` — which reads as a
+// routing problem and sends them looking in the wrong plugin.
+func assertRunSucceeded(tb testing.TB, p *pipelinetest.Pipeline) {
+	tb.Helper()
+	sink := p.Diagnostics()
+	if sink == nil || !sink.HasErrors() {
+		return
+	}
+	var b strings.Builder
+	for _, d := range sink.Diagnostics() {
+		if d.Severity < diag.Error {
+			continue
+		}
+		fmt.Fprintf(&b, "\n  %s: %s: %s", d.Severity, d.Plugin, d.Message)
+	}
+	tb.Fatalf("golangtest: the run recorded errors, so whatever it wrote is not what the "+
+		"generator meant to write and every assertion over it would be vacuous:%s", b.String())
 }
 
 // Of adopts files a caller assembled itself, for a test driving a
@@ -151,6 +206,27 @@ func (g *Generated) InModule(dir string) *Generated {
 
 // Files returns every file the run produced, ordered by path.
 func (g *Generated) Files() []File { return slices.Clone(g.files) }
+
+// AssertPaths fails when the run produced anything other than exactly
+// the named files.
+//
+// The name a consumer sees is not the name the plugin chose: Layout
+// composes it from a source basename and the declared suffix, and a
+// plugin author has no other way to pin what that composition
+// produced. Pinning the whole set also catches the output nobody
+// asked for — a second file a slot contributor started routing
+// somewhere of its own, which no assertion addressed at a known path
+// can see.
+func (g *Generated) AssertPaths(tb testing.TB, want ...string) *Generated {
+	tb.Helper()
+	gotPaths, wantPaths, extra, missing := diffSets(g.paths(), want)
+	if extra == nil && missing == nil {
+		return g
+	}
+	tb.Errorf("golangtest: the run wrote %v, want exactly %v (unexpected: %v; absent: %v)",
+		gotPaths, wantPaths, extra, missing)
+	return g
+}
 
 // File returns the parsed file at the given path.
 func (g *Generated) File(tb testing.TB, filePath string) *Source {
@@ -239,11 +315,18 @@ func (g *Generated) modulePathOf() string {
 		if f.ImportPath == "" {
 			continue
 		}
+		// An external test package's import path carries a `_test`
+		// suffix no directory on disk has: a mock in `users/` compiled
+		// as `example.com/app/users_test` would otherwise strip nothing,
+		// fall back to the placeholder module, and take every import of
+		// the package it doubles down with it — a failure that reads as
+		// the generator emitting the wrong path.
+		path := strings.TrimSuffix(f.ImportPath, "_test")
 		dir := f.Dir()
 		if dir == "" {
-			return f.ImportPath
+			return path
 		}
-		if trimmed, ok := strings.CutSuffix(f.ImportPath, "/"+dir); ok {
+		if trimmed, ok := strings.CutSuffix(path, "/"+dir); ok {
 			return trimmed
 		}
 	}

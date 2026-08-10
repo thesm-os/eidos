@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 // Package shapewriter detects structs that satisfy the io.Writer
-// shape — a method named `Write` taking a `[]byte` and returning
-// `(int, error)`. Downstream generators read the stamped metadata
-// (`shape.writer.detected`, `shape.writer.method`) to decide
-// whether their codegen path applies to a given struct.
+// shape — a method named `Write` taking one non-variadic `[]byte`
+// and returning `(int, error)`. Downstream generators read the
+// stamped metadata (`shape.writer.detected`, `shape.writer.method`)
+// to decide whether their codegen path applies to a given struct.
+//
+// The heuristic reads the struct's own declared methods. A `Write`
+// promoted from an embedded field makes the type an io.Writer to the
+// compiler and is not detected here.
 //
 // Detection is heuristic by default; directive overrides force or
 // suppress the detection regardless of the heuristic outcome:

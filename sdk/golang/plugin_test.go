@@ -306,6 +306,25 @@ func TestBaseTemplateFuncs(t *testing.T) {
 		}
 	})
 
+	// text/template panics inside Funcs on a name that is not a Go
+	// identifier, and the backend calls Funcs for every plugin that
+	// ships templates. A hyphen in a plugin name is ordinary —
+	// `debug-weaver`, `if-match`, `leader-election` — so composing the
+	// prefix verbatim made every one of them abort the whole render.
+	t.Run("a name text/template would reject is folded to an identifier", func(t *testing.T) {
+		t.Parallel()
+		got := sdkgo.NewPlugin("debug-weaver").Build().TemplateFuncs(langgo.Language)
+		if _, ok := got["debug_weaver_args"]; !ok {
+			t.Fatalf("funcs = %v, want a debug_weaver_-prefixed bundle",
+				slices.Sorted(maps.Keys(got)))
+		}
+		// The claim is not about spelling: it is that the backend can
+		// register the bundle at all.
+		if _, err := template.New("probe").Funcs(got).Parse(""); err != nil {
+			t.Fatalf("registering the bundle: %v", err)
+		}
+	})
+
 	t.Run("overrides are not prefixed", func(t *testing.T) {
 		t.Parallel()
 		// An override is identified by the builtin it stands in for.
@@ -395,6 +414,61 @@ func TestBuildRefusesAMalformedDeclaration(t *testing.T) {
 		// and declares no file of its own.
 		if got := sdkgo.NewPlugin("audit").Templates(goTemplates).Build(); got == nil {
 			t.Fatalf("Build returned nil")
+		}
+	})
+
+	t.Run("a tree declared alongside BuiltinTemplates", func(t *testing.T) {
+		t.Parallel()
+		// The two say opposite things about whether a tree exists, and
+		// silently honouring one would register templates the plugin
+		// declared it had none of.
+		msg := mustPanic(t, func() {
+			sdkgo.NewGenerator("stub", goTemplates, out()...).BuiltinTemplates().Build()
+		})
+		if !strings.Contains(msg, "BuiltinTemplates") {
+			t.Fatalf("panic = %q", msg)
+		}
+	})
+}
+
+func TestBuiltinTemplatesServesATemplateFreeGenerator(t *testing.T) {
+	t.Parallel()
+
+	// The shape mockgen and repogen have: they own a file, and every
+	// decl they emit is a standard one the backend already renders. A
+	// template tree would have nothing in it.
+	build := func() *sdkgo.Base {
+		return sdkgo.NewPlugin("mock").
+			Outputs(sdk.Output{Suffix: "_mock_test.go"}).
+			BuiltinTemplates().
+			Build()
+	}
+
+	t.Run("outputs without a tree are accepted", func(t *testing.T) {
+		t.Parallel()
+		got := build()
+		if len(got.Outputs(langgo.Language)) != 1 {
+			t.Fatalf("Outputs = %v", got.Outputs(langgo.Language))
+		}
+	})
+
+	t.Run("it reports shipping no templates", func(t *testing.T) {
+		t.Parallel()
+		// The supported answer for "no templates for this language",
+		// and what the backend keys its per-plugin parse on.
+		if _, ok := build().Templates(langgo.Language); ok {
+			t.Fatalf("Templates reported a tree for a plugin declaring none")
+		}
+	})
+
+	t.Run("no helper bundle is registered", func(t *testing.T) {
+		t.Parallel()
+		// A plugin's helpers bind only to its own templates at parse
+		// time, so a bundle without a tree is unreachable by
+		// construction — registering one would put sixty names into the
+		// backend's registry that nothing can ever call.
+		if got := build().TemplateFuncs(langgo.Language); len(got) != 0 {
+			t.Fatalf("TemplateFuncs registered %d entries for a template-free plugin", len(got))
 		}
 	})
 }

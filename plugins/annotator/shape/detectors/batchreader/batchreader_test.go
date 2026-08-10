@@ -6,9 +6,9 @@ package batchreader_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/batchreader"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,13 +24,13 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_Matches(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "GetAll", Package: "x",
-		Params: []*node.Param{
+		Params: []*sdk.Param{
 			dt.Param("ctx", dt.Ctx()),
 			dt.Variadic("ids", dt.Named("string")),
 		},
-		Returns: node.AnonReturns(
+		Returns: sdk.AnonReturns(
 			dt.Slice(dt.Qualified("x", "Article")),
 			dt.Err(),
 		),
@@ -43,28 +43,28 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"non-variadic key (Reader territory)", &node.Function{
+		{"non-variadic key (Reader territory)", &sdk.Function{
 			Name: "GetAll", Package: "x",
-			Params: []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: node.AnonReturns(
+			Params: []*sdk.Param{dt.Param("id", dt.Named("string"))},
+			Returns: sdk.AnonReturns(
 				dt.Slice(dt.Qualified("x", "Article")),
 				dt.Err(),
 			),
 		}},
-		{"non-slice value (Reader territory)", &node.Function{
+		{"non-slice value (Reader territory)", &sdk.Function{
 			Name: "Get", Package: "x",
-			Params: []*node.Param{dt.Variadic("ids", dt.Named("string"))},
-			Returns: node.AnonReturns(
+			Params: []*sdk.Param{dt.Variadic("ids", dt.Named("string"))},
+			Returns: sdk.AnonReturns(
 				dt.Qualified("x", "Article"),
 				dt.Err(),
 			),
 		}},
-		{"no error return", &node.Function{
+		{"no error return", &sdk.Function{
 			Name: "GetAll", Package: "x",
-			Params: []*node.Param{dt.Variadic("ids", dt.Named("string"))},
-			Returns: node.AnonReturns(
+			Params: []*sdk.Param{dt.Variadic("ids", dt.Named("string"))},
+			Returns: sdk.AnonReturns(
 				dt.Slice(dt.Qualified("x", "Article")),
 			),
 		}},

@@ -4,7 +4,7 @@
 // {{ .CallType }} records one invocation of {{ $.IfaceName }}.{{ .Name }}.
 type {{ .CallType }} struct {
 {{- range .Params }}
-	{{ .Field }} {{ renderType .Type }}
+	{{ .Field }} {{ if .Variadic }}[]{{ end }}{{ renderType .Type }}
 {{- end }}
 {{- range .Returns }}
 	{{ .Field }} {{ renderType .Type }}
@@ -26,13 +26,13 @@ type {{ $stub }} struct {
 }
 {{ range .Methods }}
 // {{ .Name }} records the call and delegates to {{ .FuncField }}.
-func (s *{{ $stub }}) {{ .Name }}({{ template "stubgen.paramdecls" . }}) {{ template "stubgen.namedresults" . }} {
+func ({{ .Recv }} *{{ $stub }}) {{ .Name }}({{ template "stubgen.paramdecls" . }}) {{ template "stubgen.namedresults" . }} {
 {{- if .Returns }}
-	{{ template "stubgen.locals" . }} {{ if .NamedReturns }}={{ else }}:={{ end }} s.{{ .FuncField }}({{ template "stubgen.args" . }})
+	{{ template "stubgen.locals" . }} {{ if .NamedReturns }}={{ else }}:={{ end }} {{ .Recv }}.{{ .FuncField }}({{ template "stubgen.args" . }})
 {{- else }}
-	s.{{ .FuncField }}({{ template "stubgen.args" . }})
+	{{ .Recv }}.{{ .FuncField }}({{ template "stubgen.args" . }})
 {{- end }}
-	s.{{ .CallsField }} = append(s.{{ .CallsField }}, {{ .CallType }}{
+	{{ .Recv }}.{{ .CallsField }} = append({{ .Recv }}.{{ .CallsField }}, {{ .CallType }}{
 {{- range .Params }}
 		{{ .Field }}: {{ .Name }},
 {{- end }}
@@ -48,15 +48,15 @@ func (s *{{ $stub }}) {{ .Name }}({{ template "stubgen.paramdecls" . }}) {{ temp
 {{- end -}}
 
 {{- define "stubgen.paramtypes" -}}
-{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ renderType $p.Type }}{{ end }}
+{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ if $p.Variadic }}...{{ end }}{{ renderType $p.Type }}{{ end }}
 {{- end -}}
 
 {{- define "stubgen.paramdecls" -}}
-{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ $p.Name }} {{ renderType $p.Type }}{{ end }}
+{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ $p.Name }} {{ if $p.Variadic }}...{{ end }}{{ renderType $p.Type }}{{ end }}
 {{- end -}}
 
 {{- define "stubgen.args" -}}
-{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ $p.Name }}{{ end }}
+{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}{{ $p.Name }}{{ if $p.Variadic }}...{{ end }}{{ end }}
 {{- end -}}
 
 {{- define "stubgen.locals" -}}

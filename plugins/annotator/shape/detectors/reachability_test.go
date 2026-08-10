@@ -7,9 +7,9 @@ import (
 	"sort"
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // The umbrella plugin dispatches a callable to the first detector
@@ -32,30 +32,30 @@ import (
 // was labelled a writer of `string` with the Doc unrecorded.
 
 // refNamed returns a package-qualified named type reference.
-func refNamed(pkg, name string) *node.TypeRef {
-	return &node.TypeRef{TypeKind: node.TypeRefNamed, Package: pkg, Name: name}
+func refNamed(pkg, name string) *sdk.TypeRef {
+	return &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Package: pkg, Name: name}
 }
 
 // refBuiltin returns a predeclared type reference. The node IR
 // models these as named refs carrying no package.
-func refBuiltin(name string) *node.TypeRef {
-	return &node.TypeRef{TypeKind: node.TypeRefNamed, Name: name}
+func refBuiltin(name string) *sdk.TypeRef {
+	return &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Name: name}
 }
 
-func refPointer(elem *node.TypeRef) *node.TypeRef {
-	return &node.TypeRef{TypeKind: node.TypeRefPointer, Elem: elem}
+func refPointer(elem *sdk.TypeRef) *sdk.TypeRef {
+	return &sdk.TypeRef{TypeKind: sdk.TypeRefPointer, Elem: elem}
 }
 
-func refSlice(elem *node.TypeRef) *node.TypeRef {
-	return &node.TypeRef{TypeKind: node.TypeRefSlice, Elem: elem}
+func refSlice(elem *sdk.TypeRef) *sdk.TypeRef {
+	return &sdk.TypeRef{TypeKind: sdk.TypeRefSlice, Elem: elem}
 }
 
-func refIterSeq(elem *node.TypeRef) *node.TypeRef {
-	return &node.TypeRef{
-		TypeKind: node.TypeRefNamed,
+func refIterSeq(elem *sdk.TypeRef) *sdk.TypeRef {
+	return &sdk.TypeRef{
+		TypeKind: sdk.TypeRefNamed,
 		Package:  "iter",
 		Name:     "Seq",
-		TypeArgs: []*node.TypeRef{elem},
+		TypeArgs: []*sdk.TypeRef{elem},
 	}
 }
 
@@ -67,45 +67,45 @@ func refIterSeq(elem *node.TypeRef) *node.TypeRef {
 // is reachable only through a variadic sole parameter, so a sweep
 // that omits them reports a false shadowing against a detector
 // whose predicate is fine.
-func paramSpace() [][]*node.Param {
+func paramSpace() [][]*sdk.Param {
 	doc := refNamed("example.com/x", "Doc")
-	pool := []*node.TypeRef{
+	pool := []*sdk.TypeRef{
 		refBuiltin("string"), refPointer(doc), refNamed("io", "Reader"),
 		// Parameters with no equality, which `reader` refuses as
 		// keys. Present so that rule is measured rather than assumed.
 		refSlice(refBuiltin("string")),
-		{TypeKind: node.TypeRefAnonInterface},
+		{TypeKind: sdk.TypeRefAnonInterface},
 	}
 
-	var positional [][]*node.Param
-	var grow func(cur []*node.Param, depth int)
-	grow = func(cur []*node.Param, depth int) {
-		positional = append(positional, append([]*node.Param(nil), cur...))
+	var positional [][]*sdk.Param
+	var grow func(cur []*sdk.Param, depth int)
+	grow = func(cur []*sdk.Param, depth int) {
+		positional = append(positional, append([]*sdk.Param(nil), cur...))
 		if depth == 3 {
 			return
 		}
 		for _, p := range pool {
-			grow(append(cur, &node.Param{Name: "a", Type: p}), depth+1)
+			grow(append(cur, &sdk.Param{Name: "a", Type: p}), depth+1)
 		}
 	}
 	grow(nil, 0)
 
-	ctxParam := &node.Param{Name: "ctx", Type: refNamed("context", "Context")}
-	var out [][]*node.Param
+	ctxParam := &sdk.Param{Name: "ctx", Type: refNamed("context", "Context")}
+	var out [][]*sdk.Param
 	for _, withCtx := range []bool{false, true} {
 		for _, variadic := range []bool{false, true} {
 			for _, base := range positional {
 				if variadic && len(base) == 0 {
 					continue
 				}
-				ps := append([]*node.Param(nil), base...)
+				ps := append([]*sdk.Param(nil), base...)
 				if variadic {
 					last := *ps[len(ps)-1]
 					last.Variadic = true
 					ps[len(ps)-1] = &last
 				}
 				if withCtx {
-					ps = append([]*node.Param{ctxParam}, ps...)
+					ps = append([]*sdk.Param{ctxParam}, ps...)
 				}
 				out = append(out, ps)
 			}
@@ -117,17 +117,17 @@ func paramSpace() [][]*node.Param {
 // returnSpace returns every return list the sweep probes: 0-3
 // returns drawn from a pool reaching each predicate the catalog
 // discriminates on — pointer, slice, bool, error, and iter.Seq.
-func returnSpace() [][]*node.TypeRef {
+func returnSpace() [][]*sdk.TypeRef {
 	doc := refNamed("example.com/x", "Doc")
-	pool := []*node.TypeRef{
+	pool := []*sdk.TypeRef{
 		refBuiltin("string"), refPointer(doc), refBuiltin("bool"),
 		refBuiltin("error"), refIterSeq(refBuiltin("string")), refSlice(refBuiltin("string")),
 	}
 
-	var out [][]*node.TypeRef
-	var grow func(cur []*node.TypeRef, depth int)
-	grow = func(cur []*node.TypeRef, depth int) {
-		out = append(out, append([]*node.TypeRef(nil), cur...))
+	var out [][]*sdk.TypeRef
+	var grow func(cur []*sdk.TypeRef, depth int)
+	grow = func(cur []*sdk.TypeRef, depth int) {
+		out = append(out, append([]*sdk.TypeRef(nil), cur...))
 		if depth == 3 {
 			return
 		}
@@ -153,7 +153,7 @@ func sweepDispatch(all []shape.Detector) (matches, wins map[string]int) {
 
 	for _, ps := range paramSpace() {
 		for _, rs := range returnSpace() {
-			callable := &node.Method{Name: "M", Params: ps, Returns: node.AnonReturns(rs...)}
+			callable := &sdk.Method{Name: "M", Params: ps, Returns: sdk.AnonReturns(rs...)}
 			claimed := false
 			for _, d := range all {
 				detect, ok := d.Detect["golang"]

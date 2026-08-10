@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/writer"
 	"go.thesmos.sh/eidos/sdk"
@@ -16,7 +14,7 @@ import (
 )
 
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // TestDetector_Identity pins the constructor invariants.
 func TestDetector_Identity(t *testing.T) {
@@ -53,13 +51,13 @@ func TestDetector_MatchesWriterSignatures(t *testing.T) {
 	t.Run("struct method", func(t *testing.T) {
 		t.Parallel()
 		m := writerMethod("Save", true)
-		s := &node.Struct{
+		s := &sdk.Struct{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{m},
+			Methods: []*sdk.Method{m},
 		}
-		runDetect(t, &node.Package{
+		runDetect(t, &sdk.Package{
 			Name: "x", Path: "x",
-			Structs: []*node.Struct{s},
+			Structs: []*sdk.Struct{s},
 		})
 		assertShape(t, m.Meta(), writer.Name, "x.Article")
 	})
@@ -71,16 +69,16 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
 		{
 			name: "no error return (not a writer)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Save", Package: "x",
-				Params: []*node.Param{
-					{Name: "a", Type: &node.TypeRef{Name: "Article", Package: "x"}},
+				Params: []*sdk.Param{
+					{Name: "a", Type: &sdk.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "Article", Package: "x"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "Article", Package: "x"}),
 			},
 		},
 		{
@@ -98,36 +96,36 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 		},
 		{
 			name: "two non-ctx params (CompositeWriter territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Save", Package: "x",
-				Params: []*node.Param{
-					{Name: "k", Type: &node.TypeRef{Name: "string"}},
-					{Name: "v", Type: &node.TypeRef{Name: "Article", Package: "x"}},
+				Params: []*sdk.Param{
+					{Name: "k", Type: &sdk.TypeRef{Name: "string"}},
+					{Name: "v", Type: &sdk.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "error"}),
 			},
 		},
 		{
 			name: "lifecycle signature (no non-ctx params)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Start", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "error"}),
 			},
 		},
 		{
 			name: "three returns including error (MultiReader territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Save", Package: "x",
-				Params: []*node.Param{
-					{Name: "v", Type: &node.TypeRef{Name: "Article", Package: "x"}},
+				Params: []*sdk.Param{
+					{Name: "v", Type: &sdk.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: node.AnonReturns(
-					&node.TypeRef{Name: "R1", Package: "x"},
-					&node.TypeRef{Name: "R2", Package: "x"},
-					&node.TypeRef{Name: "error"},
+				Returns: sdk.AnonReturns(
+					&sdk.TypeRef{Name: "R1", Package: "x"},
+					&sdk.TypeRef{Name: "R2", Package: "x"},
+					&sdk.TypeRef{Name: "error"},
 				),
 			},
 		},
@@ -143,55 +141,55 @@ func TestDetector_RejectsNonWriter(t *testing.T) {
 	}
 }
 
-// writerFunc builds a free [node.Function] matching the canonical
+// writerFunc builds a free [sdk.Function] matching the canonical
 // writer signature. withResult enables the (R, error) return
 // variant; withCtx prepends a leading context parameter.
-func writerFunc(name string, withCtx, withResult bool) *node.Function {
-	params := []*node.Param{
-		{Name: "v", Type: &node.TypeRef{Name: "Article", Package: "x"}},
+func writerFunc(name string, withCtx, withResult bool) *sdk.Function {
+	params := []*sdk.Param{
+		{Name: "v", Type: &sdk.TypeRef{Name: "Article", Package: "x"}},
 	}
 	if withCtx {
-		params = append([]*node.Param{
-			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+		params = append([]*sdk.Param{
+			{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 		}, params...)
 	}
-	returns := []*node.TypeRef{{Name: "error"}}
+	returns := []*sdk.TypeRef{{Name: "error"}}
 	if withResult {
-		returns = []*node.TypeRef{
+		returns = []*sdk.TypeRef{
 			{Name: "Result", Package: "x"},
 			{Name: "error"},
 		}
 	}
-	return &node.Function{
+	return &sdk.Function{
 		Name: name, Package: "x",
 		Params:  params,
-		Returns: node.AnonReturns(returns...),
+		Returns: sdk.AnonReturns(returns...),
 	}
 }
 
-// writerMethod builds a [node.Method] matching the canonical
+// writerMethod builds a [sdk.Method] matching the canonical
 // writer signature.
-func writerMethod(name string, withCtx bool) *node.Method {
+func writerMethod(name string, withCtx bool) *sdk.Method {
 	fn := writerFunc(name, withCtx, false)
-	return &node.Method{
+	return &sdk.Method{
 		Name: fn.Name, Params: fn.Params, Returns: fn.Returns,
 	}
 }
 
 // runDetectFunc wires fn into a single-function package and runs
 // the writer detector through the umbrella shape plugin.
-func runDetectFunc(t *testing.T, fn *node.Function) {
+func runDetectFunc(t *testing.T, fn *sdk.Function) {
 	t.Helper()
-	runDetect(t, &node.Package{
+	runDetect(t, &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{fn},
+		Functions: []*sdk.Function{fn},
 	})
 }
 
 // runDetect adds pkg to a fresh store, stamps the Go frontend
 // marker on the package, and runs the umbrella shape plugin
 // configured with this package's detector.
-func runDetect(t *testing.T, pkg *node.Package) {
+func runDetect(t *testing.T, pkg *sdk.Package) {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -213,7 +211,7 @@ func runDetect(t *testing.T, pkg *node.Package) {
 // assertShape fails when the structural-shape meta keys on bag
 // don't match the supplied want values. Empty wantValue means
 // "value must be absent".
-func assertShape(t *testing.T, bag *meta.Bag, wantName, wantValue string) {
+func assertShape(t *testing.T, bag *sdk.Bag, wantName, wantValue string) {
 	t.Helper()
 	if got := shape.Get(bag); got != wantName {
 		t.Fatalf("shape = %q, want %q", got, wantName)

@@ -18,16 +18,13 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
 
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // AssertIdentity fails the test when m does not match the
 // expected name + params. Use as the canonical body of every
@@ -50,8 +47,8 @@ func AssertIdentity(t *testing.T, m shape.Mixin, wantName string, wantParams []s
 
 // HostDirective builds a `+gen:mixin <name> [<param>=<value>]...`
 // directive for test fixtures.
-func HostDirective(mixinName string, params map[string]string) *directive.Directive {
-	d := &directive.Directive{
+func HostDirective(mixinName string, params map[string]string) *sdk.Directive {
+	d := &sdk.Directive{
 		Name: shape.MixinDirectiveName,
 		Args: []string{mixinName},
 	}
@@ -65,11 +62,11 @@ func HostDirective(mixinName string, params map[string]string) *directive.Direct
 // RunPipeline wires a single-function package into a fresh store,
 // stamps the "golang" frontend marker, and runs the umbrella
 // plugin with m as the sole registered mixin. Returns fn's bag.
-func RunPipeline(t *testing.T, m shape.Mixin, fn *node.Function) *meta.Bag {
+func RunPipeline(t *testing.T, m shape.Mixin, fn *sdk.Function) *sdk.Bag {
 	t.Helper()
-	pkg := &node.Package{
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{fn},
+		Functions: []*sdk.Function{fn},
 	}
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -94,7 +91,7 @@ func RunPipeline(t *testing.T, m shape.Mixin, fn *node.Function) *meta.Bag {
 // sequence with m as the sole registered mixin. Use for testing
 // [shape.Mixin.SiblingParams] resolution where the test fixture
 // needs more than one callable in scope.
-func RunWithResolver(t *testing.T, m shape.Mixin, pkg *node.Package) {
+func RunWithResolver(t *testing.T, m shape.Mixin, pkg *sdk.Package) {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -118,7 +115,7 @@ func RunWithResolver(t *testing.T, m shape.Mixin, pkg *node.Package) {
 
 // AssertAttached fails when mixinName is not in the [shape.Mixins]
 // list on bag.
-func AssertAttached(t *testing.T, bag *meta.Bag, mixinName string) {
+func AssertAttached(t *testing.T, bag *sdk.Bag, mixinName string) {
 	t.Helper()
 	got := shape.Mixins(bag)
 	if !slices.Contains(got, mixinName) {
@@ -128,7 +125,7 @@ func AssertAttached(t *testing.T, bag *meta.Bag, mixinName string) {
 
 // AssertParam fails when the param stamp for (mixinName, param)
 // on bag does not equal want.
-func AssertParam(t *testing.T, bag *meta.Bag, mixinName, param, want string) {
+func AssertParam(t *testing.T, bag *sdk.Bag, mixinName, param, want string) {
 	t.Helper()
 	got, ok := shape.MixinParamKey(mixinName, param).Get(bag)
 	if !ok {

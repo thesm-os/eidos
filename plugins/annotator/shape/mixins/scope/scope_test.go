@@ -6,10 +6,9 @@ package scope_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/internal/mixintest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scope"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestMixin(t *testing.T) {
@@ -22,10 +21,10 @@ func TestMixin(t *testing.T) {
 
 	t.Run("pipeline stamps name param", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Begin", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					mixintest.HostDirective(scope.Name, map[string]string{
 						"name": "request",
 					}),

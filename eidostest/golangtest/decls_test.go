@@ -243,6 +243,96 @@ func TestDoc(t *testing.T) {
 	})
 }
 
+func TestDocLacks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts a doc that promises nothing extra", func(t *testing.T) {
+		t.Parallel()
+		parse(t).AssertType(t, "StoreStub").AssertDocLacks(t, "records every call")
+	})
+
+	t.Run("rejects a doc still promising a withheld guarantee", func(t *testing.T) {
+		t.Parallel()
+		// Nothing else sees this: the code is right, the doc is a
+		// comment, and a reader who believes the sentence stops looking
+		// for the guarantee anywhere else.
+		s := probe(t)
+		parse(t).AssertType(t, "StoreStub").AssertDocLacks(s, "stands in for Store")
+		if !s.failed || !strings.Contains(s.msg, "must not") {
+			t.Fatalf("AssertDocLacks = %v, %q", s.failed, s.msg)
+		}
+	})
+}
+
+func TestVars(t *testing.T) {
+	t.Parallel()
+
+	t.Run("finds the declaration a registry generator's whole output is", func(t *testing.T) {
+		t.Parallel()
+		parseChain(t).AssertVar(t, "OrdersMiddleware").
+			AssertDoc(t, "chain every contributor rendered into")
+	})
+
+	t.Run("lists the vars when the name is absent", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		parseChain(t).AssertVar(s, "Absent")
+		if !s.failed || !strings.Contains(s.msg, "ErrUnknownStatus") {
+			t.Fatalf("message %q does not list the vars", s.msg)
+		}
+	})
+
+	t.Run("declines to accept a const of the same name", func(t *testing.T) {
+		t.Parallel()
+		// A consumer can take the address of one and not the other, so
+		// the two are not interchangeable and the failure should say
+		// which was found rather than that nothing was.
+		s := probe(t)
+		parseChain(t).AssertVar(s, "MaxChain")
+		if !s.failed || !strings.Contains(s.msg, "const") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
+
+	t.Run("rejects a var that must not be there", func(t *testing.T) {
+		t.Parallel()
+		parseChain(t).AssertNoVar(t, "Absent")
+		s := probe(t)
+		parseChain(t).AssertNoVar(s, "ErrUnknownStatus")
+		if !s.failed {
+			t.Fatal("AssertNoVar accepted a declared var")
+		}
+	})
+
+	t.Run("declines a signature question a var has no answer to", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		parseChain(t).AssertVar(t, "OrdersMiddleware").Signature(s, "()")
+		if !s.failed || !strings.Contains(s.msg, "a variable") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
+
+	t.Run("chains off an absent var without panicking", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		parseChain(t).AssertVar(s, "Absent").AssertDoc(s, "x").AssertDocLacks(s, "y")
+	})
+}
+
+func TestDeclSource(t *testing.T) {
+	t.Parallel()
+
+	t.Run("carries the file back for a chained narrowing", func(t *testing.T) {
+		t.Parallel()
+		// Establishing that a declaration exists and then narrowing into
+		// it is one thought; without this it is two statements or one
+		// dropped assertion.
+		parse(t).AssertType(t, "StoreStub").Source().
+			InMethod(t, "StoreStub", "Get").AssertContains(t, "answer(s.OnGet)")
+	})
+}
+
 func TestNoFunc(t *testing.T) {
 	t.Parallel()
 

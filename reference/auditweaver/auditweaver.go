@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package auditweaver appends an audit-record call to the
-// [emit.Method.Prebody] slot of every method in the emit store —
+// [sdk.EmitMethod.Prebody] slot of every method in the emit store —
 // a cross-cutting concern paired with the debug-weaver entry
 // trace. The plugin runs in [sdk.GeneratorCrossCutting] and
 // declares `Requires: ["trace"]` so plan resolution orders it after
@@ -16,8 +16,8 @@
 // [Options.Package] selects the import path of the audit package
 // the rendered call references, and [Options.Func] selects the
 // function on that package. The renderer registers the import on
-// the host file's import set via [emit.NewExternal] — the same
-// flow [emit.External] type references use — so the rendered output
+// the host file's import set via [sdk.NewExternal] — the same
+// flow [sdk.External] type references use — so the rendered output
 // is structurally correct without any plugin-side import-management
 // scaffolding.
 //
@@ -29,12 +29,10 @@ package auditweaver
 
 import (
 	"embed"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
-	"go.thesmos.sh/eidos/node"
+	"go.thesmos.sh/eidos/reference/debugweaver"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -52,8 +50,6 @@ const Version = "1.0.0"
 // `define` name in templates/golang/auditweaver.record.tmpl.
 const Kind sdk.Kind = "auditweaver.record"
 
-const langGo = "golang"
-
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
 
@@ -62,14 +58,16 @@ const Capability = "audit"
 
 // RequiresTrace names the upstream capability this plugin depends
 // on so the plan orders the trace contributor (typically
-// debug-weaver) first.
-const RequiresTrace = "trace"
+// debug-weaver) first. It aliases the providing plugin's published
+// const rather than repeating the label, so the two cannot drift
+// into an ordering that silently stops holding.
+const RequiresTrace = debugweaver.Capability
 
 // DirectiveName is the bare directive name read from emit methods
 // to suppress the audit contribution on a per-method basis.
 const DirectiveName sdk.DirectiveName = "audit"
 
-// EntryID is the [emit.Provenance.ID] stamped on every audit-weaver
+// EntryID is the [sdk.EmitProvenance.ID] stamped on every audit-weaver
 // prebody contribution. Other cross-cutting plugins may position
 // themselves relative to the audit record through
 // `builder.Before` / `builder.After`.
@@ -113,17 +111,17 @@ type Options struct {
 }
 
 // Record is the audit call this plugin contributes, as a
-// plugin-defined emit kind rather than a hand-assembled [emit.Stmt].
+// plugin-defined emit kind rather than a hand-assembled [sdk.Stmt].
 //
-// The prebody slot it lands in is constrained to [emit.KindStmt], so
-// the contribution is wrapped by [emit.NewRenderStmt]: the wrapper
+// The prebody slot it lands in is constrained to [sdk.EmitKindStmt], so
+// the contribution is wrapped by [sdk.NewRenderStmt]: the wrapper
 // satisfies the slot, and the backend renders it by dispatching to the
 // template registered under this Kind. That is what lets the plugin own
 // its own spelling — the alternative is encoding the call shape in Go
-// against the [emit.Stmt] union, which no other reference contributor
+// against the [sdk.Stmt] union, which no other reference contributor
 // does.
 //
-// The three fields are [emit.Expr] rather than plain strings so the
+// The three fields are [sdk.Expr] rather than plain strings so the
 // backend performs the literal escaping and the import registration.
 // Holding raw text here and interpolating it in the template would
 // re-implement both, badly.
@@ -132,57 +130,70 @@ type Record struct {
 
 	// FuncRef is the audit function the record calls, as an external
 	// reference. Rendering it registers the import on the host file.
-	FuncRef *emit.Expr
+	FuncRef *sdk.Expr
 
 	// Format is the printf-style first argument.
-	Format *emit.Expr
+	Format *sdk.Expr
 
 	// Subject is the fully-qualified "<Type>.<Method>" the record
 	// names.
-	Subject *emit.Expr
+	Subject *sdk.Expr
 }
 
 // Kind binds this value to its template.
 func (*Record) Kind() sdk.Kind { return Kind }
 
-// Plugin is the cross-cutting audit-weaver.
+// Plugin is the cross-cutting audit-weaver. The zero value is
+// unusable; go through [New] so the embedded holder binds to the
+// options field.
 type Plugin struct {
+	*sdkgo.Base
 	*sdk.Holder[Options]
 	opts Options
 }
 
 // New returns a fresh plugin instance with the options holder
 // bound.
+//
+// It ships a template but declares no [sdk.Output], and so needs no
+// [sdk.FilenameProvider]: templates say how a value renders, outputs
+// say where a file lands, and this plugin renders inside a file it
+// does not own.
+//
+// The cross-cutting bucket runs it after the foundation and
+// composition generators that produce the methods it weaves into.
+// Requires names [RequiresTrace] so plan resolution orders the trace
+// contributor first, which is what puts the debug trace above the
+// audit record in the rendered prebody.
+//
+// The shared Go helpers the builder registers are namespaced under
+// [sdkgo.FuncPrefix] of this plugin's name, so two plugins carrying
+// the same bundle never collide. The hyphen in `audit-weaver` is
+// folded to an underscore there — text/template accepts only
+// identifier-shaped function names, and the plugin name is a
+// user-visible identity that provenance and directive scoping key
+// on, so it is the prefix that bends, not the name.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{Base: sdkgo.NewPlugin(Name).
+		Templates(goTemplates).
+		Version(Version).
+		Priority(sdk.GeneratorCrossCutting).
+		Provides(Capability).
+		Requires(RequiresTrace).
+		Directives(directives()...).
+		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the cross-cutting bucket.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorCrossCutting }
-
-// Provides advertises the audit capability.
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires declares the trace capability dependency so the plan
-// orders the trace contributor first.
-func (*Plugin) Requires() []string { return []string{RequiresTrace} }
-
-// Directives declares the `-gen:audit` schema. The positive form
+// directives declares the `-gen:audit` schema. The positive form
 // is allowed by the framework default but carries no plugin
 // semantics — audit-weaver applies to every method unconditionally
 // unless suppressed.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(node.KindMethod).
+			On(sdk.NodeKindMethod).
 			Describe("Suppresses (-) the audit record on the host method.").
 			Build(),
 	}
@@ -193,7 +204,7 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 // The call resolves to `<Options.Package>.<Options.Func>(<format>,
 // "<Type>.<Method>")` — the renderer registers the import for
 // Options.Package on the host file's import set via the
-// [emit.NewExternal] expression.
+// [sdk.NewExternal] expression.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name)
 	for m := range ctx.Reader.EmitMethods().All() {
@@ -203,45 +214,18 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		record := &Record{
 			BaseEmit: sdk.BaseEmit{SetByName: c.SetBy(), SourcePos: m.Pos()},
 			FuncRef:  sdk.NewExternal(p.pkg(), p.funcName()),
-			Format:   emit.NewLiteralString(p.format()),
-			Subject:  emit.NewLiteralString(ownerName(m) + "." + m.Name),
+			Format:   sdk.NewLiteralString(p.format()),
+			Subject:  sdk.NewLiteralString(ownerName(m) + "." + m.Name),
 		}
 		// AppendPrebody can only fail when host is nil or carries
-		// an unsupported kind — neither possible for the *emit.Method
+		// an unsupported kind — neither possible for the *sdk.EmitMethod
 		// values EmitMethods yields, and the render wrapper reports
-		// emit.KindStmt by construction. The Append is therefore
+		// sdk.EmitKindStmt by construction. The Append is therefore
 		// infallible at this call site.
-		_ = c.AppendPrebody(m, emit.NewRenderStmt(record), EntryID)
+		_ = c.AppendPrebody(m, sdk.NewRenderStmt(record), EntryID)
 	}
 	return nil
 }
-
-// Templates ships the record template.
-//
-// A contributor shipping a template needs no [sdk.FilenameProvider]:
-// templates say how a value renders, outputs say where a file lands,
-// and this plugin renders inside a file it does not own.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang != langGo {
-		return nil, false
-	}
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
-}
-
-// TemplateFuncs contributes nothing.
-//
-// The shared Go helpers are already merged into the backend's
-// overrideable funcmap, so returning them here re-registers names that
-// exist — a Build-time collision that would stop this plugin and any
-// other plugin doing the same from appearing in one pipeline.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides replaces nothing.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // pkg / funcName / format return the configured option value or
 // the documented default when the option is empty. Centralised so
@@ -273,6 +257,6 @@ func (p *Plugin) format() string {
 // (Struct, Interface, source-side enum / alias for free-standing
 // methods) are uniformly handled by [contract.Owner.OwnerName] —
 // the helper delegates rather than type-switching.
-func ownerName(m *emit.Method) string {
+func ownerName(m *sdk.EmitMethod) string {
 	return m.OwnerName()
 }

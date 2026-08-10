@@ -4,9 +4,8 @@
 package streamreader
 
 import (
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -16,7 +15,7 @@ const Name = "streamreader"
 // `"seq"` for `iter.Seq[V]` or `"seq2"` for `iter.Seq2[V, …]`.
 //
 //nolint:gochecknoglobals // registry-singleton key
-var Variant = meta.NewKey("shape.streamreader.variant", meta.StringParser)
+var Variant = sdk.NewKey("shape.streamreader.variant", sdk.StringParser)
 
 // Detector returns the [shape.Detector] this package contributes.
 func Detector() shape.Detector {
@@ -34,7 +33,7 @@ func Detector() shape.Detector {
 // `iter.Seq[V]` or `iter.Seq2[V, …]` reference. The variant is
 // stamped via [Variant] so consumers can discriminate the two
 // iterator shapes.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if len(returns) != 1 {
 		return shape.Match{}, false

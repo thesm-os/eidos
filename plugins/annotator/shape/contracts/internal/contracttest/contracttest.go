@@ -25,9 +25,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -38,7 +35,7 @@ import (
 // packages without re-implementing the lookup.
 //
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // AssertIdentity fails the test when c does not match the
 // expected name + roles. Use as the canonical body of every
@@ -60,10 +57,10 @@ func AssertIdentity(t *testing.T, c shape.Contract, wantName string, wantRoles [
 // [<partner>=<sibling>]...` directive for test fixtures. The KV
 // map's `role` key is set unconditionally; supply partner roles
 // keyed by role name.
-func HostDirective(contractName, role string, partners map[string]string) *directive.Directive {
+func HostDirective(contractName, role string, partners map[string]string) *sdk.Directive {
 	kv := map[string]string{"role": role}
 	maps.Copy(kv, partners)
-	return &directive.Directive{
+	return &sdk.Directive{
 		Name: shape.ContractDirectiveName,
 		Args: []string{contractName},
 		KV:   kv,
@@ -74,7 +71,7 @@ func HostDirective(contractName, role string, partners map[string]string) *direc
 // marker and runs the full umbrella → resolver → validator
 // sequence with c as the sole registered contract. Returns the
 // accumulated diagnostic snapshot for assertion.
-func RunPipeline(t *testing.T, c shape.Contract, pkg *node.Package) []diag.Diag {
+func RunPipeline(t *testing.T, c shape.Contract, pkg *sdk.Package) []sdk.Diag {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -103,7 +100,7 @@ func RunPipeline(t *testing.T, c shape.Contract, pkg *node.Package) []diag.Diag 
 
 // AssertRole fails when the role stamp for contractName on bag
 // does not equal want.
-func AssertRole(t *testing.T, bag *meta.Bag, contractName, want string) {
+func AssertRole(t *testing.T, bag *sdk.Bag, contractName, want string) {
 	t.Helper()
 	got, ok := shape.ContractRoleKey(contractName).Get(bag)
 	if !ok {
@@ -116,7 +113,7 @@ func AssertRole(t *testing.T, bag *meta.Bag, contractName, want string) {
 
 // AssertPartner fails when the partner stamp for (contractName,
 // role) on bag does not equal want.
-func AssertPartner(t *testing.T, bag *meta.Bag, contractName, role, want string) {
+func AssertPartner(t *testing.T, bag *sdk.Bag, contractName, role, want string) {
 	t.Helper()
 	got, ok := shape.ContractPartnerKey(contractName, role).Get(bag)
 	if !ok {
@@ -131,7 +128,7 @@ func AssertPartner(t *testing.T, bag *meta.Bag, contractName, role, want string)
 // both sev and contains substr in its message. The failure
 // includes the full diagnostic list so the reader sees what was
 // (or wasn't) emitted.
-func AssertContainsDiag(t *testing.T, diags []diag.Diag, sev diag.Severity, substr string) {
+func AssertContainsDiag(t *testing.T, diags []sdk.Diag, sev sdk.Severity, substr string) {
 	t.Helper()
 	for _, d := range diags {
 		if d.Severity == sev && strings.Contains(d.Message, substr) {
@@ -142,14 +139,14 @@ func AssertContainsDiag(t *testing.T, diags []diag.Diag, sev diag.Severity, subs
 		sev, substr, len(diags), diags)
 }
 
-// AssertNoErrorDiag fails when any [diag.Error] (or higher)
+// AssertNoErrorDiag fails when any [sdk.SeverityError] (or higher)
 // diagnostic appears in diags. Use as the happy-path negative
 // assertion that a valid contract membership produces no
 // validator failures.
-func AssertNoErrorDiag(t *testing.T, diags []diag.Diag) {
+func AssertNoErrorDiag(t *testing.T, diags []sdk.Diag) {
 	t.Helper()
 	for _, d := range diags {
-		if d.Severity >= diag.Error {
+		if d.Severity >= sdk.SeverityError {
 			t.Fatalf("unexpected error diagnostic: %+v", d)
 		}
 	}

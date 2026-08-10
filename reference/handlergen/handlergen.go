@@ -6,12 +6,9 @@ package handlergen
 import (
 	"embed"
 	"fmt"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -55,8 +52,6 @@ const (
 // GoSuffix is the per-source trailer Layout appends for this plugin.
 const GoSuffix = "_handler.go"
 
-const langGo = "golang"
-
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
 
@@ -83,114 +78,88 @@ type Handler struct {
 	// WriterRef and RequestRef are held as refs rather than rendered
 	// strings so the backend registers their imports and the template
 	// carries no import block.
-	WriterRef  emit.Ref
-	RequestRef emit.Ref
+	WriterRef  sdk.Ref
+	RequestRef sdk.Ref
 
-	pre, post *emit.Slot
+	pre, post *sdk.Slot
 }
 
 // Kind binds this value to its template.
 func (*Handler) Kind() sdk.Kind { return Kind }
 
 // Prebody returns the slot rendered before this plugin's statements.
-func (h *Handler) Prebody() *emit.Slot {
+func (h *Handler) Prebody() *sdk.Slot {
 	if h.pre == nil {
-		h.pre = emit.NewSlot(PrebodySlot, "")
+		h.pre = sdk.NewSlot(PrebodySlot, "")
 		h.pre.Owner = h
 	}
 	return h.pre
 }
 
 // Postbody returns the slot rendered after this plugin's statements.
-func (h *Handler) Postbody() *emit.Slot {
+func (h *Handler) Postbody() *sdk.Slot {
 	if h.post == nil {
-		h.post = emit.NewSlot(PostbodySlot, "")
+		h.post = sdk.NewSlot(PostbodySlot, "")
 		h.post.Owner = h
 	}
 	return h.post
 }
 
-// Slot satisfies [emit.SlotHost] so the backend's `slot` helper can
+// Slot satisfies [sdk.SlotHost] so the backend's `slot` helper can
 // reach either slot by name. An unknown name yields an empty slot
 // rather than nil, so a template asking for one this kind does not
 // have renders nothing instead of failing.
-func (h *Handler) Slot(name string) *emit.Slot {
+func (h *Handler) Slot(name string) *sdk.Slot {
 	switch name {
 	case PrebodySlot:
 		return h.Prebody()
 	case PostbodySlot:
 		return h.Postbody()
 	default:
-		return emit.NewSlot(name, "")
+		return sdk.NewSlot(name, "")
 	}
 }
 
-var _ emit.SlotHost = (*Handler)(nil)
+var _ sdk.SlotHost = (*Handler)(nil)
 
 // Plugin emits the handler every other plugin in the ensemble extends.
-type Plugin struct{}
+type Plugin struct{ *sdkgo.Base }
 
 // New returns a plugin instance.
-func New() *Plugin { return &Plugin{} }
+//
+// It declares one [sdk.Output], carrying [GoSuffix]: this plugin owns
+// the handler file, and the suffix is the whole of what Layout needs to
+// compose a filename from a source file. Contributors into that file
+// declare no output of their own — they append to the value this plugin
+// emitted, so a run without handlergen writes nothing rather than an
+// orphan half-file.
+//
+// The foundation bucket is where it has to run: it emits the value
+// every later plugin contributes to, so it must run before any of them.
+// Provides publishes the label those contributors order against, and
+// nothing is required back — first in the graph depends on no one.
+func New() *Plugin {
+	return &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, sdk.Output{Suffix: GoSuffix}).
+		Version(Version).
+		Priority(sdk.GeneratorFoundation).
+		Provides(Capability).
+		Directives(directives()...).
+		Build()}
+}
 
-// Name satisfies [sdk.Plugin].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the foundation bucket: it emits the
-// value every later plugin contributes to, so it must run first.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorFoundation }
-
-// Provides publishes the capability contributors order against.
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires reports no dependencies.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares `+gen:handler`, which this plugin owns.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+// directives declares `+gen:handler`, which this plugin owns — every
+// other plugin in the ensemble reads the stamp rather than redeclaring
+// it, because a directive name may be registered only once per run.
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(node.KindStruct).
+			On(sdk.NodeKindStruct).
 			DenyNegation().
 			Describe("Emit an HTTP handler for this struct. Owned by handlergen; other " +
 				"plugins in the ensemble read the stamp rather than redeclaring it.").
 			Build(),
 	}
 }
-
-// Outputs declares the single file this plugin owns.
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == langGo {
-		return []sdk.Output{{Suffix: GoSuffix}}
-	}
-	return nil
-}
-
-// Templates ships the handler template.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang != langGo {
-		return nil, false
-	}
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
-}
-
-// TemplateFuncs contributes nothing.
-//
-// The shared Go helpers are already merged into the backend's
-// overrideable funcmap, so returning them re-registers existing names —
-// a Build-time ErrTemplateFuncCollision, which would mean this plugin
-// could not appear beside any other that did the same.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides replaces nothing.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Generate emits one handler per annotated struct.
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
@@ -207,8 +176,8 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			},
 			TypeName:   src.Name + "Handler",
 			Source:     src.Name,
-			WriterRef:  emit.External("net/http", "ResponseWriter"),
-			RequestRef: emit.Ptr(emit.External("net/http", "Request")),
+			WriterRef:  sdk.External("net/http", "ResponseWriter"),
+			RequestRef: sdk.Ptr(sdk.External("net/http", "Request")),
 		}
 		if err := ctx.Store.Emit().AppendOriginSlot(
 			src, "top", h, c.Provenance(Name+".handler."+src.Name),

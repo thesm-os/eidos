@@ -34,6 +34,9 @@
 // interface-satisfaction assertion against the generated type, which
 // catches a dropped variadic marker or a method lost through an embed
 // — both of which compile perfectly and satisfy nothing.
+// [Generated.AssertDoesNotSatisfy] states the same thing the other way
+// round, which is the claim a shape detector is really making: not
+// that the canonical shape passes but that every near miss fails.
 // [Generated.AssertTestsPass] compiles and *runs* a generated
 // `_test.go`, which is the only way a generator that emits test
 // suites ever learns whether they pass.
@@ -48,7 +51,8 @@
 // Build the module once per fixture and let the structural
 // assertions carry the fine-grained work:
 //
-//	gen := golangtest.Rendered(t, renderFixture(t)).WithSource(sourcePkg)
+//	gen := golangtest.Render(t, backendgolang.New(), pkg, myplugin.New()).
+//	    WithSource(sourcePkg)
 //
 //	t.Run("emits Go the consumer can build", func(t *testing.T) {
 //		gen.AssertCompiles(t)   // once
@@ -58,7 +62,17 @@
 //	})
 //
 // A [Generated] caches its built module, so several toolchain
-// assertions over one fixture pay the setup once.
+// assertions over one fixture pay the setup once. Configure it before
+// sharing it — [Generated.WithSource] and its siblings — and its
+// assertions are then safe to run from parallel subtests.
+//
+// [Render] is the whole path from a fixture package to the files it
+// produced. It takes the backend rather than constructing one, which
+// is what keeps this package out of backend/golang's module graph —
+// see [Driver] for why that constraint is load-bearing. Reach for
+// [Driver] when the run needs a builder option, or when the test
+// asserts on diagnostics and wants the pipeline rather than the
+// files; [Rendered] adopts a pipeline a test drove itself.
 //
 // # Reading a failure
 //

@@ -8,9 +8,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/persister"
 	"go.thesmos.sh/eidos/sdk"
@@ -18,7 +15,7 @@ import (
 )
 
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // TestContract_Identity pins the package-exported constants
 // against the [shape.Contract] value the constructor returns.
@@ -42,10 +39,10 @@ func TestContract_Identity(t *testing.T) {
 func TestContract_DirectiveStamping(t *testing.T) {
 	t.Parallel()
 
-	save := &node.Function{
+	save := &sdk.Function{
 		Name: "Save", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				{
 					Name: shape.ContractDirectiveName,
 					Args: []string{persister.Name},
@@ -57,9 +54,9 @@ func TestContract_DirectiveStamping(t *testing.T) {
 			},
 		},
 	}
-	pkg := &node.Package{
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{save},
+		Functions: []*sdk.Function{save},
 	}
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {

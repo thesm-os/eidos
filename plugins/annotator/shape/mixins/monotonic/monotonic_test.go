@@ -6,10 +6,9 @@ package monotonic_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/internal/mixintest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonic"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestMixin_Identity(t *testing.T) {
@@ -23,10 +22,10 @@ func TestMixin_Identity(t *testing.T) {
 // correctly.
 func TestMixin_PipelineStamping(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Tick", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				mixintest.HostDirective(monotonic.Name, nil),
 			},
 		},

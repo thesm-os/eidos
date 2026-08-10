@@ -4,8 +4,8 @@
 package mutator
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -26,7 +26,7 @@ func Detector() shape.Detector {
 // exactly one non-context parameter, zero return values. Strips
 // the `*V` pointer wrapping when present so the stamped value
 // type names the underlying element.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if len(returns) != 0 {
 		return shape.Match{}, false

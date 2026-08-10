@@ -3,7 +3,7 @@
 
 package shape
 
-import "go.thesmos.sh/eidos/node"
+import "go.thesmos.sh/eidos/sdk"
 
 // The helpers in this file are the Go-flavoured query primitives
 // a Go-language [DetectFunc] composes. They are intentionally lazy
@@ -25,11 +25,11 @@ import "go.thesmos.sh/eidos/node"
 // callable node kinds. Returns `(nil, nil)` for any other node
 // type so detectors can early-return on a falsy length check
 // without a separate type-assertion ladder.
-func GoCallable(n node.Node) (params []*node.Param, returns []*node.Return) {
+func GoCallable(n sdk.Node) (params []*sdk.Param, returns []*sdk.Return) {
 	switch x := n.(type) {
-	case *node.Function:
+	case *sdk.Function:
 		return x.Params, x.Returns
-	case *node.Method:
+	case *sdk.Method:
 		return x.Params, x.Returns
 	}
 	return nil, nil
@@ -37,14 +37,14 @@ func GoCallable(n node.Node) (params []*node.Param, returns []*node.Return) {
 
 // GoHasContext reports whether the first parameter is the
 // Go-native `context.Context` type.
-func GoHasContext(params []*node.Param) bool {
+func GoHasContext(params []*sdk.Param) bool {
 	return len(params) > 0 && isGoContextRef(params[0].Type)
 }
 
 // GoStripContext returns params with a leading `context.Context`
 // parameter dropped. Returns params unchanged when no context
 // parameter is present.
-func GoStripContext(params []*node.Param) []*node.Param {
+func GoStripContext(params []*sdk.Param) []*sdk.Param {
 	if GoHasContext(params) {
 		return params[1:]
 	}
@@ -55,7 +55,7 @@ func GoStripContext(params []*node.Param) []*node.Param {
 // variadic, or nil otherwise. Useful for detectors that want to
 // peel a `...T` off the end before classifying the remaining
 // fixed parameters.
-func GoTrailingVariadic(params []*node.Param) *node.Param {
+func GoTrailingVariadic(params []*sdk.Param) *sdk.Param {
 	n := len(params)
 	if n == 0 || !params[n-1].Variadic {
 		return nil
@@ -66,7 +66,7 @@ func GoTrailingVariadic(params []*node.Param) *node.Param {
 // GoStripVariadic returns params with a trailing variadic
 // parameter dropped. Returns params unchanged when no variadic
 // parameter is present.
-func GoStripVariadic(params []*node.Param) []*node.Param {
+func GoStripVariadic(params []*sdk.Param) []*sdk.Param {
 	if GoTrailingVariadic(params) == nil {
 		return params
 	}
@@ -75,7 +75,7 @@ func GoStripVariadic(params []*node.Param) []*node.Param {
 
 // GoErrorIndex returns the index of the first bare builtin
 // `error` return, or -1 when no error return is present.
-func GoErrorIndex(returns []*node.Return) int {
+func GoErrorIndex(returns []*sdk.Return) int {
 	for i, r := range returns {
 		if r != nil && isGoErrorRef(r.Type) {
 			return i
@@ -86,7 +86,7 @@ func GoErrorIndex(returns []*node.Return) int {
 
 // GoHasError reports whether any return is the bare builtin
 // `error` type.
-func GoHasError(returns []*node.Return) bool {
+func GoHasError(returns []*sdk.Return) bool {
 	return GoErrorIndex(returns) >= 0
 }
 
@@ -97,23 +97,23 @@ func GoHasError(returns []*node.Return) bool {
 // on the type vector — arity, element kinds, error position — and a
 // return's binding name has no bearing on which shape a signature
 // is. Projecting here keeps that the common case while leaving the
-// names reachable on [node.Method.Returns] for the generators that
+// names reachable on [sdk.Method.Returns] for the generators that
 // derive identifiers from them.
-func GoStripError(returns []*node.Return) []*node.TypeRef {
+func GoStripError(returns []*sdk.Return) []*sdk.TypeRef {
 	i := GoErrorIndex(returns)
 	if i < 0 {
-		return node.ReturnTypes(returns)
+		return sdk.ReturnTypes(returns)
 	}
-	kept := make([]*node.Return, 0, len(returns)-1)
+	kept := make([]*sdk.Return, 0, len(returns)-1)
 	kept = append(kept, returns[:i]...)
 	kept = append(kept, returns[i+1:]...)
-	return node.ReturnTypes(kept)
+	return sdk.ReturnTypes(kept)
 }
 
 // GoIterSeqElem returns the element type V when r is
 // `iter.Seq[V]` and nil otherwise. Used by detectors that
 // recognise the single-value iterator shape.
-func GoIterSeqElem(r *node.TypeRef) *node.TypeRef {
+func GoIterSeqElem(r *sdk.TypeRef) *sdk.TypeRef {
 	if !isIterSeqRef(r) || len(r.TypeArgs) == 0 {
 		return nil
 	}
@@ -123,7 +123,7 @@ func GoIterSeqElem(r *node.TypeRef) *node.TypeRef {
 // GoIterSeq2Args returns the (K, V) type args when r is
 // `iter.Seq2[K, V]` and (nil, nil) otherwise. Used by detectors
 // that recognise the key/value iterator shape.
-func GoIterSeq2Args(r *node.TypeRef) (*node.TypeRef, *node.TypeRef) {
+func GoIterSeq2Args(r *sdk.TypeRef) (*sdk.TypeRef, *sdk.TypeRef) {
 	if !isIterSeq2Ref(r) || len(r.TypeArgs) < 2 {
 		return nil, nil
 	}
@@ -133,7 +133,7 @@ func GoIterSeq2Args(r *node.TypeRef) (*node.TypeRef, *node.TypeRef) {
 // GoIsBool reports whether r is the bare builtin `bool` type.
 // Used by detectors that recognise sentinel-bool return slots
 // (Predicate, ReaderWithBool, Lookup).
-func GoIsBool(r *node.TypeRef) bool {
+func GoIsBool(r *sdk.TypeRef) bool {
 	if r == nil {
 		return false
 	}
@@ -143,8 +143,8 @@ func GoIsBool(r *node.TypeRef) bool {
 // GoSliceElem returns the element type of a slice ref, or nil
 // when r is not a slice. Used by detectors that recognise
 // `[]T`-shaped returns or parameters (BatchReader, …).
-func GoSliceElem(r *node.TypeRef) *node.TypeRef {
-	if r == nil || r.TypeKind != node.TypeRefSlice {
+func GoSliceElem(r *sdk.TypeRef) *sdk.TypeRef {
+	if r == nil || r.TypeKind != sdk.TypeRefSlice {
 		return nil
 	}
 	return r.Elem
@@ -154,8 +154,8 @@ func GoSliceElem(r *node.TypeRef) *node.TypeRef {
 // nil when r is not a pointer. Used by detectors that recognise
 // `*T`-shaped returns (PointerReader, …) or parameters (Mutator
 // in its pointer-receiver variant).
-func GoPointerElem(r *node.TypeRef) *node.TypeRef {
-	if r == nil || r.TypeKind != node.TypeRefPointer {
+func GoPointerElem(r *sdk.TypeRef) *sdk.TypeRef {
+	if r == nil || r.TypeKind != sdk.TypeRefPointer {
 		return nil
 	}
 	return r.Elem
@@ -164,12 +164,12 @@ func GoPointerElem(r *node.TypeRef) *node.TypeRef {
 // GoIsPointerReceiver reports whether m is a method bound to a
 // pointer receiver (`func (r *Repo) Save(...)`). Returns false for
 // value-receiver methods and for interface methods (whose
-// [node.Method.Receiver] is nil).
-func GoIsPointerReceiver(m *node.Method) bool {
+// [sdk.Method.Receiver] is nil).
+func GoIsPointerReceiver(m *sdk.Method) bool {
 	if m == nil || m.Receiver == nil {
 		return false
 	}
-	return m.Receiver.TypeKind == node.TypeRefPointer
+	return m.Receiver.TypeKind == sdk.TypeRefPointer
 }
 
 // QName returns the qualified type spelling for a type ref —
@@ -178,7 +178,7 @@ func GoIsPointerReceiver(m *node.Method) bool {
 // [Match.ValueType]; consumers reading those meta keys get the
 // same form back. Returns empty when r is nil so callers don't
 // need a nil guard before calling.
-func QName(r *node.TypeRef) string {
+func QName(r *sdk.TypeRef) string {
 	if r == nil {
 		return ""
 	}
@@ -191,7 +191,7 @@ func QName(r *node.TypeRef) string {
 // isGoContextRef reports whether r is the Go-native
 // `context.Context` type. The TypeRef carries the source package
 // qualifier verbatim — see the Go frontend's emission contract.
-func isGoContextRef(r *node.TypeRef) bool {
+func isGoContextRef(r *sdk.TypeRef) bool {
 	if r == nil {
 		return false
 	}
@@ -201,7 +201,7 @@ func isGoContextRef(r *node.TypeRef) bool {
 // isGoErrorRef reports whether r is the bare builtin `error`
 // type. The Go frontend emits builtin error as a TypeRef with
 // empty Package and Name "error".
-func isGoErrorRef(r *node.TypeRef) bool {
+func isGoErrorRef(r *sdk.TypeRef) bool {
 	if r == nil {
 		return false
 	}
@@ -209,7 +209,7 @@ func isGoErrorRef(r *node.TypeRef) bool {
 }
 
 // isIterSeqRef reports whether r is `iter.Seq[V]`.
-func isIterSeqRef(r *node.TypeRef) bool {
+func isIterSeqRef(r *sdk.TypeRef) bool {
 	if r == nil {
 		return false
 	}
@@ -217,7 +217,7 @@ func isIterSeqRef(r *node.TypeRef) bool {
 }
 
 // isIterSeq2Ref reports whether r is `iter.Seq2[K, V]`.
-func isIterSeq2Ref(r *node.TypeRef) bool {
+func isIterSeq2Ref(r *sdk.TypeRef) bool {
 	if r == nil {
 		return false
 	}

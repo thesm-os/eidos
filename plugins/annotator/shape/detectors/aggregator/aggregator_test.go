@@ -6,9 +6,9 @@ package aggregator_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/aggregator"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -27,10 +27,10 @@ func TestDetector_Matches(t *testing.T) {
 
 	t.Run("(ctx) (T, error)", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Count", Package: "x",
-			Params: []*node.Param{dt.Param("ctx", dt.Ctx())},
-			Returns: node.AnonReturns(
+			Params: []*sdk.Param{dt.Param("ctx", dt.Ctx())},
+			Returns: sdk.AnonReturns(
 				dt.Named("int"),
 				dt.Err(),
 			),
@@ -41,10 +41,10 @@ func TestDetector_Matches(t *testing.T) {
 
 	t.Run("(ctx) T", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Count", Package: "x",
-			Params:  []*node.Param{dt.Param("ctx", dt.Ctx())},
-			Returns: node.AnonReturns(dt.Named("int")),
+			Params:  []*sdk.Param{dt.Param("ctx", dt.Ctx())},
+			Returns: sdk.AnonReturns(dt.Named("int")),
 		}
 		bag := dt.RunFn(t, aggregator.Detector(), fn)
 		dt.AssertShape(t, bag, aggregator.Name, "", "int")
@@ -52,9 +52,9 @@ func TestDetector_Matches(t *testing.T) {
 
 	t.Run("() T", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Count", Package: "x",
-			Returns: node.AnonReturns(dt.Named("int")),
+			Returns: sdk.AnonReturns(dt.Named("int")),
 		}
 		bag := dt.RunFn(t, aggregator.Detector(), fn)
 		dt.AssertShape(t, bag, aggregator.Name, "", "int")
@@ -65,22 +65,22 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"has non-ctx param (Reader / ReaderNoError territory)", &node.Function{
+		{"has non-ctx param (Reader / ReaderNoError territory)", &sdk.Function{
 			Name: "Find", Package: "x",
-			Params:  []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: node.AnonReturns(dt.Named("int")),
+			Params:  []*sdk.Param{dt.Param("id", dt.Named("string"))},
+			Returns: sdk.AnonReturns(dt.Named("int")),
 		}},
-		{"two values + error (MultiAggregator territory)", &node.Function{
+		{"two values + error (MultiAggregator territory)", &sdk.Function{
 			Name: "Stats", Package: "x",
-			Returns: node.AnonReturns(
+			Returns: sdk.AnonReturns(
 				dt.Named("int"),
 				dt.Named("int"),
 				dt.Err(),
 			),
 		}},
-		{"void return (Lifecycle / VoidLifecycle territory)", &node.Function{
+		{"void return (Lifecycle / VoidLifecycle territory)", &sdk.Function{
 			Name: "Tick", Package: "x",
 		}},
 	}

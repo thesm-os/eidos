@@ -6,10 +6,9 @@ package cursor_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/cursor"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -21,20 +20,20 @@ func TestContract_Identity(t *testing.T) {
 
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	next := &node.Function{
+	next := &sdk.Function{
 		Name: "Next", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(cursor.Name, "next", map[string]string{
 					"close": "Close",
 				}),
 			},
 		},
 	}
-	closeFn := &node.Function{Name: "Close", Package: "x"}
-	pkg := &node.Package{
+	closeFn := &sdk.Function{Name: "Close", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{next, closeFn},
+		Functions: []*sdk.Function{next, closeFn},
 	}
 	diags := contracttest.RunPipeline(t, cursor.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)

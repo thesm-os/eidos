@@ -4,8 +4,8 @@
 package poisonaccessor
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -24,7 +24,7 @@ func Detector() shape.Detector {
 
 // detectGolang accepts a callable taking nothing and returning a
 // single bare `error`.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if len(params) != 0 || len(returns) != 1 {
 		return shape.Match{}, false

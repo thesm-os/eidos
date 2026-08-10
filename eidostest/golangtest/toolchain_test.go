@@ -42,6 +42,23 @@ func TestAssertCompiles(t *testing.T) {
 		}
 	})
 
+	t.Run("a fixture shared across sibling subtests survives the first one", func(t *testing.T) {
+		t.Parallel()
+		// The shape this package's own docs prescribe — build the module
+		// once, spend it over several assertions — put in the form a test
+		// author naturally writes it: one subtest per asserted behaviour.
+		// A directory cached from the first subtest's TempDir is removed
+		// when that subtest ends, so the second would run `go` somewhere
+		// that no longer exists.
+		shared := gen(t, goodDouble)
+		//nolint:paralleltest // the sequencing is the subject: the stale
+		// directory only exists once the first subtest has ended.
+		t.Run("compiles", func(t *testing.T) { shared.AssertCompiles(t) })
+		//nolint:paralleltest // ditto — running these two concurrently
+		// would leave the first TempDir alive and prove nothing.
+		t.Run("vets", func(t *testing.T) { shared.AssertVets(t) })
+	})
+
 	t.Run("derives the module path from the resolved import path", func(t *testing.T) {
 		t.Parallel()
 		// A companion in an external test package imports the primary by
@@ -92,6 +109,106 @@ func TestAssertSatisfies(t *testing.T) {
 			AssertSatisfies(s, "T", "I")
 		if !s.failed || !strings.Contains(s.msg, "no non-test file") {
 			t.Fatalf("message %q", s.msg)
+		}
+	})
+}
+
+func TestAssertDoesNotSatisfy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts a near miss", func(t *testing.T) {
+		t.Parallel()
+		// The claim a shape detector actually makes. `Print(args
+		// string)` is spelled the way a frontend records `Print(args
+		// ...string)` — element type, marker gone — so every structural
+		// assertion about it passes and only the method set differs.
+		gen(t, variadicDropped).AssertDoesNotSatisfy(t, "PrinterStub", "Printer")
+	})
+
+	t.Run("rejects a type that does implement it", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		gen(t, goodDouble).AssertDoesNotSatisfy(s, "PrinterStub", "Printer")
+		if !s.failed || !strings.Contains(s.msg, "must not") {
+			t.Fatalf("AssertDoesNotSatisfy = %v, %q", s.failed, s.msg)
+		}
+	})
+
+	t.Run("refuses to pass on output that does not build at all", func(t *testing.T) {
+		t.Parallel()
+		// The vacuity this assertion is one step away from: a build that
+		// was already failing fails again with the assertion added, and
+		// "it did not compile" gets read as "it does not implement".
+		broken := strings.Replace(goodDouble, "return nil", "return undefinedHelper()", 1)
+		s := probe(t)
+		gen(t, broken).AssertDoesNotSatisfy(s, "PrinterStub", "Printer")
+		if !s.failed || !strings.Contains(s.msg, "does not build on its own") {
+			t.Fatalf("AssertDoesNotSatisfy passed on unbuildable output: %v, %q", s.failed, s.msg)
+		}
+	})
+
+	t.Run("refuses to pass on a misspelled interface", func(t *testing.T) {
+		t.Parallel()
+		// The same vacuity one level in: the output builds, the
+		// assertion does not, and the reason is a typo in the test
+		// rather than anything about the generated type.
+		s := probe(t)
+		gen(t, variadicDropped).AssertDoesNotSatisfy(s, "PrinterStub", "Printr")
+		if !s.failed || !strings.Contains(s.msg, "other than the method set") {
+			t.Fatalf("AssertDoesNotSatisfy passed on an undefined interface: %v, %q", s.failed, s.msg)
+		}
+	})
+}
+
+func TestAssertSatisfiesAll(t *testing.T) {
+	t.Parallel()
+
+	t.Run("proves several claims in one build", func(t *testing.T) {
+		t.Parallel()
+		gen(t, goodDouble).AssertSatisfiesAll(t,
+			golangtest.Satisfaction{Type: "PrinterStub", Interface: "Printer"},
+			golangtest.Satisfaction{Type: "PrinterStub", Interface: "Closer"},
+		)
+	})
+
+	t.Run("names the claim that failed", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		gen(t, variadicDropped).AssertSatisfiesAll(s,
+			golangtest.Satisfaction{Type: "PrinterStub", Interface: "Closer"},
+			golangtest.Satisfaction{Type: "PrinterStub", Interface: "Printer"},
+		)
+		if !s.failed || !strings.Contains(s.msg, "Print") {
+			t.Fatalf("AssertSatisfiesAll = %v, %q", s.failed, s.msg)
+		}
+	})
+
+	t.Run("reports a call that claims nothing", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		gen(t, goodDouble).AssertSatisfiesAll(s)
+		if !s.failed || !strings.Contains(s.msg, "proves nothing") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
+}
+
+func TestAssertInterfaceSatisfies(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts a port that covers the contract", func(t *testing.T) {
+		t.Parallel()
+		gen(t, generatedPort).AssertInterfaceSatisfies(t, "PrinterPort", "Printer")
+	})
+
+	t.Run("rejects one that drops a method", func(t *testing.T) {
+		t.Parallel()
+		// A generated interface has no useful pointer form, so the
+		// concrete assertion cannot state this at all.
+		s := probe(t)
+		gen(t, shortPort).AssertInterfaceSatisfies(s, "PrinterPort", "Printer")
+		if !s.failed || !strings.Contains(s.msg, "Close") {
+			t.Fatalf("AssertInterfaceSatisfies = %v, %q", s.failed, s.msg)
 		}
 	})
 }

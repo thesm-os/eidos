@@ -4,21 +4,14 @@
 package enum_test
 
 import (
-	"bytes"
-	"fmt"
-	"go/parser"
-	"go/token"
 	"strings"
 	"testing"
-	"text/template"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/plugin"
 	enumplugin "go.thesmos.sh/eidos/plugins/generator/enum"
+	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -53,21 +46,21 @@ func TestConformance(t *testing.T) {
 			[]plugintest.GeneratorFixture{
 				{
 					Name: "empty package",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return storefixture.New().Build()
 					},
 				},
 				{
 					Name: "annotated enum with two variants",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildEnumStore(t, withoutOverrides)
 					},
 				},
 				{
 					Name: "annotated enum with a +gen:value override",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildEnumStore(t, withOverride)
 					},
@@ -146,7 +139,7 @@ func TestGenerateOnAnnotatedEnumWithNoVariants(t *testing.T) {
 // emptyEnumPos is the position the no-variant fixture declares, so
 // the position assertion compares against a value the fixture owns
 // rather than a literal repeated on both sides.
-var emptyEnumPos = position.At("empty/empty.go", 1, 1)
+var emptyEnumPos = sdk.At("empty/empty.go", 1, 1)
 
 // generateEmptyEnum drives Generate against a store holding one
 // annotated enum with no variants and returns the store together
@@ -154,7 +147,7 @@ var emptyEnumPos = position.At("empty/empty.go", 1, 1)
 //
 // The sink is [diag.Capture] rather than [diag.Discard]: the whole
 // point of this test is what was emitted.
-func generateEmptyEnum(t *testing.T) (*store.Store, *diag.Sink) {
+func generateEmptyEnum(t *testing.T) (*sdk.Store, *sdk.Sink) {
 	t.Helper()
 	s := storefixture.New().
 		Package("empty", "example.com/empty").
@@ -164,7 +157,7 @@ func generateEmptyEnum(t *testing.T) (*store.Store, *diag.Sink) {
 		}).
 		Build()
 	d := diag.Capture()
-	if err := enumplugin.New().Generate(&plugin.GeneratorContext{
+	if err := enumplugin.New().Generate(&sdk.GeneratorContext{
 		Store:  s,
 		Reader: store.NewReader(s),
 		Diag:   d,
@@ -174,18 +167,18 @@ func generateEmptyEnum(t *testing.T) (*store.Store, *diag.Sink) {
 	return s, d
 }
 
-// buildEnumStore returns a [store.Store] populated with one
+// buildEnumStore returns a [sdk.Store] populated with one
 // source enum named Status declared in `status/status.go`. The
 // configure hook tweaks the per-test variant set / directive
 // layout. Used by the generator suite, which expects a full
 // store; the backend-driven end-to-end acceptance test lives
 // outside this package (plugins cannot import backends).
-func buildEnumStore(t *testing.T, configure func(*storefixture.EnumBuilder)) *store.Store {
+func buildEnumStore(t *testing.T, configure func(*storefixture.EnumBuilder)) *sdk.Store {
 	t.Helper()
 	return storefixture.New().
 		Package("status", "example.com/status").
 		Enum("Status", func(eb *storefixture.EnumBuilder) {
-			eb.Pos(position.At("status/status.go", 1, 1))
+			eb.Pos(sdk.At("status/status.go", 1, 1))
 			eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
 			configure(eb)
 		}).
@@ -208,16 +201,21 @@ func withOverride(eb *storefixture.EnumBuilder) {
 	eb.Variant("StatusActive", "0")
 	eb.Variant("StatusInactive", "1")
 	eb.Variant("StatusPending", "2")
-	// Reach into the just-appended variant to attach the
-	// override directive — the storefixture's Variant signature
-	// is flat (no callback), so the directive list is mutated
-	// after construction.
-	enum := eb.Node()
-	pending := enum.Variants[len(enum.Variants)-1]
-	pending.DirectiveList = append(pending.DirectiveList, &directive.Directive{
-		Name: "value",
-		Args: []string{"pending_review"},
-	})
+	pinValue(eb, "pending_review")
+}
+
+// pinValue attaches a `+gen:value` override to the variant most
+// recently appended to eb.
+//
+// Reaches into the node because [storefixture.EnumBuilder.Variant]
+// has a flat signature with no callback, so the directive list is
+// mutated after construction rather than during it.
+func pinValue(eb *storefixture.EnumBuilder, value string) {
+	variants := eb.Node().Variants
+	variants[len(variants)-1].DirectiveList = append(
+		variants[len(variants)-1].DirectiveList,
+		&sdk.Directive{Name: "value", Args: []string{value}},
+	)
 }
 
 // TestStringValuedEnum covers the string-underlying path.
@@ -240,14 +238,14 @@ func TestStringValuedEnum(t *testing.T) {
 		s := storefixture.New().
 			Package("region", "example.com/region").
 			Enum("Region", func(eb *storefixture.EnumBuilder) {
-				eb.Pos(position.At("region/region.go", 1, 1))
+				eb.Pos(sdk.At("region/region.go", 1, 1))
 				eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
 				eb.Underlying(storefixture.Named(underlying))
 				configure(eb)
 			}).
 			Build()
 		d := diag.Capture()
-		if err := enumplugin.New().Generate(&plugin.GeneratorContext{
+		if err := enumplugin.New().Generate(&sdk.GeneratorContext{
 			Store: s, Reader: store.NewReader(s), Diag: d,
 		}); err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -306,10 +304,7 @@ func TestStringValuedEnum(t *testing.T) {
 		t.Parallel()
 		api := apiFor(t, "string", func(eb *storefixture.EnumBuilder) {
 			eb.Variant("US", `"us-east"`)
-			pending := eb.Node().Variants[0]
-			pending.DirectiveList = append(pending.DirectiveList, &directive.Directive{
-				Name: "value", Args: []string{"americas"},
-			})
+			pinValue(eb, "americas")
 		})
 		if got := api.Variants[0].StringValue; got != "americas" {
 			t.Fatalf("StringValue = %q, want the explicit override americas", got)
@@ -366,13 +361,13 @@ func TestStringValuedEnum(t *testing.T) {
 		s := storefixture.New().
 			Package("region", "example.com/region").
 			Enum("Region", func(eb *storefixture.EnumBuilder) {
-				eb.Pos(position.At("region/region.go", 1, 1))
+				eb.Pos(sdk.At("region/region.go", 1, 1))
 				eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
 				eb.Variant("RegionNorth", "0")
 			}).
 			Build()
 		d := diag.Capture()
-		if err := enumplugin.New().Generate(&plugin.GeneratorContext{
+		if err := enumplugin.New().Generate(&sdk.GeneratorContext{
 			Store: s, Reader: store.NewReader(s), Diag: d,
 		}); err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -386,116 +381,5 @@ func TestStringValuedEnum(t *testing.T) {
 			}
 		}
 		t.Fatalf("plugin queued no API contribution")
-	})
-}
-
-// renderAPITemplate executes the `enum.api` template against api and
-// returns the rendered Go source.
-//
-// The funcmap entries the template reaches — `renderExpr` and
-// `external` — are supplied by the Go backend, which a plugin package
-// cannot import. They are stubbed here to something syntactically
-// inert: this test is about which branch the template takes, and the
-// backend's own tests own what those entries render.
-func renderAPITemplate(t *testing.T, api *enumplugin.API) string {
-	t.Helper()
-	tmplFS, ok := enumplugin.GoTemplates()
-	if !ok {
-		t.Fatalf("plugin exposes no Go template tree")
-	}
-	tmpl, err := template.New("enum").Funcs(template.FuncMap{
-		"external":   func(pkg, name string) string { return pkg + "." + name },
-		"renderExpr": func(v any) string { return fmt.Sprint(v) },
-	}).ParseFS(tmplFS, "*.tmpl")
-	if err != nil {
-		t.Fatalf("parse templates: %v", err)
-	}
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "enum.api", api); err != nil {
-		t.Fatalf("execute enum.api: %v", err)
-	}
-	return buf.String()
-}
-
-// TestAPITemplate_FallbackConversion pins the `String` fallback the
-// template emits per underlying type.
-//
-// This is the defect that reached the consumer's build: `int(v)` was
-// unconditional, so every generated file for a string-valued enum
-// failed to compile with "cannot convert v (variable of string type
-// Region) to type int". The data-side tests above cannot see it —
-// the conversion is chosen in the template, not in the emit value.
-func TestAPITemplate_FallbackConversion(t *testing.T) {
-	t.Parallel()
-
-	api := func(underlying string) *enumplugin.API {
-		return &enumplugin.API{
-			TypeName:     "Region",
-			ParseName:    "ParseRegion",
-			SentinelName: "ErrUnknownRegion",
-			Underlying:   underlying,
-			Variants: []enumplugin.Variant{
-				{ConstName: "US", StringValue: "us-east"},
-			},
-		}
-	}
-
-	t.Run("a string enum converts with string(v)", func(t *testing.T) {
-		t.Parallel()
-		got := renderAPITemplate(t, api("string"))
-		if !strings.Contains(got, "return string(v)") {
-			t.Fatalf("string enum must fall back through string(v); got:\n%s", got)
-		}
-	})
-
-	t.Run("a string enum never emits the numeric conversion", func(t *testing.T) {
-		t.Parallel()
-		// The exact expression that did not compile.
-		got := renderAPITemplate(t, api("string"))
-		if strings.Contains(got, "int(v)") {
-			t.Fatalf("string enum must not emit int(v); got:\n%s", got)
-		}
-	})
-
-	t.Run("a numeric enum keeps the Sprintf fallback", func(t *testing.T) {
-		t.Parallel()
-		got := renderAPITemplate(t, api("int"))
-		if !strings.Contains(got, "int(v)") {
-			t.Fatalf("numeric enum must keep int(v); got:\n%s", got)
-		}
-		if !strings.Contains(got, `"Region(%d)"`) {
-			t.Fatalf("numeric enum must keep the Region(%%d) form; got:\n%s", got)
-		}
-	})
-
-	t.Run("an enum with no underlying type takes the numeric branch", func(t *testing.T) {
-		t.Parallel()
-		// Historical behaviour for typeless enums; the only form a Go
-		// const group without an explicit type can have.
-		got := renderAPITemplate(t, api(""))
-		if !strings.Contains(got, "int(v)") {
-			t.Fatalf("typeless enum must take the numeric branch; got:\n%s", got)
-		}
-	})
-
-	t.Run("the declared value reaches the switch arm", func(t *testing.T) {
-		t.Parallel()
-		got := renderAPITemplate(t, api("string"))
-		if !strings.Contains(got, `case US:`) || !strings.Contains(got, `return "us-east"`) {
-			t.Fatalf("switch arm should map US to its declared value; got:\n%s", got)
-		}
-	})
-
-	t.Run("both branches parse as Go", func(t *testing.T) {
-		t.Parallel()
-		// A branch that renders but does not parse is the same class
-		// of failure as the original bug, one step earlier.
-		for _, u := range []string{"string", "int", ""} {
-			src := "package p\n\ntype Region string\n\nconst US Region = \"us-east\"\n\n" +
-				renderAPITemplate(t, api(u))
-			if _, err := parser.ParseFile(token.NewFileSet(), "p.go", src, 0); err != nil {
-				t.Fatalf("underlying %q rendered unparseable Go: %v\n%s", u, err, src)
-			}
-		}
 	})
 }

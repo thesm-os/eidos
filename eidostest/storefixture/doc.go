@@ -42,12 +42,36 @@
 // default. Call a sub-builder's Pos to pin a specific one; see
 // [StructBuilder.Pos].
 //
+// Routing overrides are the other half of that story, and the
+// `+gen:out` directive has a trap sharp enough to warrant its own
+// constructor: its value is a path, so a directory spelled without a
+// trailing separator routes the output to a *file* of that name, and
+// no diagnostic is raised. Build the directive with [RouteTo], which
+// cannot get the separator wrong.
+//
 // # Type-reference helpers
 //
 // The package-level constructors ([Named], [PkgNamed], [Pointer],
 // [Slice], [Array], [Map], [Func], [WithArgs]) build [node.TypeRef]
 // values without manual struct-literal verbosity. They are pure
 // functions; callers may compose freely.
+//
+// # The Go a consumer would have written
+//
+// A render fixture needs two things that describe the same
+// declarations: the node graph that drives the run, and the Go source
+// the generated output references. [Builder.GoSource] projects the
+// second from the first, so the pair is correct by construction
+// rather than by review:
+//
+//	gen := golangtest.Rendered(t, run).
+//	    WithSource(golangtest.GoFile(fixture().GoSource()))
+//
+// It returns plain strings rather than a golangtest value on purpose:
+// this package builds a run's input and golangtest asserts on its
+// output, and neither should have to compile the other. A construct
+// the projection cannot spell stops the test naming it, rather than
+// producing a support package the fixture no longer describes.
 //
 // # Metadata and inspection
 //

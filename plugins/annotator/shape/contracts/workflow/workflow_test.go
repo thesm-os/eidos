@@ -6,11 +6,10 @@ package workflow_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/workflow"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract(t *testing.T) {
@@ -23,17 +22,17 @@ func TestContract(t *testing.T) {
 
 	t.Run("pipeline stamps transitions param", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Run", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					contracttest.HostDirective(workflow.Name, "fn", map[string]string{
 						"transitions": "start->step1->done",
 					}),
 				},
 			},
 		}
-		pkg := &node.Package{Name: "x", Path: "x", Functions: []*node.Function{fn}}
+		pkg := &sdk.Package{Name: "x", Path: "x", Functions: []*sdk.Function{fn}}
 		diags := contracttest.RunPipeline(t, workflow.Contract(), pkg)
 		contracttest.AssertNoErrorDiag(t, diags)
 

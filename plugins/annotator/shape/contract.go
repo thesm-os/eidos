@@ -6,9 +6,7 @@ package shape
 import (
 	"slices"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Contract is one named multi-callable protocol with a fixed role
@@ -83,7 +81,7 @@ type ContractValidator func(members map[string][]ContractMember) []ContractViola
 // pointer map keyed by partner role.
 type ContractMember struct {
 	// Host is the callable participating in the contract.
-	Host node.Node
+	Host sdk.Node
 
 	// Partners maps partner role names to the resolved qualified
 	// name of the callable filling that role for this specific
@@ -100,7 +98,7 @@ type ContractViolation struct {
 	// Host is the node the diagnostic attaches to. Pick the
 	// member that most directly demonstrates the failure (e.g.
 	// the orphan Get when "no matching Put" is violated).
-	Host node.Node
+	Host sdk.Node
 
 	// Message is the human-readable violation summary.
 	Message string
@@ -113,15 +111,15 @@ type ContractViolation struct {
 // part of, then read the per-contract role + partner keys.
 //
 //nolint:gochecknoglobals // registry-singleton key
-var MetaContracts = meta.EnsureKey("shape.contracts", meta.StringListParser)
+var MetaContracts = sdk.EnsureKey("shape.contracts", sdk.StringListParser)
 
 // ContractRoleKey returns the typed meta key carrying the
 // callable's role within the named contract — stamped at
 // `shape.contract.<name>.role`. Constructed on demand via
-// [meta.EnsureKey] so multiple per-contract sub-packages
+// [sdk.EnsureKey] so multiple per-contract sub-packages
 // referencing the same name resolve to one canonical key.
-func ContractRoleKey(name string) meta.Key[string] {
-	return meta.EnsureKey("shape.contract."+name+".role", meta.StringParser)
+func ContractRoleKey(name string) sdk.Key[string] {
+	return sdk.EnsureKey("shape.contract."+name+".role", sdk.StringParser)
 }
 
 // ContractPartnerKey returns the typed meta key carrying the
@@ -130,10 +128,10 @@ func ContractRoleKey(name string) meta.Key[string] {
 // stamped value is a raw sibling name as the umbrella plugin
 // records it and a qualified name after the refinement resolver
 // rewrites it.
-func ContractPartnerKey(contract, role string) meta.Key[string] {
-	return meta.EnsureKey(
+func ContractPartnerKey(contract, role string) sdk.Key[string] {
+	return sdk.EnsureKey(
 		"shape.contract."+contract+".partner."+role,
-		meta.StringParser,
+		sdk.StringParser,
 	)
 }
 
@@ -143,10 +141,10 @@ func ContractPartnerKey(contract, role string) meta.Key[string] {
 // declared in [Contract.Params] (non-callable values like field
 // names or literals). The refinement resolver does not touch
 // param values.
-func ContractParamKey(contract, key string) meta.Key[string] {
-	return meta.EnsureKey(
+func ContractParamKey(contract, key string) sdk.Key[string] {
+	return sdk.EnsureKey(
 		"shape.contract."+contract+".param."+key,
-		meta.StringParser,
+		sdk.StringParser,
 	)
 }
 
@@ -168,7 +166,7 @@ const contractStampedBy = PluginName + ".contract"
 // malformed positional, etc.) at Build time; this pass concerns
 // itself only with meta stamping for callables whose directives
 // already passed parse-time validation.
-func (p *Plugin) applyContracts(bag *meta.Bag, dirs []*directive.Directive) {
+func (p *Plugin) applyContracts(bag *sdk.Bag, dirs []*sdk.Directive) {
 	for _, d := range dirs {
 		// The negated guard is defence-in-depth: the schema denies
 		// that form, so it cannot arrive from parsed source.
@@ -219,8 +217,8 @@ func paramSet(params []string) map[string]struct{} {
 // d — the first positional argument. Returns empty when no
 // positional was supplied; the schema marks the slot Required, so
 // that cannot arrive from parsed source, and the guard covers
-// callers that build [directive.Directive] values directly.
-func contractNameFromDirective(d *directive.Directive) string {
+// callers that build [sdk.Directive] values directly.
+func contractNameFromDirective(d *sdk.Directive) string {
 	if len(d.Args) > 0 {
 		return d.Args[0]
 	}
@@ -230,7 +228,7 @@ func contractNameFromDirective(d *directive.Directive) string {
 // appendContract adds name to the [MetaContracts] list on bag,
 // preserving insertion order and skipping duplicates. Idempotent:
 // repeated calls with the same name leave the list unchanged.
-func appendContract(bag *meta.Bag, name string) {
+func appendContract(bag *sdk.Bag, name string) {
 	current, _ := MetaContracts.Get(bag)
 	if slices.Contains(current, name) {
 		return
@@ -249,7 +247,7 @@ func appendContract(bag *meta.Bag, name string) {
 //	    role, _ := shape.ContractRoleKey(name).Get(m.Meta())
 //	    // …
 //	}
-func Contracts(bag *meta.Bag) []string {
+func Contracts(bag *sdk.Bag) []string {
 	if bag == nil {
 		return nil
 	}

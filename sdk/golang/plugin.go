@@ -10,6 +10,7 @@ import (
 	"maps"
 	"slices"
 	"text/template"
+	"unicode"
 
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
@@ -36,16 +37,63 @@ const DefaultTemplateDir = "templates/golang"
 // until the collision.
 const FuncPrefixSeparator = "_"
 
+// FuncPrefix composes the template-function prefix for a plugin name.
+//
+// text/template requires every registered function name to be a Go
+// identifier — letters, digits and underscore, with a non-digit first
+// rune — and rejects anything else by panicking inside
+// [template.Template.Funcs]. Plugin names carry no such constraint:
+// `debug-weaver` and `if-match` are ordinary, and a name is a
+// user-visible identity that directive scoping and provenance
+// attribution both key on, so it cannot be bent to suit the template
+// engine.
+//
+// Every rune the engine will not accept is therefore folded to an
+// underscore here — `debug-weaver` prefixes as `debug_weaver_`. The
+// fold is not injective, so two plugins named `a-b` and `a.b` would
+// share a prefix; the backend rejects duplicate extension names
+// outright, so that collides loudly at registration rather than
+// silently at render.
+//
+// Templates are unaffected: a hyphenated helper name could never be
+// referenced from a template in the first place, because the template
+// parser reads `debug-weaver_x` as a subtraction.
+func FuncPrefix(name string) string {
+	out := []rune(name + FuncPrefixSeparator)
+	for i, r := range out {
+		if !isIdentRune(r, i) {
+			out[i] = '_'
+		}
+	}
+	return string(out)
+}
+
+// isIdentRune reports whether r is legal at position i of a Go
+// identifier, matching the rule text/template's own `goodName` applies.
+func isIdentRune(r rune, i int) bool {
+	switch {
+	case r == '_':
+		return true
+	case unicode.IsLetter(r):
+		return true
+	case unicode.IsDigit(r):
+		return i > 0
+	default:
+		return false
+	}
+}
+
 // Builder accumulates a plugin's declarations. Terminated by
 // [Builder.Build], which freezes them into a [Base].
 //
 // Not safe for concurrent use, and does not need to be: it exists
 // for the length of one New call.
 type Builder struct {
-	base Base
-	dir  string
-	tree embed.FS
-	set  bool
+	base    Base
+	dir     string
+	tree    embed.FS
+	set     bool
+	builtin bool
 }
 
 // NewPlugin starts a builder for a plugin that ships no templates —
@@ -78,6 +126,30 @@ func NewGenerator(name string, templates embed.FS, outputs ...sdk.Output) *Build
 // populated when it behaved differently.
 func (b *Builder) Version(v string) *Builder {
 	b.base.version = v
+	return b
+}
+
+// BuiltinTemplates declares that the plugin owns a file but renders it
+// entirely through the backend's own kind templates.
+//
+// A plugin needs a template tree only for emit kinds it *defines*. One
+// that emits nothing but standard decls — a struct, its fields, its
+// methods — has nothing a plugin-local template could resolve, and the
+// backend already knows how to render every one of them.
+//
+// Declared rather than inferred from the absence of a tree, because
+// the two mistakes are opposite and only the plugin knows which it is
+// making: a generator that defines a [sdk.Kind] and forgot its
+// templates renders a short file and fails nowhere, which is the case
+// [Builder.Build] panics on. Saying so here keeps that diagnostic
+// pointed at the accident while letting the deliberate shape through.
+//
+// Suppresses [Base.TemplateFuncs], which would otherwise register the
+// shared helper bundle for a plugin that has no template able to call
+// it: a plugin's helpers are bound only to its own templates at parse
+// time, so a bundle without a tree is unreachable by construction.
+func (b *Builder) BuiltinTemplates() *Builder {
+	b.builtin = true
 	return b
 }
 
@@ -175,10 +247,16 @@ func (b *Builder) Build() *Base {
 		panic("sdk/golang: plugin name is empty; the pipeline keys registration, " +
 			"provenance and directive scoping on it")
 	}
-	if len(b.base.outputs) > 0 && !b.set {
+	if len(b.base.outputs) > 0 && !b.set && !b.builtin {
 		panic(fmt.Sprintf("sdk/golang: plugin %q declares %d output(s) and no template "+
-			"tree; the backend resolves a template per emit kind and would find none",
-			b.base.name, len(b.base.outputs)))
+			"tree; the backend resolves a template per emit kind and would find none. "+
+			"Call Builder.BuiltinTemplates if it renders through the backend's own "+
+			"kind templates", b.base.name, len(b.base.outputs)))
+	}
+	if b.set && b.builtin {
+		panic(fmt.Sprintf("sdk/golang: plugin %q declares both a template tree and "+
+			"BuiltinTemplates; the second says there is no tree to register",
+			b.base.name))
 	}
 	seen := map[string]struct{}{}
 	for i, o := range b.base.outputs {
@@ -205,12 +283,14 @@ func (b *Builder) Build() *Base {
 		b.base.templates = sub
 	}
 
-	prefix := b.base.name + FuncPrefixSeparator
-	merged := golang.AllFuncMap(prefix)
-	for name, fn := range b.base.funcs {
-		merged[prefix+name] = fn
+	if !b.builtin {
+		prefix := FuncPrefix(b.base.name)
+		merged := golang.AllFuncMap(prefix)
+		for name, fn := range b.base.funcs {
+			merged[prefix+name] = fn
+		}
+		b.base.funcs = merged
 	}
-	b.base.funcs = merged
 
 	frozen := b.base
 	return &frozen

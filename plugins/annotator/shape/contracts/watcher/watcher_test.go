@@ -6,10 +6,9 @@ package watcher_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/watcher"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -21,20 +20,20 @@ func TestContract_Identity(t *testing.T) {
 
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	watch := &node.Function{
+	watch := &sdk.Function{
 		Name: "Watch", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(watcher.Name, "watch", map[string]string{
 					"trigger": "Notify",
 				}),
 			},
 		},
 	}
-	trigger := &node.Function{Name: "Notify", Package: "x"}
-	pkg := &node.Package{
+	trigger := &sdk.Function{Name: "Notify", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{watch, trigger},
+		Functions: []*sdk.Function{watch, trigger},
 	}
 	diags := contracttest.RunPipeline(t, watcher.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)

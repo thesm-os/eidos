@@ -55,3 +55,56 @@ func TestDirective(t *testing.T) {
 		}
 	})
 }
+
+func TestRouteTo(t *testing.T) {
+	t.Parallel()
+
+	// The assertion the helper exists for. Layout reads the value as
+	// a path and treats a slashless one as a filename, so the routed
+	// package silently becomes a file named after the directory —
+	// with no diagnostic. Nothing else in the suite would catch a
+	// refactor that dropped the separator.
+	t.Run("terminates the directory with a separator", func(t *testing.T) {
+		t.Parallel()
+		d := storefixture.RouteTo("validategen", "validation", "validation")
+		if len(d.Args) != 1 || d.Args[0] != "validation/" {
+			t.Fatalf("Args = %q, want [\"validation/\"]; a slashless value routes to a "+
+				"file called `validation`, not a directory", d.Args)
+		}
+	})
+
+	t.Run("accepts a directory already carrying the separator", func(t *testing.T) {
+		t.Parallel()
+		d := storefixture.RouteTo("validategen", "validation/", "validation")
+		if len(d.Args) != 1 || d.Args[0] != "validation/" {
+			t.Fatalf("Args = %q, want [\"validation/\"] with no doubled separator", d.Args)
+		}
+	})
+
+	t.Run("leaves an empty directory empty", func(t *testing.T) {
+		t.Parallel()
+		d := storefixture.RouteTo("validategen", "", "validation")
+		if len(d.Args) != 1 || d.Args[0] != "" {
+			t.Fatalf("Args = %q, want [\"\"]; an empty dir means the origin's own "+
+				"directory, not the module root", d.Args)
+		}
+	})
+
+	t.Run("scopes the routing to one plugin and names the package", func(t *testing.T) {
+		t.Parallel()
+		d := storefixture.RouteTo("validategen", "validation", "vpkg")
+		if d.Name != "out" {
+			t.Fatalf("name = %q, want the canonical out directive", d.Name)
+		}
+		if d.Negated {
+			t.Fatalf("a routing directive is never the negated form")
+		}
+		if d.KV["plugin"] != "validategen" {
+			t.Fatalf("plugin = %q, want validategen; an unscoped route moves every "+
+				"plugin's output", d.KV["plugin"])
+		}
+		if d.KV["pkg"] != "vpkg" {
+			t.Fatalf("pkg = %q, want vpkg", d.KV["pkg"])
+		}
+	})
+}

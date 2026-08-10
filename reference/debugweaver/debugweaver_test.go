@@ -4,18 +4,20 @@
 package debugweaver_test
 
 import (
+	"strings"
 	"testing"
 	"text/template"
 
+	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/opt"
+	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/emit"
-	"go.thesmos.sh/eidos/emit/builder"
-	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/reference/debugweaver"
+	"go.thesmos.sh/eidos/reference/repogen"
+	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -42,14 +44,14 @@ func TestConformance(t *testing.T) {
 			[]plugintest.GeneratorFixture{
 				{
 					Name: "empty package",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return storefixture.New().Build()
 					},
 				},
 				{
 					Name: "package with a struct",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return storefixture.New().
 							Struct("User", nil).
@@ -128,7 +130,7 @@ func TestPlugin_Templates(t *testing.T) {
 // are never executed here.
 func probeFuncs() template.FuncMap {
 	return template.FuncMap{
-		"renderExpr": func(*emit.Expr) (string, error) { return "", nil },
+		"renderExpr": func(*sdk.Expr) (string, error) { return "", nil },
 	}
 }
 
@@ -136,13 +138,13 @@ func probeFuncs() template.FuncMap {
 // carrying one method, which is the minimum shape a cross-cutting
 // weaver needs: its Generate walks the emit store, so a
 // source-only fixture leaves the loop body unexecuted.
-func emitStoreWithMethod(t *testing.T, pkg, structName, methodName string) *store.Store {
+func emitStoreWithMethod(t *testing.T, pkg, structName, methodName string) *sdk.Store {
 	t.Helper()
-	c := builder.For("fixture").WithTarget(emit.Target{})
+	c := sdk.NewProvenance("fixture").WithTarget(sdk.EmitTarget{})
 	built, err := c.Package(pkg, pkg).
-		Struct(structName, func(s *builder.StructBuilder) {
-			s.Method(methodName, func(m *builder.MethodBuilder) {
-				m.Receiver("r", emit.Ptr(emit.Internal(s.Node())))
+		Struct(structName, func(s *sdk.StructBuilder) {
+			s.Method(methodName, func(m *sdk.MethodBuilder) {
+				m.Receiver("r", sdk.Ptr(sdk.Internal(s.Node())))
 			})
 		}).
 		Build()
@@ -158,10 +160,10 @@ func emitStoreWithMethod(t *testing.T, pkg, structName, methodName string) *stor
 
 // generateInto drives p.Generate against s and returns the single
 // emit method the fixture seeded, for slot assertions.
-func generateInto(t *testing.T, p *debugweaver.Plugin, s *store.Store) *emit.Method {
+func generateInto(t *testing.T, p *debugweaver.Plugin, s *sdk.Store) *sdk.EmitMethod {
 	t.Helper()
 	reader := store.NewReader(s)
-	if err := p.Generate(&plugin.GeneratorContext{Store: s, Reader: reader, Diag: diag.New()}); err != nil {
+	if err := p.Generate(&sdk.GeneratorContext{Store: s, Reader: reader, Diag: diag.New()}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	methods := store.NewReader(s).EmitMethods().Slice()
@@ -231,11 +233,11 @@ func TestGenerate_WeavesTraceCall(t *testing.T) {
 		t.Parallel()
 		s := emitStoreWithMethod(t, "users", "Repo", "Get")
 		m := store.NewReader(s).EmitMethods().Slice()[0]
-		m.DirectiveList = append(m.DirectiveList, &directive.Directive{
+		m.DirectiveList = append(m.DirectiveList, &sdk.Directive{
 			Name: debugweaver.DirectiveName, Negated: true,
 		})
 
-		if err := debugweaver.New().Generate(&plugin.GeneratorContext{
+		if err := debugweaver.New().Generate(&sdk.GeneratorContext{
 			Store: s, Reader: store.NewReader(s), Diag: diag.New(),
 		}); err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -252,7 +254,7 @@ func TestGenerate_WeavesTraceCall(t *testing.T) {
 // and the string literals passed as arguments. Asserting on the
 // emit graph rather than on rendered text keeps these tests
 // independent of any backend's formatting.
-func wovenCall(t *testing.T, n emit.Node) (pkg, fn string, args []string) {
+func wovenCall(t *testing.T, n sdk.EmitNode) (pkg, fn string, args []string) {
 	t.Helper()
 	trace := wovenTrace(t, n)
 	if trace.FuncRef == nil {
@@ -262,7 +264,7 @@ func wovenCall(t *testing.T, n emit.Node) (pkg, fn string, args []string) {
 	// Name; the backend resolves the alias at render time.
 	pkg, fn = trace.FuncRef.Pkg, trace.FuncRef.Name
 	// String literals hold their unquoted content in RawText.
-	for _, a := range []*emit.Expr{trace.Format, trace.Subject} {
+	for _, a := range []*sdk.Expr{trace.Format, trace.Subject} {
 		if a == nil {
 			t.Fatalf("woven trace carries a nil argument expression")
 		}
@@ -275,14 +277,14 @@ func wovenCall(t *testing.T, n emit.Node) (pkg, fn string, args []string) {
 // emit value.
 //
 // The entry is a render statement rather than a bare one: the prebody
-// slot is constrained to [emit.KindStmt], and the wrapper is what lets
-// this plugin put its own kind — and therefore its own template —
+// slot is constrained to [sdk.EmitKindStmt], and the wrapper is what
+// lets this plugin put its own kind — and therefore its own template —
 // inside that constraint.
-func wovenTrace(t *testing.T, n emit.Node) *debugweaver.Trace {
+func wovenTrace(t *testing.T, n sdk.EmitNode) *debugweaver.Trace {
 	t.Helper()
-	stmt, ok := n.(*emit.Stmt)
+	stmt, ok := n.(*sdk.Stmt)
 	if !ok {
-		t.Fatalf("slot entry is %T, want *emit.Stmt", n)
+		t.Fatalf("slot entry is %T, want *sdk.Stmt", n)
 	}
 	if stmt.StmtKind != emit.StmtRender {
 		t.Fatalf("slot entry should be a render statement; got StmtKind=%s", stmt.StmtKind)
@@ -292,4 +294,192 @@ func wovenTrace(t *testing.T, n emit.Node) *debugweaver.Trace {
 		t.Fatalf("render statement wraps %T, want *debugweaver.Trace", stmt.Node)
 	}
 	return trace
+}
+
+// hostBuilder is the annotated struct the woven output is generated
+// from, and — through [storefixture.Builder.GoSource] — the package
+// it is compiled against.
+//
+// repogen names `User` in every signature it emits, so nothing this
+// plugin contributes can be compiled without the declaration. One
+// builder supplies both halves so a field or a name changed here
+// cannot leave a second, hand-written spelling behind.
+func hostBuilder() *storefixture.Builder {
+	return storefixture.New().
+		Struct("User", func(s *storefixture.StructBuilder) {
+			s.Docs("User is the type the generated repository stores.")
+			s.Pos(sdk.Pos{File: "user.go", Line: 1})
+			s.Directive(storefixture.Directive(repogen.DirectiveName))
+			s.Field("ID", storefixture.Named("string"), nil)
+		})
+}
+
+// hostMethods names every method repogen puts on `UserRepo`, which is
+// the set debug-weaver must weave into exactly once each.
+var hostMethods = []string{"Get", "List", "Save", "Delete"}
+
+// weaveInto runs repogen and debug-weaver over one annotated struct
+// and adopts the rendered output for the Go assertions.
+//
+// A weaver owns no file. Its contribution exists only inside a host
+// generator's output, so the only place its *rendering* can be judged
+// — as opposed to its emit graph, which the unit tests above cover —
+// is a pipeline that runs a host alongside it. repogen is that host:
+// one annotated struct buys four method bodies and an interface, which
+// is the smallest shape that exercises the per-method loop and the
+// host-file import registration at the same time.
+//
+// opts, when non-empty, is applied as debug-weaver's plugin options,
+// which is how a consumer redirects the trace at their own logging
+// surface.
+func weaveInto(t *testing.T, opts map[string]string) *golangtest.Generated {
+	t.Helper()
+	fixture := hostBuilder()
+	b := golangtest.Driver(t, backendgolang.New(), fixture.PackageNode(),
+		repogen.New(), debugweaver.New())
+	if len(opts) > 0 {
+		b = b.WithPluginOptions(debugweaver.Name, opts)
+	}
+	p := b.Build()
+	p.Run("./...")
+	// pipelinetest treats a run that produced diagnostics as a
+	// completed run, so a panicking plugin leaves an empty sink and a
+	// green test — every assertion downstream would then be asserting
+	// about nothing at all.
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("the run reported errors, so there is nothing to assert on: %v",
+			p.Diagnostics().Diagnostics())
+	}
+	return golangtest.Rendered(t, p).WithSource(golangtest.GoFile(fixture.GoSource()))
+}
+
+// TestRender_DefaultTraceIsValidGo is the assertion the emit-graph
+// tests above are all proxies for.
+//
+// Those tests prove the plugin builds the right *values*. Nothing in
+// them can see that the template renders a call the compiler accepts,
+// that the trace package reached the host file's import set, or that
+// the format string and its one argument agree — and all three are
+// this plugin's own contract rather than the host's.
+//
+// The toolchain subtests are parallel: [golangtest.Generated] guards
+// its built-module cache, so the seconds each `go` invocation costs
+// overlap rather than accumulate.
+func TestRender_DefaultTraceIsValidGo(t *testing.T) {
+	t.Parallel()
+
+	gen := weaveInto(t, nil)
+
+	t.Run("the woven host file compiles", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertCompiles(t)
+	})
+
+	// vet is the assertion that matters most here: the plugin passes
+	// exactly one argument to a printf-style function whose format
+	// string is a user-settable option, so a default carrying two
+	// verbs or none would ship a vet failure into every consumer's
+	// build and no substring check would ever see it.
+	t.Run("the trace call satisfies vet's printf check", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertVets(t)
+	})
+
+	// A cross-cutting weaver's worst failure mode is disturbing a
+	// contract it does not own. The host emits both the implementation
+	// and the interface it implements, so the pair is checkable: a
+	// contribution that landed outside the body, or on the wrong
+	// receiver, compiles and satisfies nothing.
+	t.Run("the weave leaves the host's interface satisfied", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertSatisfies(t, "UserRepo", "UserRepository")
+	})
+
+	// Emitting an import is an API change for every consumer whose
+	// module does not already require it. `context` is repogen's;
+	// `log` is the only one this plugin is entitled to add.
+	t.Run("adds exactly the trace package to the host's imports", func(t *testing.T) {
+		t.Parallel()
+		gen.Primary(t).AssertImportsOnly(t, "context", "log")
+	})
+
+	t.Run("weaves each host method exactly once", func(t *testing.T) {
+		t.Parallel()
+		src := gen.Primary(t)
+		for _, name := range hostMethods {
+			call := `log.Printf("debug: %s entered", "UserRepo.` + name + `")`
+			src.InMethod(t, "UserRepo", name).AssertCount(t, call, 1)
+		}
+	})
+
+	// Prebody means first. A contribution rendered after the return is
+	// dead code that compiles, vets and satisfies everything — the one
+	// failure no other assertion in this file can reach.
+	t.Run("the trace runs before the method body", func(t *testing.T) {
+		t.Parallel()
+		src := gen.Primary(t)
+		for _, name := range hostMethods {
+			assertPrecedes(t, src.InMethod(t, "UserRepo", name).Body(), "log.Printf", "return")
+		}
+	})
+}
+
+// TestRender_ConfiguredTraceIsValidGo pins the configured path, where
+// the plugin's two riskiest behaviours live: it rewrites the host
+// file's import set from an option, and it embeds an arbitrary
+// user-supplied string in the rendered source.
+func TestRender_ConfiguredTraceIsValidGo(t *testing.T) {
+	t.Parallel()
+
+	// The format carries a double quote on purpose. It reaches the
+	// output through [sdk.NewLiteralString], and an implementation
+	// that interpolated the raw text would emit a file that does not
+	// parse — which is precisely the class of defect a substring
+	// assertion cannot express, because the substring would be
+	// unparseable too.
+	const format = `entering "%s"`
+	gen := weaveInto(t, map[string]string{
+		"package": "fmt",
+		"func":    "Printf",
+		"format":  format,
+	})
+
+	t.Run("the reconfigured trace compiles", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertCompiles(t)
+	})
+
+	t.Run("the configured package replaces the default in the host's imports", func(t *testing.T) {
+		t.Parallel()
+		gen.Primary(t).
+			AssertImportsOnly(t, "context", "fmt").
+			AssertNoImport(t, debugweaver.DefaultPackage)
+	})
+
+	t.Run("the format's quotes are escaped rather than interpolated", func(t *testing.T) {
+		t.Parallel()
+		gen.Primary(t).
+			InMethod(t, "UserRepo", "Get").
+			AssertContains(t, `fmt.Printf("entering \"%s\"", "UserRepo.Get")`)
+	})
+}
+
+// assertPrecedes fails when first does not appear before second in
+// body.
+//
+// Local because [golangtest.Scope] has no ordering assertion:
+// [golangtest.Source.AssertOrder] answers the same question for
+// top-level declarations, and a slot contributor needs it one level
+// down, inside a body.
+func assertPrecedes(t *testing.T, body, first, second string) {
+	t.Helper()
+	a, b := strings.Index(body, first), strings.Index(body, second)
+	switch {
+	case a < 0:
+		t.Errorf("body does not contain %q:\n%s", first, body)
+	case b < 0:
+		t.Errorf("body does not contain %q:\n%s", second, body)
+	case a > b:
+		t.Errorf("%q must be woven before %q, but follows it:\n%s", first, second, body)
+	}
 }

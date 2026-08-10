@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package debugweaver appends a debug-trace call to the
-// [emit.Method.Prebody] slot of every method in the emit store —
+// [sdk.EmitMethod.Prebody] slot of every method in the emit store —
 // the canonical "entry trace" cross-cutting concern. The plugin
 // runs in [sdk.GeneratorCrossCutting] and advertises the
 // `trace` capability so other cross-cutting plugins (audit,
@@ -20,20 +20,17 @@
 // [Options.Package] selects the import path of the package the
 // rendered call references; [Options.Func] selects the function on
 // that package. The renderer registers the import on the host
-// file's import set via [emit.NewExternal] — the same flow
-// [emit.External] type references use — so the rendered output is
+// file's import set via [sdk.NewExternal] — the same flow
+// [sdk.External] type references use — so the rendered output is
 // structurally correct without any plugin-side import-management
 // scaffolding.
 package debugweaver
 
 import (
 	"embed"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -51,8 +48,6 @@ const Version = "1.0.0"
 // `define` name in templates/golang/debugweaver.trace.tmpl.
 const Kind sdk.Kind = "debugweaver.trace"
 
-const langGo = "golang"
-
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
 
@@ -65,7 +60,7 @@ const Capability = "trace"
 // emit methods to suppress its contribution on a per-method basis.
 const DirectiveName sdk.DirectiveName = "debug"
 
-// EntryID is the [emit.Provenance.ID] stamped on every debug-weaver
+// EntryID is the [sdk.EmitProvenance.ID] stamped on every debug-weaver
 // prebody contribution. Cross-cutting plugins that want to position
 // their own statement relative to the entry trace pass this id to
 // [builder.Before] / [builder.After].
@@ -102,17 +97,17 @@ type Options struct {
 }
 
 // Trace is the trace call this plugin contributes, as a
-// plugin-defined emit kind rather than a hand-assembled [emit.Stmt].
+// plugin-defined emit kind rather than a hand-assembled [sdk.Stmt].
 //
-// The prebody slot it lands in is constrained to [emit.KindStmt], so
-// the contribution is wrapped by [emit.NewRenderStmt]: the wrapper
+// The prebody slot it lands in is constrained to [sdk.EmitKindStmt], so
+// the contribution is wrapped by [sdk.NewRenderStmt]: the wrapper
 // satisfies the slot, and the backend renders it by dispatching to the
 // template registered under this Kind. That is what lets the plugin own
 // its own spelling — the alternative is encoding the call shape in Go
-// against the [emit.Stmt] union, which no other reference contributor
+// against the [sdk.Stmt] union, which no other reference contributor
 // does.
 //
-// The three fields are [emit.Expr] rather than plain strings so the
+// The three fields are [sdk.Expr] rather than plain strings so the
 // backend performs the literal escaping and the import registration.
 // Holding raw text here and interpolating it in the template would
 // re-implement both, badly.
@@ -121,14 +116,14 @@ type Trace struct {
 
 	// FuncRef is the trace function the entry calls, as an external
 	// reference. Rendering it registers the import on the host file.
-	FuncRef *emit.Expr
+	FuncRef *sdk.Expr
 
 	// Format is the printf-style first argument.
-	Format *emit.Expr
+	Format *sdk.Expr
 
 	// Subject is the fully-qualified "<Type>.<Method>" the trace
 	// names.
-	Subject *emit.Expr
+	Subject *sdk.Expr
 }
 
 // Kind binds this value to its template.
@@ -136,42 +131,44 @@ func (*Trace) Kind() sdk.Kind { return Kind }
 
 // Plugin is the cross-cutting debug-weaver.
 type Plugin struct {
+	*sdkgo.Base
 	*sdk.Holder[Options]
 	opts Options
 }
 
 // New returns a fresh plugin instance with the options holder
 // bound.
+//
+// It ships a template but declares no [sdk.Output], and so needs no
+// [sdk.FilenameProvider]: templates say how a value renders, outputs
+// say where a file lands, and this plugin renders inside methods it
+// does not own.
+//
+// The cross-cutting bucket runs it after the foundation and
+// composition generators that produce those methods. [Capability] is
+// published so downstream cross-cutting contributors (audit, metric,
+// …) can order against a known trace entry; nothing upstream is
+// required in turn.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{Base: sdkgo.NewPlugin(Name).
+		Templates(goTemplates).
+		Version(Version).
+		Priority(sdk.GeneratorCrossCutting).
+		Provides(Capability).
+		Directives(directives()...).
+		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the cross-cutting bucket so it
-// runs after foundation and composition generators.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorCrossCutting }
-
-// Provides advertises the trace capability.
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires returns nil — debug-weaver has no upstream dependency.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares the `-gen:debug` schema. The positive form
-// is allowed by the framework default but carries no plugin
-// semantics — debug-weaver applies to every method unconditionally
-// unless suppressed.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+// directives declares the `-gen:debug` schema. The positive form is
+// allowed by the framework default but carries no plugin semantics —
+// debug-weaver applies to every method unconditionally unless
+// suppressed.
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(node.KindMethod).
+			On(sdk.NodeKindMethod).
 			Describe("Suppresses (-) the debug-entry trace on the host method.").
 			Build(),
 	}
@@ -182,7 +179,7 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 // The call resolves to `<Options.Package>.<Options.Func>(<format>,
 // "<Type>.<Method>")` — the renderer registers the import for
 // Options.Package on the host file's import set via the
-// [emit.NewExternal] expression.
+// [sdk.NewExternal] expression.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name)
 	for m := range ctx.Reader.EmitMethods().All() {
@@ -192,45 +189,18 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		trace := &Trace{
 			BaseEmit: sdk.BaseEmit{SetByName: c.SetBy(), SourcePos: m.Pos()},
 			FuncRef:  sdk.NewExternal(p.pkg(), p.funcName()),
-			Format:   emit.NewLiteralString(p.format()),
-			Subject:  emit.NewLiteralString(ownerName(m) + "." + m.Name),
+			Format:   sdk.NewLiteralString(p.format()),
+			Subject:  sdk.NewLiteralString(ownerName(m) + "." + m.Name),
 		}
 		// AppendPrebody can only fail when host is nil or carries
-		// an unsupported kind — neither possible for the *emit.Method
+		// an unsupported kind — neither possible for the *sdk.EmitMethod
 		// values EmitMethods yields, and the render wrapper reports
-		// emit.KindStmt by construction. The Append is therefore
+		// sdk.EmitKindStmt by construction. The Append is therefore
 		// infallible at this call site.
-		_ = c.AppendPrebody(m, emit.NewRenderStmt(trace), EntryID)
+		_ = c.AppendPrebody(m, sdk.NewRenderStmt(trace), EntryID)
 	}
 	return nil
 }
-
-// Templates ships the trace template.
-//
-// A contributor shipping a template needs no [sdk.FilenameProvider]:
-// templates say how a value renders, outputs say where a file lands,
-// and this plugin renders inside a file it does not own.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang != langGo {
-		return nil, false
-	}
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
-}
-
-// TemplateFuncs contributes nothing.
-//
-// The shared Go helpers are already merged into the backend's
-// overrideable funcmap, so returning them here re-registers names that
-// exist — a Build-time collision that would stop this plugin and any
-// other plugin doing the same from appearing in one pipeline.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides replaces nothing.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // pkg / funcName / format return the configured option value or
 // the documented default when the option is empty.
@@ -261,6 +231,6 @@ func (p *Plugin) format() string {
 // interfaces, methods on structs, and methods on source-side
 // types are all handled uniformly via [contract.Owner.OwnerName],
 // so the function never type-switches the underlying Owner kind.
-func ownerName(m *emit.Method) string {
+func ownerName(m *sdk.EmitMethod) string {
 	return m.OwnerName()
 }

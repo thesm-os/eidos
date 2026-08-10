@@ -4,9 +4,8 @@
 package multiargwriter
 
 import (
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -16,7 +15,7 @@ const Name = "multiargwriter"
 // stamped on a positive match.
 //
 //nolint:gochecknoglobals // registry-singleton key
-var ArgTypes = meta.NewKey("shape.multiargwriter.arg_types", meta.StringListParser)
+var ArgTypes = sdk.NewKey("shape.multiargwriter.arg_types", sdk.StringListParser)
 
 // Detector returns the [shape.Detector] this package contributes.
 func Detector() shape.Detector {
@@ -32,7 +31,7 @@ func Detector() shape.Detector {
 // detectGolang accepts a callable with three or more non-context
 // parameters and a single trailing `error` return. The full
 // argument-type list is stamped via [ArgTypes].
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if !shape.GoHasError(returns) || len(shape.GoStripError(returns)) != 0 {
 		return shape.Match{}, false

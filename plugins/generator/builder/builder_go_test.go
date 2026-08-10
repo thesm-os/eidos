@@ -9,9 +9,8 @@ import (
 
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/node"
 	builderplugin "go.thesmos.sh/eidos/plugins/generator/builder"
-	"go.thesmos.sh/eidos/store"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // TestConformance_Golang drives the language-neutral
@@ -25,11 +24,13 @@ import (
 // interprets them.
 //
 // The conformance suite asserts only panic-safety, source-
-// frozen-ness, and emit-projection determinism — the
-// rendered template's correctness is pinned end-to-end by
-// the demoproject acceptance test, which renders through
-// the Go backend and verifies the generated builder
-// compiles via `go build` / `go vet`.
+// frozen-ness, and emit-projection determinism. It never
+// looks at the rendered text, so every fixture below would
+// pass against a template emitting a redeclared name or a
+// setter at the wrong arity. Closing that gap needs a
+// backend, which this module may not import; the compiler is
+// put behind the rendered builder end-to-end by the
+// demoproject acceptance test instead.
 func TestConformance_Golang(t *testing.T) {
 	t.Parallel()
 
@@ -39,54 +40,54 @@ func TestConformance_Golang(t *testing.T) {
 		[]plugintest.GeneratorFixture{
 			{
 				Name: "un-annotated struct emits nothing",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return storefixture.New().
 						Package("blog", "example.com/blog").
 						Struct("Article", func(sb *storefixture.StructBuilder) {
-							sb.Field("Title", &node.TypeRef{Name: "string"}, nil)
+							sb.Field("Title", &sdk.TypeRef{Name: "string"}, nil)
 						}).
 						Build()
 				},
 			},
 			{
 				Name: "annotated struct with scalar fields",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return buildScalarStore(t)
 				},
 			},
 			{
 				Name: "annotated struct with slice, map, and bytes fields",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return buildCollectionStore(t)
 				},
 			},
 			{
 				Name: "annotated struct with a pointer field",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return buildPointerStore(t)
 				},
 			},
 			{
 				Name: "annotated generic struct",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return buildGenericStore(t)
 				},
 			},
 			{
 				Name: "annotated struct with defaults=pkg.Func",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return buildDefaultsStore(t)
 				},
 			},
 			{
 				Name: "annotated struct with no exported fields",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return buildUnexportedOnlyStore(t)
 				},
@@ -158,62 +159,62 @@ func TestGoDefaultsExpr(t *testing.T) {
 	})
 }
 
-// buildScalarStore returns a [store.Store] populated with one
+// buildScalarStore returns a [sdk.Store] populated with one
 // annotated struct carrying only scalar fields — exercises
 // the default With<Field> branch of the per-field-shape
 // template.
-func buildScalarStore(t *testing.T) *store.Store {
+func buildScalarStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	return storefixture.New().
 		Package("blog", "example.com/blog").
 		Struct("Article", func(sb *storefixture.StructBuilder) {
 			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Title", &node.TypeRef{Name: "string"}, nil)
-			sb.Field("Views", &node.TypeRef{Name: "int"}, nil)
-			sb.Field("Published", &node.TypeRef{Name: "bool"}, nil)
+			sb.Field("Title", &sdk.TypeRef{Name: "string"}, nil)
+			sb.Field("Views", &sdk.TypeRef{Name: "int"}, nil)
+			sb.Field("Published", &sdk.TypeRef{Name: "bool"}, nil)
 		}).
 		Build()
 }
 
-// buildCollectionStore returns a [store.Store] populated with
+// buildCollectionStore returns a [sdk.Store] populated with
 // one annotated struct carrying a slice, a map, and a []byte
 // field — exercises every variadic / entry / string-
 // convenience branch of the rendered builder.
-func buildCollectionStore(t *testing.T) *store.Store {
+func buildCollectionStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	return storefixture.New().
 		Package("blog", "example.com/blog").
 		Struct("Article", func(sb *storefixture.StructBuilder) {
 			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Tags", storefixture.Slice(&node.TypeRef{Name: "string"}), nil)
+			sb.Field("Tags", storefixture.Slice(&sdk.TypeRef{Name: "string"}), nil)
 			sb.Field("Metadata", storefixture.Map(
-				&node.TypeRef{Name: "string"},
-				&node.TypeRef{Name: "string"},
+				&sdk.TypeRef{Name: "string"},
+				&sdk.TypeRef{Name: "string"},
 			), nil)
-			sb.Field("Body", storefixture.Slice(&node.TypeRef{Name: "byte"}), nil)
+			sb.Field("Body", storefixture.Slice(&sdk.TypeRef{Name: "byte"}), nil)
 		}).
 		Build()
 }
 
-// buildPointerStore returns a [store.Store] populated with one
+// buildPointerStore returns a [sdk.Store] populated with one
 // annotated struct carrying a pointer field — exercises the
 // pointer-passthrough branch of refconv.FromNode.
-func buildPointerStore(t *testing.T) *store.Store {
+func buildPointerStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	return storefixture.New().
 		Package("blog", "example.com/blog").
 		Struct("Article", func(sb *storefixture.StructBuilder) {
 			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Author", storefixture.Pointer(&node.TypeRef{Name: "string"}), nil)
+			sb.Field("Author", storefixture.Pointer(&sdk.TypeRef{Name: "string"}), nil)
 		}).
 		Build()
 }
 
-// buildGenericStore returns a [store.Store] populated with one
+// buildGenericStore returns a [sdk.Store] populated with one
 // annotated generic struct — exercises the type-parameter
 // decl / args plumbing across builder type, constructors,
 // setters, Mutate, Clone, and Build.
-func buildGenericStore(t *testing.T) *store.Store {
+func buildGenericStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	return storefixture.New().
 		Package("blog", "example.com/blog").
@@ -221,17 +222,17 @@ func buildGenericStore(t *testing.T) *store.Store {
 			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
 			sb.TypeParam("T", nil)
 			sb.Field("Item", storefixture.TypeParamRef("T"), nil)
-			sb.Field("Label", &node.TypeRef{Name: "string"}, nil)
+			sb.Field("Label", &sdk.TypeRef{Name: "string"}, nil)
 		}).
 		Build()
 }
 
-// buildDefaultsStore returns a [store.Store] populated with
+// buildDefaultsStore returns a [sdk.Store] populated with
 // one annotated struct carrying the
 // `defaults=example.com/blog.ArticleDefaults` override —
 // exercises the additional New<Name>WithDefaults constructor
 // branch.
-func buildDefaultsStore(t *testing.T) *store.Store {
+func buildDefaultsStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	return storefixture.New().
 		Package("blog", "example.com/blog").
@@ -240,22 +241,22 @@ func buildDefaultsStore(t *testing.T) *store.Store {
 				builderplugin.DirectiveName,
 				storefixture.KV(builderplugin.DefaultsKey, "example.com/blog.ArticleDefaults"),
 			))
-			sb.Field("Title", &node.TypeRef{Name: "string"}, nil)
+			sb.Field("Title", &sdk.TypeRef{Name: "string"}, nil)
 		}).
 		Build()
 }
 
-// buildUnexportedOnlyStore returns a [store.Store] populated
+// buildUnexportedOnlyStore returns a [sdk.Store] populated
 // with one annotated struct whose only fields are unexported
 // — the builder must render an empty setter set without
 // short-circuiting the type / constructor / Build emission.
-func buildUnexportedOnlyStore(t *testing.T) *store.Store {
+func buildUnexportedOnlyStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	return storefixture.New().
 		Package("blog", "example.com/blog").
 		Struct("Article", func(sb *storefixture.StructBuilder) {
 			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("internal", &node.TypeRef{Name: "string"}, nil)
+			sb.Field("internal", &sdk.TypeRef{Name: "string"}, nil)
 		}).
 		Build()
 }

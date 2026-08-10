@@ -6,8 +6,8 @@ package shape_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // All three of this plugin's directives reject the negated form,
@@ -31,30 +31,30 @@ func TestDirectives_RejectNegatedForm(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		directive *directive.Directive
+		directive *sdk.Directive
 	}{
 		{
 			name: "shape: suppression is meaningful but unimplemented",
-			directive: &directive.Directive{
+			directive: &sdk.Directive{
 				Name: shape.DirectiveName, Args: []string{"reader"}, Negated: true,
 			},
 		},
 		{
 			name: "shape: bare negated form",
-			directive: &directive.Directive{
+			directive: &sdk.Directive{
 				Name: shape.DirectiveName, Negated: true,
 			},
 		},
 		{
 			name: "contract: membership exists only where declared",
-			directive: &directive.Directive{
+			directive: &sdk.Directive{
 				Name: shape.ContractDirectiveName, Args: []string{"tx"},
 				KV: map[string]string{"role": "begin"}, Negated: true,
 			},
 		},
 		{
 			name: "mixin: attachment exists only where declared",
-			directive: &directive.Directive{
+			directive: &sdk.Directive{
 				Name: shape.MixinDirectiveName, Args: []string{"atomic"}, Negated: true,
 			},
 		},
@@ -77,24 +77,24 @@ func TestDirectives_AcceptPositiveForm(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		directive *directive.Directive
+		directive *sdk.Directive
 	}{
 		{
 			name: "shape",
-			directive: &directive.Directive{
+			directive: &sdk.Directive{
 				Name: shape.DirectiveName, Args: []string{"reader"},
 			},
 		},
 		{
 			name: "contract",
-			directive: &directive.Directive{
+			directive: &sdk.Directive{
 				Name: shape.ContractDirectiveName, Args: []string{"tx"},
 				KV: map[string]string{"role": "begin"},
 			},
 		},
 		{
 			name: "mixin",
-			directive: &directive.Directive{
+			directive: &sdk.Directive{
 				Name: shape.MixinDirectiveName, Args: []string{"atomic"},
 			},
 		},

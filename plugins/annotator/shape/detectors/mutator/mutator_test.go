@@ -6,9 +6,9 @@ package mutator_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/mutator"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,9 +24,9 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_MatchesValueByValue(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Set", Package: "x",
-		Params: []*node.Param{
+		Params: []*sdk.Param{
 			dt.Param("ctx", dt.Ctx()),
 			dt.Param("v", dt.Qualified("x", "Article")),
 		},
@@ -37,9 +37,9 @@ func TestDetector_MatchesValueByValue(t *testing.T) {
 
 func TestDetector_MatchesPointerValue(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Set", Package: "x",
-		Params: []*node.Param{
+		Params: []*sdk.Param{
 			dt.Param("v", dt.Pointer(dt.Qualified("x", "Article"))),
 		},
 	}
@@ -51,20 +51,20 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"has error return (Writer territory)", &node.Function{
+		{"has error return (Writer territory)", &sdk.Function{
 			Name: "Save", Package: "x",
-			Params:  []*node.Param{dt.Param("v", dt.Qualified("x", "Article"))},
-			Returns: node.AnonReturns(dt.Err()),
+			Params:  []*sdk.Param{dt.Param("v", dt.Qualified("x", "Article"))},
+			Returns: sdk.AnonReturns(dt.Err()),
 		}},
-		{"no params (Lifecycle territory)", &node.Function{
+		{"no params (Lifecycle territory)", &sdk.Function{
 			Name: "Tick", Package: "x",
-			Params: []*node.Param{dt.Param("ctx", dt.Ctx())},
+			Params: []*sdk.Param{dt.Param("ctx", dt.Ctx())},
 		}},
-		{"two non-ctx params (CompositeWriter territory)", &node.Function{
+		{"two non-ctx params (CompositeWriter territory)", &sdk.Function{
 			Name: "X", Package: "x",
-			Params: []*node.Param{
+			Params: []*sdk.Param{
 				dt.Param("k", dt.Named("string")),
 				dt.Param("v", dt.Qualified("x", "Article")),
 			},

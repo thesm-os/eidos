@@ -6,9 +6,9 @@ package predicate_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/predicate"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,9 +24,9 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_MatchesPredicate(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Ready", Package: "x",
-		Returns: node.AnonReturns(dt.Named("bool")),
+		Returns: sdk.AnonReturns(dt.Named("bool")),
 	}
 	bag := dt.RunFn(t, predicate.Detector(), fn)
 	dt.AssertShape(t, bag, predicate.Name, "", "")
@@ -36,21 +36,21 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"void return", &node.Function{Name: "X", Package: "x"}},
-		{"error return", &node.Function{
+		{"void return", &sdk.Function{Name: "X", Package: "x"}},
+		{"error return", &sdk.Function{
 			Name: "X", Package: "x",
-			Returns: node.AnonReturns(dt.Err()),
+			Returns: sdk.AnonReturns(dt.Err()),
 		}},
-		{"qualified bool is not a builtin", &node.Function{
+		{"qualified bool is not a builtin", &sdk.Function{
 			Name: "X", Package: "x",
-			Returns: node.AnonReturns(dt.Qualified("x", "bool")),
+			Returns: sdk.AnonReturns(dt.Qualified("x", "bool")),
 		}},
-		{"has params", &node.Function{
+		{"has params", &sdk.Function{
 			Name: "X", Package: "x",
-			Params:  []*node.Param{dt.Param("a", dt.Named("string"))},
-			Returns: node.AnonReturns(dt.Named("bool")),
+			Params:  []*sdk.Param{dt.Param("a", dt.Named("string"))},
+			Returns: sdk.AnonReturns(dt.Named("bool")),
 		}},
 	}
 	for _, tc := range cases {

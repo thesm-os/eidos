@@ -70,6 +70,117 @@ func TestScope(t *testing.T) {
 	})
 }
 
+func TestScopeOrder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ranks statements inside one body", func(t *testing.T) {
+		t.Parallel()
+		// The claim a weaver makes and nothing else could state: a
+		// prebody contribution rendered after the return compiles, vets
+		// and satisfies every substring assertion about it.
+		parse(t).InMethod(t, "StoreStub", "Get").
+			AssertOrder(t, "answer(s.OnGet)", "return r.Item")
+	})
+
+	t.Run("names the inverted pair", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		parse(t).InMethod(t, "StoreStub", "Get").
+			AssertOrder(s, "return r.Item", "answer(s.OnGet)")
+		if !s.failed || !strings.Contains(s.msg, `renders "answer(s.OnGet)" before "return r.Item"`) {
+			t.Fatalf("message %q does not name the inverted pair", s.msg)
+		}
+	})
+
+	t.Run("ranks a whole list of contributors", func(t *testing.T) {
+		t.Parallel()
+		parseChain(t).InVar(t, "OrdersMiddleware").
+			AssertOrderAll(t, "auth.Require", "metrics.Record", "trace.Span")
+	})
+
+	t.Run("fails on a contributor that stopped rendering", func(t *testing.T) {
+		t.Parallel()
+		// A missing entry is a failure rather than a hole silently
+		// skipped over: the order it would have taken part in is the
+		// whole claim.
+		s := probe(t)
+		parseChain(t).InVar(t, "OrdersMiddleware").
+			AssertOrderAll(s, "auth.Require", "audit.Record", "trace.Span")
+		if !s.failed || !strings.Contains(s.msg, "audit.Record") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
+
+	t.Run("chains off an absent scope without panicking", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		parseChain(t).InVar(s, "Absent").AssertOrder(s, "a", "b")
+	})
+}
+
+func TestInVar(t *testing.T) {
+	t.Parallel()
+
+	t.Run("narrows to one var's initialiser", func(t *testing.T) {
+		t.Parallel()
+		// A file-wide substring cannot tell this var's contents from a
+		// neighbouring one's, which is the whole difficulty when a
+		// generator's output is one composite literal.
+		parseChain(t).InVar(t, "OrdersMiddleware").
+			AssertContains(t, "metrics.Record").
+			AssertNotContains(t, "unknown status")
+	})
+
+	t.Run("reports a var with nothing to narrow to", func(t *testing.T) {
+		t.Parallel()
+		// Every assertion over an empty scope would pass on nothing.
+		s := probe(t)
+		parseChain(t).InVar(s, "declared").AssertContains(s, "Middleware")
+		if !s.failed || !strings.Contains(s.msg, "no initialiser") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
+
+	t.Run("lists the vars when the name is absent", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		parseChain(t).InVar(s, "Absent")
+		if !s.failed || !strings.Contains(s.msg, "OrdersMiddleware") {
+			t.Fatalf("message %q does not list the vars", s.msg)
+		}
+	})
+}
+
+func TestAssertTestFuncs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts the exact set", func(t *testing.T) {
+		t.Parallel()
+		parseTests(t).AssertTestFuncs(t, "TestStoreStubGet", "TestStoreStubClose")
+	})
+
+	t.Run("rejects a suite carrying one nobody asked for", func(t *testing.T) {
+		t.Parallel()
+		// The half a membership assertion cannot state: a check emitted
+		// for a method the projection cannot honestly exercise passes
+		// every "is it present" assertion ever written.
+		s := probe(t)
+		parseTests(t).AssertTestFuncs(s, "TestStoreStubGet")
+		if !s.failed || !strings.Contains(s.msg, "unexpected: [TestStoreStubClose]") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
+
+	t.Run("rejects a suite missing one", func(t *testing.T) {
+		t.Parallel()
+		s := probe(t)
+		parseTests(t).AssertTestFuncs(s, "TestStoreStubGet", "TestStoreStubClose", "TestStoreStubName")
+		if !s.failed || !strings.Contains(s.msg, "absent: [TestStoreStubName]") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
+}
+
 func TestSubtests(t *testing.T) {
 	t.Parallel()
 

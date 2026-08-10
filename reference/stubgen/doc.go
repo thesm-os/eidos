@@ -83,8 +83,8 @@
 //	}
 //
 //	type StoreStub struct {
-//	    GetFunc func(ctx context.Context, id string) (User, error)
-//	    PutFunc func(ctx context.Context, u User) error
+//	    GetFunc func(context.Context, string) (User, error)
+//	    PutFunc func(context.Context, User) error
 //
 //	    GetCalls []StoreGetCall
 //	    PutCalls []StorePutCall
@@ -142,6 +142,36 @@
 // nothing else — the recorded-call struct keeps its derived field
 // names either way, because those are per-return and have no
 // all-or-nothing constraint.
+//
+// # Variadic parameters
+//
+// A variadic tail is carried through every position it appears in,
+// and the four disagree: the generated method declares `opts
+// ...string`, the func field's type is `func(string, ...string)`,
+// the delegate call spreads with `opts...`, and the recorded-call
+// field is `[]string` — the parameter's type inside the body.
+//
+// Dropping the marker in any of them yields a double whose method
+// takes one value where the interface wants many. That compiles as a
+// standalone type and satisfies nothing, so it surfaces only where a
+// consumer assigns the stub to the interface — which is exactly what
+// the companion's `var _ Iface = (*Stub)(nil)` line is for.
+//
+// # The receiver identifier
+//
+// The generated method binds its receiver to the stub type's initial
+// — `s` for `StoreStub` — unless a parameter already holds that
+// identifier, in which case the receiver moves rather than the
+// parameter. The source names the parameters and this generator
+// names nothing, so the parameter is what has to be preserved: an
+// interface declaring `Recv(s string)` would otherwise render
+// `func (s *StoreStub) Recv(s string)`, where every `s.<Field>` in
+// the body resolves to the parameter.
+//
+// The companion's delegate closures go further and declare every
+// parameter blank. They ignore their arguments, and a source
+// identifier brought into that scope can shadow the closure's own
+// call counter — a suite that compiles, runs, and fails.
 //
 // # Options
 //

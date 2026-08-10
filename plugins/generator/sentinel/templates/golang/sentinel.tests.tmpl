@@ -105,7 +105,9 @@ func Test{{ .TestName }}(t *{{ renderExpr (external "testing" "T") }}) {
 //   - errors.As round-trip:  extracted instance preserves every field.
 //   - errors.Join wrapping:  errors.As succeeds through errors.Join.
 //   - fmt.Errorf wrapping:   errors.As succeeds through fmt.Errorf("%w").
+{{- if $et.FormatCheckOrder }}
 //   - Error format:          output includes every recognised field value.
+{{- end }}
 {{- if $et.OtherTypes }}
 //   - non-overlap:           does not alias other custom error types.
 {{- end }}

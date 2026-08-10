@@ -99,9 +99,13 @@
 //     [TypeParamDecls], [TypeParamNames], [TypeParamRefs],
 //     [SelfRef], [Witnesses], [SubstituteTypeParams],
 //     [SubstituteSig].
-//   - Conventions (conventions.go): [GeneratedHeader],
-//     [IsGeneratedSource], [TestFuncName], [ConstructorName],
-//     [SentinelName], [Doc], [DeprecatedDoc], [TestFileName].
+//   - Conventions (conventions.go): [ExportedName],
+//     [GeneratedHeader], [IsGeneratedSource], [TestFuncName],
+//     [ConstructorName], [SentinelName], [Doc], [DeprecatedDoc],
+//     [TestFileName]. [ExportedName] is the general case the rest
+//     are built on — a caller that only wants an identifier's
+//     exported spelling, with no convention layered over it, has a
+//     name here and no reason to reach for [core/naming] itself.
 //
 // # How predicates answer
 //
@@ -236,6 +240,14 @@
 // layer it on top, typically inside a language-specific frontend
 // or backend helper". [SafeIdent] is that layer, and it needs the
 // sanitiser underneath it.
+//
+// The case converters sit in the same relationship. PascalCase is a
+// shape with no language in it; `exported` is the Go rule that gives
+// the shape a meaning, and [ExportedName] is where that rule is
+// stated. Everything Go-shaped a consumer needs from [core/naming]
+// is therefore reachable here, which is the point — a plugin
+// importing this package to emit Go should never also import a
+// language-neutral case converter to finish the job.
 //
 // Future per-language packages (`lang/rust`, `lang/typescript`)
 // mirror this shape with language-flavoured equivalents.

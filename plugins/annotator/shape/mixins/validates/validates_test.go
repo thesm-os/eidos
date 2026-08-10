@@ -6,11 +6,10 @@ package validates_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/internal/mixintest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/validates"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestMixin(t *testing.T) {
@@ -23,20 +22,20 @@ func TestMixin(t *testing.T) {
 
 	t.Run("resolver rewrites fn param to qualified name", func(t *testing.T) {
 		t.Parallel()
-		host := &node.Function{
+		host := &sdk.Function{
 			Name: "Save", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					mixintest.HostDirective(validates.Name, map[string]string{
 						"fn": "ValidateInput",
 					}),
 				},
 			},
 		}
-		validator := &node.Function{Name: "ValidateInput", Package: "x"}
-		mixintest.RunWithResolver(t, validates.Mixin(), &node.Package{
+		validator := &sdk.Function{Name: "ValidateInput", Package: "x"}
+		mixintest.RunWithResolver(t, validates.Mixin(), &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{host, validator},
+			Functions: []*sdk.Function{host, validator},
 		})
 
 		got, _ := shape.MixinParamKey(validates.Name, "fn").Get(host.Meta())

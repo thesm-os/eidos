@@ -6,11 +6,10 @@ package orderafter_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/internal/mixintest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/orderafter"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestMixin(t *testing.T) {
@@ -23,20 +22,20 @@ func TestMixin(t *testing.T) {
 
 	t.Run("resolver rewrites fn param to qualified name", func(t *testing.T) {
 		t.Parallel()
-		host := &node.Function{
+		host := &sdk.Function{
 			Name: "DoWork", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					mixintest.HostDirective(orderafter.Name, map[string]string{
 						"fn": "Initialise",
 					}),
 				},
 			},
 		}
-		initFn := &node.Function{Name: "Initialise", Package: "x"}
-		mixintest.RunWithResolver(t, orderafter.Mixin(), &node.Package{
+		initFn := &sdk.Function{Name: "Initialise", Package: "x"}
+		mixintest.RunWithResolver(t, orderafter.Mixin(), &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{host, initFn},
+			Functions: []*sdk.Function{host, initFn},
 		})
 
 		got, _ := shape.MixinParamKey(orderafter.Name, "fn").Get(host.Meta())

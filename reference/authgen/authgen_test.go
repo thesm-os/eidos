@@ -9,6 +9,7 @@ import (
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/reference/authgen"
+	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -35,7 +36,7 @@ func TestConformance(t *testing.T) {
 		plugintest.RunGeneratorSuite(t, authgen.New(), []plugintest.GeneratorFixture{
 			{
 				Name: "empty store",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return store.New()
 				},
@@ -45,7 +46,7 @@ func TestConformance(t *testing.T) {
 				// without emitting, panicking, or touching the source
 				// graph — the path a real run takes for most packages.
 				Name: "package with nothing this plugin handles",
-				BuildStore: func(t *testing.T) *store.Store {
+				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
 					return storefixture.New().Struct("Plain", nil).Build()
 				},

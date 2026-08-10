@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/streamconsumer"
 	"go.thesmos.sh/eidos/sdk"
@@ -21,8 +19,8 @@ import (
 //
 //nolint:gochecknoglobals // cross-package registry-singleton keys
 var (
-	frontendMarker  = meta.EnsureKey("frontend", meta.StringParser)
-	metaIsInterface = meta.EnsureKey("go.isInterface", meta.BoolParser)
+	frontendMarker  = sdk.EnsureKey("frontend", sdk.StringParser)
+	metaIsInterface = sdk.EnsureKey("go.isInterface", sdk.BoolParser)
 )
 
 // TestDetector_Identity pins the constructor invariants.
@@ -51,7 +49,7 @@ func TestDetector_MatchesStreamConsumers(t *testing.T) {
 
 	t.Run("inline interface needs no stamp", func(t *testing.T) {
 		t.Parallel()
-		fn := consumerFunc("Load", &node.TypeRef{TypeKind: node.TypeRefAnonInterface})
+		fn := consumerFunc("Load", &sdk.TypeRef{TypeKind: sdk.TypeRefAnonInterface})
 		runDetectFunc(t, fn)
 		if got := shape.Get(fn.Meta()); got != streamconsumer.Name {
 			t.Fatalf("shape = %q, want %q", got, streamconsumer.Name)
@@ -83,25 +81,25 @@ func TestDetector_RejectsNonConsumers(t *testing.T) {
 
 	tests := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
 		{
 			// Requiring ctx keeps the detector out of constructor-
 			// and helper-shaped code, which shares this signature.
 			name: "no context parameter",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Load", Package: "x",
-				Params:  []*node.Param{{Name: "r", Type: stampedInterface("io", "Reader")}},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "int"}, &node.TypeRef{Name: "error"}),
+				Params:  []*sdk.Param{{Name: "r", Type: stampedInterface("io", "Reader")}},
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "int"}, &sdk.TypeRef{Name: "error"}),
 			},
 		},
 		{
 			name: "unstamped named ref is not known to be an interface",
-			fn:   consumerFunc("Load", &node.TypeRef{Name: "Duration", Package: "time"}),
+			fn:   consumerFunc("Load", &sdk.TypeRef{Name: "Duration", Package: "time"}),
 		},
 		{
 			name: "plain value parameter",
-			fn:   consumerFunc("Get", &node.TypeRef{Name: "string"}),
+			fn:   consumerFunc("Get", &sdk.TypeRef{Name: "string"}),
 		},
 		{
 			// A constraint is an interface; `K comparable` is a key.
@@ -110,27 +108,27 @@ func TestDetector_RejectsNonConsumers(t *testing.T) {
 		},
 		{
 			name: "no error return",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Load", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 					{Name: "r", Type: stampedInterface("io", "Reader")},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "int"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "int"}),
 			},
 		},
 		{
 			name: "two values alongside the error",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Load", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 					{Name: "r", Type: stampedInterface("io", "Reader")},
 				},
-				Returns: node.AnonReturns(
-					&node.TypeRef{Name: "int"},
-					&node.TypeRef{Name: "int"},
-					&node.TypeRef{Name: "error"},
+				Returns: sdk.AnonReturns(
+					&sdk.TypeRef{Name: "int"},
+					&sdk.TypeRef{Name: "int"},
+					&sdk.TypeRef{Name: "error"},
 				),
 			},
 		},
@@ -148,8 +146,8 @@ func TestDetector_RejectsNonConsumers(t *testing.T) {
 
 // stampedInterface returns a named ref carrying the frontend's
 // interface-ness fact, as the Go frontend would produce it.
-func stampedInterface(pkg, name string) *node.TypeRef {
-	ref := &node.TypeRef{Name: name, Package: pkg}
+func stampedInterface(pkg, name string) *sdk.TypeRef {
+	ref := &sdk.TypeRef{Name: name, Package: pkg}
 	metaIsInterface.Set(ref.EnsureMeta(), true, "test")
 	return ref
 }
@@ -157,30 +155,30 @@ func stampedInterface(pkg, name string) *node.TypeRef {
 // stampedTypeParam returns a type-parameter ref carrying the stamp
 // it would never receive in practice, so the test proves the
 // detector's own exclusion rather than the frontend's.
-func stampedTypeParam() *node.TypeRef {
-	ref := &node.TypeRef{TypeKind: node.TypeRefTypeParam, Name: "K"}
+func stampedTypeParam() *sdk.TypeRef {
+	ref := &sdk.TypeRef{TypeKind: sdk.TypeRefTypeParam, Name: "K"}
 	metaIsInterface.Set(ref.EnsureMeta(), true, "test")
 	return ref
 }
 
 // consumerFunc builds the canonical consumer signature around the
 // supplied stream parameter type.
-func consumerFunc(name string, stream *node.TypeRef) *node.Function {
-	return &node.Function{
+func consumerFunc(name string, stream *sdk.TypeRef) *sdk.Function {
+	return &sdk.Function{
 		Name: name, Package: "x",
-		Params: []*node.Param{
-			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+		Params: []*sdk.Param{
+			{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 			{Name: "r", Type: stream},
 		},
-		Returns: node.AnonReturns(&node.TypeRef{Name: "int"}, &node.TypeRef{Name: "error"}),
+		Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "int"}, &sdk.TypeRef{Name: "error"}),
 	}
 }
 
 // runDetectFunc wires fn into a single-function package and runs the
 // detector through the umbrella shape plugin.
-func runDetectFunc(t *testing.T, fn *node.Function) {
+func runDetectFunc(t *testing.T, fn *sdk.Function) {
 	t.Helper()
-	pkg := &node.Package{Name: "x", Path: "x", Functions: []*node.Function{fn}}
+	pkg := &sdk.Package{Name: "x", Path: "x", Functions: []*sdk.Function{fn}}
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
@@ -197,7 +195,7 @@ func runDetectFunc(t *testing.T, fn *node.Function) {
 
 // assertStream fails unless bag carries the streamconsumer stamp
 // with the expected stream and value types.
-func assertStream(t *testing.T, bag *meta.Bag, wantStream, wantValue string) {
+func assertStream(t *testing.T, bag *sdk.Bag, wantStream, wantValue string) {
 	t.Helper()
 	if got := shape.Get(bag); got != streamconsumer.Name {
 		t.Fatalf("shape = %q, want %q", got, streamconsumer.Name)

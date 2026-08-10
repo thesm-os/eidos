@@ -129,6 +129,12 @@ const (
 	// anything — so the run writes no files at all, for every plugin in
 	// the composition rather than only this one.
 	ViolationReservedFuncName Violation = "reserved-func-name"
+
+	// ViolationUnbindableFuncName registers a funcmap entry under a
+	// name that is not a Go identifier. text/template panics rather
+	// than erroring on one, so the backend takes the panic mid-render
+	// and the run writes fewer files than it should.
+	ViolationUnbindableFuncName Violation = "unbindable-func-name"
 )
 
 // Violations returns every [Violation] this package ships, sorted.
@@ -156,6 +162,7 @@ func Violations() []Violation {
 		ViolationFuncInBothMaps,
 		ViolationUnparsableTemplate,
 		ViolationReservedFuncName,
+		ViolationUnbindableFuncName,
 		ViolationSharedSlice,
 	}
 	slices.Sort(out)
@@ -238,6 +245,8 @@ func BrokenPlugin(v Violation) plugin.Plugin {
 		return &brokenTemplateProvider{FixturePlugin: base, unparsable: true}
 	case ViolationReservedFuncName:
 		return &brokenTemplateProvider{FixturePlugin: base, reservedFunc: true}
+	case ViolationUnbindableFuncName:
+		return &brokenTemplateProvider{FixturePlugin: base, unbindableFunc: true}
 	default:
 		return base
 	}
@@ -367,9 +376,10 @@ func (p *brokenUnstableOutputs) Outputs(lang string) []plugin.Output {
 // selected by the flag set on it, and nothing else.
 type brokenTemplateProvider struct {
 	*FixturePlugin
-	bothMaps     bool
-	unparsable   bool
-	reservedFunc bool
+	bothMaps       bool
+	unparsable     bool
+	reservedFunc   bool
+	unbindableFunc bool
 }
 
 // fixtureTemplateDir is the directory the fixture nests its template
@@ -404,6 +414,12 @@ func (p *brokenTemplateProvider) TemplateFuncs(lang string) template.FuncMap {
 		// `imp` is the backend's import-collection helper. A plugin
 		// registering it shadows the one every core template calls.
 		return template.FuncMap{"imp": func() string { return "" }}
+	}
+	if p.unbindableFunc {
+		// The shape a hyphenated plugin name derives when it prefixes
+		// its own helpers. text/template reads the hyphen as a
+		// subtraction, so the name can never be referenced either.
+		return template.FuncMap{"fixture-helper": func() string { return "" }}
 	}
 	return template.FuncMap{"fixtureHelper": func() string { return "" }}
 }

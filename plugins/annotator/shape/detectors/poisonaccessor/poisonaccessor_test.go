@@ -6,9 +6,9 @@ package poisonaccessor_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/poisonaccessor"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,9 +24,9 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_MatchesPoison(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Check", Package: "x",
-		Returns: node.AnonReturns(dt.Err()),
+		Returns: sdk.AnonReturns(dt.Err()),
 	}
 	bag := dt.RunFn(t, poisonaccessor.Detector(), fn)
 	dt.AssertShape(t, bag, poisonaccessor.Name, "", "")
@@ -36,18 +36,18 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"has params (Lifecycle territory)", &node.Function{
+		{"has params (Lifecycle territory)", &sdk.Function{
 			Name: "Check", Package: "x",
-			Params:  []*node.Param{dt.Param("ctx", dt.Ctx())},
-			Returns: node.AnonReturns(dt.Err()),
+			Params:  []*sdk.Param{dt.Param("ctx", dt.Ctx())},
+			Returns: sdk.AnonReturns(dt.Err()),
 		}},
-		{"non-error single return (Predicate territory)", &node.Function{
+		{"non-error single return (Predicate territory)", &sdk.Function{
 			Name: "Check", Package: "x",
-			Returns: node.AnonReturns(dt.Named("bool")),
+			Returns: sdk.AnonReturns(dt.Named("bool")),
 		}},
-		{"void return (VoidLifecycle territory)", &node.Function{
+		{"void return (VoidLifecycle territory)", &sdk.Function{
 			Name: "Check", Package: "x",
 		}},
 	}

@@ -37,11 +37,13 @@ type TB interface {
 // AssertEveryMetaKeyDocumented walks every `.go` source file
 // under packageDir (excluding `_test.go`), extracts the literal-
 // string first argument of every `meta.NewKey(...)` /
-// `meta.EnsureKey(...)` call, and asserts each resulting key
-// appears verbatim in packageDir/doc.go. Dynamic-name calls
-// whose first argument is not a literal string are skipped;
-// those land under a documented namespace prefix, which the
-// caller audits separately via the prefix presence in doc.go.
+// `meta.EnsureKey(...)` call — under either the `meta` or the
+// `sdk` spelling, see [metaKeyLiteralFrom] — and asserts each
+// resulting key appears verbatim in packageDir/doc.go.
+// Dynamic-name calls whose first argument is not a literal
+// string are skipped; those land under a documented namespace
+// prefix, which the caller audits separately via the prefix
+// presence in doc.go.
 //
 // Pass the test's `t` and the absolute path of the package
 // directory. The package's doc.go is read by joining packageDir
@@ -166,11 +168,26 @@ func calleeSelector(fun ast.Expr) (*ast.SelectorExpr, bool) {
 }
 
 // metaKeyLiteralFrom returns the first-argument literal string
-// of n when n is a `meta.NewKey(...)` or `meta.EnsureKey(...)`
-// call; ok=false otherwise. Calls whose first argument is not a
-// literal string (the dynamic-name pattern) return ok=false too
-// — those are documented by namespace prefix, not per-key
-// enumeration.
+// of n when n is a `NewKey(...)` or `EnsureKey(...)` call
+// qualified by either `meta` or `sdk`; ok=false otherwise. Calls
+// whose first argument is not a literal string (the dynamic-name
+// pattern) return ok=false too — those are documented by
+// namespace prefix, not per-key enumeration.
+//
+// Both qualifiers are matched because the same key can be
+// declared through either: framework-internal packages name
+// core/meta directly, plugins name the sdk façade, and
+// [sdk.NewKey] / [sdk.EnsureKey] are thin generic wrappers that
+// return the identical key. Matching only `meta` exempted every
+// façade-spelled key from the audit while the gate stayed green
+// — the silent-pass failure this package exists to prevent.
+//
+// The match is syntactic, on the qualifier identifier alone: no
+// type information is available here, so a local variable named
+// `sdk` or `meta` with a NewKey method would be picked up. The
+// cost of that false positive is one over-audited key; the cost
+// of the false negative it replaces is an undocumented published
+// key.
 func metaKeyLiteralFrom(n ast.Node) (string, bool) {
 	call, ok := n.(*ast.CallExpr)
 	if !ok {
@@ -181,7 +198,7 @@ func metaKeyLiteralFrom(n ast.Node) (string, bool) {
 		return "", false
 	}
 	pkgIdent, ok := sel.X.(*ast.Ident)
-	if !ok || pkgIdent.Name != "meta" {
+	if !ok || (pkgIdent.Name != "meta" && pkgIdent.Name != "sdk") {
 		return "", false
 	}
 	if sel.Sel.Name != "NewKey" && sel.Sel.Name != "EnsureKey" {

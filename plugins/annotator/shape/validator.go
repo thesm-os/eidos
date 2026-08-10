@@ -3,13 +3,7 @@
 
 package shape
 
-import (
-	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/core/position"
-	"go.thesmos.sh/eidos/node"
-	"go.thesmos.sh/eidos/sdk"
-)
+import "go.thesmos.sh/eidos/sdk"
 
 // ValidatorName is the stable identifier the framework uses for
 // the contract-validation annotator that runs after the
@@ -107,14 +101,14 @@ func (v *Validator) BeforeNodes(*sdk.AnnotatorContext) {
 // OnMethod runs the required-partner check on m for every
 // contract it participates in, and accumulates m into the
 // member set keyed by (contract, role).
-func (v *Validator) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
+func (v *Validator) OnMethod(ctx *sdk.AnnotatorContext, m *sdk.Method) {
 	v.visit(ctx, m, m.Meta())
 }
 
 // OnFunction runs the required-partner check on fn for every
 // contract it participates in, and accumulates fn into the
 // member set keyed by (contract, role).
-func (v *Validator) OnFunction(ctx *sdk.AnnotatorContext, fn *node.Function) {
+func (v *Validator) OnFunction(ctx *sdk.AnnotatorContext, fn *sdk.Function) {
 	v.visit(ctx, fn, fn.Meta())
 }
 
@@ -150,7 +144,7 @@ func (v *Validator) AfterNodes(ctx *sdk.AnnotatorContext) {
 // memberships, accumulates host into the contract member set,
 // and accumulates host's mixin attachments for the AfterNodes
 // validator pass.
-func (v *Validator) visit(ctx *sdk.AnnotatorContext, host node.Node, bag *meta.Bag) {
+func (v *Validator) visit(ctx *sdk.AnnotatorContext, host sdk.Node, bag *sdk.Bag) {
 	sink := ctx.Diag.For(ValidatorName)
 	for _, contractName := range Contracts(bag) {
 		spec, ok := v.contracts[contractName]
@@ -174,11 +168,11 @@ func (v *Validator) visit(ctx *sdk.AnnotatorContext, host node.Node, bag *meta.B
 // declared in spec.Required[role] that is missing a stamped
 // partner key on bag.
 func (*Validator) checkRequired(
-	host node.Node,
-	bag *meta.Bag,
+	host sdk.Node,
+	bag *sdk.Bag,
 	role string,
 	spec Contract,
-	sink *diag.PluginSink,
+	sink *sdk.PluginSink,
 ) {
 	required, ok := spec.Required[role]
 	if !ok {
@@ -201,7 +195,7 @@ func (*Validator) checkRequired(
 // the pairings directly. Roles are deduplicated by host pointer
 // so the same callable joining a contract twice (via self-stamp
 // + back-stamp) appears once per role.
-func (v *Validator) accumulate(spec Contract, role string, host node.Node, bag *meta.Bag) {
+func (v *Validator) accumulate(spec Contract, role string, host sdk.Node, bag *sdk.Bag) {
 	byRole, ok := v.members[spec.Name]
 	if !ok {
 		byRole = make(map[string][]ContractMember)
@@ -228,7 +222,7 @@ func (v *Validator) accumulate(spec Contract, role string, host node.Node, bag *
 // the mixin's declared params from bag so [Mixin.Validate] can
 // read them without re-walking the meta. Deduplicated by host
 // pointer.
-func (v *Validator) accumulateMixin(spec Mixin, host node.Node, bag *meta.Bag) {
+func (v *Validator) accumulateMixin(spec Mixin, host sdk.Node, bag *sdk.Bag) {
 	for _, existing := range v.attachments[spec.Name] {
 		if existing.Host == host {
 			return
@@ -244,11 +238,11 @@ func (v *Validator) accumulateMixin(spec Mixin, host node.Node, bag *meta.Bag) {
 		MixinAttachment{Host: host, Params: params})
 }
 
-// posOf returns n's source position via the [node.Node.Pos]
+// posOf returns n's source position via the [sdk.Node.Pos]
 // method. Defensive guard: nil hosts produce a zero position.
-func posOf(n node.Node) position.Pos {
+func posOf(n sdk.Node) sdk.Pos {
 	if n == nil {
-		return position.Pos{}
+		return sdk.Pos{}
 	}
 	return n.Pos()
 }

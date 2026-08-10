@@ -5,12 +5,9 @@ package stubgen
 
 import (
 	"fmt"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -32,7 +29,7 @@ const Capability = "stub"
 // prefix — the plugin reads from source interfaces.
 const DirectiveName sdk.DirectiveName = "stub"
 
-// SlotName is the [emit.File] slot both emit values append into.
+// SlotName is the [sdk.EmitFile] slot both emit values append into.
 // `top` renders between the package clause and the first core decl,
 // which is where a template-rendered block of whole declarations
 // belongs.
@@ -50,12 +47,6 @@ const (
 // name to form the stub type's identifier.
 const DefaultSuffix = "Stub"
 
-// langGo is the backend language identifier the per-language
-// adapters key on. Every dispatcher below compares against it, so a
-// second language arrives as one more arm rather than a scattered
-// string literal.
-const langGo = "golang"
-
 // Options carries the plugin's user-tunable settings.
 //
 // Recording is deliberately absent. A stub that records nothing is
@@ -70,41 +61,42 @@ type Options struct {
 // Plugin is the stub generator. The zero value is unusable; go
 // through [New] so the embedded holder binds to the options field.
 type Plugin struct {
+	*sdkgo.Base
 	*sdk.Holder[Options]
 	opts Options
 }
 
 // New returns a fresh plugin instance with the options holder bound.
+//
+// The foundation bucket is where a stub belongs: it is a base type
+// other generators may decorate, so it has to exist before the
+// composition and cross-cutting buckets run. Requires stays empty —
+// the plugin reads source interfaces and waits on no other plugin's
+// contribution — which is why the bucket, not a capability, is what
+// orders it.
+//
+// [GoOutputs] carries both files this plugin owns, primary first.
+// Neither the templates nor the emit values need a helper of their
+// own: the two `*.tmpl` call only the backend's canonical renderers,
+// so the plugin registers no template function and overrides no
+// builtin.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, GoOutputs()...).
+		Version(Version).
+		Priority(sdk.GeneratorFoundation).
+		Provides(Capability).
+		Directives(directives()...).
+		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the foundation bucket: the stub is a
-// base type other generators may decorate, so it must exist before
-// composition and cross-cutting plugins run.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorFoundation }
-
-// Provides advertises [Capability].
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires returns nil — the plugin reads source interfaces and
-// depends on no other plugin's contribution.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares the `+gen:stub` schema.
+// directives declares the `+gen:stub` schema.
 //
 // The directive takes no positional argument and denies negation: a
 // stub exists exactly where one is declared, so deleting the line is
 // the suppression and a negated form would have nothing to act on.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
 			Describe(
@@ -114,36 +106,11 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 					"exists only where declared, so removing the directive is the " +
 					"suppression.",
 			).
-			On(node.KindInterface).
+			On(sdk.NodeKindInterface).
 			DenyNegation().
 			Build(),
 	}
 }
-
-// Outputs dispatches to the per-language adapter. Adding a language
-// adds an arm here; unknown languages return nil, which the
-// framework reads as "no routable output for this backend".
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == langGo {
-		return GoOutputs()
-	}
-	return nil
-}
-
-// Templates dispatches to the per-language adapter's template tree.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang == langGo {
-		return GoTemplates()
-	}
-	return nil, false
-}
-
-// TemplateFuncs dispatches to the per-language adapter's funcmap.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides returns nil — the plugin replaces no canonical
-// funcmap entry.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // suffix returns the configured stub-type suffix, or the documented
 // default when unset.
@@ -155,14 +122,27 @@ func (p *Plugin) suffix() string {
 }
 
 // Param is one rendered parameter: the in-method identifier and its
-// type, already lifted to an [emit.Ref] so `renderType` consumes it.
+// type, already lifted to an [sdk.Ref] so `renderType` consumes it.
 type Param struct {
 	Name string
-	Type emit.Ref
+	Type sdk.Ref
 
 	// Field is the exported field name the recorded-call struct uses
 	// for this parameter.
 	Field string
+
+	// Variadic reports whether the source declared `...T`, in which
+	// case Type is the element type and every position the parameter
+	// appears in spells the ellipsis or the slice itself.
+	//
+	// Carried rather than folded into Type because the four positions
+	// disagree: the declaration and the func-field type want `...T`,
+	// the forwarding call wants `name...`, and the recorded-call field
+	// wants `[]T` — the parameter's type inside the method body.
+	// Dropping it produced a double whose method took one T where the
+	// interface wanted many, which compiles standalone and satisfies
+	// nothing.
+	Variadic bool
 }
 
 // Return is one rendered return slot.
@@ -173,7 +153,7 @@ type Param struct {
 // supplied one, so unnamed returns fall back to positional.
 type Return struct {
 	Name  string
-	Type  emit.Ref
+	Type  sdk.Ref
 	Field string
 
 	// Local is the identifier the generated body binds this return
@@ -187,6 +167,12 @@ type Return struct {
 // Method is one rendered interface method.
 type Method struct {
 	Name string
+
+	// Recv is the identifier the generated method binds its receiver
+	// to. Per-method rather than fixed: the source names the
+	// parameters, and one named after the receiver would shadow it —
+	// see [receiverIdentFor].
+	Recv string
 
 	// CallType is the identifier of the per-method recorded-call
 	// struct — `<Iface><Method>Call`.
@@ -236,7 +222,7 @@ func (*Stub) Kind() sdk.Kind { return KindStub }
 //
 // The two references resolve from different places, and the
 // difference is the whole reason [Tests] implements
-// [emit.OutputPackageSetter]:
+// [sdk.OutputPackageSetter]:
 //
 //   - IfaceRef names the source interface, which is hand-written and
 //     stays where the author put it. Its package is known during
@@ -251,14 +237,14 @@ type Tests struct {
 	IfaceName string
 
 	// IfaceRef qualifies the source interface. Set during Generate.
-	IfaceRef *emit.Expr
+	IfaceRef *sdk.Expr
 
 	// StubRef qualifies the generated stub. Set during Generate
 	// against the source package as a provisional value, then
 	// corrected by [Tests.SetOutputPackages] once routing resolves.
 	// The provisional value is what a run without a Layout phase —
 	// a direct generator unit test — observes.
-	StubRef *emit.Expr
+	StubRef *sdk.Expr
 
 	Methods []Method
 }
@@ -309,7 +295,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		// which does not satisfy the interface it doubles.
 		set := ctx.Reader.MethodSet(iface)
 		for _, issue := range set.Issues {
-			name, _ := node.EmbedName(issue.Embed)
+			name, _ := sdk.EmbedName(issue.Embed)
 			ctx.Diag.Errorf(iface.Pos(),
 				"%s: interface %q embeds %q, which %s; the generated stub would be missing its methods",
 				Name, iface.QName(), name, issue.Reason)
@@ -322,7 +308,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		}
 
 		typeName := iface.Name + p.suffix()
-		methods := methodsOf(iface.Name, set.Methods)
+		methods := methodsOf(iface.Name, typeName, set.Methods)
 
 		stub := &Stub{
 			BaseEmit: sdk.BaseEmit{
@@ -369,18 +355,24 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 //
 // Takes the resolved set rather than the interface so an embedded
 // method is doubled like a declared one.
-func methodsOf(ifaceName string, methods []*node.Method) []Method {
+//
+// typeName is the stub struct's identifier, needed because the
+// receiver identifier is derived from it and then disambiguated
+// against the parameters — see [receiverIdentFor].
+func methodsOf(ifaceName, typeName string, methods []*sdk.Method) []Method {
 	out := make([]Method, 0, len(methods))
 	for _, m := range methods {
 		params := paramsOf(m)
-		named := namedReturnsUsable(m)
+		recv := receiverIdentFor(typeName, params)
+		named := namedReturnsUsable(m, recv, params)
 		out = append(out, Method{
 			Name:         m.Name,
+			Recv:         recv,
 			CallType:     ifaceName + m.Name + "Call",
 			FuncField:    m.Name + "Func",
 			CallsField:   m.Name + "Calls",
 			Params:       params,
-			Returns:      withLocals(returnsOf(m), params, named),
+			Returns:      withLocals(returnsOf(m), params, recv, named),
 			NamedReturns: named,
 		})
 	}

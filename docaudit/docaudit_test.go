@@ -186,6 +186,21 @@ func TestMetaKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("collects a key declared through the sdk façade", func(t *testing.T) {
+		t.Parallel()
+		// A plugin names sdk.NewKey / sdk.EnsureKey, which are thin
+		// generic wrappers returning the identical key. Matching only
+		// the `meta` qualifier exempted every façade-spelled key from
+		// the audit while the gate stayed green.
+		dir := pkgWith(t, "package p\n"+
+			`var _ = sdk.NewKey("sdk.new", nil)`+"\n"+
+			`var _ = sdk.EnsureKey("sdk.ensured", nil)`+"\n")
+		got, err := docaudit.MetaKeys(dir)
+		if err != nil || len(got) != 2 || got[0] != "sdk.ensured" || got[1] != "sdk.new" {
+			t.Fatalf("MetaKeys = %v (err %v), want [sdk.ensured sdk.new]", got, err)
+		}
+	})
+
 	t.Run("collects a key declared with one explicit type argument", func(t *testing.T) {
 		t.Parallel()
 		// meta.NewKey[bool]("k") parses as an IndexExpr wrapping the

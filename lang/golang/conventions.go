@@ -97,17 +97,17 @@ const (
 // An empty behaviour yields `Test<Subject>`, which is the whole-
 // subject case.
 func TestFuncName(subject, behaviour string) string {
-	return TestPrefix + naming.Pascal(subject) + naming.Pascal(behaviour)
+	return TestPrefix + ExportedName(subject) + ExportedName(behaviour)
 }
 
 // BenchmarkFuncName composes a benchmark function's identifier.
 func BenchmarkFuncName(subject, behaviour string) string {
-	return BenchmarkPrefix + naming.Pascal(subject) + naming.Pascal(behaviour)
+	return BenchmarkPrefix + ExportedName(subject) + ExportedName(behaviour)
 }
 
 // FuzzFuncName composes a fuzz target's identifier.
 func FuzzFuncName(subject string) string {
-	return FuzzPrefix + naming.Pascal(subject)
+	return FuzzPrefix + ExportedName(subject)
 }
 
 // ExampleFuncName composes an example's identifier.
@@ -130,8 +130,32 @@ func ExampleFuncName(subject, method string) string {
 // Bare `New` where the type name is empty, which is the
 // one-type-per-package convention Go's own libraries follow.
 func ConstructorName(typeName string) string {
-	return "New" + naming.Pascal(typeName)
+	return "New" + ExportedName(typeName)
 }
+
+// ExportedName returns the exported spelling of an arbitrary
+// identifier.
+//
+// It exists beside the specific wrappers below because none of them
+// means this. [GetterName] computes the same string, but it asserts
+// that the result accesses a field; a generator deriving a struct
+// field name, a map key or a variant identifier asserts nothing of
+// the kind, and borrowing the accessor's name for it writes a
+// convention into code that is not following one. The alternative —
+// calling [naming.Pascal] at the call site — is worse: case
+// conversion is language-neutral and `exported` is a Go rule, so a
+// Go generator reaching past this package for it learns a second
+// vocabulary for the layer this package already is.
+//
+// Conversion is initialism-aware, so `url_path` yields `URLPath`
+// rather than `UrlPath`.
+//
+// It converts case and nothing else. Runes illegal in an identifier
+// survive (`foo$bar` → `Foo$bar`), and an identifier whose first
+// word opens on a digit cannot be exported at all (`2fast` stays
+// `2fast`). Sanitise untrusted input through [SafeIdent] first, and
+// supply a prefix where the source may be digit-leading.
+func ExportedName(ident string) string { return naming.Pascal(ident) }
 
 // GetterName composes the conventional accessor identifier.
 //
@@ -139,17 +163,17 @@ func ConstructorName(typeName string) string {
 // guidance is explicit that `Get` is not idiomatic on an accessor,
 // and generated code that uses it reads as translated from another
 // language.
-func GetterName(field string) string { return naming.Pascal(field) }
+func GetterName(field string) string { return ExportedName(field) }
 
 // SetterName composes the conventional mutator identifier —
 // `Set<Field>`.
 //
 // `Set` is idiomatic where `Get` is not, because the verb
 // distinguishes the call from the field it writes.
-func SetterName(field string) string { return "Set" + naming.Pascal(field) }
+func SetterName(field string) string { return "Set" + ExportedName(field) }
 
 // WithName composes the fluent-option identifier — `With<Field>`.
-func WithName(field string) string { return "With" + naming.Pascal(field) }
+func WithName(field string) string { return "With" + ExportedName(field) }
 
 // SentinelName composes an error variable's identifier —
 // `Err<Subject>`.
@@ -157,11 +181,11 @@ func WithName(field string) string { return "With" + naming.Pascal(field) }
 // The convention every Go codebase follows and the one a sentinel
 // detector matches on, so a generator emitting an error variable
 // under any other name produces one nothing finds.
-func SentinelName(subject string) string { return "Err" + naming.Pascal(subject) }
+func SentinelName(subject string) string { return "Err" + ExportedName(subject) }
 
 // ParseFuncName composes a parse function's identifier —
 // `Parse<Type>`.
-func ParseFuncName(typeName string) string { return "Parse" + naming.Pascal(typeName) }
+func ParseFuncName(typeName string) string { return "Parse" + ExportedName(typeName) }
 
 // Doc renders a doc comment that satisfies godoc's opening
 // convention.

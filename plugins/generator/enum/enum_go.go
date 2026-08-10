@@ -5,10 +5,7 @@ package enum
 
 import (
 	"embed"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -43,6 +40,11 @@ const GoDefaultParsePrefix = "Parse"
 // callers compare via [errors.Is].
 const GoDefaultSentinelPrefix = "ErrUnknown"
 
+// goTemplatesFS is the Go adapter's template tree. The Go
+// backend reads it once at Build time and registers every
+// `*.tmpl` it finds under `templates/golang/` by base
+// filename.
+//
 //go:embed templates/golang/*.tmpl
 var goTemplatesFS embed.FS
 
@@ -54,23 +56,4 @@ func GoOutputs() []sdk.Output {
 		{Suffix: GoPrimarySuffix},
 		{Tag: GoTestOutputTag, Suffix: GoTestSuffix},
 	}
-}
-
-// GoTemplates returns the Go adapter's embedded template
-// tree. The Go backend reads it once at Build time and
-// registers every `*.tmpl` it finds under
-// `templates/golang/`.
-func GoTemplates() (fs.FS, bool) {
-	sub, _ := fs.Sub(goTemplatesFS, "templates/"+golang.Language)
-	return sub, true
-}
-
-// GoFuncMap returns nil — the enum plugin's templates rely
-// only on the canonical `renderType` / `renderExpr` /
-// `renderTypeParams` entries (always available) plus the
-// shared Go-convention helpers, both of which ride on the
-// Go backend's funcmap surface. The plugin contributes no
-// extension entries of its own today.
-func GoFuncMap() template.FuncMap {
-	return nil
 }

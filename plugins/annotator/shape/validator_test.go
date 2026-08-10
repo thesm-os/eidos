@@ -8,12 +8,8 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/node"
-	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
-	"go.thesmos.sh/eidos/priority"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
@@ -35,14 +31,14 @@ func TestValidator_Contract(t *testing.T) {
 
 	t.Run("priority is AnnotatorValidation", func(t *testing.T) {
 		t.Parallel()
-		if got, want := shape.New().Validator().Priority(), priority.AnnotatorValidation; got != want {
+		if got, want := shape.New().Validator().Priority(), sdk.AnnotatorValidation; got != want {
 			t.Fatalf("Priority() = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("satisfies plugin.Annotator", func(t *testing.T) {
+	t.Run("satisfies sdk.Annotator", func(t *testing.T) {
 		t.Parallel()
-		var _ plugin.Annotator = shape.New().Validator()
+		var _ sdk.Annotator = shape.New().Validator()
 	})
 
 	t.Run("Annotate on empty store does not panic", func(t *testing.T) {
@@ -71,7 +67,7 @@ func TestValidator_RequiredPartners(t *testing.T) {
 		// Directive declares only `commit=`; the validator must
 		// flag the missing `rollback=` partner.
 		fn := contractFn("Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin", "commit": "Commit"},
@@ -79,13 +75,13 @@ func TestValidator_RequiredPartners(t *testing.T) {
 			// A standalone commit function so the resolver succeeds
 			// for the one partner that is provided.
 		)
-		commit := &node.Function{Name: "Commit", Package: "x"}
-		pkg := &node.Package{
+		commit := &sdk.Function{Name: "Commit", Package: "x"}
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{fn, commit},
+			Functions: []*sdk.Function{fn, commit},
 		}
 		diags := runFullPipeline(t, pkg, spec)
-		assertContainsDiag(t, diags, diag.Error, "rollback")
+		assertContainsDiag(t, diags, sdk.SeverityError, "rollback")
 	})
 
 	t.Run("all required partners present emits no diagnostic", func(t *testing.T) {
@@ -96,19 +92,19 @@ func TestValidator_RequiredPartners(t *testing.T) {
 			Required: map[string][]string{"begin": {"commit"}},
 		}
 		fn := contractFn("Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin", "commit": "Commit"},
 			},
 		)
-		commit := &node.Function{Name: "Commit", Package: "x"}
-		pkg := &node.Package{
+		commit := &sdk.Function{Name: "Commit", Package: "x"}
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{fn, commit},
+			Functions: []*sdk.Function{fn, commit},
 		}
 		for _, d := range runFullPipeline(t, pkg, spec) {
-			if d.Severity >= diag.Error {
+			if d.Severity >= sdk.SeverityError {
 				t.Fatalf("unexpected error diagnostic: %+v", d)
 			}
 		}
@@ -134,16 +130,16 @@ func TestValidator_ContractValidate(t *testing.T) {
 			},
 		}
 		begin := contractFn("Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin", "commit": "Commit"},
 			},
 		)
-		commit := &node.Function{Name: "Commit", Package: "x"}
-		pkg := &node.Package{
+		commit := &sdk.Function{Name: "Commit", Package: "x"}
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{begin, commit},
+			Functions: []*sdk.Function{begin, commit},
 		}
 		_ = runFullPipeline(t, pkg, spec)
 
@@ -170,19 +166,19 @@ func TestValidator_ContractValidate(t *testing.T) {
 			},
 		}
 		begin := contractFn("Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin", "commit": "Commit"},
 			},
 		)
-		commit := &node.Function{Name: "Commit", Package: "x"}
-		pkg := &node.Package{
+		commit := &sdk.Function{Name: "Commit", Package: "x"}
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{begin, commit},
+			Functions: []*sdk.Function{begin, commit},
 		}
 		diags := runFullPipeline(t, pkg, spec)
-		assertContainsDiag(t, diags, diag.Error, "synthetic invariant breach")
+		assertContainsDiag(t, diags, sdk.SeverityError, "synthetic invariant breach")
 	})
 
 	t.Run("nil Validate hook is a permissive no-op", func(t *testing.T) {
@@ -192,19 +188,19 @@ func TestValidator_ContractValidate(t *testing.T) {
 			Roles: []string{"begin", "commit"},
 		}
 		fn := contractFn("Begin",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin", "commit": "Commit"},
 			},
 		)
-		commit := &node.Function{Name: "Commit", Package: "x"}
-		pkg := &node.Package{
+		commit := &sdk.Function{Name: "Commit", Package: "x"}
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{fn, commit},
+			Functions: []*sdk.Function{fn, commit},
 		}
 		for _, d := range runFullPipeline(t, pkg, spec) {
-			if d.Severity >= diag.Error {
+			if d.Severity >= sdk.SeverityError {
 				t.Fatalf("nil Validate must not produce errors; got %+v", d)
 			}
 		}
@@ -220,10 +216,10 @@ func TestValidator_ContractValidate(t *testing.T) {
 			Roles:    []string{"begin", "commit", "rollback"},
 			Required: map[string][]string{"begin": {"commit", "rollback"}},
 		}
-		begin := &node.Method{
+		begin := &sdk.Method{
 			Name: "Begin",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					{
 						Name: shape.ContractDirectiveName,
 						Args: []string{"tx"},
@@ -232,17 +228,17 @@ func TestValidator_ContractValidate(t *testing.T) {
 				},
 			},
 		}
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{begin, commit},
+			Methods: []*sdk.Method{begin, commit},
 		}
-		pkg := &node.Package{
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Structs: []*node.Struct{s},
+			Structs: []*sdk.Struct{s},
 		}
 		diags := runFullPipeline(t, pkg, spec)
-		assertContainsDiag(t, diags, diag.Error, "rollback")
+		assertContainsDiag(t, diags, sdk.SeverityError, "rollback")
 	})
 }
 
@@ -289,7 +285,7 @@ func TestValidator_ContractValidateCascade(t *testing.T) {
 					}
 				}
 				host := "<not a function>"
-				if fn, ok := begins[0].Host.(*node.Function); ok {
+				if fn, ok := begins[0].Host.(*sdk.Function); ok {
 					host = fn.Name
 				}
 				return []shape.ContractViolation{
@@ -301,20 +297,20 @@ func TestValidator_ContractValidateCascade(t *testing.T) {
 		// Fresh nodes per run: the umbrella stamps metadata onto
 		// the bags it walks, so reusing them would let run N see
 		// run N-1's stamps.
-		newPkg := func() *node.Package {
-			record := contractFn("Record", &directive.Directive{
+		newPkg := func() *sdk.Package {
+			record := contractFn("Record", &sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"audit"},
 				KV:   map[string]string{"role": "record"},
 			})
-			begin := contractFn("Begin", &directive.Directive{
+			begin := contractFn("Begin", &sdk.Directive{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
 				KV:   map[string]string{"role": "begin"},
 			})
-			return &node.Package{
+			return &sdk.Package{
 				Name: "x", Path: "x",
-				Functions: []*node.Function{record, begin},
+				Functions: []*sdk.Function{record, begin},
 			}
 		}
 
@@ -324,10 +320,10 @@ func TestValidator_ContractValidateCascade(t *testing.T) {
 		const want = `shape.contract "tx": begin member Begin has no rollback partner`
 		for run := range cascadeRuns {
 			diags := runFullPipeline(t, newPkg(), audit, tx)
-			if !hasDiag(diags, diag.Error, shape.ValidatorName, want) {
+			if !hasDiag(diags, sdk.SeverityError, shape.ValidatorName, want) {
 				t.Fatalf("run %d/%d: contract %q never reached its Validate hook: "+
 					"want %v from %q with message %q; got %d diags: %+v",
-					run+1, cascadeRuns, "tx", diag.Error, shape.ValidatorName, want, len(diags), diags)
+					run+1, cascadeRuns, "tx", sdk.SeverityError, shape.ValidatorName, want, len(diags), diags)
 			}
 		}
 	})
@@ -338,7 +334,7 @@ func TestValidator_ContractValidateCascade(t *testing.T) {
 // [assertContainsDiag] performs, because the cascade assertion
 // above distinguishes *which* contract produced the diagnostic
 // from the mere fact that one appeared.
-func hasDiag(diags []diag.Diag, sev diag.Severity, plugin, msg string) bool {
+func hasDiag(diags []sdk.Diag, sev sdk.Severity, plugin, msg string) bool {
 	for _, d := range diags {
 		if d.Severity == sev && d.Plugin == plugin && d.Message == msg {
 			return true
@@ -367,15 +363,15 @@ func TestValidator_MixinValidate(t *testing.T) {
 			},
 		}
 		fn := contractFn("X",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"tagged"},
 				KV:   map[string]string{"tag": "important"},
 			},
 		)
-		pkg := &node.Package{
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{fn},
+			Functions: []*sdk.Function{fn},
 		}
 		runMixinPipeline(t, spec, pkg)
 
@@ -392,7 +388,7 @@ func TestValidator_MixinValidate(t *testing.T) {
 // sequence with m as the sole registered mixin. Mirrors
 // [runFullPipeline] but takes a [shape.Mixin] instead of a
 // [shape.Contract].
-func runMixinPipeline(t *testing.T, m shape.Mixin, pkg *node.Package) []diag.Diag {
+func runMixinPipeline(t *testing.T, m shape.Mixin, pkg *sdk.Package) []sdk.Diag {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -427,7 +423,7 @@ func runMixinPipeline(t *testing.T, m shape.Mixin, pkg *node.Package) []diag.Dia
 // Variadic because [Validator.AfterNodes] walks the accumulated
 // member sets as a cascade: proving one contract does not
 // suppress another needs at least two registered at once.
-func runFullPipeline(t *testing.T, pkg *node.Package, cs ...shape.Contract) []diag.Diag {
+func runFullPipeline(t *testing.T, pkg *sdk.Package, cs ...shape.Contract) []sdk.Diag {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -459,7 +455,7 @@ func runFullPipeline(t *testing.T, pkg *node.Package, cs ...shape.Contract) []di
 //
 // The three shape plugins previously ran no conformance suite at
 // all, which is how each came to declare Priority() without the rest
-// of plugin.CapabilityProvider — satisfying nothing, so the pipeline
+// of sdk.CapabilityProvider — satisfying nothing, so the pipeline
 // ignored the declared ordering and ran all three in the default
 // bucket, in registration order. The suite's completeness check
 // catches that shape directly; wiring the plugins into the suite is

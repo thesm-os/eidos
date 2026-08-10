@@ -6,12 +6,10 @@ package errorgen
 import (
 	"embed"
 	"fmt"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -22,6 +20,11 @@ const Name = "errorgen"
 // invalidates a cache populated when this plugin behaved differently.
 const Version = "1.0.0"
 
+// Capability is this contributor's published label, exported so a
+// plugin ordering against it names the const rather than a literal
+// the two could drift apart on.
+const Capability = "http.error"
+
 // Kind is the emit kind this plugin declares. It must equal the
 // `define` name in templates/golang/errorgen.entry.tmpl.
 const Kind sdk.Kind = "errorgen.entry"
@@ -29,8 +32,6 @@ const Kind sdk.Kind = "errorgen.entry"
 // EntryID is the [sdk.Provenance] ID stamped on this plugin's entry,
 // exported so a later contributor can position against it.
 const EntryID = "errorgen.entry"
-
-const langGo = "golang"
 
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
@@ -45,7 +46,7 @@ type Entry struct {
 	sdk.BaseEmit
 
 	// FuncRef is the call this entry installs.
-	FuncRef *emit.Expr
+	FuncRef *sdk.Expr
 
 	// Handler names the host type, for the rendered comment.
 	Handler string
@@ -55,52 +56,27 @@ type Entry struct {
 func (*Entry) Kind() sdk.Kind { return Kind }
 
 // Plugin contributes one recover-and-respond entry into every handler.
-type Plugin struct{}
+type Plugin struct{ *sdkgo.Base }
 
 // New returns a plugin instance.
-func New() *Plugin { return &Plugin{} }
-
-// Name satisfies [sdk.Plugin].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in its bucket, after handlergen's
-// foundation bucket. Requires resolves only within a bucket, so the
-// bucket is what orders this plugin against its host.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorCrossCutting }
-
-// Provides publishes this contributor's label.
-func (*Plugin) Provides() []string { return []string{"http.error"} }
-
-// Requires reports no dependencies within its bucket.
-func (*Plugin) Requires() []string { return nil }
-
-// Templates ships the entry template.
 //
-// The file is named for the plugin because templates are registered
-// under their base filename as well as their `define` name: two
-// contributors each shipping `entry.tmpl` collide at merge and the
-// whole run writes nothing.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang != langGo {
-		return nil, false
-	}
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
+// It declares no [sdk.Output]: a contributor renders inside a file it
+// does not own. The template file is named for the plugin because the
+// backend registers templates under their base filename as well as
+// their `define` name — two contributors each shipping `entry.tmpl`
+// collide at merge and the whole run writes nothing.
+//
+// The cross-cutting bucket places it after handlergen's foundation
+// bucket. Requires resolves only within a bucket, so the bucket — not
+// a capability — is what orders this plugin against its host.
+func New() *Plugin {
+	return &Plugin{Base: sdkgo.NewPlugin(Name).
+		Templates(goTemplates).
+		Version(Version).
+		Priority(sdk.GeneratorCrossCutting).
+		Provides(Capability).
+		Build()}
 }
-
-// TemplateFuncs contributes nothing. The shared Go helpers are already
-// in the backend's overrideable funcmap; returning them again is a
-// Build-time ErrTemplateFuncCollision.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides replaces nothing.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Generate appends this plugin's entry to every handler in the run.
 //

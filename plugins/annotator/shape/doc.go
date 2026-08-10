@@ -46,7 +46,7 @@
 // and dispatches to the matching [DetectFunc]. That key is a
 // string carrying the producing frontend's plugin name
 // (`"golang"`, `"protobuf"`); the frontend stamps it, this package
-// only reads it, and it is bound here through [meta.EnsureKey]
+// only reads it, and it is bound here through [sdk.EnsureKey]
 // rather than imported because the frontends live in other
 // modules. Sources from frontends without a registered entry are
 // silently skipped — permissive by construction.

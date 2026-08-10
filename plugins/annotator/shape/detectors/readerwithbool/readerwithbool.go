@@ -4,8 +4,8 @@
 package readerwithbool
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -25,7 +25,7 @@ func Detector() shape.Detector {
 // detectGolang accepts a callable with exactly one non-context
 // parameter and exactly two returns: a value followed by a bare
 // bool. No error return.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	keys := shape.GoStripContext(params)
 	if len(keys) != 1 || len(returns) != 2 {

@@ -6,10 +6,8 @@ package shape
 import (
 	"sort"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // PluginName is the stable identifier the framework uses for the
@@ -73,14 +71,14 @@ const DirectiveName sdk.DirectiveName = "shape"
 const ContractDirectiveName sdk.DirectiveName = "contract"
 
 // DetectFunc is the per-language detection signature. The umbrella
-// plugin hands every callable (a [*node.Function] or
-// [*node.Method]) to the function; detectors type-assert as
+// plugin hands every callable (a [*sdk.Function] or
+// [*sdk.Method]) to the function; detectors type-assert as
 // needed (typically through [GoCallable]) and use the lazy
 // helpers in this package to compose queries.
 //
 // A `(Match{}, false)` return is the permissive skip — the next
 // registered detector gets a turn. Detectors return it freely.
-type DetectFunc func(n node.Node) (Match, bool)
+type DetectFunc func(n sdk.Node) (Match, bool)
 
 // Detector is one shape's contribution to the umbrella plugin: a
 // canonical shape name plus a per-frontend detection function
@@ -151,13 +149,13 @@ type Match struct {
 // returns through [Match.StringStamps] for the umbrella plugin to
 // stamp on the host callable's meta bag.
 type StringStamp struct {
-	Key   meta.Key[string]
+	Key   sdk.Key[string]
 	Value string
 }
 
 // ListStamp is the list-typed counterpart to [StringStamp].
 type ListStamp struct {
-	Key   meta.Key[[]string]
+	Key   sdk.Key[[]string]
 	Value []string
 }
 
@@ -171,6 +169,8 @@ type ListStamp struct {
 // recognises, and the framework's "one owner per directive" rule
 // is satisfied by construction.
 type Plugin struct {
+	*sdkgo.Base
+
 	detectors []Detector
 	contracts map[string]Contract
 	mixins    map[string]Mixin
@@ -180,15 +180,15 @@ type Plugin struct {
 	// Populated in [Plugin.BeforeNodes]; consumed by the per-
 	// callable hooks so dispatch resolves the source language in
 	// O(1) without depending on the optional
-	// [node.Method.Owner] back-pointer. Reset every Annotate
+	// [sdk.Method.Owner] back-pointer. Reset every Annotate
 	// call — per-run state, not cross-run cache.
-	frontByMethod map[*node.Method]string
-	frontByFunc   map[*node.Function]string
+	frontByMethod map[*sdk.Method]string
+	frontByFunc   map[*sdk.Function]string
 }
 
-// New returns an empty umbrella [Plugin]. Configure it through
-// [Plugin.Detectors] and [Plugin.Contracts] before passing to the
-// pipeline:
+// New returns an umbrella [Plugin] with no shapes registered.
+// Configure it through [Plugin.Detectors], [Plugin.Contracts] and
+// [Plugin.Mixins] before passing to the pipeline:
 //
 //	pipe.Use(shape.New().
 //	    Detectors(reader.Detector(), writer.Detector()).
@@ -200,7 +200,31 @@ type Plugin struct {
 // (e.g. Deleter must claim its signature before Writer falls
 // back). Contract registration order is irrelevant — contracts
 // are indexed by name.
-func New() *Plugin { return &Plugin{} }
+//
+// The shape-detection bucket is where the merged plugin belongs
+// because it runs every directive override and every detector in
+// one pass, so override and detection share a single priority
+// band.
+//
+// Nothing is provided or required. The annotator publishes its
+// results as metadata keys rather than as a named capability, so
+// nothing could usefully declare a dependency on the label; and
+// ordering within the annotator phase comes from the bucket, where
+// expressing it as a capability dependency instead would make
+// registering the three shape plugins individually a hard error
+// rather than a caller's choice. Both still have to be *answered*,
+// because [sdk.CapabilityProvider] is all-or-nothing — declaring a
+// bucket alone fails the pipeline's type assertion and collapses
+// the plugin into the default bucket, discarding the ordering the
+// bucket was declared to express. [sdkgo.Base] answers all three
+// together, which is what makes that failure unreachable.
+func New() *Plugin {
+	return &Plugin{Base: sdkgo.NewPlugin(PluginName).
+		Version(Version).
+		Priority(sdk.AnnotatorShape).
+		Directives(directives()...).
+		Build()}
+}
 
 // Detectors registers one or more per-shape signature detectors
 // with the plugin and sorts the cumulative list by [Detector.Priority]
@@ -249,41 +273,12 @@ func (p *Plugin) Mixins(ms ...Mixin) *Plugin {
 	return p
 }
 
-// Name returns [PluginName].
-func (*Plugin) Name() string { return PluginName }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the annotator-shape-detection
-// bucket. The merged plugin runs every directive override and
-// every detector in one pass, so override and detection share a
-// single priority band.
-func (*Plugin) Priority() sdk.Priority { return sdk.AnnotatorShape }
-
-// Provides returns nil: the shape annotator publishes its results as metadata
-// keys rather than as a named capability, so nothing can usefully
-// declare a dependency on the label.
-//
-// The method exists because [plugin.CapabilityProvider] is an
-// all-or-nothing interface — Priority, Provides and Requires
-// together. Declaring Priority alone does not satisfy it, so the
-// pipeline's type assertion fails and the plugin silently collapses
-// into the default bucket, discarding the ordering Priority was
-// declared to express.
-func (*Plugin) Provides() []string { return nil }
-
-// Requires returns nil. Ordering within the annotator phase comes
-// from [Plugin.Priority]; expressing it as a capability
-// dependency instead would make registering the plugins
-// individually a hard error rather than a caller's choice.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares the `+gen:shape` and `+gen:contract`
-// schemas. The framework's directive registry holds exactly one
-// owner per directive name; registering this plugin twice in one
-// pipeline surfaces as a duplicate-directive error at Build time.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+// directives declares the `+gen:shape`, `+gen:contract` and
+// `+gen:mixin` schemas. The framework's directive registry holds
+// exactly one owner per directive name; registering this plugin
+// twice in one pipeline surfaces as a duplicate-directive error at
+// Build time.
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
 			Describe(
@@ -359,14 +354,14 @@ func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 }
 
 // BeforeNodes builds the callable-to-frontend lookup maps once
-// per Annotate call. Walking each [node.Package]'s own struct /
+// per Annotate call. Walking each [sdk.Package]'s own struct /
 // interface / function slices avoids relying on the optional
-// [node.Method.Owner] back-pointer the per-method buckets
+// [sdk.Method.Owner] back-pointer the per-method buckets
 // otherwise need to resolve a method's containing package.
 func (p *Plugin) BeforeNodes(ctx *sdk.AnnotatorContext) {
-	p.frontByMethod = make(map[*node.Method]string)
-	p.frontByFunc = make(map[*node.Function]string)
-	ctx.Reader.Packages().Each(func(pkg *node.Package) {
+	p.frontByMethod = make(map[*sdk.Method]string)
+	p.frontByFunc = make(map[*sdk.Function]string)
+	ctx.Reader.Packages().Each(func(pkg *sdk.Package) {
 		front, _ := frontendMarker.Get(pkg.Meta())
 		for _, s := range pkg.Structs {
 			for _, m := range s.Methods {
@@ -386,15 +381,15 @@ func (p *Plugin) BeforeNodes(ctx *sdk.AnnotatorContext) {
 
 // OnMethod dispatches detection over every method in the store
 // (struct- and interface-declared alike). Interface methods carry
-// a nil [node.Method.Receiver]; detectors that care about the
+// a nil [sdk.Method.Receiver]; detectors that care about the
 // receiver shape must handle the absence explicitly.
-func (p *Plugin) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
+func (p *Plugin) OnMethod(ctx *sdk.AnnotatorContext, m *sdk.Method) {
 	p.handle(ctx, m, m.EnsureMeta(), m.Directives(), p.frontByMethod[m])
 }
 
 // OnFunction dispatches detection over every free function in the
 // store.
-func (p *Plugin) OnFunction(ctx *sdk.AnnotatorContext, fn *node.Function) {
+func (p *Plugin) OnFunction(ctx *sdk.AnnotatorContext, fn *sdk.Function) {
 	p.handle(ctx, fn, fn.EnsureMeta(), fn.Directives(), p.frontByFunc[fn])
 }
 
@@ -405,9 +400,9 @@ func (p *Plugin) OnFunction(ctx *sdk.AnnotatorContext, fn *node.Function) {
 // the already-stamped guard.
 func (p *Plugin) handle(
 	ctx *sdk.AnnotatorContext,
-	n node.Node,
-	bag *meta.Bag,
-	dirs []*directive.Directive,
+	n sdk.Node,
+	bag *sdk.Bag,
+	dirs []*sdk.Directive,
 	front string,
 ) {
 	sink := ctx.Diag.For(PluginName)
@@ -446,13 +441,13 @@ func (p *Plugin) handle(
 // time, not from this plugin at runtime.
 //
 // The negated guard is defence-in-depth for callers that build
-// [directive.Directive] values directly; the schema denies the form,
+// [sdk.Directive] values directly; the schema denies the form,
 // so it cannot arrive from parsed source. Skipping is deliberately
 // not suppression — a negated directive that reached here would
 // fall through to detection and be stamped anyway, which is why the
 // schema rejects it rather than letting it read as a suppression
 // that silently does nothing.
-func matchFromDirective(dirs []*directive.Directive) (Match, bool) {
+func matchFromDirective(dirs []*sdk.Directive) (Match, bool) {
 	for _, d := range dirs {
 		if d == nil || d.Name != DirectiveName || d.Negated {
 			continue
@@ -474,7 +469,7 @@ func matchFromDirective(dirs []*directive.Directive) (Match, bool) {
 // drawing from (in order): the first positional argument, the
 // `kind=` KV value. Returns empty when neither form supplied a
 // name.
-func shapeNameFromDirective(d *directive.Directive) string {
+func shapeNameFromDirective(d *sdk.Directive) string {
 	if len(d.Args) > 0 && d.Args[0] != "" {
 		return d.Args[0]
 	}
@@ -487,7 +482,7 @@ func shapeNameFromDirective(d *directive.Directive) string {
 // stamps only land when the detector populated them — shapes
 // without a key/value leave those keys absent so consumers can
 // distinguish "no key by design" from "key happened to be empty".
-func stamp(bag *meta.Bag, m Match, setBy string) {
+func stamp(bag *sdk.Bag, m Match, setBy string) {
 	MetaShape.Set(bag, m.Shape, setBy)
 	if m.KeyType != "" {
 		MetaKeyType.Set(bag, m.KeyType, setBy)
@@ -511,8 +506,8 @@ func stamp(bag *meta.Bag, m Match, setBy string) {
 //
 // Declared here rather than imported from `frontend/protobuf`
 // (which is in a different module) or `frontend/golang` (same
-// reason) — [meta.EnsureKey] returns the canonical singleton
+// reason) — [sdk.EnsureKey] returns the canonical singleton
 // regardless of which package registered it first.
 //
 //nolint:gochecknoglobals // cross-package registry-singleton key
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)

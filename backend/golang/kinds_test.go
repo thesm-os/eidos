@@ -10,7 +10,7 @@ import (
 	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/core/kind"
 	"go.thesmos.sh/eidos/core/position"
-	"go.thesmos.sh/eidos/eidostest/pipelinetest"
+	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/emit"
 	emitbuilder "go.thesmos.sh/eidos/emit/builder"
@@ -76,10 +76,8 @@ func fixturePkg() *node.Package {
 // named kinds and returns the run's diagnostics.
 func renderKinds(t *testing.T, kinds ...string) []string {
 	t.Helper()
-	p := pipelinetest.New(t).
-		WithFrontend(pipelinetest.FromNodes(fixturePkg())).
-		WithGenerator(&kindsGenerator{kinds: kinds}).
-		WithBackend(backendgolang.New()).
+	p := golangtest.Driver(t, backendgolang.New(), fixturePkg(),
+		&kindsGenerator{kinds: kinds}).
 		Build().
 		Run()
 	diags := p.Diagnostics().Diagnostics()

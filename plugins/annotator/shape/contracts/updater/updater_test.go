@@ -6,10 +6,9 @@ package updater_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/updater"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -23,20 +22,20 @@ func TestContract_Identity(t *testing.T) {
 // stamping and the resolver's back-stamp on the reader sibling.
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	save := &node.Function{
+	save := &sdk.Function{
 		Name: "Save", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(updater.Name, "writer", map[string]string{
 					"reader": "GetByID",
 				}),
 			},
 		},
 	}
-	get := &node.Function{Name: "GetByID", Package: "x"}
-	pkg := &node.Package{
+	get := &sdk.Function{Name: "GetByID", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{save, get},
+		Functions: []*sdk.Function{save, get},
 	}
 	diags := contracttest.RunPipeline(t, updater.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)

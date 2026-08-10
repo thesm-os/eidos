@@ -127,26 +127,37 @@ func (s *Source) AssertNoImport(tb testing.TB, path string) *Source {
 // Pinning the whole set is what turns that into a one-line diff.
 func (s *Source) AssertImportsOnly(tb testing.TB, paths ...string) *Source {
 	tb.Helper()
-	got, want := s.Imports(), slices.Clone(paths)
-	slices.Sort(got)
-	slices.Sort(want)
-	if slices.Equal(got, want) {
+	got, want, extra, missing := diffSets(s.Imports(), paths)
+	if extra == nil && missing == nil {
 		return s
-	}
-	var extra, missing []string
-	for _, p := range got {
-		if !slices.Contains(want, p) {
-			extra = append(extra, p)
-		}
-	}
-	for _, p := range want {
-		if !slices.Contains(got, p) {
-			missing = append(missing, p)
-		}
 	}
 	tb.Errorf("golangtest: %s imports %v, want %v (unexpected: %v; absent: %v)",
 		s.path, got, want, extra, missing)
 	return s
+}
+
+// diffSets sorts two name sets and reports what each holds that the
+// other does not.
+//
+// Shared because an exact-set assertion is only worth having if its
+// message says which way it went wrong: "want [A B C], got [A B D]"
+// makes the reader diff two lists by eye, and they will get it wrong
+// once the lists run past four entries.
+func diffSets(have, wanted []string) (got, want, extra, missing []string) {
+	got, want = slices.Clone(have), slices.Clone(wanted)
+	slices.Sort(got)
+	slices.Sort(want)
+	for _, n := range got {
+		if !slices.Contains(want, n) {
+			extra = append(extra, n)
+		}
+	}
+	for _, n := range want {
+		if !slices.Contains(got, n) {
+			missing = append(missing, n)
+		}
+	}
+	return got, want, extra, missing
 }
 
 // AssertGeneratedHeader fails when the file carries no line matching
@@ -372,6 +383,34 @@ func (s *Source) AssertOrder(tb testing.TB, first, second string) *Source {
 	case a > b:
 		tb.Errorf("golangtest: %s declares %q at line %d, after %q at line %d",
 			s.path, first, s.fset.Position(a).Line, second, s.fset.Position(b).Line)
+	}
+	return s
+}
+
+// AssertOrderAll fails unless the file declares every named
+// declaration, in the order given.
+//
+// The list form of [Source.AssertOrder], because slot ordering is
+// almost never a pair: a file assembled from three contributors takes
+// two calls to pin with the pair form, and the reader has to supply
+// the transitivity argument themselves. It also fails on an absent
+// name rather than skipping it, so a contributor that stopped
+// rendering is a failure here rather than a silent hole in the order.
+func (s *Source) AssertOrderAll(tb testing.TB, names ...string) *Source {
+	tb.Helper()
+	prev, prevPos := "", token.NoPos
+	for _, name := range names {
+		pos, ok := s.declPos(name)
+		if !ok {
+			tb.Errorf("golangtest: %s declares no %q; it declares %v", s.path, name, s.DeclNames())
+			return s
+		}
+		if prevPos.IsValid() && pos < prevPos {
+			tb.Errorf("golangtest: %s declares %q at line %d, after %q at line %d",
+				s.path, prev, s.fset.Position(prevPos).Line, name, s.fset.Position(pos).Line)
+			return s
+		}
+		prev, prevPos = name, pos
 	}
 	return s
 }

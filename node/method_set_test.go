@@ -409,3 +409,86 @@ func TestMethodSet_MalformedGraph(t *testing.T) {
 		}
 	})
 }
+
+func TestMethodSet_Attribution(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a declared method reports no contributing embed", func(t *testing.T) {
+		t.Parallel()
+		got := node.MethodSet(ifaceOf("Store", "Get"), nil)
+		if from := got.From("Get"); from != nil {
+			t.Fatalf("From(Get) = %v, want nil for a method the interface declares", from)
+		}
+	})
+
+	t.Run("an embedded method reports the embed it arrived through", func(t *testing.T) {
+		t.Parallel()
+		// The attribution a generated field spends on saying where it
+		// came from: a double that grows because an embedded interface
+		// gained a method otherwise explains nothing.
+		reader := ifaceOf("Reader", "Read")
+		store := ifaceOf("Store", "Put")
+		embed(store, "x", "Reader")
+
+		got := node.MethodSet(store, resolverFor(reader))
+		from := got.From("Read")
+		if from == nil {
+			t.Fatal("From(Read) = nil, want the embed that contributed it")
+		}
+		if from.Type == nil || from.Type.Name != "Reader" {
+			t.Fatalf("From(Read) named %v, want the Reader embed", from.Type)
+		}
+	})
+
+	t.Run("a transitively embedded method reports the top-level embed", func(t *testing.T) {
+		t.Parallel()
+		// A embeds B embeds C: C's method is attributed to A's embed of
+		// B, because that is the one the interface in front of the
+		// caller actually writes down. Naming C's embed would name
+		// something the caller cannot see.
+		inner := ifaceOf("Closer", "Close")
+		mid := ifaceOf("ReadCloser", "Read")
+		embed(mid, "x", "Closer")
+		outer := ifaceOf("Store", "Put")
+		embed(outer, "x", "ReadCloser")
+
+		got := node.MethodSet(outer, resolverFor(inner, mid))
+		from := got.From("Close")
+		if from == nil || from.Type == nil {
+			t.Fatalf("From(Close) = %v, want the top-level embed", from)
+		}
+		if from.Type.Name != "ReadCloser" {
+			t.Fatalf("From(Close) named %q, want ReadCloser (the top-level embed)", from.Type.Name)
+		}
+	})
+
+	t.Run("Entries lines up with Methods", func(t *testing.T) {
+		t.Parallel()
+		// The two are published side by side, so a caller indexing one
+		// against the other must not be reading different sets.
+		reader := ifaceOf("Reader", "Read")
+		store := ifaceOf("Store", "Put")
+		embed(store, "x", "Reader")
+
+		got := node.MethodSet(store, resolverFor(reader))
+		if len(got.Entries) != len(got.Methods) {
+			t.Fatalf("Entries=%d Methods=%d, want equal", len(got.Entries), len(got.Methods))
+		}
+		for i, m := range got.Methods {
+			if got.Entries[i].Method != m {
+				t.Fatalf("Entries[%d].Method = %v, want Methods[%d] = %v",
+					i, got.Entries[i].Method, i, m)
+			}
+		}
+	})
+
+	t.Run("an unresolved method is absent rather than unattributed", func(t *testing.T) {
+		t.Parallel()
+		// From answers nil for both "declared here" and "not in the set",
+		// so the distinction is ByName's to make.
+		got := node.MethodSet(ifaceOf("Store", "Get"), nil)
+		if got.From("Missing") != nil || got.ByName("Missing") != nil {
+			t.Fatal("a method the set does not have was reported")
+		}
+	})
+}

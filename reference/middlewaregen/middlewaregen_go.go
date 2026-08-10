@@ -5,10 +5,7 @@ package middlewaregen
 
 import (
 	"embed"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -25,18 +22,10 @@ const GoSuffix = "_middleware.go"
 var goTemplates embed.FS
 
 // GoOutputs declares the single file this plugin owns.
+//
+// Exported rather than inlined into [New] so a contributor sharing
+// the file can name the same declaration instead of re-spelling
+// [GoSuffix] in a literal the two could drift apart on.
 func GoOutputs() []sdk.Output {
 	return []sdk.Output{{Suffix: GoSuffix}}
 }
-
-// GoTemplates returns the embedded Go template set.
-func GoTemplates() (fs.FS, bool) {
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
-}
-
-// GoFuncMap contributes the shared Go ref-conversion helpers.
-func GoFuncMap() template.FuncMap { return golang.FuncMap() }

@@ -6,10 +6,9 @@ package outbox_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/outbox"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -21,20 +20,20 @@ func TestContract_Identity(t *testing.T) {
 
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	app := &node.Function{
+	app := &sdk.Function{
 		Name: "Append", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(outbox.Name, "append", map[string]string{
 					"subscribe": "Subscribe",
 				}),
 			},
 		},
 	}
-	sub := &node.Function{Name: "Subscribe", Package: "x"}
-	pkg := &node.Package{
+	sub := &sdk.Function{Name: "Subscribe", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{app, sub},
+		Functions: []*sdk.Function{app, sub},
 	}
 	diags := contracttest.RunPipeline(t, outbox.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)

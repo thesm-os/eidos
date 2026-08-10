@@ -5,7 +5,6 @@ package stubgen
 
 import (
 	"embed"
-	"io/fs"
 
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -26,6 +25,10 @@ const GoTestSuffix = "_stub_test.go"
 // all match against this value.
 const GoTestOutputTag = "test"
 
+// goTemplates is the tree [New] hands the plugin base, which roots
+// it at the conventional `templates/golang` and hands the backend
+// every `*.tmpl` under it. The backend reads it once at Build time.
+//
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
 
@@ -40,14 +43,4 @@ func GoOutputs() []sdk.Output {
 		{Tag: "", Suffix: GoPrimarySuffix},
 		{Tag: GoTestOutputTag, Suffix: GoTestSuffix},
 	}
-}
-
-// GoTemplates returns the embedded Go template tree. The backend
-// reads it once at Build time and registers every `*.tmpl` under it.
-func GoTemplates() (fs.FS, bool) {
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
 }

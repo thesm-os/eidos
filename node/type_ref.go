@@ -63,9 +63,8 @@ const (
 
 	// TypeRefAnonInterface is an anonymous interface type
 	// expression, e.g. `interface{ Read([]byte) (int, error) }`
-	// appearing as a field or parameter type. [TypeRef.Methods] /
-	// [TypeRef.Embeds] / [TypeRef.TypeSet] carry the inline
-	// structure.
+	// appearing as a field or parameter type. [TypeRef.Methods] and
+	// [TypeRef.Embeds] carry the inline structure.
 	TypeRefAnonInterface
 )
 

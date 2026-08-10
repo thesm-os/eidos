@@ -39,9 +39,9 @@
 //     application registered them in.
 //   - A later contributor can position itself relative to an earlier
 //     one by [emit.Provenance] ID.
-//   - The element kind is checked at append, so a contributor handing
-//     over a statement instead of an expression is told at the call
-//     site rather than at render.
+//   - The slot carries no element kind, because each contributor
+//     brings its own emit kind and the template that renders it. See
+//     [MiddlewareStack.Chain] for what that costs at diagnosis time.
 //
 // # The dependency direction, and what it buys
 //

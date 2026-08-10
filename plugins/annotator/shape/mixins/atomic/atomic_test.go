@@ -9,9 +9,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/atomic"
 	"go.thesmos.sh/eidos/sdk"
@@ -19,7 +16,7 @@ import (
 )
 
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // TestMixin_Identity pins the constructor invariants: name + the
 // zero-param mixin spec.
@@ -39,15 +36,15 @@ func TestMixin_Identity(t *testing.T) {
 // mixin name in [shape.MetaMixins].
 func TestMixin_DirectiveStamping(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Save", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				{Name: shape.MixinDirectiveName, Args: []string{atomic.Name}},
 			},
 		},
 	}
-	pkg := &node.Package{Name: "x", Path: "x", Functions: []*node.Function{fn}}
+	pkg := &sdk.Package{Name: "x", Path: "x", Functions: []*sdk.Function{fn}}
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)

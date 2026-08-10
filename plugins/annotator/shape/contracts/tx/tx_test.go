@@ -7,11 +7,9 @@ import (
 	"reflect"
 	"testing"
 
-	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/tx"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -35,10 +33,10 @@ func TestContract_RequiresCommitAndRollback(t *testing.T) {
 // validator.
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	begin := &node.Function{
+	begin := &sdk.Function{
 		Name: "Begin", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(tx.Name, "begin", map[string]string{
 					"commit":   "Commit",
 					"rollback": "Rollback",
@@ -46,11 +44,11 @@ func TestContract_PipelineRoundTrip(t *testing.T) {
 			},
 		},
 	}
-	commit := &node.Function{Name: "Commit", Package: "x"}
-	rollback := &node.Function{Name: "Rollback", Package: "x"}
-	pkg := &node.Package{
+	commit := &sdk.Function{Name: "Commit", Package: "x"}
+	rollback := &sdk.Function{Name: "Rollback", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{begin, commit, rollback},
+		Functions: []*sdk.Function{begin, commit, rollback},
 	}
 	diags := contracttest.RunPipeline(t, tx.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)
@@ -69,21 +67,21 @@ func TestContract_PipelineRoundTrip(t *testing.T) {
 // naming the missing role.
 func TestContract_ValidatorFlagsMissingPartner(t *testing.T) {
 	t.Parallel()
-	begin := &node.Function{
+	begin := &sdk.Function{
 		Name: "Begin", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(tx.Name, "begin", map[string]string{
 					"commit": "Commit",
 				}),
 			},
 		},
 	}
-	commit := &node.Function{Name: "Commit", Package: "x"}
-	pkg := &node.Package{
+	commit := &sdk.Function{Name: "Commit", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{begin, commit},
+		Functions: []*sdk.Function{begin, commit},
 	}
 	diags := contracttest.RunPipeline(t, tx.Contract(), pkg)
-	contracttest.AssertContainsDiag(t, diags, diag.Error, "rollback")
+	contracttest.AssertContainsDiag(t, diags, sdk.SeverityError, "rollback")
 }

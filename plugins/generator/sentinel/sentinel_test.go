@@ -8,12 +8,10 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/node"
-	"go.thesmos.sh/eidos/plugin"
 	sentinelplugin "go.thesmos.sh/eidos/plugins/generator/sentinel"
+	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -39,35 +37,35 @@ func TestConformance(t *testing.T) {
 			[]plugintest.GeneratorFixture{
 				{
 					Name: "empty package",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return storefixture.New().Build()
 					},
 				},
 				{
 					Name: "annotated package with Err* sentinels only",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildSentinelOnlyStore(t)
 					},
 				},
 				{
 					Name: "annotated package with a custom error type only",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildErrorTypeOnlyStore(t)
 					},
 				},
 				{
 					Name: "annotated package mixing sentinels and error types",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildMixedStore(t)
 					},
 				},
 				{
 					Name: "un-annotated package emits nothing",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						// Package without the +gen:sentinel directive
 						// must be skipped silently.
@@ -96,21 +94,21 @@ func TestConformance(t *testing.T) {
 			[]plugintest.GeneratorFixture{
 				{
 					Name: "prefix=custom overrides the default",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildStoreWithPrefixOverride(t, "custom: ")
 					},
 				},
 				{
 					Name: "prefix=off disables the prefix subtest",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildStoreWithPrefixOverride(t, "off")
 					},
 				},
 				{
 					Name: "prefix= (empty) disables the prefix subtest",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return buildStoreWithPrefixOverride(t, "")
 					},
@@ -123,7 +121,7 @@ func TestConformance(t *testing.T) {
 // TestErrorTypeDetection pins that a struct is recognised by its
 // method signatures' types.
 //
-// [node.Return] carries a binding name alongside the type, and
+// [sdk.Return] carries a binding name alongside the type, and
 // both spell that field `Name`. Classifying on the binding name
 // compiles and matches nothing: every `Error() string` in the wild
 // is written anonymously, so the whole custom-error-type half of
@@ -138,13 +136,13 @@ func TestErrorTypeDetection(t *testing.T) {
 		b := storefixture.New().
 			Package("auth", "example.com/auth").
 			Struct("ValidationError", func(sb *storefixture.StructBuilder) {
-				sb.Field("Field", &node.TypeRef{Name: "string"}, nil)
+				sb.Field("Field", &sdk.TypeRef{Name: "string"}, nil)
 				methods(sb)
 			})
 		annotatePackage(b)
 		s := b.Build()
 		d := diag.Capture()
-		if err := sentinelplugin.New().Generate(&plugin.GeneratorContext{
+		if err := sentinelplugin.New().Generate(&sdk.GeneratorContext{
 			Store: s, Reader: store.NewReader(s), Diag: d,
 		}); err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -170,7 +168,7 @@ func TestErrorTypeDetection(t *testing.T) {
 		got := typesFor(t, func(sb *storefixture.StructBuilder) {
 			addErrorMethod(sb)
 			sb.Method(sentinelplugin.UnwrapMethodName, func(mb *storefixture.MethodBuilder) {
-				mb.Return(&node.TypeRef{Name: "error"})
+				mb.Return(&sdk.TypeRef{Name: "error"})
 			})
 		})
 		if len(got) != 1 || !got[0].HasUnwrap {
@@ -183,8 +181,8 @@ func TestErrorTypeDetection(t *testing.T) {
 		got := typesFor(t, func(sb *storefixture.StructBuilder) {
 			addErrorMethod(sb)
 			sb.Method(sentinelplugin.IsMethodName, func(mb *storefixture.MethodBuilder) {
-				mb.Param("target", &node.TypeRef{Name: "error"})
-				mb.Return(&node.TypeRef{Name: "bool"})
+				mb.Param("target", &sdk.TypeRef{Name: "error"})
+				mb.Return(&sdk.TypeRef{Name: "bool"})
 			})
 		})
 		if len(got) != 1 || !got[0].HasIs {
@@ -204,7 +202,7 @@ func TestErrorTypeDetection(t *testing.T) {
 		// Reading the type is what keeps the check a check.
 		got := typesFor(t, func(sb *storefixture.StructBuilder) {
 			sb.Method(sentinelplugin.ErrorMethodName, func(mb *storefixture.MethodBuilder) {
-				mb.Return(&node.TypeRef{Name: "int"})
+				mb.Return(&sdk.TypeRef{Name: "int"})
 			})
 		})
 		if len(got) != 0 {
@@ -231,25 +229,27 @@ func TestFieldSelection(t *testing.T) {
 		b := storefixture.New().
 			Package("auth", "example.com/auth").
 			Struct("ValidationError", func(sb *storefixture.StructBuilder) {
-				sb.Field("Field", &node.TypeRef{Name: "string"}, nil)
-				sb.Field("Code", &node.TypeRef{Name: "int8"}, nil)
-				sb.Field("Ratio", &node.TypeRef{Name: "float64"}, nil)
-				sb.Field("Cause", &node.TypeRef{
-					TypeKind: node.TypeRefPointer,
-					Elem:     &node.TypeRef{Name: "int"},
+				sb.Field("Field", &sdk.TypeRef{Name: "string"}, nil)
+				sb.Field("Code", &sdk.TypeRef{Name: "int8"}, nil)
+				sb.Field("Status", &sdk.TypeRef{Name: "int32"}, nil)
+				sb.Field("Total", &sdk.TypeRef{Name: "int"}, nil)
+				sb.Field("Ratio", &sdk.TypeRef{Name: "float64"}, nil)
+				sb.Field("Cause", &sdk.TypeRef{
+					TypeKind: sdk.TypeRefPointer,
+					Elem:     &sdk.TypeRef{Name: "int"},
 				}, nil)
-				sb.Field("Tags", &node.TypeRef{
-					TypeKind: node.TypeRefSlice,
-					Elem:     &node.TypeRef{Name: "string"},
+				sb.Field("Tags", &sdk.TypeRef{
+					TypeKind: sdk.TypeRefSlice,
+					Elem:     &sdk.TypeRef{Name: "string"},
 				}, nil)
-				sb.Field("Elapsed", &node.TypeRef{Package: "time", Name: "Duration"}, nil)
+				sb.Field("Elapsed", &sdk.TypeRef{Package: "time", Name: "Duration"}, nil)
 				addErrorMethod(sb)
 			})
 		annotatePackage(b)
 		s := b.Build()
 
 		d := diag.Capture()
-		if err := sentinelplugin.New().Generate(&plugin.GeneratorContext{
+		if err := sentinelplugin.New().Generate(&sdk.GeneratorContext{
 			Store: s, Reader: store.NewReader(s), Diag: d,
 		}); err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -271,12 +271,49 @@ func TestFieldSelection(t *testing.T) {
 		return out
 	}
 
+	samples := func(t *testing.T) map[string]string {
+		t.Helper()
+		out := map[string]string{}
+		for _, f := range fieldsFor(t) {
+			out[f.Name] = f.SampleValue
+		}
+		return out
+	}
+
 	t.Run("a narrow integer samples as zero rather than nil", func(t *testing.T) {
 		t.Parallel()
-		for _, f := range fieldsFor(t) {
-			if f.Name == "Code" && f.SampleValue != "0" {
-				t.Fatalf("Code.SampleValue = %q, want 0", f.SampleValue)
+		if got := samples(t)["Code"]; got != "int8(0)" {
+			t.Fatalf("Code.SampleValue = %q, want int8(0)", got)
+		}
+	})
+
+	t.Run("every numeric sample carries the field's own type", func(t *testing.T) {
+		t.Parallel()
+		// The rendered test binds each sample to a local before
+		// naming it in a struct literal, and `:=` takes the untyped
+		// constant's default type. A bare 42 is an int, which an
+		// int32 field will not accept — a file that fails in the
+		// consumer's build rather than here.
+		want := map[string]string{
+			"Code":   "int8(0)",
+			"Status": "int32(42)",
+			"Ratio":  "float64(0)",
+		}
+		got := samples(t)
+		for name, spelling := range want {
+			if got[name] != spelling {
+				t.Errorf("%s.SampleValue = %q, want %q", name, got[name], spelling)
 			}
+		}
+	})
+
+	t.Run("an int field keeps the bare literal", func(t *testing.T) {
+		t.Parallel()
+		// int is the default type an untyped integer constant binds
+		// at, so converting would only make the output read less
+		// like the Go an author would have written.
+		if got := samples(t)["Total"]; got != "42" {
+			t.Fatalf("Total.SampleValue = %q, want 42", got)
 		}
 	})
 
@@ -286,8 +323,9 @@ func TestFieldSelection(t *testing.T) {
 		// type; time.Duration's zero needs a resolution the model
 		// cannot do. Each is dropped rather than rendered wrong.
 		got := names(fieldsFor(t))
-		if !slices.Equal(got, []string{"Field", "Code", "Ratio"}) {
-			t.Fatalf("exercised fields = %v, want [Field Code Ratio]", got)
+		want := []string{"Field", "Code", "Status", "Total", "Ratio"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("exercised fields = %v, want %v", got, want)
 		}
 	})
 
@@ -302,17 +340,17 @@ func TestFieldSelection(t *testing.T) {
 	})
 }
 
-// buildStoreWithPrefixOverride returns a [store.Store] populated
+// buildStoreWithPrefixOverride returns a [sdk.Store] populated
 // with an annotated package whose `+gen:sentinel` directive
 // carries the supplied prefix value. Both "off" and the empty
 // string disable the prefix subtest; any other value pins the
 // prefix the subtest asserts.
-func buildStoreWithPrefixOverride(t *testing.T, prefix string) *store.Store {
+func buildStoreWithPrefixOverride(t *testing.T, prefix string) *sdk.Store {
 	t.Helper()
 	b := storefixture.New().
 		Package("auth", "example.com/auth").
 		Variable("ErrFoo", func(vb *storefixture.VariableBuilder) {
-			vb.Type(&node.TypeRef{Name: "error"})
+			vb.Type(&sdk.TypeRef{Name: "error"})
 		})
 	pkg := b.PackageNode()
 	pkg.DirectiveList = append(pkg.DirectiveList, storefixture.Directive(
@@ -322,57 +360,57 @@ func buildStoreWithPrefixOverride(t *testing.T, prefix string) *store.Store {
 	return b.Build()
 }
 
-// buildSentinelOnlyStore returns a [store.Store] populated with
+// buildSentinelOnlyStore returns a [sdk.Store] populated with
 // one annotated source package declaring two Err* sentinel
 // variables but no custom error types — exercises the
 // Sentinels-only branch of the rendered template.
-func buildSentinelOnlyStore(t *testing.T) *store.Store {
+func buildSentinelOnlyStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	b := storefixture.New().
 		Package("auth", "example.com/auth").
 		Variable("ErrUnauthorised", func(vb *storefixture.VariableBuilder) {
-			vb.Type(&node.TypeRef{Name: "error"})
+			vb.Type(&sdk.TypeRef{Name: "error"})
 		}).
 		Variable("ErrTokenExpired", func(vb *storefixture.VariableBuilder) {
-			vb.Type(&node.TypeRef{Name: "error"})
+			vb.Type(&sdk.TypeRef{Name: "error"})
 		})
 	annotatePackage(b)
 	return b.Build()
 }
 
-// buildErrorTypeOnlyStore returns a [store.Store] populated
+// buildErrorTypeOnlyStore returns a [sdk.Store] populated
 // with one annotated source package declaring a custom error
 // type but no Err* sentinels — exercises the ErrorTypes-only
 // branch of the rendered template.
-func buildErrorTypeOnlyStore(t *testing.T) *store.Store {
+func buildErrorTypeOnlyStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	b := storefixture.New().
 		Package("auth", "example.com/auth").
 		Struct("ValidationError", func(sb *storefixture.StructBuilder) {
-			sb.Field("Field", &node.TypeRef{Name: "string"}, nil)
-			sb.Field("Reason", &node.TypeRef{Name: "string"}, nil)
+			sb.Field("Field", &sdk.TypeRef{Name: "string"}, nil)
+			sb.Field("Reason", &sdk.TypeRef{Name: "string"}, nil)
 			addErrorMethod(sb)
 		})
 	annotatePackage(b)
 	return b.Build()
 }
 
-// buildMixedStore returns a [store.Store] populated with one
+// buildMixedStore returns a [sdk.Store] populated with one
 // annotated source package declaring both Err* sentinels and a
 // custom error type — the canonical real-world shape testkit's
 // sentinel generator targets.
-func buildMixedStore(t *testing.T) *store.Store {
+func buildMixedStore(t *testing.T) *sdk.Store {
 	t.Helper()
 	b := storefixture.New().
 		Package("auth", "example.com/auth").
 		Variable("ErrUnauthorised", func(vb *storefixture.VariableBuilder) {
-			vb.Type(&node.TypeRef{Name: "error"})
+			vb.Type(&sdk.TypeRef{Name: "error"})
 		}).
 		Variable("ErrTokenExpired", func(vb *storefixture.VariableBuilder) {
-			vb.Type(&node.TypeRef{Name: "error"})
+			vb.Type(&sdk.TypeRef{Name: "error"})
 		}).
 		Struct("ValidationError", func(sb *storefixture.StructBuilder) {
-			sb.Field("Field", &node.TypeRef{Name: "string"}, nil)
+			sb.Field("Field", &sdk.TypeRef{Name: "string"}, nil)
 			addErrorMethod(sb)
 		})
 	annotatePackage(b)
@@ -395,12 +433,6 @@ func annotatePackage(b *storefixture.Builder) {
 // rendered tests' runtime behaviour.
 func addErrorMethod(sb *storefixture.StructBuilder) {
 	sb.Method(sentinelplugin.ErrorMethodName, func(mb *storefixture.MethodBuilder) {
-		mb.Return(&node.TypeRef{Name: "string"})
+		mb.Return(&sdk.TypeRef{Name: "string"})
 	})
 }
-
-// Silence the "imported and not used" lint when the directive
-// package isn't referenced in tests that don't override the
-// per-package directive (the storefixture's Directive helper
-// uses the import transitively).
-var _ = directive.Validate

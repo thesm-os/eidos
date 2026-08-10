@@ -4,10 +4,9 @@
 package streamconsumer
 
 import (
-	"go.thesmos.sh/eidos/core/meta"
 	langgo "go.thesmos.sh/eidos/lang/golang"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps. Consumers
@@ -33,7 +32,7 @@ var (
 	// false claim this shape exists to remove, since a generator
 	// branching on key_type emits same-key-same-value assertions
 	// that a drained stream satisfies vacuously.
-	MetaStreamType = meta.EnsureKey("shape.stream_type", meta.StringParser)
+	MetaStreamType = sdk.EnsureKey("shape.stream_type", sdk.StringParser)
 )
 
 // Detector returns the [shape.Detector] this package contributes
@@ -65,7 +64,7 @@ func Detector() shape.Detector {
 // is too ambiguous to claim — constructors and helpers share it —
 // and the cost of requiring ctx is a missed stamp on an unusual
 // form, against mislabelling a common one.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if !shape.GoHasContext(params) || !shape.GoHasError(returns) {
 		return shape.Match{}, false
@@ -98,7 +97,7 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 // Type parameters are excluded twice over: the frontend does not
 // stamp them, and the IR discriminates them outright. A constraint
 // is an interface, but `K comparable` is a key.
-func isStream(t *node.TypeRef) bool {
+func isStream(t *sdk.TypeRef) bool {
 	if t == nil || t.IsTypeParam() {
 		return false
 	}

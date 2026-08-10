@@ -4,9 +4,8 @@
 package lookup
 
 import (
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -17,7 +16,7 @@ const Name = "lookup"
 // triple). Empty when no lookup is detected.
 //
 //nolint:gochecknoglobals // registry-singleton key
-var MetaType = meta.NewKey("shape.lookup.meta_type", meta.StringParser)
+var MetaType = sdk.NewKey("shape.lookup.meta_type", sdk.StringParser)
 
 // Detector returns the [shape.Detector] this package contributes.
 func Detector() shape.Detector {
@@ -34,7 +33,7 @@ func Detector() shape.Detector {
 // parameter and exactly three returns: a value, metadata, and a
 // bare bool sentinel. No error return. The metadata type is
 // stamped via [MetaType] alongside the universal triple.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	keys := shape.GoStripContext(params)
 	if len(keys) != 1 || len(returns) != 3 {

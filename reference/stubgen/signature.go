@@ -6,9 +6,8 @@ package stubgen
 import (
 	"strconv"
 
-	"go.thesmos.sh/eidos/core/naming"
 	refconv "go.thesmos.sh/eidos/lang/golang"
-	"go.thesmos.sh/eidos/node"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // paramsOf lifts a method's parameters into rendered form.
@@ -19,14 +18,20 @@ import (
 // generators here had each written their own slice of them. The
 // recorded-call field name is the exported form of whichever
 // identifier ends up in use.
-func paramsOf(m *node.Method) []Param {
+//
+// The variadic flag travels beside the element type rather than being
+// folded into it: the four places the parameter is rendered want four
+// different spellings, and only the source knows which parameter is
+// the tail. See [Param.Variadic].
+func paramsOf(m *sdk.Method) []Param {
 	idents := refconv.ParamIdents(m.Params)
 	out := make([]Param, 0, len(m.Params))
 	for i, p := range m.Params {
 		out = append(out, Param{
-			Name:  idents[i],
-			Type:  refconv.FromNode(p.Type),
-			Field: naming.Pascal(idents[i]),
+			Name:     idents[i],
+			Type:     refconv.FromNode(p.Type),
+			Field:    refconv.ExportedName(idents[i]),
+			Variadic: refconv.IsVariadic(p),
 		})
 	}
 	return out
@@ -40,12 +45,12 @@ func paramsOf(m *node.Method) []Param {
 // [namedReturnsUsable] — a signature that cannot carry names on the
 // generated method still records both types under readable-where-
 // possible field names.
-func returnsOf(m *node.Method) []Return {
+func returnsOf(m *sdk.Method) []Return {
 	out := make([]Return, 0, len(m.Returns))
 	for i, r := range m.Returns {
 		field := "Result" + strconv.Itoa(i)
 		if r.Name != "" {
-			field = naming.Pascal(r.Name)
+			field = refconv.ExportedName(r.Name)
 		}
 		out = append(out, Return{
 			Name:  r.Name,
@@ -56,25 +61,47 @@ func returnsOf(m *node.Method) []Return {
 	return out
 }
 
+// receiverIdentFor returns the identifier the generated method binds
+// its receiver to, chosen around the parameter identifiers already
+// spoken for.
+//
+// Derived per method rather than fixed at `s`, because the source
+// picks the parameter names and this generator picks nothing: an
+// interface declaring `Recv(s string)` produced
+// `func (s *StoreStub) Recv(s string)`, where every `s.<Field>` in
+// the body resolved to the parameter. That does not compile, and no
+// substring assertion over the rendered file could see it.
+//
+// [refconv.ReceiverIdent] owns the convention — the type name's
+// initial, lower-cased, disambiguated on collision — so a reader of
+// the generated code sees the same receiver shape every other
+// generator here emits.
+func receiverIdentFor(typeName string, params []Param) string {
+	taken := make([]string, 0, len(params))
+	for _, p := range params {
+		taken = append(taken, p.Name)
+	}
+	return refconv.ReceiverIdent(typeName, taken...)
+}
+
 // namedReturnsUsable reports whether the generated method may carry
 // the source's return names on its own signature.
 //
 // The rule itself is Go's and lives in [refconv.NamedReturnsUsable];
-// what this generator supplies is the occupied scope — its receiver
-// identifier plus the parameter identifiers it just chose, which is
+// what this generator supplies is the occupied scope — the receiver
+// identifier it just chose plus the parameter identifiers, which is
 // knowledge no shared helper has.
 //
 // Falling back costs documentation on the generated signature and
 // nothing else; the recorded-call struct keeps its field names.
-func namedReturnsUsable(m *node.Method) bool {
-	taken := append([]string{receiverIdent}, refconv.ParamIdents(m.Params)...)
+func namedReturnsUsable(m *sdk.Method, recv string, params []Param) bool {
+	taken := make([]string, 0, len(params)+1)
+	taken = append(taken, recv)
+	for _, p := range params {
+		taken = append(taken, p.Name)
+	}
 	return refconv.NamedReturnsUsable(m.Returns, taken...)
 }
-
-// receiverIdent is the identifier the generated methods bind their
-// receiver to. Declared here rather than in the template because
-// [namedReturnsUsable] has to reason about collisions against it.
-const receiverIdent = "s"
 
 // withLocals assigns each return slot the identifier the generated
 // body binds it to.
@@ -82,10 +109,14 @@ const receiverIdent = "s"
 // Named results are already declared by the signature, so the local
 // is the declared name. Anonymous results need a fresh local for the
 // capture, which is positional — and prefixed with an underscore on
-// the rare occasion a parameter already holds that identifier, since
-// shadowing a parameter would record the wrong value.
-func withLocals(returns []Return, params []Param, named bool) []Return {
-	taken := make(map[string]struct{}, len(params))
+// the rare occasion a parameter or the receiver already holds that
+// identifier, since shadowing either records the wrong value or
+// breaks the delegate call.
+func withLocals(returns []Return, params []Param, recv string, named bool) []Return {
+	taken := make(map[string]struct{}, len(params)+1)
+	if recv != "" {
+		taken[recv] = struct{}{}
+	}
 	for _, p := range params {
 		taken[p.Name] = struct{}{}
 	}

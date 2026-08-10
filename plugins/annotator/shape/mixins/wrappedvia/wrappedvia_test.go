@@ -6,11 +6,10 @@ package wrappedvia_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/internal/mixintest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/wrappedvia"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestMixin(t *testing.T) {
@@ -23,20 +22,20 @@ func TestMixin(t *testing.T) {
 
 	t.Run("resolver rewrites fn param to qualified name", func(t *testing.T) {
 		t.Parallel()
-		host := &node.Function{
+		host := &sdk.Function{
 			Name: "Wrapped", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					mixintest.HostDirective(wrappedvia.Name, map[string]string{
 						"fn": "Delegate",
 					}),
 				},
 			},
 		}
-		inner := &node.Function{Name: "Delegate", Package: "x"}
-		mixintest.RunWithResolver(t, wrappedvia.Mixin(), &node.Package{
+		inner := &sdk.Function{Name: "Delegate", Package: "x"}
+		mixintest.RunWithResolver(t, wrappedvia.Mixin(), &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{host, inner},
+			Functions: []*sdk.Function{host, inner},
 		})
 
 		got, _ := shape.MixinParamKey(wrappedvia.Name, "fn").Get(host.Meta())

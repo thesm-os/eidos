@@ -7,11 +7,9 @@ import (
 	"reflect"
 	"testing"
 
-	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/leaderelection"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -35,10 +33,10 @@ func TestContract_RequiresResignAndIsLeader(t *testing.T) {
 // validator.
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	campaign := &node.Function{
+	campaign := &sdk.Function{
 		Name: "Campaign", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(leaderelection.Name, "campaign", map[string]string{
 					"resign":   "Resign",
 					"isleader": "IsLeader",
@@ -46,11 +44,11 @@ func TestContract_PipelineRoundTrip(t *testing.T) {
 			},
 		},
 	}
-	resign := &node.Function{Name: "Resign", Package: "x"}
-	isleader := &node.Function{Name: "IsLeader", Package: "x"}
-	pkg := &node.Package{
+	resign := &sdk.Function{Name: "Resign", Package: "x"}
+	isleader := &sdk.Function{Name: "IsLeader", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{campaign, resign, isleader},
+		Functions: []*sdk.Function{campaign, resign, isleader},
 	}
 	diags := contracttest.RunPipeline(t, leaderelection.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)
@@ -69,21 +67,21 @@ func TestContract_PipelineRoundTrip(t *testing.T) {
 // the missing role.
 func TestContract_ValidatorFlagsMissingPartner(t *testing.T) {
 	t.Parallel()
-	campaign := &node.Function{
+	campaign := &sdk.Function{
 		Name: "Campaign", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(leaderelection.Name, "campaign", map[string]string{
 					"resign": "Resign",
 				}),
 			},
 		},
 	}
-	resign := &node.Function{Name: "Resign", Package: "x"}
-	pkg := &node.Package{
+	resign := &sdk.Function{Name: "Resign", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{campaign, resign},
+		Functions: []*sdk.Function{campaign, resign},
 	}
 	diags := contracttest.RunPipeline(t, leaderelection.Contract(), pkg)
-	contracttest.AssertContainsDiag(t, diags, diag.Error, "isleader")
+	contracttest.AssertContainsDiag(t, diags, sdk.SeverityError, "isleader")
 }

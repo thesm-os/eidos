@@ -4,8 +4,8 @@
 package saga
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical contract name this package stamps.
@@ -57,11 +57,11 @@ func validate(members map[string][]shape.ContractMember) []shape.ContractViolati
 // stepLabel returns a human-readable identifier for a saga step
 // host — function or method name — for inclusion in diagnostic
 // messages. Returns the empty string for any other node kind.
-func stepLabel(n node.Node) string {
+func stepLabel(n sdk.Node) string {
 	switch x := n.(type) {
-	case *node.Function:
+	case *sdk.Function:
 		return x.Name
-	case *node.Method:
+	case *sdk.Method:
 		return x.Name
 	}
 	return ""

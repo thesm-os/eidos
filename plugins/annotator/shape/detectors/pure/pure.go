@@ -4,8 +4,8 @@
 package pure
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps. Consumers
@@ -32,7 +32,7 @@ func Detector() shape.Detector {
 // context, no error return, exactly one return value. Parameter
 // count and types are unconstrained — the shape is about the
 // return discipline, not the input shape.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if shape.GoHasContext(params) || shape.GoHasError(returns) {
 		return shape.Match{}, false

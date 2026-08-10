@@ -7,16 +7,13 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"io/fs"
 	"strings"
-	"text/template"
 
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 )
 
 // GoSuffix is the per-source-basename suffix the Go adapter
-// reports through [Plugin.Outputs]. All `+gen:builder`
+// reports through [GoOutputs]. All `+gen:builder`
 // structs declared in `article.go` collate into a single
 // `article_builder.go`.
 const GoSuffix = "_builder.go"
@@ -32,6 +29,11 @@ var ErrMalformedDefaults = errors.New(
 	`builder: defaults value must be "FuncName" or "import/path.FuncName"`,
 )
 
+// goTemplatesFS is the Go adapter's template tree. The Go
+// backend reads it once at Build time and registers every
+// `*.tmpl` it finds under `templates/golang/` by base
+// filename.
+//
 //go:embed templates/golang/*.tmpl
 var goTemplatesFS embed.FS
 
@@ -42,28 +44,8 @@ func GoOutputs() []sdk.Output {
 	return []sdk.Output{{Suffix: GoSuffix}}
 }
 
-// GoTemplates returns the Go adapter's embedded template
-// tree. The Go backend reads it once at Build time and
-// registers every `*.tmpl` it finds.
-func GoTemplates() (fs.FS, bool) {
-	sub, _ := fs.Sub(goTemplatesFS, "templates/"+golang.Language)
-	return sub, true
-}
-
-// GoFuncMap returns the builder-specific Go funcmap entries
-// the `templates/golang/builder.type.tmpl` template consumes
-// — only `defaultsExpr` today. Shared Go-convention helpers
-// (`isExported`, `isByteSlice`, `selfType`, ...) ride on the
-// Go backend's canonical extras funcmap and are available to
-// every Go template without per-plugin registration.
-func GoFuncMap() template.FuncMap {
-	return template.FuncMap{
-		"defaultsExpr": GoDefaultsExpr,
-	}
-}
-
 // GoDefaultsExpr parses a `defaults=` value into an
-// [emit.External] expression suitable for the rendered
+// [sdk.External] expression suitable for the rendered
 // `New<Name>WithDefaults` body. Two forms are accepted:
 //
 //   - A bare identifier — `defaults=defaultUser` — naming a
@@ -74,7 +56,7 @@ func GoFuncMap() template.FuncMap {
 //   - `<import-path>.<FuncName>` — `defaults=example.com/x.New`
 //     — naming a factory in another package.
 //
-// Both render through [emit.External], so the same-package
+// Both render through [sdk.External], so the same-package
 // elision rule picks the spelling: a builder emitted alongside
 // its source renders the bare name, and one redirected by
 // `out=` / `pkg=` renders it qualified against the import the
@@ -95,7 +77,10 @@ func GoFuncMap() template.FuncMap {
 //
 // The parser is plugin-local because the two-form convention
 // is specific to the builder's `defaults=` arg; shared
-// identifier-convention helpers live in [golang].
+// identifier-convention helpers live in
+// [go.thesmos.sh/eidos/lang/golang]. The base registers this
+// one under the plugin's name prefix, so the template calls it
+// as `builder_defaultsExpr`.
 func GoDefaultsExpr(raw, srcPkg string) (*sdk.Expr, error) {
 	i := strings.LastIndex(raw, ".")
 	if i < 0 {

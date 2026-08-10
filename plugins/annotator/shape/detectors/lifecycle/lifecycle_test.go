@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/lifecycle"
 	"go.thesmos.sh/eidos/sdk"
@@ -16,7 +14,7 @@ import (
 )
 
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // TestDetector_Identity pins the constructor invariants.
 func TestDetector_Identity(t *testing.T) {
@@ -57,13 +55,13 @@ func TestDetector_MatchesMethod(t *testing.T) {
 	t.Run("struct method", func(t *testing.T) {
 		t.Parallel()
 		m := lifecycleMethod("Start")
-		s := &node.Struct{
+		s := &sdk.Struct{
 			Name: "Service", Package: "x",
-			Methods: []*node.Method{m},
+			Methods: []*sdk.Method{m},
 		}
-		runDetect(t, &node.Package{
+		runDetect(t, &sdk.Package{
 			Name: "x", Path: "x",
-			Structs: []*node.Struct{s},
+			Structs: []*sdk.Struct{s},
 		})
 		if got := shape.Get(m.Meta()); got != lifecycle.Name {
 			t.Fatalf("shape = %q, want %q", got, lifecycle.Name)
@@ -73,13 +71,13 @@ func TestDetector_MatchesMethod(t *testing.T) {
 	t.Run("interface method", func(t *testing.T) {
 		t.Parallel()
 		m := lifecycleMethod("Start")
-		i := &node.Interface{
+		i := &sdk.Interface{
 			Name: "Service", Package: "x",
-			Methods: []*node.Method{m},
+			Methods: []*sdk.Method{m},
 		}
-		runDetect(t, &node.Package{
+		runDetect(t, &sdk.Package{
 			Name: "x", Path: "x",
-			Interfaces: []*node.Interface{i},
+			Interfaces: []*sdk.Interface{i},
 		})
 		if got := shape.Get(m.Meta()); got != lifecycle.Name {
 			t.Fatalf("shape = %q, want %q", got, lifecycle.Name)
@@ -93,45 +91,45 @@ func TestDetector_RejectsNonLifecycle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
 		{
 			name: "missing context (would be VoidLifecycle / Predicate / PoisonAccessor)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Start", Package: "x",
-				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "error"}),
 			},
 		},
 		{
 			name: "missing error (just `(ctx)` is void)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Start", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 				},
 			},
 		},
 		{
 			name: "extra param (Reader / Writer territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Start", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
-					{Name: "x", Type: &node.TypeRef{Name: "string"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
+					{Name: "x", Type: &sdk.TypeRef{Name: "string"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "error"}),
 			},
 		},
 		{
 			name: "extra return (Reader territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Start", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: node.AnonReturns(
-					&node.TypeRef{Name: "string"},
-					&node.TypeRef{Name: "error"},
+				Returns: sdk.AnonReturns(
+					&sdk.TypeRef{Name: "string"},
+					&sdk.TypeRef{Name: "error"},
 				),
 			},
 		},
@@ -147,41 +145,41 @@ func TestDetector_RejectsNonLifecycle(t *testing.T) {
 	}
 }
 
-// lifecycleFunc builds a free [node.Function] with the canonical
+// lifecycleFunc builds a free [sdk.Function] with the canonical
 // lifecycle signature.
-func lifecycleFunc(name string) *node.Function {
-	return &node.Function{
+func lifecycleFunc(name string) *sdk.Function {
+	return &sdk.Function{
 		Name: name, Package: "x",
-		Params: []*node.Param{
-			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+		Params: []*sdk.Param{
+			{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 		},
-		Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
+		Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "error"}),
 	}
 }
 
-// lifecycleMethod builds a [node.Method] with the canonical
+// lifecycleMethod builds a [sdk.Method] with the canonical
 // lifecycle signature.
-func lifecycleMethod(name string) *node.Method {
+func lifecycleMethod(name string) *sdk.Method {
 	fn := lifecycleFunc(name)
-	return &node.Method{
+	return &sdk.Method{
 		Name: fn.Name, Params: fn.Params, Returns: fn.Returns,
 	}
 }
 
 // runDetectFunc wires fn into a single-function package and runs
 // the lifecycle detector through the umbrella shape plugin.
-func runDetectFunc(t *testing.T, fn *node.Function) {
+func runDetectFunc(t *testing.T, fn *sdk.Function) {
 	t.Helper()
-	runDetect(t, &node.Package{
+	runDetect(t, &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{fn},
+		Functions: []*sdk.Function{fn},
 	})
 }
 
 // runDetect adds pkg to a fresh store, stamps the Go frontend
 // marker on the package, and runs the umbrella shape plugin
 // configured with this package's detector.
-func runDetect(t *testing.T, pkg *node.Package) {
+func runDetect(t *testing.T, pkg *sdk.Package) {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {

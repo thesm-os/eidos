@@ -23,9 +23,10 @@
 // schema, the [Options] surface, the [Tests] emit value,
 // and the [Plugin.Generate] pass that walks every annotated
 // source package and queues one contribution per match.
-// Per-language behaviour — the output suffix, the embedded
-// template tree, the funcmap entries — lives in the sibling
-// `sentinel_<lang>.go` adapter.
+// Per-language behaviour — the output suffix and the
+// embedded template tree — lives in the sibling
+// `sentinel_<lang>.go` adapter, which [New] hands to the
+// SDK base that answers the declaration methods.
 //
 // # Source patterns scanned
 //
@@ -59,13 +60,11 @@ package sentinel
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"strings"
-	"text/template"
 
 	"go.thesmos.sh/eidos/lang/golang"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -90,7 +89,7 @@ const Capability = "sentinel"
 // generation.
 const DirectiveName sdk.DirectiveName = "sentinel"
 
-// SlotName is the [emit.File] slot the plugin appends its
+// SlotName is the [sdk.EmitFile] slot the plugin appends its
 // rendered [Tests] emit values into. `top` renders the
 // content between the package clause and the first core
 // decl — the natural placement for a self-contained
@@ -128,6 +127,11 @@ const errorTypeName = "error"
 // about Go's untyped nil, not about the three characters.
 const nilLiteral = "nil"
 
+// intTypeName is the one numeric builtin whose values need no
+// conversion: an untyped integer constant already defaults to
+// it, so `want := 42` binds at exactly the field's type.
+const intTypeName = "int"
+
 // PrefixKey is the directive keyword that pins (or kills)
 // the message prefix every sentinel's `.Error()` is
 // asserted to start with. Resolved per-package in
@@ -153,49 +157,53 @@ type Options struct{}
 // unusable; go through [New] so the embedded [sdk.Holder]
 // binds to the options field.
 type Plugin struct {
+	*sdkgo.Base
 	*sdk.Holder[Options]
 	opts Options
 }
 
 // New returns a fresh plugin instance with the options
 // holder bound.
+//
+// The cross-cutting bucket runs the plugin after the
+// foundation and composition generators, so its scan
+// observes the post-generation package shape and can assert
+// invariants over Err* vars and error types other plugins
+// synthesised.
+//
+// It requires no capability: the scan reads source nodes
+// only, so nothing upstream has to have run for it to find
+// its input. It publishes [Capability] so a downstream
+// consumer can declare a documentary dependency on the
+// generated suite.
+//
+// It registers no template helper. The rendered tests reach
+// everything they need through the canonical `renderExpr` /
+// `renderType` / `renderTypeParams` entries and the shared
+// Go-convention helpers, all of which ride on the backend's
+// own funcmap surface.
 func New() *Plugin {
-	p := &Plugin{}
+	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplatesFS, GoOutputs()...).
+		Version(Version).
+		Priority(sdk.GeneratorCrossCutting).
+		Provides(Capability).
+		Directives(directives()...).
+		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the cross-cutting bucket so
-// it runs after foundation / composition generators — its
-// scan observes the post-generation package shape, which
-// lets it assert invariants over Err* vars / error types
-// that other plugins may have synthesised.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorCrossCutting }
-
-// Provides advertises [Capability].
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires returns nil — the sentinel plugin reads source
-// nodes only.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares the `+gen:sentinel` schema on the
+// directives declares the `+gen:sentinel` schema on the
 // source package node — annotating the package's doc
 // comment opts every error in the package into the
 // generated test suite. The optional `prefix=` keyword arg
 // overrides the default `<pkg>: ` prefix the rendered
 // prefix subtest asserts; an empty value or the literal
 // `off` disables the subtest.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(node.KindPackage).
+			On(sdk.NodeKindPackage).
 			AllowedKeys(PrefixKey).
 			Describe(
 				"Opts the host source package in for sentinel-error / error-type " +
@@ -206,37 +214,6 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 			Build(),
 	}
 }
-
-// Outputs dispatches to the per-language adapter for the
-// requested language.
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == golang.Language {
-		return GoOutputs()
-	}
-	return nil
-}
-
-// Templates dispatches to the per-language adapter's
-// embedded template tree.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang == golang.Language {
-		return GoTemplates()
-	}
-	return nil, false
-}
-
-// TemplateFuncs dispatches to the per-language adapter's
-// funcmap.
-func (*Plugin) TemplateFuncs(lang string) template.FuncMap {
-	if lang == golang.Language {
-		return GoFuncMap()
-	}
-	return nil
-}
-
-// TemplateOverrides returns nil — no per-language adapter
-// currently overrides a canonical funcmap entry.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Sentinel is one Err* package-level variable rolled into
 // the rendered test suite.
@@ -422,7 +399,7 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 // collectSentinels returns the package's Err* variable set
 // — every exported variable whose identifier starts with
 // the canonical `Err` prefix.
-func collectSentinels(pkg *node.Package) []Sentinel {
+func collectSentinels(pkg *sdk.Package) []Sentinel {
 	var out []Sentinel
 	for _, v := range pkg.Variables {
 		if !isExported(v.Name) {
@@ -442,8 +419,8 @@ func collectSentinels(pkg *node.Package) []Sentinel {
 // OtherTypes, HasIs / HasUnwrap) runs in a second pass once
 // the full set is known so the cross-type non-overlap
 // subtest data can be pre-computed.
-func collectErrorTypes(pkg *node.Package) []ErrorType {
-	var raw []*node.Struct
+func collectErrorTypes(pkg *sdk.Package) []ErrorType {
+	var raw []*sdk.Struct
 	for _, s := range pkg.Structs {
 		if !isExported(s.Name) {
 			continue
@@ -507,7 +484,7 @@ func collectErrorTypes(pkg *node.Package) []ErrorType {
 // A dropped field costs one assertion. Rendering it costs
 // the whole file: the failure lands in the consumer's build
 // of generated code, which is the last place an author looks.
-func buildFieldData(f *node.Field) (Field, bool) {
+func buildFieldData(f *sdk.Field) (Field, bool) {
 	fd := Field{Name: f.Name}
 	if f.Type != nil {
 		fd.TypeStr = f.Type.Name
@@ -521,8 +498,8 @@ func buildFieldData(f *node.Field) (Field, bool) {
 	case "string":
 		fd.SampleValue = `"test-` + lower + `"`
 		fd.FormatCheckValue = "test-" + lower
-	case "int", "int32", "int64":
-		fd.SampleValue = "42"
+	case intTypeName, "int32", "int64":
+		fd.SampleValue = typedSample(fd.TypeStr, "42")
 		fd.FormatCheckValue = "42"
 	default:
 		// Read through the shared vocabulary rather than a
@@ -533,9 +510,47 @@ func buildFieldData(f *node.Field) (Field, bool) {
 		if !derivable || zero == nilLiteral {
 			return Field{}, false
 		}
-		fd.SampleValue = zero
+		fd.SampleValue = typedSample(fd.TypeStr, zero)
 	}
 	return fd, true
+}
+
+// typedSample spells a numeric sample at the field's own type.
+//
+// The rendered test binds every sample to a local before naming
+// it in a struct literal — `wantCode := 42`, then `Code:
+// wantCode` — and `:=` takes the untyped constant's DEFAULT
+// type, never the field's. An `int32`, `int8` or `float64` field
+// therefore received an `int`, which is not an assignment Go
+// allows: the generated file failed to compile in the consumer's
+// build, a few lines from a comment promising the opposite.
+//
+// Only a bare numeric literal needs the conversion. A string
+// literal, `false` and an `errors.New` call already carry their
+// type, and an untyped integer constant binds at `int` already,
+// so each is returned untouched — which keeps the common case
+// reading as the Go an author would have written by hand.
+func typedSample(typeName, literal string) string {
+	if typeName == intTypeName || !isNumericLiteral(literal) {
+		return literal
+	}
+	return typeName + "(" + literal + ")"
+}
+
+// isNumericLiteral reports whether s is a bare run of ASCII
+// digits — for the samples this file derives, exactly the ones
+// whose type comes from Go's default-type rule rather than from
+// the spelling.
+func isNumericLiteral(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // applyExternalRefs stamps [sdk.NewExternal] expressions
@@ -567,7 +582,7 @@ func applyExternalRefs(packagePath string, sentinels []Sentinel, errorTypes []Er
 // the first error type when the package declares no Err*
 // vars. Both lists are guaranteed non-empty when this
 // function is called.
-func chooseAnchor(pkg *node.Package, sentinels []Sentinel, errorTypes []ErrorType) node.Node {
+func chooseAnchor(pkg *sdk.Package, sentinels []Sentinel, errorTypes []ErrorType) sdk.Node {
 	if len(sentinels) > 0 {
 		first := sentinels[0].Name
 		for _, v := range pkg.Variables {
@@ -589,14 +604,14 @@ func chooseAnchor(pkg *node.Package, sentinels []Sentinel, errorTypes []ErrorTyp
 
 // structImplementsError reports whether s declares an
 // `Error() string` method.
-func structImplementsError(s *node.Struct) bool {
+func structImplementsError(s *sdk.Struct) bool {
 	return hasMethod(s, ErrorMethodName, returnsStringOnly)
 }
 
 // hasMethod reports whether s declares a method named name
 // whose signature satisfies the supplied signature
 // predicate.
-func hasMethod(s *node.Struct, name string, sigOK func(*node.Method) bool) bool {
+func hasMethod(s *sdk.Struct, name string, sigOK func(*sdk.Method) bool) bool {
 	for _, m := range s.Methods {
 		if m.Name == name && sigOK(m) {
 			return true
@@ -609,11 +624,11 @@ func hasMethod(s *node.Struct, name string, sigOK func(*node.Method) bool) bool 
 // named builtin.
 //
 // The slot's type is what is asked, never the slot's binding
-// name. [node.Return] carries both, and the binding name is
+// name. [sdk.Return] carries both, and the binding name is
 // empty for the anonymous form every `Error() string` in the
 // wild is written in — so reading it classifies no method as
 // anything.
-func returnsOnly(m *node.Method, typeName string) bool {
+func returnsOnly(m *sdk.Method, typeName string) bool {
 	if len(m.Returns) != 1 || m.Returns[0] == nil {
 		return false
 	}
@@ -623,20 +638,20 @@ func returnsOnly(m *node.Method, typeName string) bool {
 
 // returnsStringOnly reports whether m's signature is
 // `() string`.
-func returnsStringOnly(m *node.Method) bool {
+func returnsStringOnly(m *sdk.Method) bool {
 	return len(m.Params) == 0 && returnsOnly(m, "string")
 }
 
 // returnsErrorOnly reports whether m's signature is
 // `() error`.
-func returnsErrorOnly(m *node.Method) bool {
+func returnsErrorOnly(m *sdk.Method) bool {
 	return len(m.Params) == 0 && returnsOnly(m, errorTypeName)
 }
 
 // isErrorBoolSignature reports whether m's signature is
 // `(error) bool` — the standard `Is(error) bool` shape
 // [errors.Is] consults.
-func isErrorBoolSignature(m *node.Method) bool {
+func isErrorBoolSignature(m *sdk.Method) bool {
 	if len(m.Params) != 1 {
 		return false
 	}
@@ -687,7 +702,7 @@ func testNameFor(packageName string) string {
 // tests omit the subtest in that case so the assertion
 // isn't silently vacuous (every string starts with the
 // empty string).
-func resolvePrefix(pkg *node.Package) (prefix string, emit bool) {
+func resolvePrefix(pkg *sdk.Package) (prefix string, emit bool) {
 	d := pkg.Directive(DirectiveName)
 	if d == nil {
 		return pkg.Name + ": ", true

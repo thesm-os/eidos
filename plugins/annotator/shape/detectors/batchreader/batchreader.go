@@ -4,8 +4,8 @@
 package batchreader
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -25,7 +25,7 @@ func Detector() shape.Detector {
 // detectGolang accepts a callable whose only non-context
 // parameter is a trailing variadic `...K`, and whose only
 // non-error return is a slice `[]V`.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if !shape.GoHasError(returns) {
 		return shape.Match{}, false

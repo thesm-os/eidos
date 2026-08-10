@@ -10,12 +10,8 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/node"
-	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
-	"go.thesmos.sh/eidos/priority"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
@@ -40,14 +36,14 @@ func TestResolver_Contract(t *testing.T) {
 
 	t.Run("priority is AnnotatorRefinement", func(t *testing.T) {
 		t.Parallel()
-		if got, want := shape.New().Resolver().Priority(), priority.AnnotatorRefinement; got != want {
+		if got, want := shape.New().Resolver().Priority(), sdk.AnnotatorRefinement; got != want {
 			t.Fatalf("Priority() = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("satisfies plugin.Annotator", func(t *testing.T) {
+	t.Run("satisfies sdk.Annotator", func(t *testing.T) {
 		t.Parallel()
-		var _ plugin.Annotator = shape.New().Resolver()
+		var _ sdk.Annotator = shape.New().Resolver()
 	})
 
 	t.Run("Annotate on empty store does not panic", func(t *testing.T) {
@@ -71,10 +67,10 @@ func TestResolver_NameRewrite(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{begin, commit},
+			Methods: []*sdk.Method{begin, commit},
 		}
 		runWithResolver(t, txContract(), pkgWithStruct(s))
 
@@ -89,10 +85,10 @@ func TestResolver_NameRewrite(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		i := &node.Interface{
+		commit := &sdk.Method{Name: "Commit"}
+		i := &sdk.Interface{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{begin, commit},
+			Methods: []*sdk.Method{begin, commit},
 		}
 		runWithResolver(t, txContract(), pkgWithInterface(i))
 
@@ -107,10 +103,10 @@ func TestResolver_NameRewrite(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Function{Name: "Commit", Package: "x"}
-		pkg := &node.Package{
+		commit := &sdk.Function{Name: "Commit", Package: "x"}
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{begin, commit},
+			Functions: []*sdk.Function{begin, commit},
 		}
 		runWithResolver(t, txContract(), pkg)
 
@@ -125,10 +121,10 @@ func TestResolver_NameRewrite(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "NonExistent"}),
 		)
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin}}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin}}
 
 		diags := runWithResolverDiags(t, txContract(), pkgWithStruct(s))
-		assertContainsDiag(t, diags, diag.Error, "NonExistent")
+		assertContainsDiag(t, diags, sdk.SeverityError, "NonExistent")
 	})
 
 	t.Run("rewrite is idempotent: second pass leaves qname unchanged", func(t *testing.T) {
@@ -137,8 +133,8 @@ func TestResolver_NameRewrite(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin, commit}}
 
 		s2, p := setupResolverPipeline(t, txContract(), pkgWithStruct(s))
 		runPlugins(t, s2, p)
@@ -158,17 +154,17 @@ func TestResolver_NameRewrite(t *testing.T) {
 				"commit": "x.Other.Commit",
 			}),
 		)
-		other := &node.Struct{
+		other := &sdk.Struct{
 			Name: "Other", Package: "x",
-			Methods: []*node.Method{{Name: "Commit"}},
+			Methods: []*sdk.Method{{Name: "Commit"}},
 		}
-		repo := &node.Struct{
+		repo := &sdk.Struct{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{begin},
+			Methods: []*sdk.Method{begin},
 		}
-		runWithResolver(t, txContract(), &node.Package{
+		runWithResolver(t, txContract(), &sdk.Package{
 			Name: "x", Path: "x",
-			Structs: []*node.Struct{repo, other},
+			Structs: []*sdk.Struct{repo, other},
 		})
 
 		// Host stamp is preserved verbatim (no rewriting).
@@ -193,8 +189,8 @@ func TestResolver_BackStamp(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin, commit}}
 		runWithResolver(t, txContract(), pkgWithStruct(s))
 
 		if got := shape.Contracts(commit.Meta()); len(got) != 1 || got[0] != "tx" {
@@ -209,8 +205,8 @@ func TestResolver_BackStamp(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin, commit}}
 		runWithResolver(t, txContract(), pkgWithStruct(s))
 
 		assertMeta(t, commit.Meta(),
@@ -230,7 +226,7 @@ func TestResolver_BackStamp(t *testing.T) {
 			"Commit",
 			contractDirective("tx", "commit", map[string]string{"begin": "Begin"}),
 		)
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin, commit}}
 		runWithResolver(t, txContract(), pkgWithStruct(s))
 
 		assertMeta(t, commit.Meta(), shape.ContractRoleKey("tx"), "commit")
@@ -257,7 +253,7 @@ func TestResolver_Diagnostics(t *testing.T) {
 			contractDirective("tx", "no-such-role", nil),
 		)
 		diags := runWithResolverDiags(t, txContract(), pkgWithFunction(fn))
-		assertContainsDiag(t, diags, diag.Error, "no-such-role")
+		assertContainsDiag(t, diags, sdk.SeverityError, "no-such-role")
 	})
 
 	t.Run("unknown partner role surfaces a diagnostic", func(t *testing.T) {
@@ -266,9 +262,9 @@ func TestResolver_Diagnostics(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"nonsense": "Foo"}),
 		)
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin}}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin}}
 		diags := runWithResolverDiags(t, txContract(), pkgWithStruct(s))
-		assertContainsDiag(t, diags, diag.Error, "nonsense")
+		assertContainsDiag(t, diags, sdk.SeverityError, "nonsense")
 	})
 
 	t.Run("unregistered contract surfaces a diagnostic", func(t *testing.T) {
@@ -301,7 +297,7 @@ func TestResolver_Diagnostics(t *testing.T) {
 		if err := resolverOnly.Resolver().Annotate(ctx); err != nil {
 			t.Fatalf("resolver.Annotate: %v", err)
 		}
-		assertContainsDiag(t, ctx.Diag.Diagnostics(), diag.Error, "tx")
+		assertContainsDiag(t, ctx.Diag.Diagnostics(), sdk.SeverityError, "tx")
 	})
 
 	t.Run("valid contract membership emits no diagnostics", func(t *testing.T) {
@@ -310,11 +306,11 @@ func TestResolver_Diagnostics(t *testing.T) {
 			"Begin",
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin, commit}}
 		diags := runWithResolverDiags(t, txContract(), pkgWithStruct(s))
 		for _, d := range diags {
-			if d.Severity >= diag.Error {
+			if d.Severity >= sdk.SeverityError {
 				t.Fatalf("unexpected error diagnostic: %+v", d)
 			}
 		}
@@ -353,8 +349,8 @@ func TestResolver_DecliningEntryDoesNotStopTheRest(t *testing.T) {
 			contractDirective("outbox", "append", nil),
 			contractDirective("tx", "begin", map[string]string{"commit": "Commit"}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin, commit}}
 
 		diags := runSplitResolver(t,
 			[]shape.Contract{outboxContract(), txContract()},
@@ -386,7 +382,7 @@ func TestResolver_DecliningEntryDoesNotStopTheRest(t *testing.T) {
 				"watcher": "Watch",
 			}),
 		)
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin}}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin}}
 
 		diags := runWithResolverDiags(t, txContractWithParam(), pkgWithStruct(s))
 
@@ -407,8 +403,8 @@ func TestResolver_DecliningEntryDoesNotStopTheRest(t *testing.T) {
 				"watcher": "Watch",
 			}),
 		)
-		commit := &node.Method{Name: "Commit"}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{begin, commit}}
+		commit := &sdk.Method{Name: "Commit"}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{begin, commit}}
 
 		diags := runWithResolverDiags(t, txContract(), pkgWithStruct(s))
 
@@ -438,7 +434,7 @@ func txContractWithParam() shape.Contract {
 // registering only resolved. This is the configuration error the
 // resolver's unregistered-contract diagnostic exists to report, and
 // the only way to hand the resolver a membership it cannot resolve.
-func runSplitResolver(t *testing.T, stamped, resolved []shape.Contract, pkg *node.Package) []diag.Diag {
+func runSplitResolver(t *testing.T, stamped, resolved []shape.Contract, pkg *sdk.Package) []sdk.Diag {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -461,11 +457,11 @@ func runSplitResolver(t *testing.T, stamped, resolved []shape.Contract, pkg *nod
 // [assertContainsDiag] on purpose: the cascade tests need to know
 // which entries were reported and which were silently dropped, and a
 // containment check cannot see a missing trailing diagnostic.
-func assertErrorDiags(t *testing.T, diags []diag.Diag, want ...string) {
+func assertErrorDiags(t *testing.T, diags []sdk.Diag, want ...string) {
 	t.Helper()
 	got := make([]string, 0, len(diags))
 	for _, d := range diags {
-		if d.Severity >= diag.Error {
+		if d.Severity >= sdk.SeverityError {
 			got = append(got, d.Message)
 		}
 	}
@@ -474,24 +470,24 @@ func assertErrorDiags(t *testing.T, diags []diag.Diag, want ...string) {
 	}
 }
 
-// contractMethod builds a [node.Method] with the supplied
+// contractMethod builds a [sdk.Method] with the supplied
 // directive list — used by every resolver test that exercises a
 // method-bound contract.
-func contractMethod(name string, dirs ...*directive.Directive) *node.Method {
-	return &node.Method{
+func contractMethod(name string, dirs ...*sdk.Directive) *sdk.Method {
+	return &sdk.Method{
 		Name:     name,
-		BaseNode: node.BaseNode{DirectiveList: dirs},
+		BaseNode: sdk.BaseNode{DirectiveList: dirs},
 	}
 }
 
-// contractDirective constructs a `+gen:contract` [*directive.Directive]
+// contractDirective constructs a `+gen:contract` [*sdk.Directive]
 // from the supplied contract name, role, and (optional) partner KVs.
 // The role= entry is always populated; nil kv produces a directive
 // with no partner refs.
-func contractDirective(name, role string, kv map[string]string) *directive.Directive {
+func contractDirective(name, role string, kv map[string]string) *sdk.Directive {
 	out := map[string]string{"role": role}
 	maps.Copy(out, kv)
-	return &directive.Directive{
+	return &sdk.Directive{
 		Name: shape.ContractDirectiveName,
 		Args: []string{name},
 		KV:   out,
@@ -502,7 +498,7 @@ func contractDirective(name, role string, kv map[string]string) *directive.Direc
 // then runs the umbrella plugin followed by its resolver — the
 // canonical umbrella → resolver sequence — failing the test on
 // any returned error.
-func runWithResolver(t *testing.T, c shape.Contract, pkg *node.Package) {
+func runWithResolver(t *testing.T, c shape.Contract, pkg *sdk.Package) {
 	t.Helper()
 	_ = runWithResolverDiags(t, c, pkg)
 }
@@ -510,7 +506,7 @@ func runWithResolver(t *testing.T, c shape.Contract, pkg *node.Package) {
 // runWithResolverDiags is the same wiring as [runWithResolver]
 // but returns the diagnostic snapshot so callers can assert on
 // emitted diags.
-func runWithResolverDiags(t *testing.T, c shape.Contract, pkg *node.Package) []diag.Diag {
+func runWithResolverDiags(t *testing.T, c shape.Contract, pkg *sdk.Package) []sdk.Diag {
 	t.Helper()
 	s, p := setupResolverPipeline(t, c, pkg)
 	runPlugins(t, s, p)
@@ -523,14 +519,14 @@ func runWithResolverDiags(t *testing.T, c shape.Contract, pkg *node.Package) []d
 type resolverPipeline struct {
 	umbrella *shape.Plugin
 	resolver *shape.Resolver
-	diag     *diag.Sink
+	diag     *sdk.Sink
 }
 
 // setupResolverPipeline builds the resolver pipeline against pkg
 // in a fresh store, registering c as the only contract. Returns
 // the store + plugin bundle so the caller can invoke the pipeline
 // itself (canonical use: idempotency tests that run twice).
-func setupResolverPipeline(t *testing.T, c shape.Contract, pkg *node.Package) (*store.Store, *resolverPipeline) {
+func setupResolverPipeline(t *testing.T, c shape.Contract, pkg *sdk.Package) (*sdk.Store, *resolverPipeline) {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -549,7 +545,7 @@ func setupResolverPipeline(t *testing.T, c shape.Contract, pkg *node.Package) (*
 // runPlugins drives umbrella → resolver against s using p's diag
 // sink. Both passes share the sink so diagnostics accumulate
 // across both passes for collective inspection.
-func runPlugins(t *testing.T, s *store.Store, p *resolverPipeline) {
+func runPlugins(t *testing.T, s *sdk.Store, p *resolverPipeline) {
 	t.Helper()
 	ctx := &sdk.AnnotatorContext{
 		Store:  s,
@@ -568,7 +564,7 @@ func runPlugins(t *testing.T, s *store.Store, p *resolverPipeline) {
 // matches both sev and contains substr in its message. The error
 // includes the full diagnostic list so the failure pinpoints
 // what was (or wasn't) emitted.
-func assertContainsDiag(t *testing.T, diags []diag.Diag, sev diag.Severity, substr string) {
+func assertContainsDiag(t *testing.T, diags []sdk.Diag, sev sdk.Severity, substr string) {
 	t.Helper()
 	for _, d := range diags {
 		if d.Severity == sev && strings.Contains(d.Message, substr) {
@@ -584,7 +580,7 @@ func assertContainsDiag(t *testing.T, diags []diag.Diag, sev diag.Severity, subs
 //
 // The three shape plugins previously ran no conformance suite at
 // all, which is how each came to declare Priority() without the rest
-// of plugin.CapabilityProvider — satisfying nothing, so the pipeline
+// of sdk.CapabilityProvider — satisfying nothing, so the pipeline
 // ignored the declared ordering and ran all three in the default
 // bucket, in registration order. The suite's completeness check
 // catches that shape directly; wiring the plugins into the suite is

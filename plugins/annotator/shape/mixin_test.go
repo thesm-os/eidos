@@ -9,9 +9,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -43,7 +40,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"Save",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"atomic"},
 			},
@@ -57,7 +54,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"Charge",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"rate-limited"},
 				KV:   map[string]string{"limit": "100", "burst": "10"},
@@ -74,8 +71,8 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"Save",
-			&directive.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
-			&directive.Directive{
+			&sdk.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"rate-limited"},
 				KV:   map[string]string{"limit": "50"},
@@ -96,7 +93,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		// Reader-shaped callable, with both a contract membership
 		// and a mixin attached. All three stamps must land.
 		fn := readerFunc("Find")
-		fn.DirectiveList = []*directive.Directive{
+		fn.DirectiveList = []*sdk.Directive{
 			{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"tx"},
@@ -122,7 +119,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"X",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"never-registered"},
 			},
@@ -137,7 +134,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"Save",
-			&directive.Directive{
+			&sdk.Directive{
 				Name:    shape.MixinDirectiveName,
 				Args:    []string{"atomic"},
 				Negated: true,
@@ -153,7 +150,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"Charge",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"rate-limited"},
 				KV:   map[string]string{"limit": "100", "burst": ""},
@@ -171,8 +168,8 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"Save",
-			&directive.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
-			&directive.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
+			&sdk.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
+			&sdk.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
 		)
 		runAnnotate(t, shape.New().Mixins(atomicMixin()), pkgWithFunction(fn))
 		assertMixins(t, fn.Meta(), []string{"atomic"})
@@ -180,15 +177,15 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 
 	t.Run("method-bound mixins stamp the same as free functions", func(t *testing.T) {
 		t.Parallel()
-		m := &node.Method{
+		m := &sdk.Method{
 			Name: "Save",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
 				},
 			},
 		}
-		s := &node.Struct{Name: "Repo", Package: "x", Methods: []*node.Method{m}}
+		s := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{m}}
 		runAnnotate(t, shape.New().Mixins(atomicMixin()), pkgWithStruct(s))
 
 		assertMixins(t, m.Meta(), []string{"atomic"})
@@ -199,7 +196,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		if got := shape.Mixins(nil); got != nil {
 			t.Fatalf("Mixins(nil) = %v, want nil", got)
 		}
-		if got := shape.Mixins(meta.NewBag()); got != nil {
+		if got := shape.Mixins(sdk.NewBag()); got != nil {
 			t.Fatalf("Mixins(empty) = %v, want nil", got)
 		}
 	})
@@ -208,16 +205,16 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 // mixinFn returns a free-function node carrying the supplied
 // directives — used by every test that exercises directive-driven
 // mixin stamping.
-func mixinFn(name string, dirs ...*directive.Directive) *node.Function {
-	return &node.Function{
+func mixinFn(name string, dirs ...*sdk.Directive) *sdk.Function {
+	return &sdk.Function{
 		Name: name, Package: "x",
-		BaseNode: node.BaseNode{DirectiveList: dirs},
+		BaseNode: sdk.BaseNode{DirectiveList: dirs},
 	}
 }
 
 // assertMixins fails the test when the mixin list stamped on bag
 // does not deep-equal want.
-func assertMixins(t *testing.T, bag *meta.Bag, want []string) {
+func assertMixins(t *testing.T, bag *sdk.Bag, want []string) {
 	t.Helper()
 	got := shape.Mixins(bag)
 	if !reflect.DeepEqual(got, want) {
@@ -236,15 +233,15 @@ func TestMixin_SiblingResolution(t *testing.T) {
 		Params:        []string{"write"},
 		SiblingParams: []string{"write"},
 	}
-	find := mixinFn("Find", &directive.Directive{
+	find := mixinFn("Find", &sdk.Directive{
 		Name: shape.MixinDirectiveName,
 		Args: []string{"readafterwrite"},
 		KV:   map[string]string{"write": "Save"},
 	})
-	save := &node.Function{Name: "Save", Package: "x"}
-	pkg := &node.Package{
+	save := &sdk.Function{Name: "Save", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{find, save},
+		Functions: []*sdk.Function{find, save},
 	}
 
 	umbrella := shape.New().Mixins(rafw)
@@ -280,11 +277,11 @@ func TestMixin_Validate(t *testing.T) {
 			return out
 		},
 	}
-	fn := mixinFn("X", &directive.Directive{
+	fn := mixinFn("X", &sdk.Directive{
 		Name: shape.MixinDirectiveName,
 		Args: []string{"flagging"},
 	})
-	pkg := &node.Package{Name: "x", Path: "x", Functions: []*node.Function{fn}}
+	pkg := &sdk.Package{Name: "x", Path: "x", Functions: []*sdk.Function{fn}}
 	ctx := contracttestCtxForMixin(t, pkg)
 	umbrella := shape.New().Mixins(flagging)
 	if err := umbrella.Annotate(ctx); err != nil {
@@ -296,13 +293,13 @@ func TestMixin_Validate(t *testing.T) {
 	if err := umbrella.Validator().Annotate(ctx); err != nil {
 		t.Fatalf("validator.Annotate: %v", err)
 	}
-	assertContainsDiag(t, ctx.Diag.Diagnostics(), diag.Error, "synthetic flag")
+	assertContainsDiag(t, ctx.Diag.Diagnostics(), sdk.SeverityError, "synthetic flag")
 }
 
 // contracttestCtxForMixin builds an annotator context backed by a
 // fresh store seeded with pkg and stamped with the "golang"
 // frontend marker. Used by the mixin pipeline tests above.
-func contracttestCtxForMixin(t *testing.T, pkg *node.Package) *sdk.AnnotatorContext {
+func contracttestCtxForMixin(t *testing.T, pkg *sdk.Package) *sdk.AnnotatorContext {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -319,7 +316,7 @@ func contracttestCtxForMixin(t *testing.T, pkg *node.Package) *sdk.AnnotatorCont
 // annotateCapturing runs p over a package holding fn and returns
 // the diagnostic sink, so tests can assert on what the mixin
 // stamping pass reported as well as what it stamped.
-func annotateCapturing(t *testing.T, p *shape.Plugin, fn *node.Function) *diag.Sink {
+func annotateCapturing(t *testing.T, p *shape.Plugin, fn *sdk.Function) *sdk.Sink {
 	t.Helper()
 	pkg := pkgWithFunction(fn)
 	s := store.New()
@@ -339,7 +336,7 @@ func TestMixin_MultipleNamesPerDirective(t *testing.T) {
 
 	t.Run("all names on one directive are stamped in written order", func(t *testing.T) {
 		t.Parallel()
-		fn := mixinFn("Put", &directive.Directive{
+		fn := mixinFn("Put", &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"rate-limited", "atomic"},
 		})
@@ -354,7 +351,7 @@ func TestMixin_MultipleNamesPerDirective(t *testing.T) {
 		// Regression: the pre-variadic handler skipped the whole
 		// directive on an unregistered name. Nested under a per-name
 		// loop that would silently drop every later name on the line.
-		fn := mixinFn("Put", &directive.Directive{
+		fn := mixinFn("Put", &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"atomic", "no-such-mixin", "rate-limited"},
 		})
@@ -367,11 +364,11 @@ func TestMixin_MultipleNamesPerDirective(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"Put",
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"atomic", "atomic"},
 			},
-			&directive.Directive{
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"atomic", "rate-limited"},
 			},
@@ -383,7 +380,7 @@ func TestMixin_MultipleNamesPerDirective(t *testing.T) {
 
 	t.Run("a single name still carries its parameters", func(t *testing.T) {
 		t.Parallel()
-		fn := mixinFn("Charge", &directive.Directive{
+		fn := mixinFn("Charge", &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"rate-limited"},
 			KV:   map[string]string{"limit": "100"},
@@ -402,8 +399,8 @@ func TestMixin_ParametersWithSeveralNamesAreRejected(t *testing.T) {
 	// KV ownership is undefined once several names share a line, so
 	// the names attach and the parameters are dropped with an error
 	// rather than being guessed onto an arbitrary owner.
-	newFn := func() *node.Function {
-		return mixinFn("Put", &directive.Directive{
+	newFn := func() *sdk.Function {
+		return mixinFn("Put", &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"rate-limited", "atomic"},
 			KV:   map[string]string{"limit": "100"},
@@ -448,7 +445,7 @@ func TestMixin_ParametersWithSeveralNamesAreRejected(t *testing.T) {
 }
 
 // assertNoErrors fails when sink recorded any Error diagnostic.
-func assertNoErrors(t *testing.T, sink *diag.Sink) {
+func assertNoErrors(t *testing.T, sink *sdk.Sink) {
 	t.Helper()
 	if sink.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %+v", sink.Diagnostics())
@@ -460,16 +457,16 @@ func assertNoErrors(t *testing.T, sink *diag.Sink) {
 // real source directive passes before any stamping happens. The
 // stamping tests above build Directive values directly and so never
 // exercise it.
-func validateAgainstSchema(t *testing.T, d *directive.Directive) *diag.Sink {
+func validateAgainstSchema(t *testing.T, d *sdk.Directive) *sdk.Sink {
 	t.Helper()
-	reg := directive.NewRegistry()
+	reg := sdk.NewRegistry()
 	for _, s := range shape.New().Directives() {
 		if err := reg.Register(s); err != nil {
 			t.Fatalf("Register %q: %v", s.Name, err)
 		}
 	}
 	sink := diag.New()
-	directive.Validate([]*directive.Directive{d}, node.KindFunction, reg, sink.For("test"))
+	sdk.Validate([]*sdk.Directive{d}, sdk.NodeKindFunction, reg, sink.For("test"))
 	return sink
 }
 
@@ -478,7 +475,7 @@ func TestMixin_SchemaAcceptsSeveralPositionals(t *testing.T) {
 
 	t.Run("several mixin names pass validation", func(t *testing.T) {
 		t.Parallel()
-		sink := validateAgainstSchema(t, &directive.Directive{
+		sink := validateAgainstSchema(t, &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"idempotent", "concurrent", "atomic", "bounded"},
 		})
@@ -489,7 +486,7 @@ func TestMixin_SchemaAcceptsSeveralPositionals(t *testing.T) {
 
 	t.Run("a single mixin name still passes validation", func(t *testing.T) {
 		t.Parallel()
-		sink := validateAgainstSchema(t, &directive.Directive{
+		sink := validateAgainstSchema(t, &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"idempotent"},
 		})
@@ -504,7 +501,7 @@ func TestMixin_SchemaAcceptsSeveralPositionals(t *testing.T) {
 		// slot is now marked Required: previously a bare +gen:mixin
 		// passed validation and was then silently dropped by the
 		// stamping pass, so the mistake had no surface at all.
-		sink := validateAgainstSchema(t, &directive.Directive{
+		sink := validateAgainstSchema(t, &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 		})
 		if !sink.HasErrors() {
@@ -517,7 +514,7 @@ func TestMixin_SchemaAcceptsSeveralPositionals(t *testing.T) {
 		// Mixins attach only through an explicit +gen:mixin, so there
 		// is nothing for -gen:mixin to remove. It previously parsed
 		// and did nothing, which reads as a working suppression.
-		sink := validateAgainstSchema(t, &directive.Directive{
+		sink := validateAgainstSchema(t, &sdk.Directive{
 			Name:    shape.MixinDirectiveName,
 			Args:    []string{"atomic"},
 			Negated: true,
@@ -531,7 +528,7 @@ func TestMixin_SchemaAcceptsSeveralPositionals(t *testing.T) {
 		t.Parallel()
 		// A role binds to exactly one contract, so batching contract
 		// names would be ambiguous in a way mixin names are not.
-		sink := validateAgainstSchema(t, &directive.Directive{
+		sink := validateAgainstSchema(t, &sdk.Directive{
 			Name: shape.ContractDirectiveName,
 			Args: []string{"outbox", "saga"},
 			KV:   map[string]string{"role": "writer"},
@@ -547,7 +544,7 @@ func TestMixin_UnregisteredNameIsReported(t *testing.T) {
 
 	t.Run("a name with no registered mixin is an error", func(t *testing.T) {
 		t.Parallel()
-		fn := mixinFn("Put", &directive.Directive{
+		fn := mixinFn("Put", &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"idempotant"}, // typo
 		})
@@ -568,7 +565,7 @@ func TestMixin_UnregisteredNameIsReported(t *testing.T) {
 		// token is a name, so `bounded 100` reads as two mixins.
 		// Before batching this failed as an arity error; the
 		// unregistered-name report is what keeps it loud.
-		fn := mixinFn("Put", &directive.Directive{
+		fn := mixinFn("Put", &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"rate-limited", "100"},
 		})
@@ -592,7 +589,7 @@ func TestMixin_UnregisteredNameIsReported(t *testing.T) {
 
 	t.Run("the stray positional is not stamped as a mixin", func(t *testing.T) {
 		t.Parallel()
-		fn := mixinFn("Put", &directive.Directive{
+		fn := mixinFn("Put", &sdk.Directive{
 			Name: shape.MixinDirectiveName,
 			Args: []string{"rate-limited", "100"},
 		})
@@ -616,7 +613,7 @@ func TestMixin_NamelessDirectiveIsIgnoredByStamping(t *testing.T) {
 	// Args[0] blindly.
 	t.Run("a directive with no name stamps nothing and does not panic", func(t *testing.T) {
 		t.Parallel()
-		fn := mixinFn("Put", &directive.Directive{Name: shape.MixinDirectiveName})
+		fn := mixinFn("Put", &sdk.Directive{Name: shape.MixinDirectiveName})
 		sink := annotateCapturing(t, shape.New().Mixins(atomicMixin()), fn)
 
 		assertMixins(t, fn.Meta(), nil)
@@ -664,9 +661,9 @@ func TestMixin_SkippedEntryDoesNotStopTheCascade(t *testing.T) {
 		// included.
 		fn := mixinFn(
 			"Put",
-			&directive.Directive{Name: shape.MixinDirectiveName},
-			&directive.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
-			&directive.Directive{
+			&sdk.Directive{Name: shape.MixinDirectiveName},
+			&sdk.Directive{Name: shape.MixinDirectiveName, Args: []string{"atomic"}},
+			&sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"rate-limited"},
 				KV:   map[string]string{"limit": "100"},
@@ -696,7 +693,7 @@ func TestMixin_SkippedEntryDoesNotStopTheCascade(t *testing.T) {
 
 		blanks := []string{"backoff", "budget", "floor"}
 		for range passes {
-			fn := mixinFn("Charge", &directive.Directive{
+			fn := mixinFn("Charge", &sdk.Directive{
 				Name: shape.MixinDirectiveName,
 				Args: []string{"retrying"},
 				KV: map[string]string{

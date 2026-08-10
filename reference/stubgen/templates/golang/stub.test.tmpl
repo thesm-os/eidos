@@ -11,7 +11,7 @@ func Test{{ $.TypeName }}Records{{ .Name }}(t *{{ renderExpr (external "testing"
 
 	var called int
 	s := &{{ renderExpr $.StubRef }}{
-		{{ .FuncField }}: func({{ template "stubgen.paramdecls" . }}) {{ template "stubgen.results" . }} {
+		{{ .FuncField }}: func({{ template "stubgen.blankdecls" . }}) {{ template "stubgen.results" . }} {
 			called++
 {{- if .Returns }}
 {{- range $i, $r := .Returns }}
@@ -34,4 +34,18 @@ func Test{{ $.TypeName }}Records{{ .Name }}(t *{{ renderExpr (external "testing"
 	}
 }
 {{ end }}
+{{- end -}}
+
+{{/*
+The delegate this suite installs ignores its arguments, so every
+parameter is declared blank. Naming them would put the source's own
+identifiers into the closure's scope, where `called` and `z0` live:
+an interface method taking a parameter called `called` produced a
+suite that incremented the parameter and failed at run time, and one
+taking `z0` produced a redeclaration that did not compile at all.
+Neither is visible from the generator's own output — only from
+running what it emitted.
+*/}}
+{{- define "stubgen.blankdecls" -}}
+{{ range $i, $p := .Params }}{{ if $i }}, {{ end }}_ {{ if $p.Variadic }}...{{ end }}{{ renderType $p.Type }}{{ end }}
 {{- end -}}

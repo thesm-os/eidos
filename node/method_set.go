@@ -3,6 +3,8 @@
 
 package node
 
+import "cmp"
+
 // InterfaceResolver resolves an embedded type reference to the
 // interface it names.
 //
@@ -92,8 +94,40 @@ type MethodSetResult struct {
 	// first, then each embed's contribution in embed order.
 	Methods []*Method
 
+	// Entries is Methods with the embed each method arrived through,
+	// in the same order: Entries[i].Method is Methods[i].
+	//
+	// Kept beside Methods rather than replacing it because the two
+	// answer different questions and the slice shape is published
+	// API. Read Methods to emit a method; read Entries to say where
+	// one came from.
+	Entries []MethodSetEntry
+
 	// Issues holds every embed that contributed nothing.
 	Issues []MethodSetIssue
+}
+
+// MethodSetEntry is one resolved method and the embed it arrived
+// through.
+//
+// A flattened method set reads as if every method were declared on the
+// interface, which is exactly what a generated double should not claim:
+// a double that grows because an embedded interface gained a method
+// offers nothing to explain the change, and a generated field
+// documenting its origin does. The attribution exists at resolution
+// time and only the result shape used to discard it.
+type MethodSetEntry struct {
+	// Method is the resolved method.
+	Method *Method
+
+	// From is the embed of the interface MethodSet was called on that
+	// contributed Method, or nil for one the interface declared itself.
+	//
+	// The *top-level* embed, not the nearest one: for `A` embedding `B`
+	// embedding `C`, a method of `C` reports `A`'s embed of `B`. That is
+	// the attribution a caller can act on, because it names something
+	// the interface in front of them actually writes down.
+	From *Embed
 }
 
 // OK reports whether every embed resolved.
@@ -114,6 +148,23 @@ func (r MethodSetResult) ByName(name string) *Method {
 	for _, m := range r.Methods {
 		if m != nil && m.Name == name {
 			return m
+		}
+	}
+	return nil
+}
+
+// From returns the embed the named method arrived through, or nil when
+// the interface declared it itself or does not have it.
+//
+// Nil is deliberately both answers: a caller documenting an origin has
+// nothing to write in either case, and forcing it to distinguish them
+// would buy a branch that renders the same thing twice. Callers that
+// must tell "declared here" from "absent" ask [MethodSetResult.ByName]
+// as well.
+func (r MethodSetResult) From(name string) *Embed {
+	for _, e := range r.Entries {
+		if e.Method != nil && e.Method.Name == name {
+			return e.From
 		}
 	}
 	return nil
@@ -163,7 +214,7 @@ func MethodSet(i *Interface, resolve InterfaceResolver) MethodSetResult {
 	var out MethodSetResult
 	seen := map[string]struct{}{}
 	visiting := map[*Interface]struct{}{}
-	collect(i, resolve, seen, visiting, &out)
+	collect(i, resolve, seen, visiting, &out, nil)
 	return out
 }
 
@@ -175,6 +226,7 @@ func collect(
 	seen map[string]struct{},
 	visiting map[*Interface]struct{},
 	out *MethodSetResult,
+	from *Embed,
 ) {
 	visiting[i] = struct{}{}
 	defer delete(visiting, i)
@@ -188,6 +240,7 @@ func collect(
 		}
 		seen[m.Name] = struct{}{}
 		out.Methods = append(out.Methods, m)
+		out.Entries = append(out.Entries, MethodSetEntry{Method: m, From: from})
 	}
 
 	for _, e := range i.Embeds {
@@ -213,7 +266,7 @@ func collect(
 				out.Issues = append(out.Issues, MethodSetIssue{Embed: e, Reason: ReasonCyclic})
 				continue
 			}
-			collect(embedded, resolve, seen, visiting, out)
+			collect(embedded, resolve, seen, visiting, out, cmp.Or(from, e))
 		}
 	}
 }

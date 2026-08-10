@@ -6,9 +6,9 @@ package voidlifecycle_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/voidlifecycle"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,7 +24,7 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_MatchesVoidVoid(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{Name: "Side", Package: "x"}
+	fn := &sdk.Function{Name: "Side", Package: "x"}
 	bag := dt.RunFn(t, voidlifecycle.Detector(), fn)
 	dt.AssertShape(t, bag, voidlifecycle.Name, "", "")
 }
@@ -33,15 +33,15 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"has params", &node.Function{
+		{"has params", &sdk.Function{
 			Name: "X", Package: "x",
-			Params: []*node.Param{dt.Param("a", dt.Named("string"))},
+			Params: []*sdk.Param{dt.Param("a", dt.Named("string"))},
 		}},
-		{"has returns", &node.Function{
+		{"has returns", &sdk.Function{
 			Name: "X", Package: "x",
-			Returns: node.AnonReturns(dt.Err()),
+			Returns: sdk.AnonReturns(dt.Err()),
 		}},
 	}
 	for _, tc := range cases {

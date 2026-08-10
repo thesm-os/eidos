@@ -6,10 +6,9 @@ package upserter_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/upserter"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -19,18 +18,18 @@ func TestContract_Identity(t *testing.T) {
 
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	put := &node.Function{
+	put := &sdk.Function{
 		Name: "Put", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(upserter.Name, "writer", map[string]string{
 					"reader": "GetByID",
 				}),
 			},
 		},
 	}
-	get := &node.Function{Name: "GetByID", Package: "x"}
-	pkg := &node.Package{Name: "x", Path: "x", Functions: []*node.Function{put, get}}
+	get := &sdk.Function{Name: "GetByID", Package: "x"}
+	pkg := &sdk.Package{Name: "x", Path: "x", Functions: []*sdk.Function{put, get}}
 	diags := contracttest.RunPipeline(t, upserter.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)
 

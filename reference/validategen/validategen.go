@@ -6,13 +6,10 @@ package validategen
 import (
 	"embed"
 	"fmt"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -41,8 +38,6 @@ const EntryID = "validategen.call"
 // plugin owns.
 const GoSuffix = "_validate.go"
 
-const langGo = "golang"
-
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
 
@@ -54,7 +49,7 @@ type Validator struct {
 	FuncName string
 
 	// SubjectRef is the type being validated.
-	SubjectRef emit.Ref
+	SubjectRef sdk.Ref
 }
 
 // Kind binds this value to its template.
@@ -70,7 +65,7 @@ type Entry struct {
 	sdk.BaseEmit
 
 	// ValidatorRef names the generated validator.
-	ValidatorRef *emit.Expr
+	ValidatorRef *sdk.Expr
 
 	// FuncName is retained so SetOutputPackages can rebuild the ref
 	// once Layout has decided where the validator landed.
@@ -101,16 +96,16 @@ func (e *Entry) SetOutputPackages(byTag map[string]string) {
 	}
 }
 
-var _ emit.OutputPackageSetter = (*Entry)(nil)
+var _ sdk.OutputPackageSetter = (*Entry)(nil)
 
 // subjectRef names the struct being validated, qualified when its
-// package is known and bare when it is not. emit.External rejects an
+// package is known and bare when it is not. sdk.External rejects an
 // empty path, so the two cases cannot share a construction.
-func subjectRef(origin node.Node, name string) emit.Ref {
+func subjectRef(origin sdk.Node, name string) sdk.Ref {
 	if pkg := pkgPathOf(origin); pkg != "" {
-		return emit.External(pkg, name)
+		return sdk.External(pkg, name)
 	}
-	return emit.Builtin(name)
+	return sdk.Builtin(name)
 }
 
 // Plugin emits a validator per handler and calls it from the handler's
@@ -121,53 +116,29 @@ func subjectRef(origin node.Node, name string) emit.Ref {
 // Outputs says where a file lands, templates say how a value renders,
 // and a plugin needs an Output only for decls it owns. The prebody
 // entry needs none — it renders inside handlergen's file.
-type Plugin struct{}
+type Plugin struct{ *sdkgo.Base }
 
 // New returns a plugin instance.
-func New() *Plugin { return &Plugin{} }
-
-// Name satisfies [sdk.Plugin].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the composition bucket, after
-// handlergen's foundation bucket.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorComposition }
-
-// Provides publishes this plugin's label.
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires reports no dependencies within its bucket.
-func (*Plugin) Requires() []string { return nil }
-
-// Outputs declares the file holding the generated validators.
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == langGo {
-		return []sdk.Output{{Suffix: GoSuffix}}
-	}
-	return nil
+//
+// The single [sdk.Output] is the file holding the generated
+// validators; the embedded tree ships both templates, one per declared
+// emit kind. A generator needs both — an output without a template
+// tree renders nothing, a tree without an output gives Layout no
+// filename to compose — which is why [sdkgo.NewGenerator] takes them
+// together.
+//
+// The composition bucket places it one after handlergen's foundation
+// bucket, so the handler exists to contribute to, and before the
+// cross-cutting and finalize contributors, so validation precedes them
+// in the rendered prebody. Nothing is required: the dependency is on a
+// plugin in another bucket, and Requires resolves only within one.
+func New() *Plugin {
+	return &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, sdk.Output{Suffix: GoSuffix}).
+		Version(Version).
+		Priority(sdk.GeneratorComposition).
+		Provides(Capability).
+		Build()}
 }
-
-// Templates ships both templates.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang != langGo {
-		return nil, false
-	}
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
-}
-
-// TemplateFuncs contributes nothing; the shared Go helpers are already
-// in the backend's overrideable funcmap.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides replaces nothing.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Generate emits one validator per handler and a prebody call to it.
 func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
@@ -183,7 +154,7 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		v := &Validator{
 			BaseEmit:   sdk.BaseEmit{OriginNode: origin, SetByName: c.SetBy(), SourcePos: host.Pos()},
 			FuncName:   fn,
-			SubjectRef: emit.Ptr(subjectRef(origin, host.Source)),
+			SubjectRef: sdk.Ptr(subjectRef(origin, host.Source)),
 		}
 		if err := ctx.Store.Emit().AppendOriginSlot(
 			origin, "top", v, c.Provenance(Name+".validator."+host.Source),
@@ -192,13 +163,23 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		}
 
 		entry := &Entry{
-			BaseEmit: sdk.BaseEmit{SetByName: c.SetBy(), SourcePos: host.Pos()},
+			// The origin is carried even though the entry is appended to
+			// the host's slot rather than routed by origin: Layout keys
+			// its output-package dispatch on (origin, plugin), and
+			// recordOutputPath drops a nil origin outright, so an entry
+			// without one could never be handed the paths its own
+			// validator resolved to. Necessary but not yet sufficient —
+			// dispatch reaches values through sdk.EmitWalk, which descends
+			// only into the built-in emit kinds, so an entry sitting in
+			// a plugin-defined host's slot is still unreachable. See the
+			// skipped subtest in validategen_test.go.
+			BaseEmit: sdk.BaseEmit{OriginNode: origin, SetByName: c.SetBy(), SourcePos: host.Pos()},
 			// Provisional, and deliberately a bare identifier: the
 			// validator lands beside its source by default, where a
 			// qualified reference would be wrong. SetOutputPackages
 			// upgrades it to a qualified one if Layout routes the
 			// validator into a different package.
-			ValidatorRef: emit.NewIdent(fn),
+			ValidatorRef: sdk.NewIdent(fn),
 			FuncName:     fn,
 			Handler:      host.Source,
 		}
@@ -213,10 +194,17 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 // it cannot be determined — in which case the backend's same-package
 // elision leaves the reference unqualified, which is correct for a decl
 // landing beside its source.
-func pkgPathOf(n node.Node) string {
-	type packaged interface{ PkgPath() string }
-	if p, ok := n.(packaged); ok {
-		return p.PkgPath()
+//
+// Typed against [sdk.Struct] rather than duck-typed: the origin always
+// is one, because the value this plugin keys off is handlergen's
+// Handler and handlergen emits one per annotated struct. An earlier
+// `interface{ PkgPath() string }` assertion looked general and matched
+// nothing in the tree — every node spells the field `Package` — so the
+// path was silently always "" and a validator routed into its own
+// package named a subject type that was not in scope there.
+func pkgPathOf(n sdk.Node) string {
+	if s, ok := n.(*sdk.Struct); ok {
+		return s.Package
 	}
 	return ""
 }

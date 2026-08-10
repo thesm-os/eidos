@@ -6,25 +6,23 @@ package shape_test
 import (
 	"reflect"
 	"testing"
+	"text/template"
+	"unicode"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/node"
-	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
-	"go.thesmos.sh/eidos/priority"
+	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
 
 // frontendMarker is the key the framework's frontends stamp on
 // every produced package — the shape plugin reads it to pick the
-// per-language detector. Declared in tests via [meta.EnsureKey] so
+// per-language detector. Declared in tests via [sdk.EnsureKey] so
 // the same canonical key is returned regardless of init order.
 //
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // TestPlugin_Contract covers the contract surface every framework
 // component relies on at registration / build time: stable name,
@@ -46,19 +44,19 @@ func TestPlugin_Contract(t *testing.T) {
 		}
 	})
 
-	t.Run("satisfies plugin.Annotator", func(t *testing.T) {
+	t.Run("satisfies sdk.Annotator", func(t *testing.T) {
 		t.Parallel()
-		var _ plugin.Annotator = shape.New()
+		var _ sdk.Annotator = shape.New()
 	})
 
-	t.Run("satisfies plugin.DirectiveProvider", func(t *testing.T) {
+	t.Run("satisfies sdk.DirectiveProvider", func(t *testing.T) {
 		t.Parallel()
-		var _ plugin.DirectiveProvider = shape.New()
+		var _ sdk.DirectiveProvider = shape.New()
 	})
 
 	t.Run("Priority is the shape-detection bucket", func(t *testing.T) {
 		t.Parallel()
-		if got, want := shape.New().Priority(), priority.AnnotatorShape; got != want {
+		if got, want := shape.New().Priority(), sdk.AnnotatorShape; got != want {
 			t.Fatalf("Priority() = %v, want %v", got, want)
 		}
 	})
@@ -66,7 +64,7 @@ func TestPlugin_Contract(t *testing.T) {
 	t.Run("Directives declares the +gen:shape and +gen:contract schemas", func(t *testing.T) {
 		t.Parallel()
 		schemas := shape.New().Directives()
-		names := make(map[directive.Name]bool, len(schemas))
+		names := make(map[sdk.DirectiveName]bool, len(schemas))
 		for _, s := range schemas {
 			names[s.Name] = true
 		}
@@ -76,6 +74,35 @@ func TestPlugin_Contract(t *testing.T) {
 		if !names[shape.ContractDirectiveName] {
 			t.Fatalf("missing %q schema; got names = %v", shape.ContractDirectiveName, names)
 		}
+	})
+
+	t.Run("every TemplateFuncs name binds into a Go template", func(t *testing.T) {
+		t.Parallel()
+		provider, ok := any(shape.New()).(sdk.TemplateProvider)
+		if !ok {
+			t.Fatalf("shape.New() no longer implements sdk.TemplateProvider")
+		}
+		funcs := provider.TemplateFuncs(langGolang)
+		if len(funcs) == 0 {
+			t.Fatalf("TemplateFuncs(%q) contributed nothing; the bundle this test guards is gone", langGolang)
+		}
+		for name := range funcs {
+			if !isTemplateIdent(name) {
+				t.Errorf("TemplateFuncs(%q) contributes %q, which text/template will reject at bind time; "+
+					"the funcmap prefix is derived from the plugin name and must stay identifier-safe",
+					langGolang, name)
+			}
+		}
+		// The loop above names the offender; this binds the whole
+		// bundle the way backend/golang does, so a name text/template
+		// dislikes for a reason the loop does not model still fails
+		// here rather than at the consumer's first render.
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("binding TemplateFuncs(%q) into a template panicked: %v", langGolang, r)
+			}
+		}()
+		template.New("bind").Funcs(funcs)
 	})
 
 	t.Run("Annotate on empty store does not error or panic", func(t *testing.T) {
@@ -116,10 +143,10 @@ func TestPlugin_DirectiveOverride(t *testing.T) {
 
 	t.Run("positional argument carries the shape name", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Custom", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					{Name: shape.DirectiveName, Args: []string{"lifecycle"}},
 				},
 			},
@@ -130,10 +157,10 @@ func TestPlugin_DirectiveOverride(t *testing.T) {
 
 	t.Run("kind= key carries the shape name when no positional", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Custom", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					{
 						Name: shape.DirectiveName,
 						KV:   map[string]string{"kind": "mutator"},
@@ -147,10 +174,10 @@ func TestPlugin_DirectiveOverride(t *testing.T) {
 
 	t.Run("key= and value= modifiers populate KeyType / ValueType", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Custom", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					{
 						Name: shape.DirectiveName,
 						Args: []string{"reader"},
@@ -169,10 +196,10 @@ func TestPlugin_DirectiveOverride(t *testing.T) {
 
 	t.Run("negated directive is ignored", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Custom", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					{Name: shape.DirectiveName, Args: []string{"lifecycle"}, Negated: true},
 				},
 			},
@@ -189,7 +216,7 @@ func TestPlugin_DirectiveOverride(t *testing.T) {
 		// directive forces "lifecycle" and the detector must skip
 		// via the already-stamped guard.
 		fn := readerFunc("Find")
-		fn.DirectiveList = []*directive.Directive{
+		fn.DirectiveList = []*sdk.Directive{
 			{Name: shape.DirectiveName, Args: []string{"lifecycle"}},
 		}
 		runAnnotate(t, shape.New().Detectors(testReaderDetector()), pkgWithFunction(fn))
@@ -213,9 +240,9 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 	t.Run("matching method on a struct gets stamped via detector", func(t *testing.T) {
 		t.Parallel()
 		m := readerMethod("Get")
-		s := &node.Struct{
+		s := &sdk.Struct{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{m},
+			Methods: []*sdk.Method{m},
 		}
 		runAnnotate(t, shape.New().Detectors(testReaderDetector()), pkgWithStruct(s))
 		assertShape(t, m.Meta(), "reader")
@@ -224,9 +251,9 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 	t.Run("matching method on an interface gets stamped via detector", func(t *testing.T) {
 		t.Parallel()
 		m := readerMethod("Get")
-		i := &node.Interface{
+		i := &sdk.Interface{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{m},
+			Methods: []*sdk.Method{m},
 		}
 		runAnnotate(t, shape.New().Detectors(testReaderDetector()), pkgWithInterface(i))
 		assertShape(t, m.Meta(), "reader")
@@ -234,7 +261,7 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 
 	t.Run("non-matching function is left unstamped", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{Name: "Anything", Package: "x"}
+		fn := &sdk.Function{Name: "Anything", Package: "x"}
 		runAnnotate(t, shape.New().Detectors(testReaderDetector()), pkgWithFunction(fn))
 		if shape.IsStamped(fn.Meta()) {
 			t.Fatalf("non-matching function unexpectedly stamped: shape=%q", shape.Get(fn.Meta()))
@@ -248,9 +275,9 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		// Package added without stamping the frontend marker
 		// — the detector map has no entry under "" so the
 		// callable is permissively skipped.
-		if err := s.Nodes().AddPackage(&node.Package{
+		if err := s.Nodes().AddPackage(&sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{fn},
+			Functions: []*sdk.Function{fn},
 		}); err != nil {
 			t.Fatalf("AddPackage: %v", err)
 		}
@@ -266,9 +293,9 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		// as "rust" so dispatch falls through.
 		fn := readerFunc("Get")
 		s := store.New()
-		pkg := &node.Package{
+		pkg := &sdk.Package{
 			Name: "x", Path: "x",
-			Functions: []*node.Function{fn},
+			Functions: []*sdk.Function{fn},
 		}
 		if err := s.Nodes().AddPackage(pkg); err != nil {
 			t.Fatalf("AddPackage: %v", err)
@@ -285,7 +312,7 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		first := shape.Detector{
 			Name: "first",
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{}, true
 				},
 			},
@@ -293,12 +320,12 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		second := shape.Detector{
 			Name: "second",
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{}, true
 				},
 			},
 		}
-		fn := &node.Function{Name: "X", Package: "x"}
+		fn := &sdk.Function{Name: "X", Package: "x"}
 		runAnnotate(t, shape.New().Detectors(first, second), pkgWithFunction(fn))
 		assertShape(t, fn.Meta(), "first")
 	})
@@ -308,12 +335,12 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		det := shape.Detector{
 			Name: "writer",
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{Shape: "appendWriter"}, true
 				},
 			},
 		}
-		fn := &node.Function{Name: "X", Package: "x"}
+		fn := &sdk.Function{Name: "X", Package: "x"}
 		runAnnotate(t, shape.New().Detectors(det), pkgWithFunction(fn))
 		assertShape(t, fn.Meta(), "appendWriter")
 	})
@@ -323,7 +350,7 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		low := shape.Detector{
 			Name: "low", Priority: 100,
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{}, true
 				},
 			},
@@ -331,12 +358,12 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		high := shape.Detector{
 			Name: "high", Priority: 900,
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{}, true
 				},
 			},
 		}
-		fn := &node.Function{Name: "X", Package: "x"}
+		fn := &sdk.Function{Name: "X", Package: "x"}
 		// Register low first, high second: priority sort puts
 		// high in front, so the stamp is "high".
 		runAnnotate(t, shape.New().Detectors(low, high), pkgWithFunction(fn))
@@ -345,12 +372,12 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 
 	t.Run("Match.StringStamps and ListStamps land alongside the universal triple", func(t *testing.T) {
 		t.Parallel()
-		extraKey := meta.EnsureKey("shape.test.extra", meta.StringParser)
-		listKey := meta.EnsureKey("shape.test.list", meta.StringListParser)
+		extraKey := sdk.EnsureKey("shape.test.extra", sdk.StringParser)
+		listKey := sdk.EnsureKey("shape.test.list", sdk.StringListParser)
 		det := shape.Detector{
 			Name: "test",
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{
 						ValueType: "v",
 						StringStamps: []shape.StringStamp{
@@ -363,7 +390,7 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 				},
 			},
 		}
-		fn := &node.Function{Name: "X", Package: "x"}
+		fn := &sdk.Function{Name: "X", Package: "x"}
 		runAnnotate(t, shape.New().Detectors(det), pkgWithFunction(fn))
 
 		if got, _ := extraKey.Get(fn.Meta()); got != "extra-value" {
@@ -400,7 +427,7 @@ func TestPlugin_DetectorCascade(t *testing.T) {
 		declining := shape.Detector{
 			Name: "declining", Priority: 900,
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{}, false
 				},
 			},
@@ -408,12 +435,12 @@ func TestPlugin_DetectorCascade(t *testing.T) {
 		accepting := shape.Detector{
 			Name: "accepting", Priority: 100,
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{ValueType: "Article"}, true
 				},
 			},
 		}
-		fn := &node.Function{Name: "X", Package: "x"}
+		fn := &sdk.Function{Name: "X", Package: "x"}
 		runAnnotate(t, shape.New().Detectors(declining, accepting), pkgWithFunction(fn))
 
 		assertShape(t, fn.Meta(), "accepting")
@@ -430,7 +457,7 @@ func TestPlugin_DetectorCascade(t *testing.T) {
 		protobufOnly := shape.Detector{
 			Name: "protobufOnly", Priority: 900,
 			Detect: map[string]shape.DetectFunc{
-				"protobuf": func(node.Node) (shape.Match, bool) {
+				"protobuf": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{}, true
 				},
 			},
@@ -438,12 +465,12 @@ func TestPlugin_DetectorCascade(t *testing.T) {
 		golangOnly := shape.Detector{
 			Name: "golangOnly", Priority: 100,
 			Detect: map[string]shape.DetectFunc{
-				"golang": func(node.Node) (shape.Match, bool) {
+				"golang": func(sdk.Node) (shape.Match, bool) {
 					return shape.Match{ValueType: "Article"}, true
 				},
 			},
 		}
-		fn := &node.Function{Name: "X", Package: "x"}
+		fn := &sdk.Function{Name: "X", Package: "x"}
 		runAnnotate(t, shape.New().Detectors(protobufOnly, golangOnly), pkgWithFunction(fn))
 
 		assertShape(t, fn.Meta(), "golangOnly")
@@ -472,7 +499,7 @@ func TestPlugin_DirectiveScan(t *testing.T) {
 	t.Run("a foreign directive ahead of +gen:shape does not hide the override", func(t *testing.T) {
 		t.Parallel()
 		fn := readerFunc("Find")
-		fn.DirectiveList = []*directive.Directive{
+		fn.DirectiveList = []*sdk.Directive{
 			{
 				Name: shape.ContractDirectiveName,
 				Args: []string{"persister"},
@@ -501,7 +528,7 @@ func TestPlugin_DirectiveScan(t *testing.T) {
 	//
 	// A nameless directive is legal to construct — the schema marks
 	// the positional Required, so the parser rejects it, but plugin
-	// code and other annotators build directive.Directive values
+	// code and other annotators build sdk.Directive values
 	// directly, which is the same path the negation guards defend.
 	// Under `break` the nameless entry aborts the scan, the explicit
 	// override is lost, and detection quietly substitutes an inferred
@@ -510,7 +537,7 @@ func TestPlugin_DirectiveScan(t *testing.T) {
 	t.Run("a nameless +gen:shape does not discard the named one after it", func(t *testing.T) {
 		t.Parallel()
 		fn := readerFunc("Find")
-		fn.DirectiveList = []*directive.Directive{
+		fn.DirectiveList = []*sdk.Directive{
 			{Name: shape.DirectiveName},
 			{Name: shape.DirectiveName, Args: []string{"lifecycle"}},
 		}
@@ -529,7 +556,7 @@ func TestPlugin_DirectiveScan(t *testing.T) {
 // the plugin's Annotate, and fails the test on error. Stamps the
 // "golang" frontend marker on the package so the default test
 // detectors dispatch.
-func runAnnotate(t *testing.T, p *shape.Plugin, pkg *node.Package) {
+func runAnnotate(t *testing.T, p *shape.Plugin, pkg *sdk.Package) {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -542,7 +569,7 @@ func runAnnotate(t *testing.T, p *shape.Plugin, pkg *node.Package) {
 // runAnnotateAgainst runs p.Annotate against s with a fresh
 // AnnotatorContext. Used directly by tests that want to control
 // the package's frontend marker (or omit it entirely).
-func runAnnotateAgainst(t *testing.T, p *shape.Plugin, s *store.Store) {
+func runAnnotateAgainst(t *testing.T, p *shape.Plugin, s *sdk.Store) {
 	t.Helper()
 	if err := p.Annotate(newAnnotatorContext(t, s)); err != nil {
 		t.Fatalf("Annotate: %v", err)
@@ -551,9 +578,9 @@ func runAnnotateAgainst(t *testing.T, p *shape.Plugin, s *store.Store) {
 
 // newAnnotatorContext returns a context wrapping s with a fresh
 // reader and an empty diagnostic sink.
-func newAnnotatorContext(t *testing.T, s *store.Store) *plugin.AnnotatorContext {
+func newAnnotatorContext(t *testing.T, s *sdk.Store) *sdk.AnnotatorContext {
 	t.Helper()
-	return &plugin.AnnotatorContext{
+	return &sdk.AnnotatorContext{
 		Store:  s,
 		Reader: store.NewReader(s),
 		Diag:   diag.New(),
@@ -561,33 +588,33 @@ func newAnnotatorContext(t *testing.T, s *store.Store) *plugin.AnnotatorContext 
 }
 
 // pkgWithFunction returns a single-function test package named "x".
-func pkgWithFunction(fn *node.Function) *node.Package {
-	return &node.Package{
+func pkgWithFunction(fn *sdk.Function) *sdk.Package {
+	return &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{fn},
+		Functions: []*sdk.Function{fn},
 	}
 }
 
 // pkgWithStruct returns a single-struct test package named "x".
-func pkgWithStruct(s *node.Struct) *node.Package {
-	return &node.Package{
+func pkgWithStruct(s *sdk.Struct) *sdk.Package {
+	return &sdk.Package{
 		Name: "x", Path: "x",
-		Structs: []*node.Struct{s},
+		Structs: []*sdk.Struct{s},
 	}
 }
 
 // pkgWithInterface returns a single-interface test package named "x".
-func pkgWithInterface(i *node.Interface) *node.Package {
-	return &node.Package{
+func pkgWithInterface(i *sdk.Interface) *sdk.Package {
+	return &sdk.Package{
 		Name: "x", Path: "x",
-		Interfaces: []*node.Interface{i},
+		Interfaces: []*sdk.Interface{i},
 	}
 }
 
 // buildStoreWithReader builds a store containing a single function
 // matching the reader signature so the idempotency test has a
 // detector-stamped callable to compare across passes.
-func buildStoreWithReader(t *testing.T) *store.Store {
+func buildStoreWithReader(t *testing.T) *sdk.Store {
 	t.Helper()
 	s := store.New()
 	pkg := pkgWithFunction(readerFunc("Get"))
@@ -598,27 +625,27 @@ func buildStoreWithReader(t *testing.T) *store.Store {
 	return s
 }
 
-// readerFunc returns a [node.Function] matching the canonical Go
+// readerFunc returns a [sdk.Function] matching the canonical Go
 // reader signature: `func(ctx context.Context, id string) (V, error)`.
-func readerFunc(name string) *node.Function {
-	return &node.Function{
+func readerFunc(name string) *sdk.Function {
+	return &sdk.Function{
 		Name: name, Package: "x",
-		Params: []*node.Param{
-			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
-			{Name: "id", Type: &node.TypeRef{Name: "string"}},
+		Params: []*sdk.Param{
+			{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
+			{Name: "id", Type: &sdk.TypeRef{Name: "string"}},
 		},
-		Returns: node.AnonReturns(
-			&node.TypeRef{Name: "Article", Package: "x"},
-			&node.TypeRef{Name: "error"},
+		Returns: sdk.AnonReturns(
+			&sdk.TypeRef{Name: "Article", Package: "x"},
+			&sdk.TypeRef{Name: "error"},
 		),
 	}
 }
 
-// readerMethod returns a [node.Method] matching the canonical Go
+// readerMethod returns a [sdk.Method] matching the canonical Go
 // reader signature, used to test method-bound dispatch.
-func readerMethod(name string) *node.Method {
+func readerMethod(name string) *sdk.Method {
 	fn := readerFunc(name)
-	return &node.Method{
+	return &sdk.Method{
 		Name:    fn.Name,
 		Params:  fn.Params,
 		Returns: fn.Returns,
@@ -633,7 +660,7 @@ func testReaderDetector() shape.Detector {
 	return shape.Detector{
 		Name: "reader",
 		Detect: map[string]shape.DetectFunc{
-			"golang": func(n node.Node) (shape.Match, bool) {
+			"golang": func(n sdk.Node) (shape.Match, bool) {
 				params, returns := shape.GoCallable(n)
 				if !shape.GoHasContext(params) || !shape.GoHasError(returns) {
 					return shape.Match{}, false
@@ -655,9 +682,9 @@ func testReaderDetector() shape.Detector {
 // snapshotShapeMeta captures every shape stamp on every callable
 // in s into a deterministic map keyed by "kind:qname:meta-name".
 // Used by the idempotency test to compare meta state across runs.
-func snapshotShapeMeta(s *store.Store) map[string]string {
+func snapshotShapeMeta(s *sdk.Store) map[string]string {
 	out := make(map[string]string)
-	collect := func(bag *meta.Bag, key string) {
+	collect := func(bag *sdk.Bag, key string) {
 		if v, ok := shape.MetaShape.Get(bag); ok {
 			out[key+":shape"] = v
 		}
@@ -680,7 +707,7 @@ func snapshotShapeMeta(s *store.Store) map[string]string {
 // assertShape fails the test when MetaShape on bag does not equal
 // want. Used by the directive-override and detector-dispatch
 // tests as the primary positive-path assertion.
-func assertShape(t *testing.T, bag *meta.Bag, want string) {
+func assertShape(t *testing.T, bag *sdk.Bag, want string) {
 	t.Helper()
 	got, ok := shape.MetaShape.Get(bag)
 	if !ok {
@@ -693,7 +720,7 @@ func assertShape(t *testing.T, bag *meta.Bag, want string) {
 
 // assertMeta fails the test when k on bag does not resolve to want.
 // Generic helper used for KeyType / ValueType assertions.
-func assertMeta(t *testing.T, bag *meta.Bag, k meta.Key[string], want string) {
+func assertMeta(t *testing.T, bag *sdk.Bag, k sdk.Key[string], want string) {
 	t.Helper()
 	got, ok := k.Get(bag)
 	if !ok {
@@ -710,7 +737,7 @@ func assertMeta(t *testing.T, bag *meta.Bag, k meta.Key[string], want string) {
 // two detectors can legitimately stamp the same name, and the
 // attribution is the only per-detector fingerprint the meta bag
 // carries.
-func assertStampedBy(t *testing.T, bag *meta.Bag, k meta.Key[string], want string) {
+func assertStampedBy(t *testing.T, bag *sdk.Bag, k sdk.Key[string], want string) {
 	t.Helper()
 	p, ok := bag.Winning(k.Name())
 	if !ok {
@@ -721,12 +748,44 @@ func assertStampedBy(t *testing.T, bag *meta.Bag, k meta.Key[string], want strin
 	}
 }
 
+// langGolang is the language tag backend/golang queries a
+// [sdk.TemplateProvider] with. Spelled once here because the
+// funcmap contribution is only reachable under this exact key —
+// a typo would silently probe a language nothing answers for and
+// turn the assertion into a no-op.
+const langGolang = "golang"
+
+// isTemplateIdent reports whether name is legal as a text/template
+// function name, mirroring the `goodName` rule text/template's
+// [template.Template.Funcs] applies before it panics.
+//
+// The rule matters here because [sdkgo.Base] derives every
+// contributed helper's name by prefixing it with the plugin's own
+// name. A plugin named with a dot — which two of the three plugins
+// this package exports are — would produce keys no template can
+// bind, and the failure surfaces as a panic on the consumer's first
+// Go render rather than anywhere near construction.
+func isTemplateIdent(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r == '_', unicode.IsLetter(r):
+		case unicode.IsDigit(r) && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // TestShapeConformance runs the framework conformance suite over
 // the shape annotator.
 //
 // The three shape plugins previously ran no conformance suite at
 // all, which is how each came to declare Priority() without the rest
-// of plugin.CapabilityProvider — satisfying nothing, so the pipeline
+// of sdk.CapabilityProvider — satisfying nothing, so the pipeline
 // ignored the declared ordering and ran all three in the default
 // bucket, in registration order. The suite's completeness check
 // catches that shape directly; wiring the plugins into the suite is

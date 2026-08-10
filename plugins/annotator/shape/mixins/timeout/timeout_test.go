@@ -6,11 +6,10 @@ package timeout_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/internal/mixintest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/timeout"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestMixin(t *testing.T) {
@@ -23,10 +22,10 @@ func TestMixin(t *testing.T) {
 
 	t.Run("pipeline stamps duration param", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Charge", Package: "x",
-			BaseNode: node.BaseNode{
-				DirectiveList: []*directive.Directive{
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
 					mixintest.HostDirective(timeout.Name, map[string]string{
 						"duration": "5s",
 					}),

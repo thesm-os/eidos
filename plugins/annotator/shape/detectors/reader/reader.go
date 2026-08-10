@@ -4,8 +4,8 @@
 package reader
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps. Consumers
@@ -39,7 +39,7 @@ func Detector() shape.Detector {
 // key; generators derive same-key-same-value, read-after-write and
 // deterministic re-read from it, and a parameter with no equality
 // makes all three vacuous rather than false.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if !shape.GoHasError(returns) {
 		return shape.Match{}, false
@@ -83,7 +83,7 @@ func detectGolang(n node.Node) (shape.Match, bool) {
 // stamp, which a `+gen:shape` directive can restore; accepting an
 // invalid one costs a wrong stamp that downstream tooling acts on
 // with no signal that anything is off.
-func keyable(t *node.TypeRef) bool {
+func keyable(t *sdk.TypeRef) bool {
 	if t == nil {
 		return false
 	}

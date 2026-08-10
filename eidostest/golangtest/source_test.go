@@ -137,6 +137,34 @@ func TestOrder(t *testing.T) {
 			t.Fatalf("message %q does not list the declarations", s.msg)
 		}
 	})
+
+	t.Run("ranks a whole list in one claim", func(t *testing.T) {
+		t.Parallel()
+		parseChain(t).AssertOrderAll(t, "OrdersMiddleware", "ErrUnknownStatus", "declared")
+	})
+
+	t.Run("names the pair that is inverted", func(t *testing.T) {
+		t.Parallel()
+		// The pair form takes two calls and an unwritten transitivity
+		// argument to say this; the reader should not have to supply it.
+		s := probe(t)
+		parseChain(t).AssertOrderAll(s, "OrdersMiddleware", "declared", "ErrUnknownStatus")
+		if !s.failed || !strings.Contains(s.msg, `"declared"`) {
+			t.Fatalf("message %q does not name the inverted pair", s.msg)
+		}
+	})
+
+	t.Run("fails on a name the file does not declare", func(t *testing.T) {
+		t.Parallel()
+		// A contributor that stopped rendering leaves a hole in the
+		// order, which is the claim, so it fails rather than being
+		// skipped over.
+		s := probe(t)
+		parseChain(t).AssertOrderAll(s, "OrdersMiddleware", "Absent")
+		if !s.failed || !strings.Contains(s.msg, "declares no") {
+			t.Fatalf("message %q", s.msg)
+		}
+	})
 }
 
 func TestDump(t *testing.T) {

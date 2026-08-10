@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/reader"
 	"go.thesmos.sh/eidos/sdk"
@@ -20,7 +18,7 @@ import (
 // package's meta bag.
 //
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // TestDetector_Identity pins the constructor's invariants: the
 // detector reports the package's canonical [reader.Name] and
@@ -58,13 +56,13 @@ func TestDetector_MatchesReaderSignatures(t *testing.T) {
 	t.Run("struct method", func(t *testing.T) {
 		t.Parallel()
 		m := readerMethod("Get", true)
-		s := &node.Struct{
+		s := &sdk.Struct{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{m},
+			Methods: []*sdk.Method{m},
 		}
-		runDetect(t, &node.Package{
+		runDetect(t, &sdk.Package{
 			Name: "x", Path: "x",
-			Structs: []*node.Struct{s},
+			Structs: []*sdk.Struct{s},
 		})
 		assertShape(t, m.Meta(), reader.Name, "string", "x.Article")
 	})
@@ -72,13 +70,13 @@ func TestDetector_MatchesReaderSignatures(t *testing.T) {
 	t.Run("interface method", func(t *testing.T) {
 		t.Parallel()
 		m := readerMethod("Get", true)
-		i := &node.Interface{
+		i := &sdk.Interface{
 			Name: "Repo", Package: "x",
-			Methods: []*node.Method{m},
+			Methods: []*sdk.Method{m},
 		}
-		runDetect(t, &node.Package{
+		runDetect(t, &sdk.Package{
 			Name: "x", Path: "x",
-			Interfaces: []*node.Interface{i},
+			Interfaces: []*sdk.Interface{i},
 		})
 		assertShape(t, m.Meta(), reader.Name, "string", "x.Article")
 	})
@@ -93,64 +91,64 @@ func TestDetector_RejectsNonReader(t *testing.T) {
 
 	tests := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
 		{
 			name: "no error return (would be ReaderNoError)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Get", Package: "x",
-				Params: []*node.Param{
-					{Name: "id", Type: &node.TypeRef{Name: "string"}},
+				Params: []*sdk.Param{
+					{Name: "id", Type: &sdk.TypeRef{Name: "string"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "Article", Package: "x"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "Article", Package: "x"}),
 			},
 		},
 		{
 			name: "writer signature: value param + error only",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Save", Package: "x",
-				Params: []*node.Param{
-					{Name: "a", Type: &node.TypeRef{Name: "Article", Package: "x"}},
+				Params: []*sdk.Param{
+					{Name: "a", Type: &sdk.TypeRef{Name: "Article", Package: "x"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "error"}),
 			},
 		},
 		{
 			name: "two non-ctx params (MultiArgWriter / CompositeWriter territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Get", Package: "x",
-				Params: []*node.Param{
-					{Name: "a", Type: &node.TypeRef{Name: "string"}},
-					{Name: "b", Type: &node.TypeRef{Name: "string"}},
+				Params: []*sdk.Param{
+					{Name: "a", Type: &sdk.TypeRef{Name: "string"}},
+					{Name: "b", Type: &sdk.TypeRef{Name: "string"}},
 				},
-				Returns: node.AnonReturns(
-					&node.TypeRef{Name: "Article", Package: "x"},
-					&node.TypeRef{Name: "error"},
+				Returns: sdk.AnonReturns(
+					&sdk.TypeRef{Name: "Article", Package: "x"},
+					&sdk.TypeRef{Name: "error"},
 				),
 			},
 		},
 		{
 			name: "two non-error returns (MultiReader territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Get", Package: "x",
-				Params: []*node.Param{
-					{Name: "id", Type: &node.TypeRef{Name: "string"}},
+				Params: []*sdk.Param{
+					{Name: "id", Type: &sdk.TypeRef{Name: "string"}},
 				},
-				Returns: node.AnonReturns(
-					&node.TypeRef{Name: "Article", Package: "x"},
-					&node.TypeRef{Name: "Meta", Package: "x"},
-					&node.TypeRef{Name: "error"},
+				Returns: sdk.AnonReturns(
+					&sdk.TypeRef{Name: "Article", Package: "x"},
+					&sdk.TypeRef{Name: "Meta", Package: "x"},
+					&sdk.TypeRef{Name: "error"},
 				),
 			},
 		},
 		{
 			name: "lifecycle signature: only ctx in, only error out",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Start", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "error"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "error"}),
 			},
 		},
 	}
@@ -178,19 +176,19 @@ func TestDetector_RejectsUnkeyableParams(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		param *node.TypeRef
+		param *sdk.TypeRef
 	}{
-		{"slice key has no equality", &node.TypeRef{
-			TypeKind: node.TypeRefSlice, Elem: &node.TypeRef{Name: "string"},
+		{"slice key has no equality", &sdk.TypeRef{
+			TypeKind: sdk.TypeRefSlice, Elem: &sdk.TypeRef{Name: "string"},
 		}},
-		{"map key has no equality", &node.TypeRef{
-			TypeKind: node.TypeRefMap,
-			MapKey:   &node.TypeRef{Name: "string"},
-			MapValue: &node.TypeRef{Name: "string"},
+		{"map key has no equality", &sdk.TypeRef{
+			TypeKind: sdk.TypeRefMap,
+			MapKey:   &sdk.TypeRef{Name: "string"},
+			MapValue: &sdk.TypeRef{Name: "string"},
 		}},
-		{"func key has no equality", &node.TypeRef{TypeKind: node.TypeRefFunc}},
-		{"inline interface may not re-read", &node.TypeRef{
-			TypeKind: node.TypeRefAnonInterface,
+		{"func key has no equality", &sdk.TypeRef{TypeKind: sdk.TypeRefFunc}},
+		{"inline interface may not re-read", &sdk.TypeRef{
+			TypeKind: sdk.TypeRefAnonInterface,
 		}},
 	}
 	for _, tc := range tests {
@@ -215,7 +213,7 @@ func TestDetector_NamedInterfaceKeyIsAKnownGap(t *testing.T) {
 	t.Parallel()
 
 	fn := readerFunc("Load", true)
-	fn.Params[len(fn.Params)-1].Type = &node.TypeRef{Name: "Reader", Package: "io"}
+	fn.Params[len(fn.Params)-1].Type = &sdk.TypeRef{Name: "Reader", Package: "io"}
 	runDetectFunc(t, fn)
 
 	if !shape.IsStamped(fn.Meta()) {
@@ -226,57 +224,57 @@ func TestDetector_NamedInterfaceKeyIsAKnownGap(t *testing.T) {
 }
 
 // keyTypeOf reports the stamped key type, for failure messages.
-func keyTypeOf(t *testing.T, fn *node.Function) string {
+func keyTypeOf(t *testing.T, fn *sdk.Function) string {
 	t.Helper()
 	got, _ := shape.MetaKeyType.Get(fn.Meta())
 	return got
 }
 
-// readerFunc builds a free [node.Function] matching the
+// readerFunc builds a free [sdk.Function] matching the
 // canonical reader signature, optionally including a leading
 // context parameter.
-func readerFunc(name string, withCtx bool) *node.Function {
-	params := []*node.Param{
-		{Name: "id", Type: &node.TypeRef{Name: "string"}},
+func readerFunc(name string, withCtx bool) *sdk.Function {
+	params := []*sdk.Param{
+		{Name: "id", Type: &sdk.TypeRef{Name: "string"}},
 	}
 	if withCtx {
-		params = append([]*node.Param{
-			{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+		params = append([]*sdk.Param{
+			{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 		}, params...)
 	}
-	return &node.Function{
+	return &sdk.Function{
 		Name: name, Package: "x",
 		Params: params,
-		Returns: node.AnonReturns(
-			&node.TypeRef{Name: "Article", Package: "x"},
-			&node.TypeRef{Name: "error"},
+		Returns: sdk.AnonReturns(
+			&sdk.TypeRef{Name: "Article", Package: "x"},
+			&sdk.TypeRef{Name: "error"},
 		),
 	}
 }
 
-// readerMethod builds a [node.Method] matching the canonical
+// readerMethod builds a [sdk.Method] matching the canonical
 // reader signature for use inside a struct or interface fixture.
-func readerMethod(name string, withCtx bool) *node.Method {
+func readerMethod(name string, withCtx bool) *sdk.Method {
 	fn := readerFunc(name, withCtx)
-	return &node.Method{
+	return &sdk.Method{
 		Name: fn.Name, Params: fn.Params, Returns: fn.Returns,
 	}
 }
 
 // runDetectFunc wires fn into a single-function package and runs
 // the reader detector through the umbrella shape plugin.
-func runDetectFunc(t *testing.T, fn *node.Function) {
+func runDetectFunc(t *testing.T, fn *sdk.Function) {
 	t.Helper()
-	runDetect(t, &node.Package{
+	runDetect(t, &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{fn},
+		Functions: []*sdk.Function{fn},
 	})
 }
 
 // runDetect adds pkg to a fresh store, stamps the Go frontend
 // marker on the package, and runs the umbrella shape plugin
 // configured with this package's detector.
-func runDetect(t *testing.T, pkg *node.Package) {
+func runDetect(t *testing.T, pkg *sdk.Package) {
 	t.Helper()
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -298,7 +296,7 @@ func runDetect(t *testing.T, pkg *node.Package) {
 // assertShape fails when the three structural-shape meta keys on
 // bag don't match the supplied want values. Empty wantKey /
 // wantValue mean "key/value must be absent".
-func assertShape(t *testing.T, bag *meta.Bag, wantName, wantKey, wantValue string) {
+func assertShape(t *testing.T, bag *sdk.Bag, wantName, wantKey, wantValue string) {
 	t.Helper()
 	if got := shape.Get(bag); got != wantName {
 		t.Fatalf("shape = %q, want %q", got, wantName)

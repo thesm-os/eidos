@@ -4,8 +4,8 @@
 package compositewriter
 
 import (
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the canonical shape name this detector stamps.
@@ -24,7 +24,7 @@ func Detector() shape.Detector {
 
 // detectGolang accepts a callable with exactly two non-context
 // parameters and a single trailing `error` return.
-func detectGolang(n node.Node) (shape.Match, bool) {
+func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if !shape.GoHasError(returns) || len(shape.GoStripError(returns)) != 0 {
 		return shape.Match{}, false

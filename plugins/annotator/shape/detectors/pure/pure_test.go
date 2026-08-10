@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/pure"
 	"go.thesmos.sh/eidos/sdk"
@@ -16,7 +14,7 @@ import (
 )
 
 //nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = meta.EnsureKey("frontend", meta.StringParser)
+var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // TestDetector_Identity pins the constructor invariants.
 func TestDetector_Identity(t *testing.T) {
@@ -38,9 +36,9 @@ func TestDetector_MatchesPure(t *testing.T) {
 
 	t.Run("no params, single return", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Now", Package: "x",
-			Returns: node.AnonReturns(&node.TypeRef{Name: "Time", Package: "time"}),
+			Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "Time", Package: "time"}),
 		}
 		runDetectFunc(t, fn)
 		assertShape(t, fn.Meta(), pure.Name, "time.Time")
@@ -48,13 +46,13 @@ func TestDetector_MatchesPure(t *testing.T) {
 
 	t.Run("two params, single return", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Add", Package: "x",
-			Params: []*node.Param{
-				{Name: "a", Type: &node.TypeRef{Name: "int"}},
-				{Name: "b", Type: &node.TypeRef{Name: "int"}},
+			Params: []*sdk.Param{
+				{Name: "a", Type: &sdk.TypeRef{Name: "int"}},
+				{Name: "b", Type: &sdk.TypeRef{Name: "int"}},
 			},
-			Returns: node.AnonReturns(&node.TypeRef{Name: "int"}),
+			Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "int"}),
 		}
 		runDetectFunc(t, fn)
 		assertShape(t, fn.Meta(), pure.Name, "int")
@@ -62,12 +60,12 @@ func TestDetector_MatchesPure(t *testing.T) {
 
 	t.Run("variadic params, single return", func(t *testing.T) {
 		t.Parallel()
-		fn := &node.Function{
+		fn := &sdk.Function{
 			Name: "Sum", Package: "x",
-			Params: []*node.Param{
-				{Name: "xs", Type: &node.TypeRef{Name: "int"}, Variadic: true},
+			Params: []*sdk.Param{
+				{Name: "xs", Type: &sdk.TypeRef{Name: "int"}, Variadic: true},
 			},
-			Returns: node.AnonReturns(&node.TypeRef{Name: "int"}),
+			Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "int"}),
 		}
 		runDetectFunc(t, fn)
 		assertShape(t, fn.Meta(), pure.Name, "int")
@@ -81,47 +79,47 @@ func TestDetector_RejectsImpure(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
 		{
 			name: "has context parameter",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Now", Package: "x",
-				Params: []*node.Param{
-					{Name: "ctx", Type: &node.TypeRef{Name: "Context", Package: "context"}},
+				Params: []*sdk.Param{
+					{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
 				},
-				Returns: node.AnonReturns(&node.TypeRef{Name: "Time", Package: "time"}),
+				Returns: sdk.AnonReturns(&sdk.TypeRef{Name: "Time", Package: "time"}),
 			},
 		},
 		{
 			name: "has error return (Aggregator / Reader territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Sum", Package: "x",
-				Params: []*node.Param{
-					{Name: "xs", Type: &node.TypeRef{Name: "int"}, Variadic: true},
+				Params: []*sdk.Param{
+					{Name: "xs", Type: &sdk.TypeRef{Name: "int"}, Variadic: true},
 				},
-				Returns: node.AnonReturns(
-					&node.TypeRef{Name: "int"},
-					&node.TypeRef{Name: "error"},
+				Returns: sdk.AnonReturns(
+					&sdk.TypeRef{Name: "int"},
+					&sdk.TypeRef{Name: "error"},
 				),
 			},
 		},
 		{
 			name: "two non-error returns (MultiAggregator territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Pair", Package: "x",
-				Returns: node.AnonReturns(
-					&node.TypeRef{Name: "int"},
-					&node.TypeRef{Name: "string"},
+				Returns: sdk.AnonReturns(
+					&sdk.TypeRef{Name: "int"},
+					&sdk.TypeRef{Name: "string"},
 				),
 			},
 		},
 		{
 			name: "no returns (VoidLifecycle / Mutator territory)",
-			fn: &node.Function{
+			fn: &sdk.Function{
 				Name: "Side", Package: "x",
-				Params: []*node.Param{
-					{Name: "v", Type: &node.TypeRef{Name: "Article", Package: "x"}},
+				Params: []*sdk.Param{
+					{Name: "v", Type: &sdk.TypeRef{Name: "Article", Package: "x"}},
 				},
 			},
 		},
@@ -139,11 +137,11 @@ func TestDetector_RejectsImpure(t *testing.T) {
 
 // runDetectFunc wires fn into a single-function package and runs
 // the pure detector through the umbrella shape plugin.
-func runDetectFunc(t *testing.T, fn *node.Function) {
+func runDetectFunc(t *testing.T, fn *sdk.Function) {
 	t.Helper()
-	pkg := &node.Package{
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{fn},
+		Functions: []*sdk.Function{fn},
 	}
 	s := store.New()
 	if err := s.Nodes().AddPackage(pkg); err != nil {
@@ -164,7 +162,7 @@ func runDetectFunc(t *testing.T, fn *node.Function) {
 
 // assertShape fails when the structural-shape meta keys on bag
 // don't match the supplied want values.
-func assertShape(t *testing.T, bag *meta.Bag, wantName, wantValue string) {
+func assertShape(t *testing.T, bag *sdk.Bag, wantName, wantValue string) {
 	t.Helper()
 	if got := shape.Get(bag); got != wantName {
 		t.Fatalf("shape = %q, want %q", got, wantName)

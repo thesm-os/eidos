@@ -13,15 +13,22 @@
 // mock is suitable for table-driven tests without an extra mocking
 // dependency.
 //
-// mockgen sits in the [sdk.GeneratorComposition] bucket; the
-// `Requires: ["repository"]` declaration documents the dependency
-// on repogen's output even though the strict-by-priority bucket
-// ordering already runs foundation generators first.
+// One shape to know before writing a stub: a variadic method keeps
+// its `...` on the mock — it has to, or the mock does not implement
+// the interface — but its field takes the slice form, so
+// `Log(format string, args ...any)` is configured through
+// `LogFunc func(string, []any)`. See [funcRefFor] for why the emit
+// layer leaves no other option.
+//
+// mockgen sits in the [sdk.GeneratorComposition] bucket; requiring
+// [repogen.Capability] documents the dependency on repogen's output
+// even though the strict-by-priority bucket ordering already runs
+// foundation generators first.
 //
 // # Output routing
 //
 // mockgen targets external test packages by default: every mock
-// lands in a `<srcPkg>_test` emit.Package and the rendered file
+// lands in a `<srcPkg>_test` sdk.EmitPackage and the rendered file
 // carries the `_mock_test.go` suffix, so the Go test toolchain
 // confines it to test builds and the import identity diverges from
 // the regular source package (no whitebox same-package elision).
@@ -37,12 +44,10 @@ package mockgen
 import (
 	"errors"
 
-	"go.thesmos.sh/eidos/core/opt"
-	"go.thesmos.sh/eidos/emit"
-	"go.thesmos.sh/eidos/emit/builder"
 	refconv "go.thesmos.sh/eidos/lang/golang"
-	"go.thesmos.sh/eidos/node"
+	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier surfaced through
@@ -60,11 +65,6 @@ const Version = "1.0.0"
 // Capability is the capability label mockgen advertises through
 // [plugin.CapabilityProvider.Provides].
 const Capability = "mock"
-
-// RequiresRepository names the upstream capability mockgen documents
-// a dependency on so [pipeline.Pipeline.Plan] records the
-// cross-bucket relationship.
-const RequiresRepository = "repository"
 
 // DirectiveName is the bare directive name (without the `+gen:` or
 // `-gen:` prefix) the plugin reads from interfaces on both the
@@ -89,11 +89,18 @@ const FilenameSuffix = "_mock_test.go"
 // qualify naturally.
 const TestPackageSuffix = "_test"
 
-// Language is the backend language whose output set
-// [Plugin.Outputs] returns. Other languages get an empty slice
-// until matching templates and per-language output declarations
-// land.
-const Language = "golang"
+// GoOutputs returns the Go adapter's output set: the single
+// alongside-source file carrying [FilenameSuffix].
+//
+// Go-only by construction. The plugin emits standard Go decls, so a
+// consumer targeting another backend language gets no output set at
+// all and the Layout phase surfaces a missing-FilenameProvider error
+// rather than a Go suffix that would not match the rendered output.
+// [sdkgo.Base] applies that language gate; the set is exported so a
+// test or a downstream plugin can name the file this one owns.
+func GoOutputs() []sdk.Output {
+	return []sdk.Output{{Suffix: FilenameSuffix}}
+}
 
 // Options carries the plugin's user-tunable settings. Routing is
 // owned by the framework's routing layer; mockgen exposes no
@@ -110,66 +117,59 @@ type Options struct {
 }
 
 // Plugin is the mock-implementation generator. The zero value is
-// unusable — go through [New] so the embedded [opt.Holder] binds
-// to the plugin's options field.
+// unusable — go through [New] so the embedded holder binds to the
+// plugin's options field.
 type Plugin struct {
-	*opt.Holder[Options]
+	*sdkgo.Base
+	*sdk.Holder[Options]
 	opts Options
 }
 
 // New returns a fresh plugin instance with the options holder bound.
 // The pipeline overlays caller-supplied option values via
-// [Plugin.SetOptions] (promoted from [opt.Holder]) at Build time.
+// [Plugin.SetOptions] (promoted from [sdk.Holder]) at Build time.
+//
+// [sdkgo.Builder.BuiltinTemplates] rather than a template tree:
+// every decl this plugin emits is a struct, a field or a method, all
+// of which the backend already renders from its own kind templates.
+// The plugin defines no [sdk.Kind] of its own, so a tree would hold
+// nothing — and declaring that is what separates this shape from the
+// generator that defines a kind and forgot to ship its templates,
+// which renders a short file and fails nowhere.
+//
+// The composition bucket is where it has to run: it doubles
+// interfaces the foundation generators synthesise, so those have to
+// exist first. Requires names [repogen.Capability] — the published
+// const rather than a literal, so the two cannot drift into a
+// dependency that silently stops being declared. The strict
+// cross-bucket ordering already runs foundation before composition,
+// so that declaration carries documentary intent rather than
+// ordering force.
 func New() *Plugin {
-	p := &Plugin{}
-	p.Holder = opt.Bind(&p.opts)
+	p := &Plugin{Base: sdkgo.NewPlugin(Name).
+		Outputs(GoOutputs()...).
+		BuiltinTemplates().
+		Version(Version).
+		Priority(sdk.GeneratorComposition).
+		Provides(Capability).
+		Requires(repogen.Capability).
+		Directives(directives()...).
+		Build()}
+	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the composition generator bucket so
-// it runs after the foundation generators that synthesise the
-// interfaces it mocks.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorComposition }
-
-// Provides returns [Capability].
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires returns the repository capability label. The strict
-// cross-bucket ordering already runs foundation before composition,
-// but the declared dependency carries documentary intent.
-func (*Plugin) Requires() []string { return []string{RequiresRepository} }
-
-// Outputs returns the ordered set of rendered files this plugin
-// produces in the named language. Implements
-// [plugin.FilenameProvider]. The plugin emits standard Go decls
-// today; consumers targeting another backend language receive
-// nil so the Layout phase surfaces a missing-FilenameProvider
-// error rather than producing a Go suffix that wouldn't match
-// the rendered output.
-func (*Plugin) Outputs(lang string) []sdk.Output {
-	if lang == Language {
-		return []sdk.Output{{Suffix: FilenameSuffix}}
-	}
-	return nil
-}
-
-// Directives declares the `+gen:mock` / `-gen:mock` schema.
+// directives declares the `+gen:mock` / `-gen:mock` schema.
 // Positive directives opt source-side interfaces in; negated
 // directives skip emit-side interfaces that would otherwise be
 // mocked. A negated directive on a source-side method skips that
 // individual method when its parent interface still opts in.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
+func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(node.KindInterface).
-			On(node.KindMethod).
-			On(emit.KindInterface).
+			On(sdk.NodeKindInterface).
+			On(sdk.NodeKindMethod).
+			On(sdk.EmitKindInterface).
 			Describe("Opts a source interface into mock generation (+) or skips an emit interface or single method (-).").
 			Build(),
 	}
@@ -189,9 +189,9 @@ func (*Plugin) Directives() []sdk.DirectiveSchema {
 // X-shaped interfaces, source-side or emit-side.
 //
 // Routing is owned entirely by the framework's routing layer:
-// every emit decl carries Origin set and leaves [emit.Target]
+// every emit decl carries Origin set and leaves [sdk.EmitTarget]
 // zero. mockgen drops each mock into a `<srcPkg>_test`
-// emit.Package so the Layout phase's alongside-source rule —
+// sdk.EmitPackage so the Layout phase's alongside-source rule —
 // which reads Target.Package from the emit-side package —
 // composes the rendered file's `package <pkg>_test` clause
 // without the framework knowing anything about Go's test-package
@@ -203,7 +203,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		if !ok {
 			continue
 		}
-		c := builder.For(Name)
+		c := sdk.NewProvenance(Name)
 		pkg := c.Package(srcPkg.Name+TestPackageSuffix, srcPkg.Path+TestPackageSuffix)
 		for _, si := range srcGroups[path] {
 			// Resolved rather than declared: a mock built from the
@@ -212,12 +212,12 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			// it mocks.
 			set := ctx.Reader.MethodSet(si)
 			for _, issue := range set.Issues {
-				name, _ := node.EmbedName(issue.Embed)
+				name, _ := sdk.EmbedName(issue.Embed)
 				ctx.Diag.Errorf(si.Pos(),
 					"%s: interface %q embeds %q, which %s; the generated mock would be missing its methods",
 					Name, si.QName(), name, issue.Reason)
 			}
-			p.emitForSourceInterface(pkg, si, emit.External(si.Package, si.Name), set.Methods)
+			p.emitForSourceInterface(pkg, si, sdk.External(si.Package, si.Name), set.Methods)
 		}
 		if err := buildAndAdd(ctx, pkg); err != nil {
 			return err
@@ -226,7 +226,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	emitGroups, emitOrder := groupEmitInterfaces(ctx)
 	for _, key := range emitOrder {
 		group := emitGroups[key]
-		c := builder.For(Name)
+		c := sdk.NewProvenance(Name)
 		pkg := c.Package(group.pkgName+TestPackageSuffix, group.pkgPath+TestPackageSuffix)
 		for _, ei := range group.items {
 			p.emitForEmitInterface(pkg, ei)
@@ -241,7 +241,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 // buildAndAdd finalises the in-progress package and folds it into
 // the emit store. Wrap-and-Join keeps the call sites in [Generate]
 // uniform across the source-side and emit-side passes.
-func buildAndAdd(ctx *sdk.GeneratorContext, pkg *builder.PackageBuilder) error {
+func buildAndAdd(ctx *sdk.GeneratorContext, pkg *sdk.PackageBuilder) error {
 	out, err := pkg.Build()
 	if err != nil {
 		return err
@@ -264,8 +264,8 @@ var errAddPackage = errors.New("mockgen: add package to store")
 // iteration of the grouping stays deterministic across runs.
 func groupSourceInterfaces(
 	ctx *sdk.GeneratorContext,
-) (map[string][]*node.Interface, []string) {
-	groups := map[string][]*node.Interface{}
+) (map[string][]*sdk.Interface, []string) {
+	groups := map[string][]*sdk.Interface{}
 	order := []string{}
 	for i := range ctx.Reader.Interfaces().All() {
 		if !i.HasPositiveDirective(DirectiveName) {
@@ -280,21 +280,21 @@ func groupSourceInterfaces(
 }
 
 // emitInterfaceGroup buckets emit-side interfaces by their
-// containing emit.Package identity (Name + Path) so each rendered
+// containing sdk.EmitPackage identity (Name + Path) so each rendered
 // mock package mirrors the upstream interface's package — with
 // the [TestPackageSuffix] applied at AddPackage time.
 type emitInterfaceGroup struct {
 	pkgName, pkgPath string
-	items            []*emit.Interface
+	items            []*sdk.EmitInterface
 }
 
 // groupEmitInterfaces walks the scoped emit-interface bucket and
 // groups every non-suppressed interface by its containing
-// emit.Package's (Name, Path). Order is first-encountered.
+// sdk.EmitPackage's (Name, Path). Order is first-encountered.
 func groupEmitInterfaces(
 	ctx *sdk.GeneratorContext,
 ) (map[string]*emitInterfaceGroup, []string) {
-	pkgByQName := map[string]*emit.Package{}
+	pkgByQName := map[string]*sdk.EmitPackage{}
 	for _, epkg := range ctx.Reader.Store().Emit().Packages().Items() {
 		pkgByQName[epkg.Path] = epkg
 	}
@@ -325,41 +325,50 @@ func groupEmitInterfaces(
 type methodSig struct {
 	name    string
 	params  []paramSig
-	returns []emit.Ref
+	returns []sdk.Ref
 }
 
-// paramSig describes one positional parameter — name and type.
-// Anonymous parameters carry an empty name; the emit code rewrites
-// them to `arg<N>` so the mock body can reference them.
+// paramSig describes one positional parameter — name, type, and
+// whether it is the signature's trailing variadic. Anonymous
+// parameters carry an empty name; the emit code rewrites them to
+// `arg<N>` so the mock body can reference them.
+//
+// The variadic flag is not decoration. A mock exists to be assignable
+// to the interface it doubles, and Go's assignability rules make
+// `Log(format string, args []any)` and `Log(format string, args
+// ...any)` different method sets: dropping the marker produces a mock
+// that compiles, that every substring assertion accepts, and that
+// satisfies nothing.
 type paramSig struct {
-	name string
-	typ  emit.Ref
+	name     string
+	typ      sdk.Ref
+	variadic bool
 }
 
 // emitForEmitInterface emits a Mock struct for an emit-store
 // interface anchored to the upstream interface's Origin. The Mock
-// references the source interface by [emit.Internal] so the
+// references the source interface by [sdk.Internal] so the
 // rendered struct correctly resolves the in-target name regardless
 // of the emit interface's own package. Generic emit interfaces
 // propagate their type parameters to the mock so the rendered
 // struct, methods, and ifaceRef-instantiation all thread
 // `[T1, T2, …]` consistently.
-func (p *Plugin) emitForEmitInterface(pkg *builder.PackageBuilder, i *emit.Interface) {
+func (p *Plugin) emitForEmitInterface(pkg *sdk.PackageBuilder, i *sdk.EmitInterface) {
 	sigs := make([]methodSig, 0, len(i.Methods))
 	for _, m := range i.Methods {
 		params := make([]paramSig, 0, len(m.Params))
 		for _, mp := range m.Params {
-			params = append(params, paramSig{name: mp.Name, typ: mp.Type})
+			params = append(params, paramSig{name: mp.Name, typ: mp.Type, variadic: mp.Variadic})
 		}
-		returns := make([]emit.Ref, 0, len(m.Returns))
+		returns := make([]sdk.Ref, 0, len(m.Returns))
 		for _, r := range m.Returns {
 			returns = append(returns, r.Type)
 		}
 		sigs = append(sigs, methodSig{name: m.Name, params: params, returns: returns})
 	}
 	tps := emitTypeParamsFromEmit(i.TypeParams)
-	typeArgs := builder.TypeArgsFromEmitParams(i.TypeParams)
-	p.emitMock(pkg, i.Name, emit.Internal(i, typeArgs...), i.Origin(), tps, sigs)
+	typeArgs := sdk.TypeArgsFromEmitParams(i.TypeParams)
+	p.emitMock(pkg, i.Name, sdk.Internal(i, typeArgs...), i.Origin(), tps, sigs)
 }
 
 // emitForSourceInterface emits a Mock struct for a source-side
@@ -367,7 +376,7 @@ func (p *Plugin) emitForEmitInterface(pkg *builder.PackageBuilder, i *emit.Inter
 // [golang.FromNode] so the generated mock parses against the same
 // signatures the source declares. ifaceRef is the reference the
 // emitted mock uses for the source interface — the plugin always
-// passes [emit.External]; the renderer qualifies references back
+// passes [sdk.External]; the renderer qualifies references back
 // into the regular package because the test-package import
 // identity differs from the regular package's.
 //
@@ -376,10 +385,10 @@ func (p *Plugin) emitForEmitInterface(pkg *builder.PackageBuilder, i *emit.Inter
 // rendered struct, methods, and embedded reference all carry
 // `[T1, T2, …]` consistently.
 func (p *Plugin) emitForSourceInterface(
-	pkg *builder.PackageBuilder,
-	i *node.Interface,
-	ifaceRef emit.Ref,
-	methods []*node.Method,
+	pkg *sdk.PackageBuilder,
+	i *sdk.Interface,
+	ifaceRef sdk.Ref,
+	methods []*sdk.Method,
 ) {
 	sigs := make([]methodSig, 0, len(methods))
 	for _, m := range methods {
@@ -391,22 +400,26 @@ func (p *Plugin) emitForSourceInterface(
 		}
 		params := make([]paramSig, 0, len(m.Params))
 		for _, mp := range m.Params {
-			params = append(params, paramSig{name: mp.Name, typ: refconv.FromNode(mp.Type)})
+			params = append(params, paramSig{
+				name:     mp.Name,
+				typ:      refconv.FromNode(mp.Type),
+				variadic: mp.Variadic,
+			})
 		}
 		// Return names are available on m.Returns but not carried
 		// here: a mock method delegates to its Func field, so a
 		// named result would be declared and never assigned. A
 		// generator deriving identifiers from returns — a recorded-
 		// call struct, say — reads r.Name instead.
-		returns := make([]emit.Ref, 0, len(m.Returns))
+		returns := make([]sdk.Ref, 0, len(m.Returns))
 		for _, r := range m.Returns {
 			returns = append(returns, refconv.FromNode(r.Type))
 		}
 		sigs = append(sigs, methodSig{name: m.Name, params: params, returns: returns})
 	}
 	tps := emitTypeParamsFromNode(i.TypeParams)
-	typeArgs := builder.TypeArgsFromNodeParams(i.TypeParams)
-	p.emitMock(pkg, i.Name, builder.ApplyTypeArgs(ifaceRef, typeArgs), i, tps, sigs)
+	typeArgs := sdk.TypeArgsFromNodeParams(i.TypeParams)
+	p.emitMock(pkg, i.Name, sdk.ApplyTypeArgs(ifaceRef, typeArgs), i, tps, sigs)
 }
 
 // emitMock appends one Mock struct decl carrying the func-valued
@@ -420,19 +433,32 @@ func (p *Plugin) emitForSourceInterface(
 //
 // Origin is set on the emitted struct so the Layout phase can
 // resolve every Target field downstream — the plugin itself
-// never constructs an [emit.Target] literal.
+// never constructs an [sdk.EmitTarget] literal.
 func (p *Plugin) emitMock(
-	pkg *builder.PackageBuilder,
+	pkg *sdk.PackageBuilder,
 	ifaceName string,
-	ifaceRef emit.Ref,
-	origin node.Node,
+	ifaceRef sdk.Ref,
+	origin sdk.Node,
 	typeParams []emitTypeParamSpec,
 	sigs []methodSig,
 ) {
-	_ = ifaceRef // reserved for future "var _ Iface = (*Mock)(nil)" emission.
+	// ifaceRef is carried but not emitted. The obvious use is a
+	// `var _ Iface = (*Mock)(nil)` satisfaction assertion beside the
+	// struct, and the emit layer renders one correctly — but the
+	// store indexes every variable under `<pkg>.<Name>`, so a second
+	// blank-named one in the same emit package is
+	// [sdk.ErrDuplicateQName], and this plugin groups every
+	// interface of a source package into one emit package. Two
+	// further carve-outs would be needed even then: a generic mock
+	// has no concrete instantiation to spell, and a mock trimmed by
+	// `-gen:mock` on a method is deliberately short of the interface
+	// it names. The rendered fixture asserts satisfaction from a
+	// hand-written support file instead — see the mockgen test's
+	// sourcePackage.
+	_ = ifaceRef
 	mockName := ifaceName + p.opts.Suffix
 
-	pkg.Struct(mockName, func(b *builder.StructBuilder) {
+	pkg.Struct(mockName, func(b *sdk.StructBuilder) {
 		b.Origin(origin)
 		b.Docs(mockName + " is a func-valued mock implementation of " + ifaceName + ".")
 		for _, tp := range typeParams {
@@ -442,12 +468,20 @@ func (p *Plugin) emitMock(
 			b.Field(s.name+"Func", funcRefFor(s), nil)
 		}
 		typeArgs := typeArgsFromSpecs(typeParams)
-		recv := emit.Ptr(emit.Internal(b.Node(), typeArgs...))
+		recv := sdk.Ptr(sdk.Internal(b.Node(), typeArgs...))
 		for _, s := range sigs {
-			b.Method(s.name, func(m *builder.MethodBuilder) {
+			b.Method(s.name, func(m *sdk.MethodBuilder) {
+				// Every exported declaration a generator emits is read
+				// by the consumer's editor and linted by their
+				// configuration; an undocumented exported method
+				// reports as the consumer's own lint failure in a file
+				// they did not write. Its sibling repogen documents the
+				// methods it emits for the same reason.
+				m.Docs(s.name + " implements " + ifaceName +
+					" by dispatching to " + s.name + "Func.")
 				m.Receiver("m", recv)
 				for i, param := range s.params {
-					m.Param(paramName(param.name, i), param.typ)
+					m.Param(paramName(param.name, i), param.typ, variadicOpts(param)...)
 				}
 				for _, ret := range s.returns {
 					m.Return(ret)
@@ -463,15 +497,15 @@ func (p *Plugin) emitMock(
 // parameter name and its resolved constraint.
 type emitTypeParamSpec struct {
 	Name       string
-	Constraint *emit.Constraint
+	Constraint *sdk.EmitConstraint
 }
 
-// emitTypeParamsFromNode lifts a [node.TypeParam] slice into the
+// emitTypeParamsFromNode lifts a [sdk.TypeParam] slice into the
 // emitTypeParamSpec slice the mock builder consumes. Constraint
 // conversion runs through [golang.ConstraintFromNode] so the
 // any-constraint shape collapses to nil for round-tripping through
 // the renderer's IsAny path.
-func emitTypeParamsFromNode(params []*node.TypeParam) []emitTypeParamSpec {
+func emitTypeParamsFromNode(params []*sdk.TypeParam) []emitTypeParamSpec {
 	if len(params) == 0 {
 		return nil
 	}
@@ -485,11 +519,11 @@ func emitTypeParamsFromNode(params []*node.TypeParam) []emitTypeParamSpec {
 	return out
 }
 
-// emitTypeParamsFromEmit projects an [emit.TypeParam] slice (the
+// emitTypeParamsFromEmit projects an [sdk.EmitTypeParam] slice (the
 // upstream-generator-produced interfaces this plugin consumes) into
 // the spec form. The constraint passes through verbatim since it
 // already lives on the emit layer.
-func emitTypeParamsFromEmit(params []*emit.TypeParam) []emitTypeParamSpec {
+func emitTypeParamsFromEmit(params []*sdk.EmitTypeParam) []emitTypeParamSpec {
 	if len(params) == 0 {
 		return nil
 	}
@@ -502,32 +536,66 @@ func emitTypeParamsFromEmit(params []*emit.TypeParam) []emitTypeParamSpec {
 
 // typeArgsFromSpecs lifts the local [emitTypeParamSpec] slice (the
 // normalised intermediate the source-side and emit-side paths
-// converge on) into the parallel bare-name [emit.Ref] list a
+// converge on) into the parallel bare-name [sdk.Ref] list a
 // generic host's receiver references take as their type arguments.
-// The two layer-specific lifters live in [builder.TypeArgsFromNodeParams]
-// / [builder.TypeArgsFromEmitParams]; this helper stays mockgen-local
+// The two layer-specific lifters live in [sdk.TypeArgsFromNodeParams]
+// / [sdk.TypeArgsFromEmitParams]; this helper stays mockgen-local
 // because [emitTypeParamSpec] is private to the package.
-func typeArgsFromSpecs(specs []emitTypeParamSpec) []emit.Ref {
+func typeArgsFromSpecs(specs []emitTypeParamSpec) []sdk.Ref {
 	if len(specs) == 0 {
 		return nil
 	}
-	out := make([]emit.Ref, 0, len(specs))
+	out := make([]sdk.Ref, 0, len(specs))
 	for _, s := range specs {
-		out = append(out, emit.Builtin(s.Name))
+		out = append(out, sdk.Builtin(s.Name))
 	}
 	return out
+}
+
+// variadicOpts returns the [sdk.ParamBuilder] configuration a
+// parameter needs, which is a marker for the trailing variadic and
+// nothing at all for every other parameter.
+//
+// Spelled as a slice of options rather than an `if` at the call site
+// so the parameter loop stays one statement per parameter.
+func variadicOpts(p paramSig) []func(*sdk.ParamBuilder) {
+	if !p.variadic {
+		return nil
+	}
+	return []func(*sdk.ParamBuilder){func(b *sdk.ParamBuilder) { b.Variadic() }}
 }
 
 // funcRefFor builds the `func(<params>) <returns>` type for the
 // func-valued field that backs a Mock method. Anonymous parameters
 // keep their empty names — fields render in func-type position so
 // the names don't appear in source.
-func funcRefFor(s methodSig) emit.Ref {
-	params := make([]emit.Ref, 0, len(s.params))
+//
+// A trailing variadic parameter is lowered to its slice form:
+// `Log(format string, args ...any)` backs onto `LogFunc func(string,
+// []any)`. Two reasons, one of them a hard constraint.
+//
+// The constraint: [sdk.CompositeRef]'s func shape carries parameter
+// refs and no per-parameter variadic marker, so `func(string, ...any)`
+// is not expressible on the emit layer at all. Emitting the element
+// type bare — `func(string, any)` — is what this replaced, and it made
+// the dispatch call a compile error the moment the method forwarded
+// its slice.
+//
+// The design agreement: inside the dispatching method the variadic
+// parameter *is* a slice, so forwarding it unspread is the direct
+// call. A test configuring the mock writes `m.LogFunc = func(f string,
+// args []any) {…}` and reads the arguments as the slice it already
+// had.
+func funcRefFor(s methodSig) sdk.Ref {
+	params := make([]sdk.Ref, 0, len(s.params))
 	for _, p := range s.params {
+		if p.variadic {
+			params = append(params, sdk.SliceOf(p.typ))
+			continue
+		}
 		params = append(params, p.typ)
 	}
-	return emit.FuncOf(params, s.returns)
+	return sdk.FuncOf(params, s.returns)
 }
 
 // paramName returns the in-method identifier for parameter index i.
@@ -536,26 +604,31 @@ func funcRefFor(s methodSig) emit.Ref {
 // otherwise, keyword adjustment on top — is Go's and lives in
 // [refconv.ParamIdent]. The wrapper exists because [methodSig]
 // lowers both an emit-side and a source-side parameter list onto a
-// name-and-type pair, so there is no [node.Param] left to hand over
+// name-and-type pair, so there is no [sdk.Param] left to hand over
 // by the time the identifier is needed.
 func paramName(name string, i int) string {
-	return refconv.ParamIdent(&node.Param{Name: name}, i)
+	return refconv.ParamIdent(&sdk.Param{Name: name}, i)
 }
 
 // dispatchBody returns the statement list for one Mock method's
 // body: `[return ]m.<Method>Func(<args...>)`. Zero-return methods
 // drop the leading return.
-func dispatchBody(s methodSig) []*emit.Stmt {
-	args := make([]*emit.Expr, 0, len(s.params))
+//
+// A variadic parameter is forwarded unspread, which pairs with the
+// slice-typed field [funcRefFor] declares for it: inside the method
+// the parameter is already a `[]T`, so the plain identifier is the
+// call that type-checks.
+func dispatchBody(s methodSig) []*sdk.Stmt {
+	args := make([]*sdk.Expr, 0, len(s.params))
 	for i, p := range s.params {
-		args = append(args, emit.NewIdent(paramName(p.name, i)))
+		args = append(args, sdk.NewIdent(paramName(p.name, i)))
 	}
-	call := emit.NewCall(
-		emit.NewField(emit.NewIdent("m"), s.name+"Func"),
+	call := sdk.NewCall(
+		sdk.NewField(sdk.NewIdent("m"), s.name+"Func"),
 		args...,
 	)
 	if len(s.returns) == 0 {
-		return []*emit.Stmt{emit.NewExprStmt(call)}
+		return []*sdk.Stmt{sdk.NewExprStmt(call)}
 	}
-	return []*emit.Stmt{emit.NewReturn(call)}
+	return []*sdk.Stmt{sdk.NewReturn(call)}
 }

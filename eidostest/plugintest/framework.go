@@ -163,6 +163,11 @@ func frameworkChecks() []check {
 			ViolationFuncInBothMaps,
 		},
 		{
+			"TemplateProvider registers funcmap names text/template can bind",
+			assertFuncMapsBind,
+			ViolationUnbindableFuncName,
+		},
+		{
 			"TemplateProvider ships templates that parse and claim no reserved name",
 			assertTemplatesParse,
 			ViolationUnparsableTemplate,
@@ -247,6 +252,61 @@ func assertStableFuncMap(
 		}
 	}
 	return first
+}
+
+// assertFuncMapsBind checks that every funcmap name the plugin
+// registers is one text/template will accept.
+//
+// [template.Template.Funcs] panics — it does not return an error — on
+// any name that is not a Go identifier, and the backend calls it while
+// parsing each plugin's own templates. So an unbindable name is not a
+// wrong rendering but a hard panic, recovered by the backend into a
+// diagnostic, leaving a run that writes fewer files and explains why
+// in nothing the author reads.
+//
+// The name is rarely typed by hand. A plugin embedding
+// [sdk/golang.Base] derives its prefix from its own Name, and a name
+// like `debug-weaver` — ordinary, and load-bearing for directive
+// scoping and provenance, so not something to bend for the template
+// engine — yields `debug-weaver_display`. Every other check in this
+// suite passes on such a plugin; only a Go render fails, and only at
+// the end.
+//
+// Binding is the check because no reimplementation of the rule stays
+// true: text/template owns it, and the one call asks it directly.
+func assertFuncMapsBind(tb testing.TB, p plugin.Plugin, languages ...string) {
+	tb.Helper()
+	provider, ok := p.(plugin.TemplateProvider)
+	if !ok {
+		skipAbsentCapability(tb, "plugin.TemplateProvider")
+		return
+	}
+	for _, lang := range probeSet(languages) {
+		for label, funcs := range map[string]template.FuncMap{
+			"TemplateFuncs":     provider.TemplateFuncs(lang),
+			"TemplateOverrides": provider.TemplateOverrides(lang),
+		} {
+			if len(funcs) == 0 {
+				continue
+			}
+			bindFuncMap(tb, lang, label, funcs)
+		}
+	}
+}
+
+// bindFuncMap reports the panic text as a contract failure, naming the
+// offending entry: the panic says which name it rejected, and that is
+// the whole diagnosis.
+func bindFuncMap(tb testing.TB, lang, label string, funcs template.FuncMap) {
+	tb.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			tb.Errorf("TemplateProvider.%s(%q) registers a name text/template cannot bind: %v; "+
+				"a funcmap name must be a Go identifier, and the backend panics on the first "+
+				"render rather than reporting it here", label, lang, r)
+		}
+	}()
+	template.New("plugintest.bind").Funcs(funcs)
 }
 
 // assertStableName pins Name's empty-string and stability

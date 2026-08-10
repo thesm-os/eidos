@@ -7,12 +7,10 @@ import (
 	"reflect"
 	"testing"
 
-	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/pool"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -38,8 +36,8 @@ func TestContract_ValidateAcceptsExactlyOneEach(t *testing.T) {
 	t.Parallel()
 	c := pool.Contract()
 	members := map[string][]shape.ContractMember{
-		"get": {{Host: &node.Function{Name: "Get"}}},
-		"put": {{Host: &node.Function{Name: "Put"}}},
+		"get": {{Host: &sdk.Function{Name: "Get"}}},
+		"put": {{Host: &sdk.Function{Name: "Put"}}},
 	}
 	if got := c.Validate(members); len(got) != 0 {
 		t.Fatalf("Validate(one-each) = %+v; want no violations", got)
@@ -63,10 +61,10 @@ func TestContract_ValidateScansEveryRole(t *testing.T) {
 
 	t.Run("a compliant get does not stop the put role from being validated", func(t *testing.T) {
 		t.Parallel()
-		putB := &node.Function{Name: "PutB"}
+		putB := &sdk.Function{Name: "PutB"}
 		members := map[string][]shape.ContractMember{
-			"get": {{Host: &node.Function{Name: "Get"}}},
-			"put": {{Host: &node.Function{Name: "PutA"}}, {Host: putB}},
+			"get": {{Host: &sdk.Function{Name: "Get"}}},
+			"put": {{Host: &sdk.Function{Name: "PutA"}}, {Host: putB}},
 		}
 		const want = "pool requires exactly one put; got 2 callables"
 		got := c.Validate(members)
@@ -75,7 +73,7 @@ func TestContract_ValidateScansEveryRole(t *testing.T) {
 				"want exactly one, %q, against the surplus put",
 				len(got), messages(got), want)
 		}
-		if got[0].Host != node.Node(putB) {
+		if got[0].Host != sdk.Node(putB) {
 			t.Fatalf("violation hangs off a node other than the surplus put %q", putB.Name)
 		}
 		if got[0].Message != want {
@@ -100,20 +98,20 @@ func messages(violations []shape.ContractViolation) []string {
 // Get + one Put through umbrella → resolver → validator.
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	get := &node.Function{
+	get := &sdk.Function{
 		Name: "Get", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(pool.Name, "get", map[string]string{
 					"put": "Put",
 				}),
 			},
 		},
 	}
-	put := &node.Function{Name: "Put", Package: "x"}
-	pkg := &node.Package{
+	put := &sdk.Function{Name: "Put", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{get, put},
+		Functions: []*sdk.Function{get, put},
 	}
 	diags := contracttest.RunPipeline(t, pool.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)
@@ -130,31 +128,31 @@ func TestContract_PipelineRoundTrip(t *testing.T) {
 // diagnostic naming the duplicate.
 func TestContract_ValidatorFlagsDuplicateGet(t *testing.T) {
 	t.Parallel()
-	getA := &node.Function{
+	getA := &sdk.Function{
 		Name: "GetA", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(pool.Name, "get", map[string]string{
 					"put": "Put",
 				}),
 			},
 		},
 	}
-	getB := &node.Function{
+	getB := &sdk.Function{
 		Name: "GetB", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(pool.Name, "get", map[string]string{
 					"put": "Put",
 				}),
 			},
 		},
 	}
-	put := &node.Function{Name: "Put", Package: "x"}
-	pkg := &node.Package{
+	put := &sdk.Function{Name: "Put", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{getA, getB, put},
+		Functions: []*sdk.Function{getA, getB, put},
 	}
 	diags := contracttest.RunPipeline(t, pool.Contract(), pkg)
-	contracttest.AssertContainsDiag(t, diags, diag.Error, "exactly one get")
+	contracttest.AssertContainsDiag(t, diags, sdk.SeverityError, "exactly one get")
 }

@@ -8,12 +8,10 @@ import (
 	"slices"
 	"testing"
 
-	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/internal/contracttest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/saga"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestContract_Identity(t *testing.T) {
@@ -35,12 +33,12 @@ func TestContract_Validate(t *testing.T) {
 		t.Parallel()
 		members := map[string][]shape.ContractMember{
 			"step": {
-				{Host: &node.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
-				{Host: &node.Function{Name: "Ship"}, Partners: map[string]string{"compensate": "x.Unship"}},
+				{Host: &sdk.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
+				{Host: &sdk.Function{Name: "Ship"}, Partners: map[string]string{"compensate": "x.Unship"}},
 			},
 			"compensate": {
-				{Host: &node.Function{Name: "Refund"}},
-				{Host: &node.Function{Name: "Unship"}},
+				{Host: &sdk.Function{Name: "Refund"}},
+				{Host: &sdk.Function{Name: "Unship"}},
 			},
 		}
 		if got := c.Validate(members); len(got) != 0 {
@@ -50,15 +48,15 @@ func TestContract_Validate(t *testing.T) {
 
 	t.Run("handles non-callable host via stepLabel fallback", func(t *testing.T) {
 		t.Parallel()
-		// First member is a [*node.Struct] — neither Function
+		// First member is a [*sdk.Struct] — neither Function
 		// nor Method, so stepLabel returns the empty string for
 		// the seen-map entry. The second step (a Function) then
 		// tries to register the same compensate qname and gets
 		// flagged.
 		members := map[string][]shape.ContractMember{
 			"step": {
-				{Host: &node.Struct{Name: "S"}, Partners: map[string]string{"compensate": "x.A"}},
-				{Host: &node.Function{Name: "Other"}, Partners: map[string]string{"compensate": "x.A"}},
+				{Host: &sdk.Struct{Name: "S"}, Partners: map[string]string{"compensate": "x.A"}},
+				{Host: &sdk.Function{Name: "Other"}, Partners: map[string]string{"compensate": "x.A"}},
 			},
 		}
 		got := c.Validate(members)
@@ -92,34 +90,34 @@ func TestContract_ValidateScansEveryStep(t *testing.T) {
 
 	t.Run("every duplicate compensation is reported, not only the first", func(t *testing.T) {
 		t.Parallel()
-		ship := &node.Function{Name: "Ship"}
-		pack := &node.Function{Name: "Pack"}
-		bill := &node.Function{Name: "Bill"}
+		ship := &sdk.Function{Name: "Ship"}
+		pack := &sdk.Function{Name: "Pack"}
+		bill := &sdk.Function{Name: "Bill"}
 		members := map[string][]shape.ContractMember{
 			"step": {
-				{Host: &node.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
+				{Host: &sdk.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
 				{Host: ship, Partners: map[string]string{"compensate": "x.Refund"}},
 				{Host: pack, Partners: map[string]string{"compensate": "x.Refund"}},
 				{Host: bill, Partners: map[string]string{"compensate": "x.Refund"}},
 			},
 		}
 		assertFlagged(t, c.Validate(members),
-			[]*node.Function{ship, pack, bill},
+			[]*sdk.Function{ship, pack, bill},
 			"saga: compensation x.Refund is already paired with step Charge")
 	})
 
 	t.Run("a step with no compensation does not stop the steps below it", func(t *testing.T) {
 		t.Parallel()
-		ship := &node.Function{Name: "Ship"}
+		ship := &sdk.Function{Name: "Ship"}
 		members := map[string][]shape.ContractMember{
 			"step": {
-				{Host: &node.Function{Name: "Audit"}},
-				{Host: &node.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
+				{Host: &sdk.Function{Name: "Audit"}},
+				{Host: &sdk.Function{Name: "Charge"}, Partners: map[string]string{"compensate": "x.Refund"}},
 				{Host: ship, Partners: map[string]string{"compensate": "x.Refund"}},
 			},
 		}
 		assertFlagged(t, c.Validate(members),
-			[]*node.Function{ship},
+			[]*sdk.Function{ship},
 			"saga: compensation x.Refund is already paired with step Charge")
 	})
 }
@@ -131,7 +129,7 @@ func TestContract_ValidateScansEveryStep(t *testing.T) {
 // correct single duplicate and a truncated cascade. Failures name
 // the steps, since a raw [shape.ContractViolation] dump renders
 // its host as a pointer address.
-func assertFlagged(t *testing.T, got []shape.ContractViolation, want []*node.Function, message string) {
+func assertFlagged(t *testing.T, got []shape.ContractViolation, want []*sdk.Function, message string) {
 	t.Helper()
 	gotSteps := make([]string, len(got))
 	for i, v := range got {
@@ -145,7 +143,7 @@ func assertFlagged(t *testing.T, got []shape.ContractViolation, want []*node.Fun
 		t.Fatalf("Validate flagged steps %v; want %v", gotSteps, wantSteps)
 	}
 	for i, w := range want {
-		if got[i].Host != node.Node(w) {
+		if got[i].Host != sdk.Node(w) {
 			t.Fatalf("violation %d names step %q but hangs off a different node", i, w.Name)
 		}
 		if got[i].Message != message {
@@ -157,8 +155,8 @@ func assertFlagged(t *testing.T, got []shape.ContractViolation, want []*node.Fun
 // hostName renders a violation host as the step name a reader can
 // match against the fixture; non-callable hosts fall back to their
 // type so the output never degrades to a pointer address.
-func hostName(n node.Node) string {
-	if fn, ok := n.(*node.Function); ok {
+func hostName(n sdk.Node) string {
+	if fn, ok := n.(*sdk.Function); ok {
 		return fn.Name
 	}
 	return fmt.Sprintf("%T", n)
@@ -168,20 +166,20 @@ func hostName(n node.Node) string {
 // step + one compensate through umbrella → resolver → validator.
 func TestContract_PipelineRoundTrip(t *testing.T) {
 	t.Parallel()
-	step := &node.Function{
+	step := &sdk.Function{
 		Name: "Charge", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(saga.Name, "step", map[string]string{
 					"compensate": "Refund",
 				}),
 			},
 		},
 	}
-	refund := &node.Function{Name: "Refund", Package: "x"}
-	pkg := &node.Package{
+	refund := &sdk.Function{Name: "Refund", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{step, refund},
+		Functions: []*sdk.Function{step, refund},
 	}
 	diags := contracttest.RunPipeline(t, saga.Contract(), pkg)
 	contracttest.AssertNoErrorDiag(t, diags)
@@ -198,31 +196,31 @@ func TestContract_PipelineRoundTrip(t *testing.T) {
 // surface.
 func TestContract_ValidatorFlagsSharedCompensate(t *testing.T) {
 	t.Parallel()
-	stepA := &node.Function{
+	stepA := &sdk.Function{
 		Name: "Charge", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(saga.Name, "step", map[string]string{
 					"compensate": "Refund",
 				}),
 			},
 		},
 	}
-	stepB := &node.Function{
+	stepB := &sdk.Function{
 		Name: "Ship", Package: "x",
-		BaseNode: node.BaseNode{
-			DirectiveList: []*directive.Directive{
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
 				contracttest.HostDirective(saga.Name, "step", map[string]string{
 					"compensate": "Refund",
 				}),
 			},
 		},
 	}
-	refund := &node.Function{Name: "Refund", Package: "x"}
-	pkg := &node.Package{
+	refund := &sdk.Function{Name: "Refund", Package: "x"}
+	pkg := &sdk.Package{
 		Name: "x", Path: "x",
-		Functions: []*node.Function{stepA, stepB, refund},
+		Functions: []*sdk.Function{stepA, stepB, refund},
 	}
 	diags := contracttest.RunPipeline(t, saga.Contract(), pkg)
-	contracttest.AssertContainsDiag(t, diags, diag.Error, "already paired")
+	contracttest.AssertContainsDiag(t, diags, sdk.SeverityError, "already paired")
 }

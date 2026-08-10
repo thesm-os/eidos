@@ -123,6 +123,47 @@ func EmbedsInterface(s *node.Struct) bool { return readBool(s, MetaEmbedsInterfa
 // embeds — Go's `any`.
 func IsEmptyInterface(i *node.Interface) bool { return readBool(i, MetaIsEmptyInterface) }
 
+// RefIsEmptyInterface reports whether t *spells* the empty interface —
+// `any`, or a written-out `interface{}`.
+//
+// The companion to [IsEmptyInterface], which answers over a
+// declaration. A generator inspecting a parameter or field holds a
+// [node.TypeRef] and cannot reach the declaration: it has no resolver
+// for a name outside the loaded packages, which is the same constraint
+// that put `go.isInterface` on the ref rather than only on the
+// interface. [IsInterface] answers over a ref; without this, its
+// emptiness counterpart did not, and that asymmetry is the surprise.
+//
+// # What it cannot see
+//
+// `go.isEmptyInterface` is stamped on the declaration and never on a
+// reference, so this answers structurally and is therefore about the
+// spelling rather than the resolved type. A *named* reference to an
+// interface that happens to declare nothing —
+//
+//	type Anything interface{}
+//	func Do(v Anything)
+//
+// — reports false, because the ref carries a package and an identifier
+// and nothing about what they resolve to. Callers that must resolve a
+// name look the declaration up and use [IsEmptyInterface]. Reported
+// this way round deliberately: a false negative leaves a generator
+// treating a value as opaque, while a false positive would have it emit
+// an unconstrained assignment against a type that constrains something.
+func RefIsEmptyInterface(t *node.TypeRef) bool {
+	if t == nil {
+		return false
+	}
+	switch t.TypeKind {
+	case node.TypeRefAnonInterface:
+		return len(t.Methods) == 0 && len(t.Embeds) == 0
+	case node.TypeRefNamed:
+		return t.Package == "" && t.Name == typeAny
+	default:
+		return false
+	}
+}
+
 // IsConstraintInterface reports whether i declares a type-set entry
 // or `~T` term, making it a generic constraint rather than a
 // method-set contract.

@@ -6,9 +6,8 @@ package shapewriter
 import (
 	"fmt"
 
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier surfaced through
@@ -36,7 +35,7 @@ const DirectiveName sdk.DirectiveName = "writer"
 // didn't run" from "annotator ran, no match".
 //
 //nolint:gochecknoglobals // package-level meta key, registered once at init.
-var Detected = meta.NewKey("shape.writer.detected", meta.BoolParser)
+var Detected = sdk.NewKey("shape.writer.detected", sdk.BoolParser)
 
 // MethodQName is the meta key the plugin stamps with the matched
 // method's fully-qualified name (`<ownerQName>.<methodName>`) on
@@ -46,47 +45,44 @@ var Detected = meta.NewKey("shape.writer.detected", meta.BoolParser)
 // must guard accordingly.
 //
 //nolint:gochecknoglobals // package-level meta key, registered once at init.
-var MethodQName = meta.NewKey("shape.writer.method", meta.StringParser)
+var MethodQName = sdk.NewKey("shape.writer.method", sdk.StringParser)
 
 // writeMethodName is the unqualified method name the heuristic
 // targets — the canonical `Write` slot on io.Writer.
 const writeMethodName = "Write"
 
-// Plugin is the writer-shape annotator. The zero value is usable.
-type Plugin struct{}
+// Plugin is the writer-shape annotator. Construct it with [New] —
+// the embedded base carries the declaration and the zero value has
+// none.
+type Plugin struct{ *sdkgo.Base }
 
-// New returns a ready-to-register plugin. Provided for parity with
-// other plugins that need constructor-time wiring.
-func New() *Plugin { return &Plugin{} }
-
-// Name returns [Name].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the shape-detector bucket so it
-// runs alongside other annotators that stamp `shape.*` metadata.
-func (*Plugin) Priority() sdk.Priority { return sdk.AnnotatorShape }
-
-// Provides returns nil — the plugin doesn't expose a capability
-// label for cross-plugin topo ordering. Downstream consumers reach
-// the shape metadata directly through the meta keys.
-func (*Plugin) Provides() []string { return nil }
-
-// Requires returns nil — the plugin has no upstream dependency.
-func (*Plugin) Requires() []string { return nil }
-
-// Directives declares the `+gen:writer` / `-gen:writer` schema with
-// the pipeline so directive validation rejects malformed uses at
-// frontend-parse time.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
-	return []sdk.DirectiveSchema{
-		sdk.NewDirective(DirectiveName).
-			On(node.KindStruct).
-			Describe("Forces (+) or suppresses (-) writer-shape detection on the host struct.").
-			Build(),
-	}
+// New returns a ready-to-register plugin.
+//
+// It ships no template tree and declares no [sdk.Output]: an
+// annotator's whole product is metadata on the node store, and it
+// renders nothing.
+//
+// It publishes no capability either. Nothing orders against this
+// plugin, because downstream consumers reach the shape metadata
+// directly through the exported meta keys rather than through the
+// topo graph — and it names no requirement, having no upstream
+// dependency of its own.
+func New() *Plugin {
+	return &Plugin{Base: sdkgo.NewPlugin(Name).
+		Version(Version).
+		// The shape-detector bucket, so it runs alongside the other
+		// annotators that stamp `shape.*` metadata.
+		Priority(sdk.AnnotatorShape).
+		// Declaring the schema is what lets directive validation
+		// reject a malformed `+gen:writer` at frontend-parse time,
+		// rather than silently ignoring it here.
+		Directives(
+			sdk.NewDirective(DirectiveName).
+				On(sdk.NodeKindStruct).
+				Describe("Forces (+) or suppresses (-) writer-shape detection on the host struct.").
+				Build(),
+		).
+		Build()}
 }
 
 // Annotate iterates the node store's struct bucket through
@@ -102,7 +98,7 @@ func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 // final detection is true, so a directive-driven match without a
 // real Write method records an empty back-link alongside
 // detected=true.
-func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *node.Struct) {
+func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *sdk.Struct) {
 	method, matched := matchSignature(s)
 	detected := matched
 	if d := s.Directive(DirectiveName); d != nil {
@@ -118,14 +114,21 @@ func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *node.Struct) {
 
 // matchSignature returns the method that matches the canonical
 // io.Writer signature, or nil + false when none does. The match
-// is exact: parameter type `[]byte`, return types `(int, error)`,
-// method name `Write`.
-func matchSignature(s *node.Struct) (*node.Method, bool) {
+// is exact: parameter type `[]byte`, non-variadic, return types
+// `(int, error)`, method name `Write`.
+func matchSignature(s *sdk.Struct) (*sdk.Method, bool) {
 	for _, m := range s.Methods {
 		if m.Name != writeMethodName || len(m.Params) != 1 || len(m.Returns) != 2 {
 			continue
 		}
-		if !isByteSlice(m.Params[0].Type) {
+		// A frontend records a variadic parameter as its *element*
+		// type, so `Write(p ...[]byte) (int, error)` arrives here
+		// carrying the same `[]byte` ref as the canonical form and is
+		// distinguishable only by the marker. Go's method set does not
+		// consider that signature an io.Writer at all, so reading the
+		// type without the marker stamps detected=true on a struct no
+		// consumer can write to.
+		if m.Params[0].Variadic || !isByteSlice(m.Params[0].Type) {
 			continue
 		}
 		if !isBuiltin(m.Returns[0].Type, "int") || !isBuiltin(m.Returns[1].Type, "error") {
@@ -141,7 +144,7 @@ func matchSignature(s *node.Struct) (*node.Method, bool) {
 // `uint8`). Callers pass refs sourced from a parsed Go method
 // signature, so the frontend invariants guarantee non-nil refs
 // and non-nil Elem on slice variants.
-func isByteSlice(ref *node.TypeRef) bool {
+func isByteSlice(ref *sdk.TypeRef) bool {
 	if !ref.IsSlice() {
 		return false
 	}
@@ -150,13 +153,13 @@ func isByteSlice(ref *node.TypeRef) bool {
 
 // isBuiltin reports whether ref is the unqualified builtin named
 // want — Named variant, no package, exactly the given Name.
-func isBuiltin(ref *node.TypeRef, want string) bool {
+func isBuiltin(ref *sdk.TypeRef, want string) bool {
 	return ref.IsBuiltin() && ref.Name == want
 }
 
 // methodQName recomposes the store's canonical method-bucket key
 // (`<ownerQName>.<methodName>`) for the matched method. Mirrors
 // the format [store.NodeView.addMethod] uses.
-func methodQName(s *node.Struct, m *node.Method) string {
+func methodQName(s *sdk.Struct, m *sdk.Method) string {
 	return fmt.Sprintf("%s.%s", s.QName(), m.Name)
 }

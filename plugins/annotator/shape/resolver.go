@@ -7,9 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -43,8 +40,8 @@ type Resolver struct {
 	// Per-Annotate scope indexes built by [Resolver.BeforeNodes]
 	// and consumed by the per-callable hooks. Reset every
 	// Annotate call.
-	methodOwner map[*node.Method]methodOwner
-	funcPkg     map[*node.Function]*node.Package
+	methodOwner map[*sdk.Method]methodOwner
+	funcPkg     map[*sdk.Function]*sdk.Package
 }
 
 // methodOwner is the per-method index entry: the owning struct or
@@ -52,7 +49,7 @@ type Resolver struct {
 // during back-stamping is O(1)).
 type methodOwner struct {
 	qname   string
-	methods []*node.Method
+	methods []*sdk.Method
 }
 
 // Resolver returns a fresh [Resolver] sharing p's contract
@@ -106,9 +103,9 @@ func (r *Resolver) Annotate(ctx *sdk.AnnotatorContext) error {
 // Annotate call from the live store so the resolver remains
 // stateless across runs.
 func (r *Resolver) BeforeNodes(ctx *sdk.AnnotatorContext) {
-	r.methodOwner = make(map[*node.Method]methodOwner)
-	r.funcPkg = make(map[*node.Function]*node.Package)
-	ctx.Reader.Packages().Each(func(pkg *node.Package) {
+	r.methodOwner = make(map[*sdk.Method]methodOwner)
+	r.funcPkg = make(map[*sdk.Function]*sdk.Package)
+	ctx.Reader.Packages().Each(func(pkg *sdk.Package) {
 		for _, s := range pkg.Structs {
 			owner := methodOwner{qname: s.QName(), methods: s.Methods}
 			for _, m := range s.Methods {
@@ -130,7 +127,7 @@ func (r *Resolver) BeforeNodes(ctx *sdk.AnnotatorContext) {
 // OnMethod resolves contract memberships and mixin sibling
 // params on m using the owning struct or interface as the
 // partner-lookup scope.
-func (r *Resolver) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
+func (r *Resolver) OnMethod(ctx *sdk.AnnotatorContext, m *sdk.Method) {
 	owner := r.methodOwner[m]
 	scope := methodScope(owner)
 	hostQName := methodQName(owner.qname, m.Name)
@@ -141,7 +138,7 @@ func (r *Resolver) OnMethod(ctx *sdk.AnnotatorContext, m *node.Method) {
 // OnFunction resolves contract memberships and mixin sibling
 // params on fn using fn's containing package's functions as the
 // partner-lookup scope.
-func (r *Resolver) OnFunction(ctx *sdk.AnnotatorContext, fn *node.Function) {
+func (r *Resolver) OnFunction(ctx *sdk.AnnotatorContext, fn *sdk.Function) {
 	scope := packageScope(r.funcPkg[fn])
 	r.resolve(ctx, fn, fn.EnsureMeta(), fn.QName(), scope)
 	r.resolveMixins(ctx, fn, fn.EnsureMeta(), scope)
@@ -176,7 +173,7 @@ func methodScope(owner methodOwner) resolveScope {
 // packageScope returns a [resolveScope] that searches pkg's
 // free-function list for a name match and returns the qualified
 // name on hit. Returns the empty-scope sentinel when pkg is nil.
-func packageScope(pkg *node.Package) resolveScope {
+func packageScope(pkg *sdk.Package) resolveScope {
 	if pkg == nil {
 		return emptyScope
 	}
@@ -215,8 +212,8 @@ func methodQName(owner, method string) string {
 // plugin attribution.
 func (r *Resolver) resolve(
 	ctx *sdk.AnnotatorContext,
-	host node.Node,
-	bag *meta.Bag,
+	host sdk.Node,
+	bag *sdk.Bag,
 	hostQName string,
 	scope resolveScope,
 ) {
@@ -240,12 +237,12 @@ func (r *Resolver) resolve(
 // resolveOne handles one contract membership on host: validate
 // its role, then resolve and back-stamp each partner reference.
 func (r *Resolver) resolveOne(
-	host node.Node,
-	bag *meta.Bag,
+	host sdk.Node,
+	bag *sdk.Bag,
 	hostQName string,
 	scope resolveScope,
 	spec Contract,
-	sink *diag.PluginSink,
+	sink *sdk.PluginSink,
 ) {
 	role, _ := ContractRoleKey(spec.Name).Get(bag)
 	if role != "" && !slices.Contains(spec.Roles, role) {
@@ -267,12 +264,12 @@ func (r *Resolver) resolveOne(
 // was stamped (partner is optional) or when the stamp already
 // holds a qname from a prior pass (idempotency).
 func (r *Resolver) resolvePartner(
-	host node.Node,
-	bag *meta.Bag,
+	host sdk.Node,
+	bag *sdk.Bag,
 	hostQName, hostRole, partnerRole string,
 	scope resolveScope,
 	spec Contract,
-	sink *diag.PluginSink,
+	sink *sdk.PluginSink,
 ) {
 	partnerKey := ContractPartnerKey(spec.Name, partnerRole)
 	raw, present := partnerKey.Get(bag)
@@ -303,10 +300,10 @@ func (r *Resolver) resolvePartner(
 // resolver via the underlying meta bag, so we iterate every
 // recorded name to discover them.
 func (*Resolver) flagUnknownPartnerRoles(
-	host node.Node,
-	bag *meta.Bag,
+	host sdk.Node,
+	bag *sdk.Bag,
 	spec Contract,
-	sink *diag.PluginSink,
+	sink *sdk.PluginSink,
 ) {
 	prefix := "shape.contract." + spec.Name + ".partner."
 	for _, name := range bag.Names() {
@@ -362,7 +359,7 @@ func (r *Resolver) backstamp(
 // qname, or nil when no such callable exists in either the
 // method-owner or function-package index. Used by [Resolver.backstamp]
 // to reach the resolved partner without re-walking the store.
-func (r *Resolver) bagByQName(qname string) *meta.Bag {
+func (r *Resolver) bagByQName(qname string) *sdk.Bag {
 	for m, owner := range r.methodOwner {
 		if methodQName(owner.qname, m.Name) == qname {
 			return m.EnsureMeta()
@@ -389,7 +386,7 @@ func isQualified(name string) bool {
 // declared [Mixin.SiblingParams] values from raw names to
 // qualified names sourced from the host's scope. Mixins without
 // SiblingParams are no-ops here.
-func (r *Resolver) resolveMixins(ctx *sdk.AnnotatorContext, host node.Node, bag *meta.Bag, scope resolveScope) {
+func (r *Resolver) resolveMixins(ctx *sdk.AnnotatorContext, host sdk.Node, bag *sdk.Bag, scope resolveScope) {
 	attached := Mixins(bag)
 	if len(attached) == 0 {
 		return
@@ -410,11 +407,11 @@ func (r *Resolver) resolveMixins(ctx *sdk.AnnotatorContext, host node.Node, bag 
 // from raw name to qname. Idempotent: skips already-qualified
 // stamps and skips when the param is absent.
 func (*Resolver) resolveMixinSibling(
-	host node.Node,
-	bag *meta.Bag,
+	host sdk.Node,
+	bag *sdk.Bag,
 	mixinName, param string,
 	scope resolveScope,
-	sink *diag.PluginSink,
+	sink *sdk.PluginSink,
 ) {
 	key := MixinParamKey(mixinName, param)
 	raw, present := key.Get(bag)

@@ -9,7 +9,7 @@ import (
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
 	builderplugin "go.thesmos.sh/eidos/plugins/generator/builder"
-	"go.thesmos.sh/eidos/store"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // TestConformance runs the language-neutral framework
@@ -43,14 +43,14 @@ func TestConformance(t *testing.T) {
 			[]plugintest.GeneratorFixture{
 				{
 					Name: "empty store",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return storefixture.New().Build()
 					},
 				},
 				{
 					Name: "package with no annotated structs",
-					BuildStore: func(t *testing.T) *store.Store {
+					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
 						return storefixture.New().
 							Package("blog", "example.com/blog").

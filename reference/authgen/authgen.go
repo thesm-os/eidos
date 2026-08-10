@@ -6,12 +6,10 @@ package authgen
 import (
 	"embed"
 	"fmt"
-	"io/fs"
-	"text/template"
 
-	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/reference/middlewaregen"
 	"go.thesmos.sh/eidos/sdk"
+	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -36,8 +34,6 @@ const Kind sdk.Kind = "authgen.entry"
 // exported so a later contributor can position against it.
 const EntryID = "authgen.entry"
 
-const langGo = "golang"
-
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
 
@@ -52,7 +48,7 @@ type Entry struct {
 	sdk.BaseEmit
 
 	// FuncRef is the middleware constructor this entry installs.
-	FuncRef *emit.Expr
+	FuncRef *sdk.Expr
 
 	// Handler names the source type, for the rendered comment.
 	Handler string
@@ -63,58 +59,27 @@ func (*Entry) Kind() sdk.Kind { return Kind }
 
 // Plugin contributes one auth entry into every middleware chain.
 //
-// It renders through its own template, so the host's chain template never encodes what authentication looks like.
-type Plugin struct{}
+// It renders through its own template, so the host's chain template
+// never encodes what authentication looks like.
+type Plugin struct{ *sdkgo.Base }
 
 // New returns a plugin instance.
-func New() *Plugin { return &Plugin{} }
-
-// Name satisfies [sdk.Plugin].
-func (*Plugin) Name() string { return Name }
-
-// Version satisfies [sdk.Versioned].
-func (*Plugin) Version() string { return Version }
-
-// Priority places the plugin in the composition bucket, one after the
-// host's foundation bucket. Requires resolves only within a bucket, so
-// the bucket is what orders this plugin against its host.
-func (*Plugin) Priority() sdk.Priority { return sdk.GeneratorComposition }
-
-// Provides publishes this contributor's label.
-func (*Plugin) Provides() []string { return []string{Capability} }
-
-// Requires reports no dependencies within its bucket.
-func (*Plugin) Requires() []string { return nil }
-
-// Templates ships the entry template.
 //
-// A contributor shipping a template needs no [sdk.FilenameProvider]:
-// templates say how a value renders, outputs say where a file lands,
-// and this plugin renders inside a file it does not own.
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-	if lang != langGo {
-		return nil, false
-	}
-	sub, err := fs.Sub(goTemplates, "templates/golang")
-	if err != nil {
-		return nil, false
-	}
-	return sub, true
+// It declares no [sdk.Output]. A contributor renders inside a file it
+// does not own: templates say how a value renders, outputs say where a
+// file lands, and this plugin only ever does the former.
+//
+// The composition bucket places it one after the host's foundation
+// bucket. Requires resolves only within a bucket, so the bucket — not
+// the capability — is what orders this plugin against its host.
+func New() *Plugin {
+	return &Plugin{Base: sdkgo.NewPlugin(Name).
+		Templates(goTemplates).
+		Version(Version).
+		Priority(sdk.GeneratorComposition).
+		Provides(Capability).
+		Build()}
 }
-
-// TemplateFuncs contributes nothing.
-//
-// The shared Go helpers (fieldType, elemType, typeArgs, …) are already
-// merged into the backend's overrideable funcmap, so a plugin that
-// returns them here re-registers names that exist. TemplateFuncs is
-// for *new* registrations and a duplicate is a Build-time
-// ErrTemplateFuncCollision — meaning two plugins that both contribute
-// the shared map cannot appear in the same pipeline. Return nil unless
-// the plugin has a helper of its own.
-func (*Plugin) TemplateFuncs(string) template.FuncMap { return nil }
-
-// TemplateOverrides replaces nothing.
-func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
 
 // Generate appends this plugin's entry to every chain in the run.
 //

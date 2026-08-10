@@ -6,9 +6,9 @@ package lookup_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/node"
 	dt "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/internal/detectortest"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/lookup"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 func TestDetector_Identity(t *testing.T) {
@@ -24,13 +24,13 @@ func TestDetector_Identity(t *testing.T) {
 
 func TestDetector_Matches(t *testing.T) {
 	t.Parallel()
-	fn := &node.Function{
+	fn := &sdk.Function{
 		Name: "Lookup", Package: "x",
-		Params: []*node.Param{
+		Params: []*sdk.Param{
 			dt.Param("ctx", dt.Ctx()),
 			dt.Param("id", dt.Named("string")),
 		},
-		Returns: node.AnonReturns(
+		Returns: sdk.AnonReturns(
 			dt.Qualified("x", "Article"),
 			dt.Qualified("x", "Meta"),
 			dt.Named("bool"),
@@ -44,28 +44,28 @@ func TestDetector_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		fn   *node.Function
+		fn   *sdk.Function
 	}{
-		{"two returns (ReaderWithBool territory)", &node.Function{
+		{"two returns (ReaderWithBool territory)", &sdk.Function{
 			Name: "Find", Package: "x",
-			Params: []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: node.AnonReturns(
+			Params: []*sdk.Param{dt.Param("id", dt.Named("string"))},
+			Returns: sdk.AnonReturns(
 				dt.Qualified("x", "Article"),
 				dt.Named("bool"),
 			),
 		}},
-		{"third return is not bool (MultiReader territory)", &node.Function{
+		{"third return is not bool (MultiReader territory)", &sdk.Function{
 			Name: "Find", Package: "x",
-			Params: []*node.Param{dt.Param("id", dt.Named("string"))},
-			Returns: node.AnonReturns(
+			Params: []*sdk.Param{dt.Param("id", dt.Named("string"))},
+			Returns: sdk.AnonReturns(
 				dt.Qualified("x", "Article"),
 				dt.Qualified("x", "Meta"),
 				dt.Err(),
 			),
 		}},
-		{"no key param", &node.Function{
+		{"no key param", &sdk.Function{
 			Name: "Find", Package: "x",
-			Returns: node.AnonReturns(
+			Returns: sdk.AnonReturns(
 				dt.Qualified("x", "Article"),
 				dt.Qualified("x", "Meta"),
 				dt.Named("bool"),
