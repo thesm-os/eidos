@@ -11,6 +11,7 @@ import (
 
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/node"
+	"go.thesmos.sh/eidos/writer"
 )
 
 // Spelling a type or a symbol: as a display string for a human, and
@@ -25,8 +26,180 @@ import (
 // imports.
 
 // ErrBadSymbol is returned by [RefForQualified] for a value that is
-// neither a bare identifier nor `<import/path>.<Symbol>`.
+// neither a bare identifier nor `<import/path>.<Symbol>`, and by
+// [ResolveQualified] for one that is neither a bare identifier nor
+// `<qualifier>.<Symbol>`.
 var ErrBadSymbol = errors.New("golang: malformed symbol reference")
+
+// ErrUnresolvedQualifier is returned by [ResolveQualified] for a
+// qualifier the file's import block does not bind.
+//
+// Distinct from [ErrBadSymbol] because the two are different
+// author-facing problems: a malformed value was typed wrong, while an
+// unresolved qualifier was typed right against imports that are not
+// there — usually a directive naming a package the file references
+// only through the directive, which is an unused import and therefore
+// unwritable.
+var ErrUnresolvedQualifier = errors.New("golang: unresolved package qualifier")
+
+// QualifierOf splits a source-level qualified identifier into its
+// package qualifier and the symbol it selects. The qualifier is empty
+// for a bare identifier.
+//
+// Split on the *first* dot, which is the opposite of what
+// [RefForQualified] does and is the difference between the two
+// notations. A qualifier in source is a single identifier and cannot
+// contain a dot, so `gopkg.in/yaml.v3.Marshal` is not source Go and
+// splitting it from the right would manufacture a qualifier that is
+// not an identifier. A directive value, which is what RefForQualified
+// reads, carries an import path instead — and a path may contain
+// dots, so that one splits from the right.
+//
+// Purely a split: `.Foo` and `Foo.` return what they hold rather than
+// an error, because a caller inspecting a name should not have to
+// handle a failure to find a dot. [ResolveQualified] does the
+// validating.
+func QualifierOf(raw string) (qualifier, symbol string) {
+	before, after, found := strings.Cut(raw, ".")
+	if !found {
+		return "", raw
+	}
+	return before, after
+}
+
+// ImportForQualifier returns the import f binds qualifier to, or nil
+// when the file's import block binds no such name.
+//
+// Explicit aliases are matched before derived ones. Two imports can
+// present the same local name — one aliased `pb`, another whose path
+// ends in `pb` — which real Go rejects but a fixture or a partially
+// loaded graph can hold; preferring the alias resolves it the way an
+// author reading the file would, rather than by slice order.
+//
+// Blank and dot imports bind no qualifier and are skipped. A dot
+// import does merge its namespace into the file's, so a bare
+// identifier in a file carrying one may name a symbol from the dotted
+// package rather than an in-package declaration — [ResolveQualified]
+// resolves the bare form against the source package regardless, which
+// is wrong for that case and right for every other. Dot imports are
+// rare enough, and discouraged enough, that guessing between the two
+// would cost more than it saves.
+func ImportForQualifier(f *node.File, qualifier string) *node.Import {
+	if f == nil || qualifier == "" {
+		return nil
+	}
+	for _, imp := range f.Imports {
+		if imp != nil && imp.Alias == qualifier && bindsAName(imp.Alias) {
+			return imp
+		}
+	}
+	for _, imp := range f.Imports {
+		if imp != nil && imp.Alias == "" && imp.LocalName() == qualifier {
+			return imp
+		}
+	}
+	return nil
+}
+
+// bindsAName reports whether an import alias introduces a qualifier.
+// Go's two special forms do not: `_` imports for the side effect and
+// `.` merges the namespace.
+//
+// The two spellings come from [writer], whose own docblock says the
+// rule outlives that package. Restating them here would be two
+// statements of one rule with no test relating them — and this side
+// reads them off a source graph while that side writes them into an
+// import block, so a disagreement would surface as a qualifier that
+// resolves on the way in and vanishes on the way out.
+func bindsAName(alias string) bool {
+	return alias != writer.BlankAlias && alias != writer.DotAlias
+}
+
+// ResolveQualified lifts a source-level type or symbol reference into
+// the reference a rendered file can use, resolving its qualifier
+// against f's import block.
+//
+// The step [RefForQualified] cannot take. That one reads everything
+// before the last dot as an import path, which is right for a
+// directive value an author wrote — an import written only to feed a
+// directive is an unused import and does not compile, so the notation
+// carries its own path. It is wrong for text read out of source,
+// where `pb.Event` means whatever `pb` was bound to *in that file*
+// and resolving it as the import path `pb` produces an ExternalRef
+// the backend rejects at render, naming neither the value nor the
+// function that mangled it.
+//
+//	pb.Event         -> whatever the file aliased pb to
+//	context.Context  -> the imported path, qualifier derived
+//	Tier             -> resolved against srcPkg
+//	string           -> a builtin, needing no import
+//
+// A bare identifier never consults f: a predeclared name renders bare
+// and anything else is taken to be declared in srcPkg, which is
+// [RefFor]'s rule and stays consistent here.
+func ResolveQualified(f *node.File, raw, srcPkg string) (emit.Ref, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("%w: empty", ErrBadSymbol)
+	}
+	if strings.HasPrefix(raw, ".") || strings.HasSuffix(raw, ".") {
+		return nil, fmt.Errorf("%w: %q", ErrBadSymbol, raw)
+	}
+	qualifier, symbol := QualifierOf(raw)
+	if strings.Contains(symbol, ".") {
+		// A selector chain, not a qualified identifier. Accepting it
+		// would render `pkg.a.B` as a type name, which parses as a
+		// field access and fails in the consumer's build.
+		return nil, fmt.Errorf("%w: %q selects through more than one qualifier", ErrBadSymbol, raw)
+	}
+	if qualifier == "" {
+		return RefFor(symbol, srcPkg), nil
+	}
+	imp := ImportForQualifier(f, qualifier)
+	if imp == nil {
+		return nil, fmt.Errorf("%w: %q in %s", ErrUnresolvedQualifier, qualifier, fileLabel(f))
+	}
+	return emit.External(imp.Path, symbol), nil
+}
+
+// FileOf returns the [node.File] within pkg that declared n, or nil
+// when pkg records no file of that name.
+//
+// The step between what a caller holds and what [ResolveQualified]
+// takes. A generator has a declaration; imports are scoped to the file
+// that wrote them, and the only link between the two is the
+// declaration's [position.Pos] — whose File is a path while
+// [node.Package.FileByName] keys on a basename. Composing that at each
+// call site is one `path.Base` away from a lookup that always misses,
+// silently: every qualifier then fails to resolve and the generator
+// reports the source as importing nothing.
+//
+// Nil for a positionless node, which is the honest answer rather than
+// a guess: a synthetic declaration has no file and therefore no
+// imports in scope.
+func FileOf(pkg *node.Package, n node.Node) *node.File {
+	if pkg == nil || n == nil {
+		return nil
+	}
+	name := n.Pos().File
+	if name == "" {
+		return nil
+	}
+	return pkg.FileByName(path.Base(name))
+}
+
+// fileLabel names the file a resolution failed against, for the
+// message. A nil file is reported as such rather than as an empty
+// name: resolving against no file at all is a different caller
+// mistake from resolving against one whose imports fall short.
+func fileLabel(f *node.File) string {
+	if f == nil {
+		return "no file"
+	}
+	if f.Name != "" {
+		return f.Name
+	}
+	return "an unnamed file"
+}
 
 // QName returns the fully-qualified spelling of a type reference —
 // `example.com/store.User`, or the bare name for a builtin or an

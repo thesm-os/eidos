@@ -28,6 +28,22 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`lang/golang` resolves a source-level qualifier against the file that wrote
+  the import.** `QualifierOf`, `ImportForQualifier`, `FileOf` and
+  `ResolveQualified` answer what `RefForQualified` cannot: that one reads
+  everything before the last dot as an import path, which is right for a
+  directive value an author wrote and wrong for text read out of source, where
+  `pb.Event` means whatever `pb` was bound to *in that file*. Resolved the old
+  way it produces an `ExternalRef` whose package is `pb`, which the backend
+  rejects at render, naming neither the value nor the code that mangled it.
+
+  `QualifierOf` splits on the first dot where `RefForQualified` splits on the
+  last — a Go qualifier is one identifier and cannot contain a dot, while an
+  import path can. `FileOf` is the step between what a generator holds (a
+  declaration) and what resolution takes (a file): `node.Package.FileByName`
+  keys on a basename and `position.Pos` carries a path, so a lookup composed at
+  the call site is one `path.Base` from always missing, silently.
+
 - **`eidostest/storefixture` can build the three shapes a Go frontend produces
   and the fixture could not spell.** Each was a hole in the harness rather than
   a missing convenience: a test written against a shape no run produces asserts
