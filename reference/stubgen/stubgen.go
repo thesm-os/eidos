@@ -244,6 +244,24 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		if !iface.HasPositiveDirective(DirectiveName) {
 			continue
 		}
+		// Declined before the walk, because a constraint's embeds are
+		// terms constraining its type set rather than types whose
+		// methods it takes on. Walking one asks the resolver for
+		// `int`, misses, and reports an embed the run did not load —
+		// telling the author to widen a run for a declaration that has
+		// no method set to double in the first place.
+		//
+		// Through the frontend's stamp rather than [sdk.IsConstraint]:
+		// `interface{ int | int64 }` and `interface{ error }` are one
+		// shape in the model, and only the frontend holds the type
+		// information that separates them.
+		if refconv.IsConstraintInterface(iface) {
+			ctx.Diag.Errorf(iface.Pos(),
+				"%s: %q carries +gen:%s but is a generic constraint, not a method-set "+
+					"contract; there is nothing to double",
+				Name, iface.QName(), DirectiveName)
+			continue
+		}
 		// Resolved rather than declared: an interface composed
 		// purely of embeds declares nothing of its own, and reading
 		// Methods alone both rejects it here and — for a partly

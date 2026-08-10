@@ -205,7 +205,22 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		}
 		c := sdk.NewProvenance(Name)
 		pkg := c.Package(srcPkg.Name+TestPackageSuffix, srcPkg.Path+TestPackageSuffix)
+		emitted := 0
 		for _, si := range srcGroups[path] {
+			// Declined before the walk. A constraint's embeds are
+			// terms constraining its type set, so walking one asks the
+			// resolver for `int`, misses, and reports an embed the run
+			// did not load — for a declaration with no method set to
+			// mock. Through the frontend's stamp because the model
+			// cannot tell `interface{ int | int64 }` from
+			// `interface{ error }`.
+			if refconv.IsConstraintInterface(si) {
+				ctx.Diag.Errorf(si.Pos(),
+					"%s: %q carries +gen:%s but is a generic constraint, not a "+
+						"method-set contract; there is nothing to mock",
+					Name, si.QName(), DirectiveName)
+				continue
+			}
 			// Resolved rather than declared: a mock built from the
 			// declared methods alone is missing whatever the
 			// interface embeds, and does not satisfy the interface
@@ -218,6 +233,15 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 					Name, si.QName(), name, issue.Reason)
 			}
 			p.emitForSourceInterface(pkg, si, sdk.External(si.Package, si.Name), set.Methods)
+			emitted++
+		}
+		// Counted rather than assumed. Every interface in a package can
+		// be declined — a package of constraints is the ordinary case —
+		// and adding the package anyway renders a file carrying nothing
+		// but the generated-by header, which reads as a generator that
+		// ran and failed rather than one that had nothing to do.
+		if emitted == 0 {
+			continue
 		}
 		if err := buildAndAdd(ctx, pkg); err != nil {
 			return err

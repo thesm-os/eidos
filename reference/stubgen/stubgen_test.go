@@ -12,9 +12,12 @@ import (
 	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/opt"
+	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
+	langgo "go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/reference/stubgen"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -668,5 +671,68 @@ func TestRendered_CompanionProvesTheDouble(t *testing.T) {
 		// the parameter and failed at run time.
 		src.InFunc(t, "TestStoreStubRecordsPut").
 			AssertContains(t, "func(_ string, _ ...string) error")
+	})
+}
+
+// A generic constraint carries terms constraining its type set where
+// an ordinary interface carries embeds. Walking one asks the resolver
+// for `int`, misses, and reports an embed the run did not load — so
+// the author is told to widen a run for a declaration that has no
+// method set to double.
+func TestGenerate_DeclinesAGenericConstraint(t *testing.T) {
+	t.Parallel()
+
+	constraintStore := func(t *testing.T) *sdk.Store {
+		t.Helper()
+		b := storefixture.New().
+			Package("cfg", "example.com/cfg").
+			Interface("Numeric", func(i *storefixture.InterfaceBuilder) {
+				i.Pos(position.At("cfg/types.go", 1, 1))
+				i.Directive(storefixture.Directive(stubgen.DirectiveName))
+				i.Embed(storefixture.Named("int"))
+				i.Embed(storefixture.Named("int64"))
+				// The frontend's stamp, which is the only thing that
+				// separates this from `interface{ error }` — one shape
+				// in the model, and only one of them is a type set.
+				langgo.MetaIsConstraintInterface.Set(
+					i.Node().EnsureMeta(), true, "golang")
+			})
+		return b.Build()
+	}
+
+	t.Run("reports the constraint rather than its terms", func(t *testing.T) {
+		t.Parallel()
+		s := constraintStore(t)
+		sink := diag.New()
+		if err := stubgen.New().Generate(&plugin.GeneratorContext{
+			Store: s, Reader: store.NewReader(s), Diag: sink,
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		got := sink.Diagnostics()
+		if len(got) != 1 {
+			t.Fatalf("diagnostics = %d, want one", len(got))
+		}
+		if !strings.Contains(got[0].Message, "generic constraint") {
+			t.Fatalf("message = %q, want it to name the constraint", got[0].Message)
+		}
+		// The failure this replaces: `embeds "int", which not loaded by
+		// this run`, sending the author after a package they do not need.
+		if strings.Contains(got[0].Message, "not loaded") {
+			t.Fatalf("message = %q, want no embed complaint", got[0].Message)
+		}
+	})
+
+	t.Run("emits nothing for it", func(t *testing.T) {
+		t.Parallel()
+		s := constraintStore(t)
+		if err := stubgen.New().Generate(&plugin.GeneratorContext{
+			Store: s, Reader: store.NewReader(s), Diag: diag.New(),
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		if got := s.Emit().PendingOriginSlots(); len(got) != 0 {
+			t.Fatalf("queued %d value(s) for a constraint", len(got))
+		}
 	})
 }

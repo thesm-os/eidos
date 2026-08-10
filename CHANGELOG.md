@@ -125,6 +125,19 @@ omitted unless they change what a caller can rely on.
   `ErrUnsupportedRef` from the backend's render site, naming the file and the
   type it could not spell.
 
+- **`reference/stubgen` and `reference/mockgen` declined nothing for a generic
+  constraint.** An interface annotated `+gen:stub` that is `interface{ int |
+  int64 }` was walked as a method-set contract: the resolver was asked for
+  `int`, missed, and the plugin reported an embed the run did not load — telling
+  the author to widen a run for a declaration that has no method set to double.
+  Both now decline it through `lang/golang.IsConstraintInterface`, which reads
+  the stamp the Go frontend sets, and say so.
+
+  `mockgen` also stopped emitting an empty package when every interface in a
+  source package is declined. Adding it anyway rendered a file carrying nothing
+  but the generated-by header, which reads as a generator that ran and failed
+  rather than one that had nothing to do.
+
 - **`lang/golang`: a variadic method matched a standard-library shape.** A
   frontend records a variadic parameter as its *element* type with `Variadic`
   set, so `Write(p ...[]byte)` arrives carrying exactly the `[]byte` that

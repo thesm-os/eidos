@@ -6,13 +6,17 @@ package mockgen_test
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/core/diag"
+	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
+	langgo "go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/reference/mockgen"
 	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/sdk"
@@ -511,4 +515,65 @@ func generateMocks(t *testing.T, s *sdk.Store) map[string]*sdk.EmitStruct {
 		out[st.Name] = st
 	}
 	return out
+}
+
+// A generic constraint carries terms constraining its type set where
+// an ordinary interface carries embeds. Walking one asks the resolver
+// for `int` and reports an embed the run did not load, sending the
+// author after a package they do not need for a declaration with no
+// method set to mock.
+func TestGenerate_DeclinesAGenericConstraint(t *testing.T) {
+	t.Parallel()
+
+	constraintStore := func(t *testing.T) *sdk.Store {
+		t.Helper()
+		return storefixture.New().
+			Package("cfg", "example.com/cfg").
+			Interface("Numeric", func(i *storefixture.InterfaceBuilder) {
+				i.Pos(position.At("cfg/types.go", 1, 1))
+				i.Directive(storefixture.Directive(mockgen.DirectiveName))
+				i.Embed(storefixture.Named("int"))
+				i.Embed(storefixture.Named("int64"))
+				// The frontend's stamp. `interface{ int | int64 }` and
+				// `interface{ error }` are one shape in the model, and
+				// only the frontend holds what separates them.
+				langgo.MetaIsConstraintInterface.Set(
+					i.Node().EnsureMeta(), true, "golang")
+			}).
+			Build()
+	}
+
+	t.Run("reports the constraint rather than its terms", func(t *testing.T) {
+		t.Parallel()
+		s := constraintStore(t)
+		sink := diag.New()
+		if err := mockgen.New().Generate(&plugin.GeneratorContext{
+			Store: s, Reader: store.NewReader(s), Diag: sink,
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		got := sink.Diagnostics()
+		if len(got) != 1 {
+			t.Fatalf("diagnostics = %d, want one", len(got))
+		}
+		if !strings.Contains(got[0].Message, "generic constraint") {
+			t.Fatalf("message = %q, want it to name the constraint", got[0].Message)
+		}
+		if strings.Contains(got[0].Message, "not loaded") {
+			t.Fatalf("message = %q, want no embed complaint", got[0].Message)
+		}
+	})
+
+	t.Run("emits nothing for it", func(t *testing.T) {
+		t.Parallel()
+		s := constraintStore(t)
+		if err := mockgen.New().Generate(&plugin.GeneratorContext{
+			Store: s, Reader: store.NewReader(s), Diag: diag.New(),
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		if got := s.Emit().Packages().Len(); got != 0 {
+			t.Fatalf("built %d package(s) for a constraint", got)
+		}
+	})
 }
