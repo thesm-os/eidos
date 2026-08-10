@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	go.thesmos.sh/eidos v1.13.2
-	go.thesmos.sh/eidos/eidostest v1.13.1
+	go.thesmos.sh/eidos/eidostest v1.13.2
 )
 
 replace (
