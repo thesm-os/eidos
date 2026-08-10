@@ -68,13 +68,44 @@ is this file landing here" before reaching for `explain`.
 
 ### `eidos explain`
 
-Runs the pipeline and reports, per generated file, which plugins
-contributed to it and which precedence layer supplied each routed
-field — layout, package, directory, filename.
+Reports how one declaration was routed: the directives on it, the
+metadata annotators stamped, and which plugin put what into which
+file.
 
-Same flags as `check`. This is the tool for "why did this file land
-*there*", and it reads the same `ResolvedLayout` block the manifest
-records.
+```
+eidos explain <selector>
+```
+
+The selector is positional and qualified — `blog.Article`, not a
+package pattern. Suffixes narrow it: `blog.Article:methods`,
+`blog.Article#shape.writer`.
+
+```
+$ eidos explain blog.Article
+Subject:    example.com/demoproject/blog.Article (struct)
+Position:   blog/article.go:25:6
+Directives:
+  +gen:repo
+  +gen:builder
+  +gen:register
+Metadata:
+  shape.writer.detected = false
+Outputs:
+  builder:
+    blog/article_builder.go        slot:top (builder.type)
+  repogen: (2 contributions)
+    blog/article_repo.go           ArticleRepo (struct)
+    blog/article_repo.go           ArticleRepository (interface)
+```
+
+It also accepts the routing flags — `-o`, `-p`, `-layout`,
+`-output-dir`, `-target` — so you can ask where a declaration *would*
+land under an override without applying it.
+
+This is the tool for "why did this file land there". Passing a package
+pattern instead of a selector reports `resolves to no source or emit
+entity`, which reads like an empty project and is really a usage
+error.
 
 ### `eidos prune`
 

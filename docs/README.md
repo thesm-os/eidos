@@ -16,9 +16,15 @@ code from it.
 | [explanation/determinism.md](explanation/determinism.md) | Why two runs over the same input produce byte-identical files |
 | [plugin/routing.md](plugin/routing.md) | Where generated files land, and how to move them |
 
-The shortest useful path: annotate a type, run `eidos run`, read the
-output, then `eidos explain` when a file lands somewhere you did not
-expect.
+New here? **[tutorials/first-generated-file.md](tutorials/first-generated-file.md)**
+walks the whole loop in twenty minutes — annotate a type, generate,
+break it on purpose to watch the drift gate catch you, delete an
+output cleanly.
+
+| Task | How-to |
+|---|---|
+| Move generated files somewhere else | [how-to/route-generated-output.md](how-to/route-generated-output.md) |
+| Delete output you no longer want | [how-to/remove-stale-output.md](how-to/remove-stale-output.md) |
 
 ## Extending eidos
 
@@ -55,5 +61,6 @@ one you want.
 - [README.md](../README.md) — what eidos is, and whether you want it.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — working on eidos itself.
 - [CHANGELOG.md](../CHANGELOG.md) — what changed.
+- [adr/](adr/README.md) — why the architecture is the way it is.
 - [`sdk`](../sdk/doc.go) — the plugin-author façade, including what it
   deliberately does not re-export and why.
