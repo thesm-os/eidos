@@ -199,10 +199,20 @@ func (r MethodSetResult) From(name string) *Embed {
 // # Constraint interfaces
 //
 // An interface used as a generic bound carries union terms in
-// [Interface.Embeds], and those are not interfaces — they report as
-// [ReasonNonInterface]. Callers walking a possibly-constraint
-// interface check [IsConstraint] first; a constraint has no method
-// set to resolve.
+// [Interface.Embeds], and those are not embeds at all. A term the
+// model rules out as an interface — a slice, a map, a func — is
+// skipped silently: it never claimed to contribute methods, so it
+// cannot have failed to. A Named term is indistinguishable here from
+// an interface embed, so one that resolves to a declaration reports
+// [ReasonNonInterface] and one that resolves to nothing reports
+// [ReasonUnresolved] — honest, since which it is cannot be known
+// from the model.
+//
+// Callers walking a possibly-constraint interface check for one
+// first; a constraint has no method set to resolve. For a Go
+// pipeline that check is `lang/golang.IsConstraintInterface`, which
+// reads the frontend's stamp; [IsConstraint] is the structural
+// fallback and sees only the composite half.
 //
 // A nil resolver walks nothing and reports every embed as
 // [ReasonUnresolved], which is the honest answer for a caller that
@@ -247,6 +257,20 @@ func collect(
 		if e == nil || e.Type == nil {
 			continue
 		}
+		// Before the resolver, because the shape already answers it.
+		// A slice, map, func or anonymous struct in embed position is
+		// a term constraining the host's type set, not a type whose
+		// methods it takes on — and asking a resolver instead returns
+		// a miss, which the switch below cannot tell from an embed
+		// this run failed to load. That reported `[]byte` as "not
+		// loaded by this run", under a name [EmbedName] renders as the
+		// empty string.
+		//
+		// Not an Issue: a term that was never an embed did not fail to
+		// be one. See [TypeRef.MayDenoteInterface].
+		if !e.Type.MayDenoteInterface() {
+			continue
+		}
 		if len(e.Type.TypeArgs) > 0 {
 			out.Issues = append(out.Issues, MethodSetIssue{Embed: e, Reason: ReasonGeneric})
 			continue
@@ -284,12 +308,28 @@ func collect(
 // than interfaces. Frontends that can tell definitively stamp their
 // own metadata; this is the model-level answer available without
 // one.
+//
+// # What the structural answer cannot see
+//
+// Only the composite half. A term the model rules out as an
+// interface — `~[]byte`, a func, a map — is evidence; a Named term is
+// not, because `int` and `error` are the same shape here and only one
+// of them is a type set. `interface{ error }` therefore reads as an
+// ordinary interface, which is what it is, and `interface{ ~int }`
+// reads as one too, which it is not.
+//
+// That second case is the cost of being right about the first: this
+// used to key on [TypeRef.IsBuiltin], which caught `~int` and also
+// classified every `interface{ error }` in the tree as a generic
+// constraint. A Go pipeline should ask the frontend's stamp through
+// `lang/golang.IsConstraintInterface` and reach here only for a graph
+// no Go frontend produced.
 func IsConstraint(i *Interface) bool {
 	if i == nil || len(i.Methods) > 0 {
 		return false
 	}
 	for _, e := range i.Embeds {
-		if e != nil && e.Type != nil && e.Type.IsBuiltin() {
+		if e != nil && e.Type != nil && !e.Type.MayDenoteInterface() {
 			return true
 		}
 	}

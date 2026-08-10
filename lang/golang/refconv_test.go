@@ -323,3 +323,54 @@ func TestFromNode_AnonStruct(t *testing.T) {
 		}
 	})
 }
+
+// The lift is total. Eight accessors in this package answer nil for
+// "not applicable", four lifts here read a field that may be absent,
+// and every crossing between them used to panic — which is why the
+// first real consumer wrote a private guard rather than using them.
+func TestFromNodeIsTotal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a nil reference lifts to a nil ref", func(t *testing.T) {
+		t.Parallel()
+		if got := refconv.FromNode(nil); got != nil {
+			t.Fatalf("FromNode(nil) = %v, want nil", got)
+		}
+	})
+
+	t.Run("composes with the accessors that answer nil", func(t *testing.T) {
+		t.Parallel()
+		// Each of these is the natural pairing a generator writes, and
+		// each panicked before: the accessor's "not applicable" answer
+		// was an argument the lift refused.
+		notAPointer := namedTypeRef("x", "User")
+		for name, got := range map[string]emit.Ref{
+			"PointerElem on a non-pointer": refconv.FromNode(refconv.PointerElem(notAPointer)),
+			"SliceElem on a non-slice":     refconv.FromNode(refconv.SliceElem(notAPointer)),
+			"MapKey on a non-map":          refconv.FromNode(refconv.MapKey(notAPointer)),
+			"IteratorElem on a non-seq":    refconv.FromNode(refconv.IteratorElem(notAPointer)),
+			"IteratorSecond on a non-seq":  refconv.FromNode(refconv.IteratorSecond(notAPointer)),
+		} {
+			if got != nil {
+				t.Fatalf("%s = %v, want nil", name, got)
+			}
+		}
+	})
+
+	t.Run("the emit-side lifts are total too", func(t *testing.T) {
+		t.Parallel()
+		// They read the field directly, so a type that carries none —
+		// or a field the model recorded without one — reached the lift
+		// as nil. An untyped field is reachable: a fixture builds one.
+		notASlice := namedTypeRef("x", "User")
+		if got := refconv.ElemType(notASlice); got != nil {
+			t.Fatalf("ElemType on a non-slice = %v, want nil", got)
+		}
+		if got := refconv.MapKeyType(notASlice); got != nil {
+			t.Fatalf("MapKeyType on a non-map = %v, want nil", got)
+		}
+		if got := refconv.FieldType(&node.Field{Name: "Untyped"}); got != nil {
+			t.Fatalf("FieldType on an untyped field = %v, want nil", got)
+		}
+	})
+}

@@ -12,13 +12,29 @@ import (
 // refs map to [emit.Builtin] and [emit.External]; composites map to
 // their corresponding emit constructors. Type parameters render as
 // unqualified identifiers — sufficient for the in-method context
-// most plugins emit. The frontend guarantees non-nil refs for
-// every parsed type, so the function does not guard against a nil
-// receiver.
+// most plugins emit.
+//
+// A nil r returns a nil ref rather than panicking. The frontend does
+// guarantee non-nil refs for every type it parsed, but that covers
+// only refs a frontend produced — and this package manufactures nils
+// of its own to mean *not applicable*: [PointerElem] on a non-pointer,
+// [IteratorElem] on a method returning no sequence, [MapKey] on a
+// slice, and five more. Every one of those is a natural argument
+// here, and refusing them made the composition a panic inside a
+// generator with no position attached.
+//
+// Propagating instead is the smaller failure in both directions. A
+// caller that branches on absence — which is what a caller asking
+// `IteratorElem` is doing — gets the nil it is testing for. One that
+// does not gets `ErrUnsupportedRef` from the backend's render site,
+// naming the file and the type it could not spell.
 //
 // The produced emit ref's OriginNode points back at r so backends
 // and downstream consumers can reach the source-side meta.
 func FromNode(r *node.TypeRef) emit.Ref {
+	if r == nil {
+		return nil
+	}
 	ref := liftFromNode(r)
 	setOrigin(ref, r)
 	return ref

@@ -328,14 +328,40 @@ func TestIsConstraint(t *testing.T) {
 		}
 	})
 
-	t.Run("an interface embedding builtin terms is a constraint", func(t *testing.T) {
+	t.Run("an interface embedding a composite term is a constraint", func(t *testing.T) {
 		t.Parallel()
 		// A constraint has no method set to double; a generator
 		// treating one as an interface emits a type asserting nothing.
-		c := &node.Interface{Name: "Numeric", Package: "x"}
-		c.Embeds = []*node.Embed{{Type: namedRef("", "int")}, {Type: namedRef("", "int64")}}
+		// A slice can never be an interface, so it is evidence whatever
+		// language produced the graph.
+		c := &node.Interface{Name: "Bytes", Package: "x"}
+		c.Embeds = []*node.Embed{{Type: sliceRef(namedRef("", "byte"))}}
 		if !node.IsConstraint(c) {
-			t.Fatalf("a type-set interface must read as a constraint")
+			t.Fatalf("a composite type-set term must read as a constraint")
+		}
+	})
+
+	t.Run("a named term is not structural evidence either way", func(t *testing.T) {
+		t.Parallel()
+		// `interface{ int | int64 }` is a constraint and
+		// `interface{ error }` is not, and the two are the same shape
+		// here — a Named ref with no package. Answering from the shape
+		// means picking one to be wrong about, and this used to pick
+		// the second: every `interface{ error }` read as a constraint.
+		//
+		// A Go pipeline asks `lang/golang.IsConstraintInterface`, which
+		// reads the stamp the frontend sets from type information. This
+		// is the fallback for a graph no Go frontend produced.
+		numeric := &node.Interface{Name: "Numeric", Package: "x"}
+		numeric.Embeds = []*node.Embed{{Type: namedRef("", "int")}, {Type: namedRef("", "int64")}}
+		if node.IsConstraint(numeric) {
+			t.Fatalf("a named term must not be read as structural evidence")
+		}
+
+		errIface := &node.Interface{Name: "Wrapped", Package: "x"}
+		errIface.Embeds = []*node.Embed{{Type: namedRef("", "error")}}
+		if node.IsConstraint(errIface) {
+			t.Fatalf("interface{ error } is an ordinary interface, not a constraint")
 		}
 	})
 
@@ -489,6 +515,85 @@ func TestMethodSet_Attribution(t *testing.T) {
 		got := node.MethodSet(ifaceOf("Store", "Get"), nil)
 		if got.From("Missing") != nil || got.ByName("Missing") != nil {
 			t.Fatal("a method the set does not have was reported")
+		}
+	})
+}
+
+// A term constraining an interface's type set is not an embed that
+// failed to contribute methods — it is not an embed. Reporting one as
+// an Issue sends a generator's diagnostic after a package the author
+// never needed to load.
+func TestMethodSet_TypeSetTerms(t *testing.T) {
+	t.Parallel()
+
+	// missing resolves nothing, standing in for a run narrower than
+	// the graph it walks.
+	missing := func(*node.TypeRef) (*node.Interface, bool) { return nil, false }
+
+	t.Run("skips a composite term rather than reporting it", func(t *testing.T) {
+		t.Parallel()
+		// `[]byte` reached the resolver, missed, and came back as "not
+		// loaded by this run" — under a name EmbedName renders empty,
+		// so the diagnostic named nothing at all.
+		i := &node.Interface{Name: "Termed", Package: "x", Embeds: []*node.Embed{
+			{Type: sliceRef(namedRef("", "byte"))},
+		}}
+		if got := node.MethodSet(i, missing); len(got.Issues) != 0 {
+			t.Fatalf("Issues = %+v, want none for a type-set term", got.Issues)
+		}
+	})
+
+	t.Run("skips every composite variant", func(t *testing.T) {
+		t.Parallel()
+		// None of these can name an interface in any language this
+		// model describes, so none of them is a resolver's business.
+		for _, ref := range []*node.TypeRef{
+			sliceRef(namedRef("", "byte")),
+			{TypeKind: node.TypeRefMap, MapKey: namedRef("", "string"), MapValue: namedRef("", "int")},
+			{TypeKind: node.TypeRefFunc},
+			{TypeKind: node.TypeRefArray, Elem: namedRef("", "byte")},
+			{TypeKind: node.TypeRefPointer, Elem: namedRef("x", "T")},
+			{TypeKind: node.TypeRefAnonStruct},
+			{TypeKind: node.TypeRefTypeParam, Name: "T"},
+		} {
+			i := &node.Interface{Name: "Termed", Package: "x", Embeds: []*node.Embed{{Type: ref}}}
+			if got := node.MethodSet(i, missing); len(got.Issues) != 0 {
+				t.Fatalf("%v reported %+v", ref.TypeKind, got.Issues)
+			}
+		}
+	})
+
+	t.Run("still reports a named embed the run did not load", func(t *testing.T) {
+		t.Parallel()
+		// The half the model cannot answer: an unloaded `MyReader` and
+		// an unloaded type-set term are the same shape here, and
+		// silence would hide a genuinely incomplete method set.
+		i := &node.Interface{Name: "Composed", Package: "x", Embeds: []*node.Embed{
+			{Type: namedRef("io", "Reader")},
+		}}
+		got := node.MethodSet(i, missing)
+		if len(got.Issues) != 1 || got.Issues[0].Reason != node.ReasonUnresolved {
+			t.Fatalf("Issues = %+v, want one unresolved", got.Issues)
+		}
+	})
+
+	t.Run("does not consult the resolver for a composite term", func(t *testing.T) {
+		t.Parallel()
+		// The ordering is the fix: asking the resolver first is what
+		// turned a shape question into a miss the switch could not tell
+		// from a failed embed.
+		var asked []node.TypeRefKind
+		spy := func(t *node.TypeRef) (*node.Interface, bool) {
+			asked = append(asked, t.TypeKind)
+			return nil, false
+		}
+		i := &node.Interface{Name: "Termed", Package: "x", Embeds: []*node.Embed{
+			{Type: sliceRef(namedRef("", "byte"))},
+			{Type: namedRef("io", "Reader")},
+		}}
+		node.MethodSet(i, spy)
+		if len(asked) != 1 || asked[0] != node.TypeRefNamed {
+			t.Fatalf("resolver saw %v, want only the named embed", asked)
 		}
 	})
 }

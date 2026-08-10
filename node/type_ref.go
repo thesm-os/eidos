@@ -201,6 +201,36 @@ func (r *TypeRef) IsAnonStruct() bool { return r.TypeKind == TypeRefAnonStruct }
 // interface type expression.
 func (r *TypeRef) IsAnonInterface() bool { return r.TypeKind == TypeRefAnonInterface }
 
+// MayDenoteInterface reports whether the ref could name an interface.
+//
+// Two variants can: a Named ref, which resolves to whatever the
+// declaration is, and an anonymous interface expression. Every other
+// variant — pointer, slice, array, map, func, anonymous struct, type
+// parameter — is a composite the model itself rules out, in any
+// language it describes.
+//
+// # Why a caller wants this
+//
+// An interface's Embeds list holds two unrelated things: types whose
+// methods it takes on, and terms constraining its type set. Nothing
+// in the model separates them, so a walker has to. The composite half
+// is decidable here, without a resolver and without knowing the
+// language, which is what stops a walker asking a resolver a question
+// the shape already answered — and then reporting the resolver's miss
+// as a failed embed.
+//
+// It is deliberately *not* [TypeRef.IsBuiltin]: `error` and `any` are
+// builtin and are interfaces, so `interface{ error }` is a genuine
+// embed. A Named ref stays ambiguous here on purpose; telling `int`
+// from `error` from an unloaded `MyReader` needs type information the
+// model does not carry, and belongs to whichever frontend has it.
+func (r *TypeRef) MayDenoteInterface() bool {
+	if r == nil {
+		return false
+	}
+	return r.TypeKind == TypeRefNamed || r.TypeKind == TypeRefAnonInterface
+}
+
 // Equal reports whether r and other refer to the same type
 // structurally — same kind, same package + name + type args (for
 // Named refs), same recursive shape (for composite refs), same

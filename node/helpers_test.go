@@ -32,6 +32,12 @@ func namedRef(pkg, name string) *node.TypeRef {
 	return &node.TypeRef{TypeKind: node.TypeRefNamed, Package: pkg, Name: name}
 }
 
+// sliceRef builds a Slice TypeRef over elem. Used by tests that need a
+// composite the model rules out as an interface.
+func sliceRef(elem *node.TypeRef) *node.TypeRef {
+	return &node.TypeRef{TypeKind: node.TypeRefSlice, Elem: elem}
+}
+
 // constraintFrom builds a [node.Constraint] embedding refs as named
 // bounds. Used by tests that need a quick generic-constraint instance
 // without manual struct-literal noise.

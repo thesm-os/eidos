@@ -554,10 +554,19 @@ func collectMethods(
 			// An interface's own Methods are what it declared, not what
 			// it has; its embeds contribute too, and a struct embedding
 			// it gets the whole set.
-			flat, probs := MethodSet(iface, r)
-			*problems = append(*problems, probs...)
-			for _, im := range flat {
-				record(im.Method)
+			//
+			// Through [node.MethodSet] rather than a walk of this
+			// package's own. Interface embedding has no shadowing and no
+			// depth rule — a method set is a set — so the second walker
+			// this package used to carry shared nothing with the
+			// promotion rules around it except a cycle guard, and the
+			// two guards disagreed about a type-set term.
+			set := node.MethodSet(iface, interfaceResolver(r))
+			for _, iss := range set.Issues {
+				*problems = append(*problems, fromIssue(iface, iss))
+			}
+			for _, m := range set.Methods {
+				record(m)
 			}
 			continue
 		}
@@ -574,127 +583,55 @@ func collectMethods(
 	}
 }
 
-// InterfaceMethod is one method in an interface's full set, with the
-// embed that contributed it.
-type InterfaceMethod struct {
-	// Method is the declaration itself.
-	Method *node.Method
-
-	// From is the embed the source wrote to reach it, empty for a
-	// method the interface declared inline. A method reached through
-	// a chain of embeds is attributed to the first hop rather than
-	// to whichever interface finally declared it, because the first
-	// hop is the one the author can see in their own file.
-	From string
-}
-
-// MethodSet returns an interface's full method set, flattened
-// through its embeds, and every embed the walk could not complete.
+// interfaceResolver adapts this package's [Resolver] to the callback
+// [node.MethodSet] takes.
 //
-// A generator reading `iface.Methods` reads what the source typed. A
-// double missing a method inherited through an embed does not
-// satisfy the interface it doubles, and a suite missing one asserts
-// about a different interface than the one a consumer implements.
-//
-// Embedded methods come first, depth-first in the order the source
-// embeds them, then the interface's own — which is how the source
-// reads, and what keeps generated ordering stable as an embed gains
-// a method.
-//
-// # Why flatten rather than compose
-//
-// Generated output could mirror the source by embedding whatever was
-// generated for the embedded interfaces. It cannot: an embedded
-// interface need not carry the directive, so its output may not
-// exist. Embedding is a fact about the source rather than an opt-in,
-// so the method set is copied.
-//
-// # Duplicates
-//
-// Go admits overlapping embedded method sets only where the
-// signatures agree, so a repeat is the same method reached twice and
-// the first arrival is as good as any. There is no shadowing rule to
-// apply, which is the one way this differs from [PromotedMethods].
-func MethodSet(i *node.Interface, r Resolver) ([]InterfaceMethod, []UnresolvedEmbed) {
-	if i == nil {
-		return nil, nil
-	}
-	w := &ifaceWalk{
-		resolver: r,
-		seen:     map[string]struct{}{},
-		visited:  map[string]struct{}{},
-	}
-	w.collect(i, "", 0)
-	return w.out, w.problems
-}
-
-// ifaceWalk carries the state one [MethodSet] shares across its
-// recursion, so the recursive step takes what varies and nothing
-// else.
-type ifaceWalk struct {
-	resolver Resolver
-	seen     map[string]struct{}
-	visited  map[string]struct{}
-	out      []InterfaceMethod
-	problems []UnresolvedEmbed
-}
-
-// collect appends host's method set, recursing into its embeds first.
-//
-// from names the embed the caller is collecting on behalf of, so a
-// method reached through a chain is attributed to the embed the
-// source actually wrote.
-func (w *ifaceWalk) collect(host *node.Interface, from string, depth int) {
-	// Guards a cycle. Illegal in Go and unreachable from a real
-	// frontend, but a malformed graph should stop the walk rather
-	// than the run.
-	if host.QName() != "" {
-		if _, looping := w.visited[host.QName()]; looping {
-			return
+// The model's walk asks a narrower question than a general resolver
+// answers — "is this an interface, and did you find it" — and the two
+// nil-and-false combinations it distinguishes are what let it tell a
+// struct in embed position from a package this run never read.
+func interfaceResolver(r Resolver) node.InterfaceResolver {
+	return func(t *node.TypeRef) (*node.Interface, bool) {
+		if r == nil {
+			return nil, false
 		}
-		w.visited[host.QName()] = struct{}{}
-	}
-
-	for _, e := range host.Embeds {
-		w.follow(host, e, from, depth)
-	}
-
-	for _, m := range host.Methods {
-		if m == nil || m.Name == "" {
-			continue
+		decl, found := r.Resolve(t)
+		if !found {
+			return nil, false
 		}
-		if _, dup := w.seen[m.Name]; dup {
-			continue
+		iface, isIface := decl.(*node.Interface)
+		if !isIface || iface == nil {
+			// Found, and not an interface: the model's walk reads the
+			// pair as ReasonNonInterface, which is a defect in the
+			// source rather than a narrow run.
+			return nil, true
 		}
-		w.seen[m.Name] = struct{}{}
-		w.out = append(w.out, InterfaceMethod{Method: m, From: from})
+		return iface, true
 	}
 }
 
-// follow resolves one embed and recurses into it.
-func (w *ifaceWalk) follow(host *node.Interface, e *node.Embed, from string, depth int) {
-	name, _ := EmbedIdent(e)
-	if name == "" {
-		// A union term in type-set position is not an interface and
-		// carries no methods. Such a type is never a generation
-		// target, so it is skipped rather than reported.
-		return
+// fromIssue translates the model's vocabulary into this package's.
+//
+// Two vocabularies for one fact is what let the type-set workaround
+// diverge between them; this is the single crossing, so a reason
+// added upstream surfaces here rather than silently mapping to the
+// nearest existing one.
+func fromIssue(host *node.Interface, iss node.MethodSetIssue) UnresolvedEmbed {
+	reason := NotLoaded
+	switch iss.Reason {
+	case node.ReasonGeneric:
+		reason = GenericEmbed
+	case node.ReasonCyclic:
+		reason = TooDeep
+	case node.ReasonUnresolved, node.ReasonNonInterface:
+		reason = NotLoaded
 	}
-	target, ok := descend(host.QName(), host.Package, e, depth, w.resolver, &w.problems)
-	if !ok {
-		return
+	return UnresolvedEmbed{
+		Host:    host.QName(),
+		Embed:   iss.Embed,
+		Written: Display(EmbedTarget(iss.Embed)),
+		Reason:  reason,
 	}
-	inner, isIface := target.(*node.Interface)
-	if !isIface {
-		// A named type in type-set position — `~int | MyInt` — is a
-		// constraint term rather than a method-set contribution.
-		return
-	}
-	attributed := from
-	if attributed == "" {
-		attributed = name
-	}
-	w.collect(inner, attributed, depth+1)
 }
 
 // PromotedFields returns only the fields reached through embedding

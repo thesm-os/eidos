@@ -80,6 +80,51 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **`node.MethodSet` reported a type-set term as a failed embed.** An
+  interface's `Embeds` list holds two unrelated things — types whose methods it
+  takes on, and terms constraining its type set — and the walk asked the
+  resolver to tell them apart. A resolver cannot: it answers *not loaded* for
+  both a term it was never meant to see and an embed the run genuinely missed.
+  So `interface{ ~[]byte }` came back as "not loaded by this run", and because
+  `EmbedName` renders a slice as the empty string, stubgen reported it as
+  `embeds "" which not loaded by this run`.
+
+  The composite half is now decided from the shape, before the resolver, by the
+  new `node.TypeRef.MayDenoteInterface`. A slice, map, func, array, pointer,
+  anonymous struct or type parameter cannot name an interface in any language
+  this model describes, so it is skipped rather than reported — it never
+  claimed to contribute methods, so it cannot have failed to.
+
+  A *named* term stays ambiguous and still reports: `int`, `error` and an
+  unloaded `MyReader` are one shape here, and pretending otherwise trades a
+  wrong diagnostic for a missing method.
+
+- **`node.IsConstraint` classified `interface{ error }` as a generic
+  constraint.** It keyed on `IsBuiltin`, which is true for `int` and equally
+  true for `error` and `any` — the two builtins that *are* interfaces. It now
+  uses the same shape predicate, so an interface embedding `error` reads as
+  what it is.
+
+  The cost is stated rather than hidden: `interface{ int | int64 }` no longer
+  reads as a constraint structurally, because that shape is indistinguishable
+  from `interface{ error }` without type information. A Go pipeline asks
+  `lang/golang.IsConstraintInterface`, which reads the stamp the Go frontend
+  already sets; `node.IsConstraint` is the fallback for a graph no Go frontend
+  produced, which is what its documentation already claimed it was.
+
+- **`lang/golang.FromNode` panicked on the nils this package manufactures.**
+  Eight accessors answer nil for *not applicable* — `PointerElem` on a
+  non-pointer, `IteratorElem` on a method returning no sequence, `MapKey` on a
+  slice — and four lifts (`ElemType`, `MapKeyType`, `MapValType`, `FieldType`)
+  read a field that may be absent. Every crossing between them was a nil
+  dereference inside a generator, with no position attached.
+
+  `FromNode(nil)` now returns nil. The frontend's non-nil guarantee covers refs
+  a frontend *parsed*, not absence this package spells itself. A caller that
+  branches on absence gets the nil it is testing for; one that does not gets
+  `ErrUnsupportedRef` from the backend's render site, naming the file and the
+  type it could not spell.
+
 - **`lang/golang`: a variadic method matched a standard-library shape.** A
   frontend records a variadic parameter as its *element* type with `Variadic`
   set, so `Write(p ...[]byte)` arrives carrying exactly the `[]byte` that
@@ -100,6 +145,14 @@ omitted unless they change what a caller can rely on.
   the receiver letter ever reached it.
 
 ### Changed
+
+- **`lang/golang.MethodSet` is deleted; `PromotedMethods` walks through
+  `node.MethodSet`.** Two walkers over one graph, each with its own cycle
+  guard, its own duplicate rule and its own vocabulary for a failed embed — and
+  the type-set workaround had diverged between them, each catching a different
+  half. The Go-side walk added nothing: interface embedding has no shadowing
+  and no depth rule, which is every rule the surrounding promotion code exists
+  for. It had no callers outside this package.
 
 - **Seven reference plugins dropped private copies of rules the framework
   answers**, including four rewrites of the option-or-default accessor the
