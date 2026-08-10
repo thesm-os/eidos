@@ -3,9 +3,9 @@ module go.thesmos.sh/eidos/reference
 go 1.26.5
 
 require (
-	go.thesmos.sh/eidos v1.13.0
-	go.thesmos.sh/eidos/backend/golang v1.9.2
-	go.thesmos.sh/eidos/eidostest v1.10.0
+	go.thesmos.sh/eidos v0.13.1
+	go.thesmos.sh/eidos/backend/golang v0.13.1
+	go.thesmos.sh/eidos/eidostest v0.13.1
 )
 
 replace (
