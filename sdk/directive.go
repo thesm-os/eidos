@@ -112,6 +112,28 @@ var HasPositive = directive.HasPositive
 // name with [Directive.Negated] true — the `-gen:NAME` form.
 var HasNegated = directive.HasNegated
 
+// Last returns the final directive in list named name, or nil when
+// none matches.
+//
+// The counterpart to the node's own `Directive` method, which returns
+// the *first* match and answers "is this declared". A repeatable
+// value-carrying directive needs the opposite rule: an author writing
+//
+//	//+gen:default limit=10
+//	//+gen:default limit=50
+//
+// has said the limit is 50, and a generator reading the first emits
+// 10 — a value the source contradicts two lines below, with no
+// diagnostic, because both directives are well-formed.
+//
+// Which rule applies is a property of the directive's schema, so it
+// is the plugin's to choose. Declaring a directive through this
+// package and having to reach past it to read one was the asymmetry
+// this closes.
+//
+//nolint:gochecknoglobals // alias re-export of a stable accessor.
+var Last = directive.Last
+
 // OutDirective is the canonical `+gen:out` directive name —
 // the per-source routing override the Layout phase consumes.
 // Plugins that consult or honour the per-source routing

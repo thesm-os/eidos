@@ -411,3 +411,89 @@ func TestConstructorsMatchTheirTypes(t *testing.T) {
 		}
 	})
 }
+
+// TestLastReadsTheFinalDirective pins the accessor issue #8 needed, and
+// the property that makes it distinct from the node's own method.
+//
+// A node's Directive method returns the *first* match and answers "is
+// this declared". A repeatable value-carrying directive needs the
+// opposite rule: an author writing the directive twice has said the
+// second value, and a generator reading the first emits a value the
+// source contradicts two lines below — with no diagnostic, because
+// both directives are well-formed.
+func TestLastReadsTheFinalDirective(t *testing.T) {
+	t.Parallel()
+
+	list := []*directive.Directive{
+		{Name: "default", KV: map[string]string{"limit": "10"}},
+		{Name: "other"},
+		{Name: "default", KV: map[string]string{"limit": "50"}},
+	}
+
+	t.Run("returns the final match, not the first", func(t *testing.T) {
+		t.Parallel()
+		got := sdk.Last(list, "default")
+		if got == nil {
+			t.Fatal("Last returned nil for a directive that is present")
+		}
+		if got.KV["limit"] != "50" {
+			t.Fatalf("limit = %q, want 50 — Last must not read the first match", got.KV["limit"])
+		}
+	})
+
+	t.Run("disagrees with the node's first-wins accessor", func(t *testing.T) {
+		t.Parallel()
+		// The two rules must be distinguishable through the façade, or
+		// a plugin whose schema promises last-wins has no way to honour
+		// it. This asserts they genuinely differ on the same input.
+		n := &sdk.BaseNode{DirectiveList: list}
+		first, last := n.Directive("default"), sdk.Last(list, "default")
+		if first.KV["limit"] == last.KV["limit"] {
+			t.Fatalf("first-wins and last-wins agree (%q); the fixture no longer "+
+				"exercises the distinction", first.KV["limit"])
+		}
+	})
+
+	t.Run("returns nil when no directive matches", func(t *testing.T) {
+		t.Parallel()
+		if got := sdk.Last(list, "absent"); got != nil {
+			t.Fatalf("Last(absent) = %+v, want nil", got)
+		}
+	})
+}
+
+// TestNewOptionsBuildsASetSetOptionsAccepts pins the constructor issue
+// #9 needed: a plugin's own test driving one option value through
+// without reaching past the façade.
+func TestNewOptionsBuildsASetSetOptionsAccepts(t *testing.T) {
+	t.Parallel()
+
+	type pluginOptions struct {
+		Suffix string `eidos:"suffix,default=_gen.go"`
+	}
+
+	t.Run("a value set through the façade reaches the bound target", func(t *testing.T) {
+		t.Parallel()
+		var opts pluginOptions
+		h := sdk.BindOptions(&opts)
+		if err := h.SetOptions(sdk.NewOptions(h.OptionsSchema(), map[string]string{
+			"suffix": "_stub.go",
+		})); err != nil {
+			t.Fatalf("SetOptions: %v", err)
+		}
+		if opts.Suffix != "_stub.go" {
+			t.Fatalf("Suffix = %q, want _stub.go", opts.Suffix)
+		}
+	})
+
+	t.Run("an unknown key is rejected", func(t *testing.T) {
+		t.Parallel()
+		var opts pluginOptions
+		h := sdk.BindOptions(&opts)
+		if err := h.SetOptions(sdk.NewOptions(h.OptionsSchema(), map[string]string{
+			"nope": "x",
+		})); err == nil {
+			t.Fatal("SetOptions accepted a key the schema does not declare")
+		}
+	})
+}
