@@ -328,6 +328,39 @@ type methodSig struct {
 	returns []sdk.Ref
 }
 
+// idents returns the identifier each parameter is bound to, in the
+// emitted signature and in the dispatch body alike.
+//
+// Derived for the whole list at once rather than per parameter,
+// because the positional fallback and a declared name collide:
+// `Put(arg0 string, string)` names the first parameter exactly what
+// the second falls back to, and two parameters of one name do not
+// compile. [refconv.ParamIdentsFor] owns that uniqueness pass;
+// asking [refconv.ParamIdent] per item reproduces the defect.
+func (s methodSig) idents() []string {
+	names := make([]string, len(s.params))
+	for i, p := range s.params {
+		names[i] = p.name
+	}
+	return refconv.ParamIdentsFor(names)
+}
+
+// receiverIdent returns the receiver identifier for a method emitted
+// on mockName.
+//
+// Disambiguated against the parameter identifiers, because the
+// receiver shares their scope. A source interface declaring
+// `Do(m string)` would otherwise emit
+//
+//	func (m *FooMock) Do(m string) { return m.DoFunc(m) }
+//
+// where the parameter shadows the receiver and `m.DoFunc` resolves
+// against a string. It compiles nowhere, and no fixture whose
+// parameters avoid the receiver letter ever reaches it.
+func (s methodSig) receiverIdent(mockName string) string {
+	return refconv.ReceiverIdent(mockName, s.idents()...)
+}
+
 // paramSig describes one positional parameter — name, type, and
 // whether it is the signature's trailing variadic. Anonymous
 // parameters carry an empty name; the emit code rewrites them to
@@ -479,14 +512,15 @@ func (p *Plugin) emitMock(
 				// methods it emits for the same reason.
 				m.Docs(s.name + " implements " + ifaceName +
 					" by dispatching to " + s.name + "Func.")
-				m.Receiver("m", recv)
+				idents := s.idents()
+				m.Receiver(s.receiverIdent(mockName), recv)
 				for i, param := range s.params {
-					m.Param(paramName(param.name, i), param.typ, variadicOpts(param)...)
+					m.Param(idents[i], param.typ, variadicOpts(param)...)
 				}
 				for _, ret := range s.returns {
 					m.Return(ret)
 				}
-				m.Body(dispatchBody(s)...)
+				m.Body(dispatchBody(s, s.receiverIdent(mockName))...)
 			})
 		}
 	})
@@ -598,18 +632,6 @@ func funcRefFor(s methodSig) sdk.Ref {
 	return sdk.FuncOf(params, s.returns)
 }
 
-// paramName returns the in-method identifier for parameter index i.
-//
-// The rule — declared name where there is one, positional fallback
-// otherwise, keyword adjustment on top — is Go's and lives in
-// [refconv.ParamIdent]. The wrapper exists because [methodSig]
-// lowers both an emit-side and a source-side parameter list onto a
-// name-and-type pair, so there is no [sdk.Param] left to hand over
-// by the time the identifier is needed.
-func paramName(name string, i int) string {
-	return refconv.ParamIdent(&sdk.Param{Name: name}, i)
-}
-
 // dispatchBody returns the statement list for one Mock method's
 // body: `[return ]m.<Method>Func(<args...>)`. Zero-return methods
 // drop the leading return.
@@ -618,13 +640,14 @@ func paramName(name string, i int) string {
 // slice-typed field [funcRefFor] declares for it: inside the method
 // the parameter is already a `[]T`, so the plain identifier is the
 // call that type-checks.
-func dispatchBody(s methodSig) []*sdk.Stmt {
-	args := make([]*sdk.Expr, 0, len(s.params))
-	for i, p := range s.params {
-		args = append(args, sdk.NewIdent(paramName(p.name, i)))
+func dispatchBody(s methodSig, recvIdent string) []*sdk.Stmt {
+	idents := s.idents()
+	args := make([]*sdk.Expr, 0, len(idents))
+	for _, id := range idents {
+		args = append(args, sdk.NewIdent(id))
 	}
 	call := sdk.NewCall(
-		sdk.NewField(sdk.NewIdent("m"), s.name+"Func"),
+		sdk.NewField(sdk.NewIdent(recvIdent), s.name+"Func"),
 		args...,
 	)
 	if len(s.returns) == 0 {

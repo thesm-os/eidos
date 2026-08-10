@@ -222,29 +222,15 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			Name:         s.Name,
 			NameLit:      sdk.NewLiteralString(s.Name),
 			Init:         sdk.NewComposite(sdk.External(s.Package, s.Name), nil),
-			RegisterFunc: sdk.NewExternal(p.registerPackage(), p.registerFunc()),
+			RegisterFunc: sdk.NewExternal(p.opts.RegisterPackage, p.opts.RegisterFunc),
 		}
-		if err := ctx.Store.Emit().AppendOriginSlot(s, SlotName, reg, c.Provenance("registry."+s.Name)); err != nil {
+		// Through AppendOrigin rather than AppendOriginSlot: the id this
+		// spelled by hand had drifted, carrying `registry.<name>` where
+		// every sibling carries `<kind>.<name>`. Letting the framework
+		// compose it is what stops the next copy drifting too.
+		if err := ctx.Store.Emit().AppendOrigin(c.SetBy(), SlotName, s, reg); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// registerPackage / registerFunc return the configured option value
-// or the documented default when the option is empty. Centralised
-// so the rendered behaviour stays consistent across both layouts
-// even when a caller bypasses SetOptions.
-func (p *Plugin) registerPackage() string {
-	if p.opts.RegisterPackage != "" {
-		return p.opts.RegisterPackage
-	}
-	return DefaultRegisterPackage
-}
-
-func (p *Plugin) registerFunc() string {
-	if p.opts.RegisterFunc != "" {
-		return p.opts.RegisterFunc
-	}
-	return DefaultRegisterFunc
 }

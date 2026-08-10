@@ -107,6 +107,21 @@ func fixtureBuilder() *storefixture.Builder {
 				m.Param("", storefixture.Named("string"))
 				m.Return(storefixture.Named("error"))
 			})
+			// A parameter named for the receiver letter: the receiver is
+			// disambiguated against the signature, or the parameter
+			// shadows it and `<recv>.PutFunc` resolves against a string.
+			i.Method("Shadow", func(m *storefixture.MethodBuilder) {
+				m.Param("u", storefixture.Named("string"))
+				m.Return(storefixture.Named("error"))
+			})
+			// A declared `arg0` beside an anonymous parameter: the
+			// fallback for the second collides with the first unless the
+			// identifiers are uniquified across the whole list.
+			i.Method("Collide", func(m *storefixture.MethodBuilder) {
+				m.Param("arg0", storefixture.Named("string"))
+				m.Param("", storefixture.Named("string"))
+				m.Return(storefixture.Named("error"))
+			})
 			// A void method drives the no-return dispatch branch.
 			i.Method("Close", nil)
 			// A variadic method is the shape that compiles either way
@@ -265,18 +280,18 @@ func TestRendered_SourceSideMock(t *testing.T) {
 		// The dispatch body has to name the parameter to forward it, so
 		// an anonymous source parameter becomes arg0.
 		src.AssertMethod(t, "UserStoreMock", "Put").Signature(t, "(arg0 string) error")
-		src.InMethod(t, "UserStoreMock", "Put").AssertContains(t, "return m.PutFunc(arg0)")
+		src.InMethod(t, "UserStoreMock", "Put").AssertContains(t, "return u.PutFunc(arg0)")
 	})
 
 	t.Run("dispatches through the field, returning only where there is one", func(t *testing.T) {
 		t.Parallel()
 		src.InMethod(t, "UserStoreMock", "Get").
-			AssertContains(t, "return m.GetFunc(ctx, id)")
+			AssertContains(t, "return u.GetFunc(ctx, id)")
 		// A void method dispatches without a return; emitting one would
 		// not compile, which is why AssertVets is the assertion behind
 		// this one.
 		src.InMethod(t, "UserStoreMock", "Close").
-			AssertContains(t, "m.CloseFunc()").
+			AssertContains(t, "u.CloseFunc()").
 			AssertNotContains(t, "return")
 	})
 
@@ -290,7 +305,21 @@ func TestRendered_SourceSideMock(t *testing.T) {
 		src.AssertMethod(t, "UserStoreMock", "Log").
 			Signature(t, "(format string, args ...any)")
 		src.AssertField(t, "UserStoreMock", "LogFunc", "func(string, []any)")
-		src.InMethod(t, "UserStoreMock", "Log").AssertContains(t, "m.LogFunc(format, args)")
+		src.InMethod(t, "UserStoreMock", "Log").AssertContains(t, "u.LogFunc(format, args)")
+
+		// The receiver must not be the identifier the signature already
+		// binds. `Shadow(u string)` on UserStoreMock would otherwise
+		// emit `func (u *UserStoreMock) Shadow(u string)`, where the
+		// parameter shadows the receiver and `u.ShadowFunc` resolves
+		// against a string — output that compiles nowhere.
+		src.AssertMethod(t, "UserStoreMock", "Shadow").AssertPointerReceiver(t, true)
+		src.InMethod(t, "UserStoreMock", "Shadow").AssertNotContains(t, "u.ShadowFunc")
+
+		// A declared `arg0` beside an anonymous parameter: the second
+		// must not fall back onto the first's name. Two parameters of
+		// one name do not compile.
+		src.InMethod(t, "UserStoreMock", "Collide").
+			AssertContains(t, "CollideFunc(arg0, arg1)")
 	})
 }
 
@@ -352,7 +381,7 @@ func TestRendered_GenericMock(t *testing.T) {
 		src.AssertMethod(t, "CacheMock", "Load").
 			Signature(t, "(key string) (T, bool)").
 			AssertPointerReceiver(t, true)
-		src.InMethod(t, "CacheMock", "Load").AssertContains(t, "return m.LoadFunc(key)")
+		src.InMethod(t, "CacheMock", "Load").AssertContains(t, "return c.LoadFunc(key)")
 	})
 }
 

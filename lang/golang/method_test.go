@@ -494,3 +494,46 @@ func TestSigEdges(t *testing.T) {
 		}
 	})
 }
+
+func TestWithReceiverFromType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("derives the receiver from the emitted type", func(t *testing.T) {
+		t.Parallel()
+		m := &node.Method{Name: "Get"}
+		got := golang.SigOf(m, golang.WithReceiverFromType("StoreStub")).ReceiverIdent()
+		if got != "s" {
+			t.Fatalf("ReceiverIdent = %q, want s", got)
+		}
+	})
+
+	t.Run("dodges a parameter that already binds the initial", func(t *testing.T) {
+		t.Parallel()
+		// The ordering a caller cannot resolve alone: the identifier is
+		// the type's initial made unique against the parameters, and the
+		// parameters are what the projection is producing. Without this
+		// the emitted method reads `func (s *StoreStub) Do(s string)`,
+		// where the parameter shadows the receiver.
+		strRef := &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}
+		m := &node.Method{Name: "Do", Params: []*node.Param{{Name: "s", Type: strRef}}}
+		got := golang.SigOf(m, golang.WithReceiverFromType("StoreStub")).ReceiverIdent()
+		if got == "s" {
+			t.Fatal("receiver collides with the parameter it shares scope with")
+		}
+	})
+
+	t.Run("takes precedence over a literal receiver", func(t *testing.T) {
+		t.Parallel()
+		// Honouring the literal would reinstate exactly the shadowing
+		// the derived form exists to prevent.
+		strRef := &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}
+		m := &node.Method{Name: "Do", Params: []*node.Param{{Name: "s", Type: strRef}}}
+		got := golang.SigOf(m,
+			golang.WithReceiverIdent("s"),
+			golang.WithReceiverFromType("StoreStub"),
+		).ReceiverIdent()
+		if got == "s" {
+			t.Fatalf("ReceiverIdent = %q; the literal overrode the derived form", got)
+		}
+	})
+}

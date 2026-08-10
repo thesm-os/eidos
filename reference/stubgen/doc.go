@@ -110,9 +110,12 @@
 // documents what its returns mean, and a recorded-call struct is
 // the main consumer of that documentation.
 //
-// Returns without declared names fall back to `Result0`, `Result1`,
-// … positionally. The blank identifier counts as unnamed, since `_`
-// cannot be used as a field name.
+// Returns without declared names fall back to the framework's rule
+// ([lang/golang.Sig]): the error slot is `Err`, a lone value slot is
+// `Result`, and several value slots are `Result0`, `Result1`, …
+// numbered across the value slots only — so adding an error return
+// does not renumber the fields beside it. The blank identifier counts
+// as unnamed, since `_` cannot be used as a field name.
 //
 // # Named returns on the generated methods
 //

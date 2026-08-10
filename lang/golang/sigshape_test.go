@@ -497,3 +497,70 @@ func TestSigShapeAccessorEdges(t *testing.T) {
 		}
 	})
 }
+
+// variadicMethod builds a method whose final parameter is variadic,
+// recorded the way a frontend records one: the ELEMENT type, with the
+// flag set beside it.
+func variadicMethod(name string, params, returns []*node.TypeRef) *node.Method {
+	m := method(name, params, returns)
+	if n := len(m.Params); n > 0 {
+		m.Params[n-1].Variadic = true
+	}
+	return m
+}
+
+func TestShapesRejectAVariadicParameter(t *testing.T) {
+	t.Parallel()
+
+	// A frontend records `...T` as T with Variadic set, so every
+	// predicate here reads exactly the type the fixed-arity contract
+	// wants. Go does not agree: `Write(p ...[]byte)` has a different
+	// method set from `Write(p []byte)` and satisfies io.Writer not at
+	// all. Each case below returned true before the guard landed.
+	countErr := []*node.TypeRef{builtinRef("int"), errorRef()}
+
+	t.Run("a variadic byte slice is not io.Writer's Write", func(t *testing.T) {
+		t.Parallel()
+		m := variadicMethod("Write", []*node.TypeRef{byteSlice()}, countErr)
+		if golang.IsWriteMethod(m) {
+			t.Fatal("Write(p ...[]byte) reported as io.Writer's Write")
+		}
+	})
+
+	t.Run("a variadic byte slice is not io.Reader's Read", func(t *testing.T) {
+		t.Parallel()
+		m := variadicMethod("Read", []*node.TypeRef{byteSlice()}, countErr)
+		if golang.IsReadMethod(m) {
+			t.Fatal("Read(p ...[]byte) reported as io.Reader's Read")
+		}
+	})
+
+	t.Run("a variadic int is not sort.Interface's Less", func(t *testing.T) {
+		t.Parallel()
+		// The general comparator, SignatureMatches, rather than the
+		// byte-slice family — the two reached the same wrong answer by
+		// different routes.
+		ints := []*node.TypeRef{builtinRef("int"), builtinRef("int")}
+		m := variadicMethod("Less", ints, []*node.TypeRef{builtinRef("bool")})
+		if golang.IsLessMethod(m) {
+			t.Fatal("Less(i int, j ...int) reported as sort.Interface's Less")
+		}
+	})
+
+	t.Run("a variadic argument is not sql.Scanner's Scan", func(t *testing.T) {
+		t.Parallel()
+		m := variadicMethod("Scan", []*node.TypeRef{builtinRef("any")}, []*node.TypeRef{errorRef()})
+		if golang.IsScanMethod(m) {
+			t.Fatal("Scan(v ...any) reported as sql.Scanner's Scan")
+		}
+	})
+
+	t.Run("the non-variadic form still matches", func(t *testing.T) {
+		t.Parallel()
+		// The guard is a narrowing; it must remove false positives and
+		// nothing else.
+		if !golang.IsWriteMethod(method("Write", []*node.TypeRef{byteSlice()}, countErr)) {
+			t.Fatal("the canonical Write stopped matching")
+		}
+	})
+}

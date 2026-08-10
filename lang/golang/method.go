@@ -166,9 +166,10 @@ type SigOption func(*sigOpts)
 
 // sigOpts carries the resolved option set.
 type sigOpts struct {
-	receiver    string
-	paramPrefix string
-	localPrefix string
+	receiver     string
+	receiverType string
+	paramPrefix  string
+	localPrefix  string
 }
 
 // Default identifiers the projection uses when a caller supplies
@@ -187,6 +188,26 @@ const (
 // method binds, which the return-name collision guard reserves.
 func WithReceiverIdent(name string) SigOption {
 	return func(o *sigOpts) { o.receiver = name }
+}
+
+// WithReceiverFromType derives the receiver identifier from the type
+// the method is emitted on, disambiguated against the parameters.
+//
+// The option [WithReceiverIdent] cannot express, because of an
+// ordering the caller cannot resolve alone: the identifier is the type
+// name's initial *made unique against the parameter identifiers*, and
+// those are what [SigOf] is being asked to project. A generator
+// holding only the type name would otherwise have to project the
+// signature once for its identifiers, derive the receiver, and project
+// it again — which is what the one generator doing this wrote, and
+// what put a second copy of the rule in a plugin.
+//
+// Takes precedence over [WithReceiverIdent] when both are supplied:
+// this one is derived from the emitted type and the other is a
+// caller's literal, so honouring the literal would silently reinstate
+// the shadowing this exists to prevent.
+func WithReceiverFromType(typeName string) SigOption {
+	return func(o *sigOpts) { o.receiverType = typeName }
 }
 
 // WithParamPrefix sets the stem for a parameter the source left
@@ -231,6 +252,11 @@ func SigOf(m *node.Method, opts ...SigOption) *Sig {
 		receiverIdent: o.receiver,
 	}
 	s.Params = paramsFrom(m.Params, o)
+	// After the parameters, because the derived form is the type's
+	// initial made unique against exactly those identifiers.
+	if o.receiverType != "" {
+		s.receiverIdent = ReceiverIdent(o.receiverType, s.Idents()...)
+	}
 	s.NamedReturns = NamedReturnsUsable(m.Returns, s.Taken()...)
 	s.Returns = returnsFrom(m.Returns, s.Params, s.NamedReturns, o)
 	return s

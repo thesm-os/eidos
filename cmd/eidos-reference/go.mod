@@ -16,6 +16,7 @@ require (
 require (
 	github.com/bufbuild/protocompile v0.14.1 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
+	go.thesmos.sh/eidos/eidostest v1.7.0
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
@@ -32,3 +33,5 @@ replace (
 	go.thesmos.sh/eidos/plugins => ../../plugins
 	go.thesmos.sh/eidos/reference => ../../reference
 )
+
+replace go.thesmos.sh/eidos/eidostest => ../../eidostest

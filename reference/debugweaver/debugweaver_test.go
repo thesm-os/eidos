@@ -14,7 +14,6 @@ import (
 	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/reference/debugweaver"
 	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/sdk"
@@ -282,18 +281,10 @@ func wovenCall(t *testing.T, n sdk.EmitNode) (pkg, fn string, args []string) {
 // inside that constraint.
 func wovenTrace(t *testing.T, n sdk.EmitNode) *debugweaver.Trace {
 	t.Helper()
-	stmt, ok := n.(*sdk.Stmt)
-	if !ok {
-		t.Fatalf("slot entry is %T, want *sdk.Stmt", n)
-	}
-	if stmt.StmtKind != emit.StmtRender {
-		t.Fatalf("slot entry should be a render statement; got StmtKind=%s", stmt.StmtKind)
-	}
-	trace, ok := stmt.Node.(*debugweaver.Trace)
-	if !ok {
-		t.Fatalf("render statement wraps %T, want *debugweaver.Trace", stmt.Node)
-	}
-	return trace
+	// This weaver declares its own emit kind and ships a template for
+	// it, so the slot entry is a render statement wrapping the value.
+	// Its sibling auditweaver takes the constructor route.
+	return plugintest.AssertRenderStmt[*debugweaver.Trace](t, n)
 }
 
 // hostBuilder is the annotated struct the woven output is generated

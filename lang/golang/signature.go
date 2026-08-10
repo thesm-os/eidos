@@ -39,9 +39,32 @@ func ParamIdent(p *node.Param, index int) string {
 // parameter exactly what the second would fall back to, and two
 // parameters of one name do not compile.
 func ParamIdents(params []*node.Param) []string {
-	out := make([]string, 0, len(params))
+	names := make([]string, len(params))
 	for i, p := range params {
-		out = append(out, UniqueIdent(ParamIdent(p, i), out...))
+		if p != nil {
+			names[i] = p.Name
+		}
+	}
+	return ParamIdentsFor(names)
+}
+
+// ParamIdentsFor is [ParamIdents] for a caller holding the declared
+// names and no [node.Param].
+//
+// A generator that projects an emit-side and a source-side signature
+// onto one internal shape has lowered away the [node.Param] before it
+// needs the identifiers. Without this it either fabricates a
+// `&node.Param{Name: n}` to satisfy the signature — which is the API
+// telling the caller it is the wrong shape — or reaches past this to
+// [ParamIdent] per item and loses the uniqueness pass, which is the
+// half that keeps `Read(arg0 []byte, []byte)` compiling.
+//
+// An empty name takes the positional fallback, exactly as an unnamed
+// [node.Param] does.
+func ParamIdentsFor(names []string) []string {
+	out := make([]string, 0, len(names))
+	for i, name := range names {
+		out = append(out, UniqueIdent(ParamIdent(&node.Param{Name: name}, i), out...))
 	}
 	return out
 }

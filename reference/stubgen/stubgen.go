@@ -6,6 +6,7 @@ package stubgen
 import (
 	"fmt"
 
+	refconv "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
@@ -121,58 +122,21 @@ func (p *Plugin) suffix() string {
 	return DefaultSuffix
 }
 
-// Param is one rendered parameter: the in-method identifier and its
-// type, already lifted to an [sdk.Ref] so `renderType` consumes it.
-type Param struct {
-	Name string
-	Type sdk.Ref
-
-	// Field is the exported field name the recorded-call struct uses
-	// for this parameter.
-	Field string
-
-	// Variadic reports whether the source declared `...T`, in which
-	// case Type is the element type and every position the parameter
-	// appears in spells the ellipsis or the slice itself.
-	//
-	// Carried rather than folded into Type because the four positions
-	// disagree: the declaration and the func-field type want `...T`,
-	// the forwarding call wants `name...`, and the recorded-call field
-	// wants `[]T` — the parameter's type inside the method body.
-	// Dropping it produced a double whose method took one T where the
-	// interface wanted many, which compiles standalone and satisfies
-	// nothing.
-	Variadic bool
-}
-
-// Return is one rendered return slot.
+// Method is one interface method in the form the templates render.
 //
-// Name is the source's declared return name, empty when the
-// signature did not name it. Field is always populated — a
-// recorded-call struct needs a field name whether or not the source
-// supplied one, so unnamed returns fall back to positional.
-type Return struct {
-	Name  string
-	Type  sdk.Ref
-	Field string
-
-	// Local is the identifier the generated body binds this return
-	// to when capturing the delegate's result. It equals Name when
-	// the signature declares named results, and is positional
-	// otherwise. Computed in Go rather than in the template so the
-	// collision guard lives next to the rule it enforces.
-	Local string
-}
-
-// Method is one rendered interface method.
+// The signature half — parameters, returns, their identifiers, the
+// recorded-call field each maps to, and whether the generated method
+// may carry the source's return names — is [refconv.Sig], embedded
+// rather than restated. Those are facts about a Go signature, not
+// about stubs, and the copy this plugin used to carry had already
+// disagreed with the framework's: it numbered unnamed returns across
+// every slot, so `(User, error)` recorded `Result0, Result1` where
+// every generator on the shared projection records `Result, Err`.
+//
+// Embedded rather than a named field so the templates keep reaching
+// `.Params`, `.Returns` and `.NamedReturns` directly.
 type Method struct {
-	Name string
-
-	// Recv is the identifier the generated method binds its receiver
-	// to. Per-method rather than fixed: the source names the
-	// parameters, and one named after the receiver would shadow it —
-	// see [receiverIdentFor].
-	Recv string
+	*refconv.Sig
 
 	// CallType is the identifier of the per-method recorded-call
 	// struct — `<Iface><Method>Call`.
@@ -185,14 +149,6 @@ type Method struct {
 	// CallsField is the identifier of the recorded-call slice —
 	// `<Method>Calls`.
 	CallsField string
-
-	Params  []Param
-	Returns []Return
-
-	// NamedReturns reports whether the generated signature declares
-	// its return names. See [namedReturnsUsable] for why this is
-	// all-or-nothing rather than per-return.
-	NamedReturns bool
 }
 
 // Stub is the emit value rendered into the primary output.
@@ -362,18 +318,11 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 func methodsOf(ifaceName, typeName string, methods []*sdk.Method) []Method {
 	out := make([]Method, 0, len(methods))
 	for _, m := range methods {
-		params := paramsOf(m)
-		recv := receiverIdentFor(typeName, params)
-		named := namedReturnsUsable(m, recv, params)
 		out = append(out, Method{
-			Name:         m.Name,
-			Recv:         recv,
-			CallType:     ifaceName + m.Name + "Call",
-			FuncField:    m.Name + "Func",
-			CallsField:   m.Name + "Calls",
-			Params:       params,
-			Returns:      withLocals(returnsOf(m), params, recv, named),
-			NamedReturns: named,
+			Sig:        refconv.SigOf(m, refconv.WithReceiverFromType(typeName)),
+			CallType:   ifaceName + m.Name + "Call",
+			FuncField:  m.Name + "Func",
+			CallsField: m.Name + "Calls",
 		})
 	}
 	return out

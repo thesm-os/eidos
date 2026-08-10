@@ -188,9 +188,9 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		}
 		trace := &Trace{
 			BaseEmit: sdk.BaseEmit{SetByName: c.SetBy(), SourcePos: m.Pos()},
-			FuncRef:  sdk.NewExternal(p.pkg(), p.funcName()),
-			Format:   sdk.NewLiteralString(p.format()),
-			Subject:  sdk.NewLiteralString(ownerName(m) + "." + m.Name),
+			FuncRef:  sdk.NewExternal(p.opts.Package, p.opts.Func),
+			Format:   sdk.NewLiteralString(p.opts.Format),
+			Subject:  sdk.NewLiteralString(m.OwnerName() + "." + m.Name),
 		}
 		// AppendPrebody can only fail when host is nil or carries
 		// an unsupported kind — neither possible for the *sdk.EmitMethod
@@ -200,37 +200,4 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		_ = c.AppendPrebody(m, sdk.NewRenderStmt(trace), EntryID)
 	}
 	return nil
-}
-
-// pkg / funcName / format return the configured option value or
-// the documented default when the option is empty.
-func (p *Plugin) pkg() string {
-	if p.opts.Package != "" {
-		return p.opts.Package
-	}
-	return DefaultPackage
-}
-
-func (p *Plugin) funcName() string {
-	if p.opts.Func != "" {
-		return p.opts.Func
-	}
-	return DefaultFunc
-}
-
-func (p *Plugin) format() string {
-	if p.opts.Format != "" {
-		return p.opts.Format
-	}
-	return DefaultFormat
-}
-
-// ownerName returns the simple receiver-type name of m's owner so
-// the rendered log message reads `<Type>.<Method>` — the common
-// "trace this method on this struct" mental model. Methods on
-// interfaces, methods on structs, and methods on source-side
-// types are all handled uniformly via [contract.Owner.OwnerName],
-// so the function never type-switches the underlying Owner kind.
-func ownerName(m *sdk.EmitMethod) string {
-	return m.OwnerName()
 }

@@ -4,8 +4,7 @@
 package shapewriter
 
 import (
-	"fmt"
-
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
@@ -46,10 +45,6 @@ var Detected = sdk.NewKey("shape.writer.detected", sdk.BoolParser)
 //
 //nolint:gochecknoglobals // package-level meta key, registered once at init.
 var MethodQName = sdk.NewKey("shape.writer.method", sdk.StringParser)
-
-// writeMethodName is the unqualified method name the heuristic
-// targets — the canonical `Write` slot on io.Writer.
-const writeMethodName = "Write"
 
 // Plugin is the writer-shape annotator. Construct it with [New] —
 // the embedded base carries the declaration and the zero value has
@@ -112,54 +107,32 @@ func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *sdk.Struct) {
 	MethodQName.Set(s.EnsureMeta(), qname, Name)
 }
 
-// matchSignature returns the method that matches the canonical
-// io.Writer signature, or nil + false when none does. The match
-// is exact: parameter type `[]byte`, non-variadic, return types
-// `(int, error)`, method name `Write`.
+// matchSignature returns the method satisfying [io.Writer], or nil +
+// false when none does.
+//
+// The rule — `Write([]byte) (int, error)`, non-variadic, either
+// spelling of the byte element — is a fact about Go rather than about
+// this plugin, so it is asked of [golang.IsWriteMethod] rather than
+// restated here. A plugin that restates it owns a second copy of a
+// language rule and gets to disagree with the first: this one did,
+// and for a while it was the copy that was right.
 func matchSignature(s *sdk.Struct) (*sdk.Method, bool) {
 	for _, m := range s.Methods {
-		if m.Name != writeMethodName || len(m.Params) != 1 || len(m.Returns) != 2 {
-			continue
+		if golang.IsWriteMethod(m) {
+			return m, true
 		}
-		// A frontend records a variadic parameter as its *element*
-		// type, so `Write(p ...[]byte) (int, error)` arrives here
-		// carrying the same `[]byte` ref as the canonical form and is
-		// distinguishable only by the marker. Go's method set does not
-		// consider that signature an io.Writer at all, so reading the
-		// type without the marker stamps detected=true on a struct no
-		// consumer can write to.
-		if m.Params[0].Variadic || !isByteSlice(m.Params[0].Type) {
-			continue
-		}
-		if !isBuiltin(m.Returns[0].Type, "int") || !isBuiltin(m.Returns[1].Type, "error") {
-			continue
-		}
-		return m, true
 	}
 	return nil, false
 }
 
-// isByteSlice reports whether ref is the unqualified `[]byte`
-// type — a Slice variant carrying an Elem of `byte` (or its alias
-// `uint8`). Callers pass refs sourced from a parsed Go method
-// signature, so the frontend invariants guarantee non-nil refs
-// and non-nil Elem on slice variants.
-func isByteSlice(ref *sdk.TypeRef) bool {
-	if !ref.IsSlice() {
-		return false
-	}
-	return isBuiltin(ref.Elem, "byte") || isBuiltin(ref.Elem, "uint8")
-}
-
-// isBuiltin reports whether ref is the unqualified builtin named
-// want — Named variant, no package, exactly the given Name.
-func isBuiltin(ref *sdk.TypeRef, want string) bool {
-	return ref.IsBuiltin() && ref.Name == want
-}
-
-// methodQName recomposes the store's canonical method-bucket key
-// (`<ownerQName>.<methodName>`) for the matched method. Mirrors
-// the format [store.NodeView.addMethod] uses.
+// methodQName composes the store's canonical method-bucket key for the
+// matched method.
+//
+// Through [golang.MethodQName] rather than a local format string: the
+// store composes the same key privately, and a plugin matching it by
+// hand stamps a back-link that resolves to nothing the day the
+// separator changes — silently, because nothing validates a meta
+// value against the index it points into.
 func methodQName(s *sdk.Struct, m *sdk.Method) string {
-	return fmt.Sprintf("%s.%s", s.QName(), m.Name)
+	return golang.MethodQName(s.QName(), m.Name)
 }

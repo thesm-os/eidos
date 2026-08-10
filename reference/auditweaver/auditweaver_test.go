@@ -6,7 +6,6 @@ package auditweaver_test
 import (
 	"strings"
 	"testing"
-	"text/template"
 
 	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/core/diag"
@@ -15,7 +14,6 @@ import (
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/reference/auditweaver"
 	"go.thesmos.sh/eidos/reference/debugweaver"
 	"go.thesmos.sh/eidos/reference/repogen"
@@ -74,63 +72,22 @@ func TestConformance(t *testing.T) {
 	})
 }
 
-func TestRecord_Kind(t *testing.T) {
+func TestPlugin_ShipsNoTemplates(t *testing.T) {
 	t.Parallel()
 
-	t.Run("reports the kind the template is registered under", func(t *testing.T) {
+	// This weaver builds its contribution from the emit constructors,
+	// so it owns no kind and needs no template tree. Pinned because the
+	// absence is the point: its sibling debugweaver takes the
+	// custom-kind route, and the pair is the reference for choosing
+	// between them.
+	t.Run("declares no template tree for any language", func(t *testing.T) {
 		t.Parallel()
-		if got := (&auditweaver.Record{}).Kind(); got != auditweaver.Kind {
-			t.Fatalf("Kind = %q, want %q", got, auditweaver.Kind)
+		for _, lang := range []string{"golang", "rust"} {
+			if _, ok := auditweaver.New().Templates(lang); ok {
+				t.Fatalf("plugin claims %s templates; it renders through the backend's own", lang)
+			}
 		}
 	})
-}
-
-func TestPlugin_Templates(t *testing.T) {
-	t.Parallel()
-
-	t.Run("ships templates for golang", func(t *testing.T) {
-		t.Parallel()
-		if _, ok := auditweaver.New().Templates("golang"); !ok {
-			t.Fatalf("plugin should ship golang templates")
-		}
-	})
-
-	t.Run("declines languages it does not target", func(t *testing.T) {
-		t.Parallel()
-		if _, ok := auditweaver.New().Templates("rust"); ok {
-			t.Fatalf("plugin should not claim templates for rust")
-		}
-	})
-
-	// The backend dispatches by looking up a template named for the
-	// value's Kind. A define name that drifts from the declared Kind
-	// costs nothing at build time and fails at render time, in
-	// someone else's file — so the pairing is pinned here.
-	t.Run("defines a template named for the declared Kind", func(t *testing.T) {
-		t.Parallel()
-		sub, ok := auditweaver.New().Templates("golang")
-		if !ok {
-			t.Fatalf("plugin should ship golang templates")
-		}
-		tmpl, err := template.New("probe").Funcs(probeFuncs()).ParseFS(sub, "*.tmpl")
-		if err != nil {
-			t.Fatalf("parse shipped templates: %v", err)
-		}
-		if tmpl.Lookup(string(auditweaver.Kind)) == nil {
-			t.Fatalf("no template defines %q; the backend would find nothing to render",
-				auditweaver.Kind)
-		}
-	})
-}
-
-// probeFuncs stubs the backend helpers the shipped template calls.
-// text/template resolves function names at parse time, so parsing the
-// template outside the backend needs the names to exist; the bodies
-// are never executed here.
-func probeFuncs() template.FuncMap {
-	return template.FuncMap{
-		"renderExpr": func(*sdk.Expr) (string, error) { return "", nil },
-	}
 }
 
 // TestOptions_TagDefaultsMatchTheDocumentedConstants pins the two
@@ -291,29 +248,6 @@ func TestGenerate_WeavesAuditCall(t *testing.T) {
 	})
 }
 
-// wovenRecord destructures a woven slot entry into the plugin's own
-// emit value.
-//
-// The entry is a render statement rather than a bare one: the prebody
-// slot is constrained to [sdk.EmitKindStmt], and the wrapper is what
-// lets this plugin put its own kind — and therefore its own template —
-// inside that constraint.
-func wovenRecord(t *testing.T, n sdk.EmitNode) *auditweaver.Record {
-	t.Helper()
-	stmt, ok := n.(*sdk.Stmt)
-	if !ok {
-		t.Fatalf("slot entry is %T, want *sdk.Stmt", n)
-	}
-	if stmt.StmtKind != emit.StmtRender {
-		t.Fatalf("slot entry should be a render statement; got StmtKind=%s", stmt.StmtKind)
-	}
-	record, ok := stmt.Node.(*auditweaver.Record)
-	if !ok {
-		t.Fatalf("render statement wraps %T, want *auditweaver.Record", stmt.Node)
-	}
-	return record
-}
-
 // wovenCall destructures a woven slot entry into the pieces the
 // assertions care about: the callee's package and function name,
 // and the string literals passed as arguments. Asserting on the
@@ -321,21 +255,11 @@ func wovenRecord(t *testing.T, n sdk.EmitNode) *auditweaver.Record {
 // independent of any backend's formatting.
 func wovenCall(t *testing.T, n sdk.EmitNode) (pkg, fn string, args []string) {
 	t.Helper()
-	record := wovenRecord(t, n)
-	if record.FuncRef == nil {
-		t.Fatalf("woven record carries no function reference")
-	}
-	// NewExternal carries the import path on Pkg and the symbol on
-	// Name; the backend resolves the alias at render time.
-	pkg, fn = record.FuncRef.Pkg, record.FuncRef.Name
-	// String literals hold their unquoted content in RawText.
-	for _, a := range []*sdk.Expr{record.Format, record.Subject} {
-		if a == nil {
-			t.Fatalf("woven record carries a nil argument expression")
-		}
-		args = append(args, a.RawText)
-	}
-	return pkg, fn, args
+	// This weaver builds its contribution from the emit constructors
+	// rather than through a kind of its own, so the slot entry is a
+	// plain expression statement. Its sibling debugweaver takes the
+	// other route, and asserts through AssertRenderStmt.
+	return plugintest.AssertExternalCall(t, n)
 }
 
 // repoBuilder builds one struct carrying +gen:repo, which makes

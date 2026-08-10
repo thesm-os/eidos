@@ -9,7 +9,7 @@ func (*StoreStub) Recv(s string) error
 type StoreAnonCall struct{Arg0 int; Arg1 string}
 type StoreCloseCall struct{}
 type StoreGetCall struct{Ctx context.Context; Err error; ID string; Item string}
-type StoreListCall struct{Result0 []string; Result1 error}
-type StorePutCall struct{ID string; Opts []string; Result0 error}
-type StoreRecvCall struct{Result0 error; S string}
+type StoreListCall struct{Err error; Result []string}
+type StorePutCall struct{Err error; ID string; Opts []string}
+type StoreRecvCall struct{Err error; S string}
 type StoreStub struct{AnonCalls []StoreAnonCall; AnonFunc func(int, string); CloseCalls []StoreCloseCall; CloseFunc func(); GetCalls []StoreGetCall; GetFunc func(context.Context, string) (string, error); ListCalls []StoreListCall; ListFunc func() ([]string, error); PutCalls []StorePutCall; PutFunc func(string, ...string) error; RecvCalls []StoreRecvCall; RecvFunc func(string) error}

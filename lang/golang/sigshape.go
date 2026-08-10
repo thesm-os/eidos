@@ -363,6 +363,12 @@ func SignatureMatches(m *node.Method, params, returns []string) bool {
 	if m == nil || len(m.Params) != len(params) || len(m.Returns) != len(returns) {
 		return false
 	}
+	// A variadic parameter is recorded as its element type, so `...int`
+	// would otherwise match a want of `int` and report a method that
+	// cannot satisfy the interface. See [anyVariadic].
+	if anyVariadic(m.Params) {
+		return false
+	}
 	for i, want := range params {
 		if !IsBuiltinNamed(paramType(m, i), want) {
 			return false
@@ -411,7 +417,33 @@ func named(m *node.Method, name string) bool {
 
 // arity reports whether m declares exactly the given counts.
 func arity(m *node.Method, params, returns int) bool {
-	return m != nil && len(m.Params) == params && len(m.Returns) == returns
+	return m != nil && len(m.Params) == params && len(m.Returns) == returns &&
+		!anyVariadic(m.Params)
+}
+
+// anyVariadic reports whether any parameter is variadic.
+//
+// Every shape in this file is a fixed-arity contract from the standard
+// library — `Write([]byte) (int, error)`, `Less(int, int) bool`,
+// `Scan(any) error`. None of them admits a `...T`, and a method
+// declaring one does not satisfy the interface however well the
+// element type reads.
+//
+// Checked because a frontend records a variadic parameter as its
+// ELEMENT type with Variadic set ([node.Param], and
+// frontend/golang/function.go), so `...[]byte` arrives carrying
+// exactly the `[]byte` that `Write` wants. A predicate reading only
+// the type therefore answers yes to a method that cannot implement
+// [io.Writer] — which is what this package did until the guard landed,
+// while [SameSignature] in satisfies.go compared the flag correctly.
+// Two comparators in one package, disagreeing on a rule Go decides.
+func anyVariadic(params []*node.Param) bool {
+	for _, p := range params {
+		if p != nil && p.Variadic {
+			return true
+		}
+	}
+	return false
 }
 
 // paramType returns the declared type of parameter i, or nil.

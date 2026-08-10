@@ -1,7 +1,9 @@
 package users_test
 
 func (*UserStoreMock) Close()
+func (*UserStoreMock) Collide(arg0 string, arg1 string) error
 func (*UserStoreMock) Get(ctx context.Context, id string) (string, error)
 func (*UserStoreMock) Log(format string, args ...any)
 func (*UserStoreMock) Put(arg0 string) error
-type UserStoreMock struct{CloseFunc func(); GetFunc func(context.Context, string) (string, error); LogFunc func(string, []any); PutFunc func(string) error}
+func (*UserStoreMock) Shadow(u string) error
+type UserStoreMock struct{CloseFunc func(); CollideFunc func(string, string) error; GetFunc func(context.Context, string) (string, error); LogFunc func(string, []any); PutFunc func(string) error; ShadowFunc func(string) error}

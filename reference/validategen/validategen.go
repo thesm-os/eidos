@@ -7,6 +7,7 @@ import (
 	"embed"
 	"fmt"
 
+	refconv "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/sdk"
 	sdkgo "go.thesmos.sh/eidos/sdk/golang"
@@ -98,16 +99,6 @@ func (e *Entry) SetOutputPackages(byTag map[string]string) {
 
 var _ sdk.OutputPackageSetter = (*Entry)(nil)
 
-// subjectRef names the struct being validated, qualified when its
-// package is known and bare when it is not. sdk.External rejects an
-// empty path, so the two cases cannot share a construction.
-func subjectRef(origin sdk.Node, name string) sdk.Ref {
-	if pkg := pkgPathOf(origin); pkg != "" {
-		return sdk.External(pkg, name)
-	}
-	return sdk.Builtin(name)
-}
-
 // Plugin emits a validator per handler and calls it from the handler's
 // prebody.
 //
@@ -154,7 +145,7 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		v := &Validator{
 			BaseEmit:   sdk.BaseEmit{OriginNode: origin, SetByName: c.SetBy(), SourcePos: host.Pos()},
 			FuncName:   fn,
-			SubjectRef: sdk.Ptr(subjectRef(origin, host.Source)),
+			SubjectRef: sdk.Ptr(refconv.SubjectRef(origin, host.Source)),
 		}
 		if err := ctx.Store.Emit().AppendOriginSlot(
 			origin, "top", v, c.Provenance(Name+".validator."+host.Source),
@@ -188,23 +179,4 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		}
 	}
 	return nil
-}
-
-// pkgPathOf returns the import path of the package owning n, or "" when
-// it cannot be determined — in which case the backend's same-package
-// elision leaves the reference unqualified, which is correct for a decl
-// landing beside its source.
-//
-// Typed against [sdk.Struct] rather than duck-typed: the origin always
-// is one, because the value this plugin keys off is handlergen's
-// Handler and handlergen emits one per annotated struct. An earlier
-// `interface{ PkgPath() string }` assertion looked general and matched
-// nothing in the tree — every node spells the field `Package` — so the
-// path was silently always "" and a validator routed into its own
-// package named a subject type that was not in scope there.
-func pkgPathOf(n sdk.Node) string {
-	if s, ok := n.(*sdk.Struct); ok {
-		return s.Package
-	}
-	return ""
 }

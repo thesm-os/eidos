@@ -179,9 +179,12 @@ func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			WriterRef:  sdk.External("net/http", "ResponseWriter"),
 			RequestRef: sdk.Ptr(sdk.External("net/http", "Request")),
 		}
-		if err := ctx.Store.Emit().AppendOriginSlot(
-			src, "top", h, c.Provenance(Name+".handler."+src.Name),
-		); err != nil {
+		// Through AppendOrigin rather than AppendOriginSlot: the
+		// framework composes the `<kind>.<origin-name>` provenance id
+		// every generator otherwise spells by hand, and the copies are
+		// what drift — a sibling of this one had already lost the plugin
+		// prefix from its id.
+		if err := ctx.Store.Emit().AppendOrigin(c.SetBy(), "top", src, h); err != nil {
 			return fmt.Errorf("%s: append handler: %w", Name, err)
 		}
 	}

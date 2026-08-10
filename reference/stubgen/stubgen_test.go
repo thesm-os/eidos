@@ -536,8 +536,8 @@ func TestRendered_PrimaryDeclaresTheDouble(t *testing.T) {
 			AssertField(t, "StoreGetCall", "ID", "string").
 			AssertField(t, "StoreGetCall", "Item", "string").
 			AssertField(t, "StoreGetCall", "Err", "error").
-			AssertField(t, "StoreListCall", "Result0", "[]string").
-			AssertField(t, "StoreListCall", "Result1", "error")
+			AssertField(t, "StoreListCall", "Result", "[]string").
+			AssertField(t, "StoreListCall", "Err", "error")
 	})
 
 	t.Run("the generated methods mirror the source signatures", func(t *testing.T) {

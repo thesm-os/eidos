@@ -26,13 +26,13 @@ type {{ $stub }} struct {
 }
 {{ range .Methods }}
 // {{ .Name }} records the call and delegates to {{ .FuncField }}.
-func ({{ .Recv }} *{{ $stub }}) {{ .Name }}({{ template "stubgen.paramdecls" . }}) {{ template "stubgen.namedresults" . }} {
+func ({{ .ReceiverIdent }} *{{ $stub }}) {{ .Name }}({{ template "stubgen.paramdecls" . }}) {{ template "stubgen.namedresults" . }} {
 {{- if .Returns }}
-	{{ template "stubgen.locals" . }} {{ if .NamedReturns }}={{ else }}:={{ end }} {{ .Recv }}.{{ .FuncField }}({{ template "stubgen.args" . }})
+	{{ template "stubgen.locals" . }} {{ if .NamedReturns }}={{ else }}:={{ end }} {{ .ReceiverIdent }}.{{ .FuncField }}({{ template "stubgen.args" . }})
 {{- else }}
-	{{ .Recv }}.{{ .FuncField }}({{ template "stubgen.args" . }})
+	{{ .ReceiverIdent }}.{{ .FuncField }}({{ template "stubgen.args" . }})
 {{- end }}
-	{{ .Recv }}.{{ .CallsField }} = append({{ .Recv }}.{{ .CallsField }}, {{ .CallType }}{
+	{{ .ReceiverIdent }}.{{ .CallsField }} = append({{ .ReceiverIdent }}.{{ .CallsField }}, {{ .CallType }}{
 {{- range .Params }}
 		{{ .Field }}: {{ .Name }},
 {{- end }}

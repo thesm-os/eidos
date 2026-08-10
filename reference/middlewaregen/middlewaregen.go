@@ -104,13 +104,6 @@ func New() *Plugin {
 	return p
 }
 
-func (p *Plugin) suffix() string {
-	if p.opts.Suffix != "" {
-		return p.opts.Suffix
-	}
-	return DefaultSuffix
-}
-
 // MiddlewareStack is the emit value rendered as one chain variable.
 //
 // It owns a named slot rather than a plain slice because the entries
@@ -188,7 +181,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 				SetByName:  c.SetBy(),
 				SourcePos:  src.Pos(),
 			},
-			VarName:    src.Name + p.suffix(),
+			VarName:    src.Name + p.opts.Suffix,
 			TypeName:   src.Name,
 			HandlerRef: sdk.External("net/http", "Handler"),
 		}
