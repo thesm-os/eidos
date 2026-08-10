@@ -1,171 +1,187 @@
-# Pattern catalog
+# Pattern catalogue
 
-For each common plugin pattern, this catalog walks through the
-matching reference plugin under `reference/`. Each section
-includes a working code snippet so you can see the shape without
-leaving the doc; for the full plugin (with helper functions,
-edge-case handling, options-struct binding, etc.) follow the
-link to the source file.
+For each common plugin pattern this catalogue walks the matching
+reference plugin under `reference/`. Each section carries a working
+snippet so you can see the shape without leaving the page; follow the
+link for the full plugin, with its helpers and edge cases.
 
-Every reference plugin satisfies the framework conformance suite
-and is production-grade.
+Every reference plugin satisfies the conformance suite and is
+production-grade. The snippets here are trimmed from the real source —
+where one differs from the plugin it names, the plugin is right.
+
+## Before the patterns: two rules
+
+**Read through `ctx.Reader`, never `ctx.Store`.** Captured reads
+compose the plugin's cache key. A read that bypasses the Reader is a
+read the cache cannot invalidate on: the source changes, the
+fingerprint does not, and the next run serves stale output
+indistinguishable from current. `ctx.Store` is for the emit side,
+where a generator queues its contributions.
+
+**Write metadata through `EnsureMeta()`, never `Meta()`.** `Meta()` is
+the read accessor and returns `nil` for a node nothing has stamped,
+which is every node on a cold run. Passing that to a setter panics.
 
 ## Annotator — shape inference
 
-**Pattern:** read source nodes, stamp typed metadata, run before
-the generator phase. Other plugins read the stamped meta to
-decide whether their codegen path applies.
+**Pattern:** read source nodes, stamp typed metadata, run before the
+generator phase. Other plugins read the stamp to decide whether their
+path applies.
 
 **Reference:** [`reference/shapewriter`](../../reference/shapewriter)
 
-Detect every struct that satisfies the `io.Writer` shape (a
-`Write([]byte) (int, error)` method) and stamp a typed meta key:
+Detect every struct satisfying the `io.Writer` shape and stamp a typed
+key:
 
 ```go
 package shapewriter
 
 import (
-    "go.thesmos.sh/eidos/core/meta"
-    "go.thesmos.sh/eidos/node"
+    "go.thesmos.sh/eidos/lang/golang"
     "go.thesmos.sh/eidos/sdk"
+    sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
-const Name = "shape-writer"
+const (
+    Name          = "shape-writer"
+    Version       = "1.0.0"
+    DirectiveName = sdk.DirectiveName("writer")
+)
 
-const DirectiveName sdk.DirectiveName = "writer"
+// Detected is the key the plugin stamps. Consumers read it with
+// shapewriter.Detected.Get(s.Meta()).
+var Detected = sdk.NewKey("shape.writer.detected", sdk.BoolParser)
 
-// Detected is the meta key the plugin stamps. Consumers read via
-// shapewriter.Detected.Get(node.Meta()).
-var Detected = meta.NewKey("shape.writer.detected", meta.BoolParser)
+type Plugin struct{ *sdkgo.Base }
 
-type Plugin struct{}
-
-func New() *Plugin { return &Plugin{} }
-
-func (*Plugin) Name() string           { return Name }
-func (*Plugin) Priority() sdk.Priority { return sdk.AnnotatorShape }
-func (*Plugin) Provides() []string     { return nil }
-func (*Plugin) Requires() []string     { return nil }
-
-// Directives declares the schema for the directive OnStruct reads.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
-    return []sdk.DirectiveSchema{
-        sdk.NewDirective(DirectiveName).
-            On(node.KindStruct).
-            Describe("Forces (+) or suppresses (-) writer-shape detection on the host struct.").
-            Build(),
-    }
+func New() *Plugin {
+    return &Plugin{Base: sdkgo.NewPlugin(Name).
+        Version(Version).
+        Priority(sdk.AnnotatorShape).
+        Directives(
+            sdk.NewDirective(DirectiveName).
+                On(sdk.NodeKindStruct).
+                Describe("Forces (+) or suppresses (-) writer-shape detection.").
+                Build(),
+        ).
+        Build()}
 }
 
-// Annotate dispatches to the per-kind hooks via sdk.Walk.
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
     return sdk.Walk(ctx, p)
 }
 
-// OnStruct is the sdk.StructHook entry point — invoked once per
-// struct in stable insertion order. The heuristic runs first; a
-// +gen:writer / -gen:writer directive overrides its outcome.
-func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *node.Struct) {
+// OnStruct runs once per struct in stable insertion order. The
+// heuristic decides first; a +gen:writer / -gen:writer directive
+// overrides it.
+func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *sdk.Struct) {
     _, detected := matchSignature(s)
     if d := s.Directive(DirectiveName); d != nil {
         detected = !d.Negated
     }
-    Detected.Set(s.Meta(), detected, Name)
+    Detected.Set(s.EnsureMeta(), detected, Name)
 }
 ```
 
 **Key idioms:**
 
-- `sdk.Walk(ctx, p)` dispatches to whichever hook interfaces (`OnStruct`, `OnInterface`, `OnMethod`, `OnFunction`, `BeforeNodes`, `AfterNodes`) the plugin implements
-- `sdk.AnnotatorShape` is the earliest annotator priority; refinement / validation annotators see the inferred shapes
-- `sdk.CapabilityProvider` is all-or-nothing — a plugin declaring `Priority` without `Provides` **and** `Requires` fails the suite's "CapabilityProvider is implemented in full or not at all" check and silently runs in the default bucket
-- `meta.NewKey` registers a typed key; consumers read it via `Key.Get(bag)`
+- `sdkgo.NewPlugin(name)` returns a fluent builder for the embedded
+  `sdkgo.Base`, which answers the declaration methods — version,
+  priority, capabilities, directives, outputs, templates — so the
+  plugin body holds only its behaviour. `Build()` closes it.
+- `sdk.Walk(ctx, p)` dispatches to whichever hooks the plugin
+  implements: `OnStruct`, `OnInterface`, `OnMethod`, `OnFunction`,
+  `BeforeNodes`, `AfterNodes`.
+- `sdk.AnnotatorShape` is the earliest annotator bucket, so refinement
+  and validation annotators see the inferred shapes.
+- `sdk.NewKey(name, parser)` declares a typed key and registers it
+  globally; `sdk.EnsureKey` is the variant for a key several packages
+  may declare, since `NewKey` panics on a duplicate.
+- The directive is **scoped with `sdk.NodeKindStruct`**, not
+  `sdk.EmitKindStruct`. Both exist, they carry different values, and a
+  directive scoped to an emit kind matches no source node — so the
+  plugin never fires and nothing reports it.
+- A `+gen:writer` overriding the heuristic is deliberate and
+  undetectable from inside the plugin: the user's statement is final.
 
 **Conformance:** `RunSuite` + `RunAnnotatorSuite`.
 
 ## Generator — per-source-decl emission
 
-**Pattern:** read a directive-tagged source decl (struct,
-interface, function), emit a counterpart in a generated
-package. The canonical "for each `+gen:repo` struct emit a
-`<Type>Repository` interface + `<Type>Repo` struct" pattern.
+**Pattern:** read a directive-tagged source decl, emit a counterpart.
+The canonical "for each `+gen:repo` struct emit a `<Type>Repository`
+interface and a `<Type>Repo` struct".
 
-**Reference:** [`reference/repogen`](../../reference/repogen) (canonical), [`reference/mockgen`](../../reference/mockgen), [`plugins/generator/builder`](../../plugins/generator/builder) (template-driven variant)
+**Reference:** [`reference/repogen`](../../reference/repogen)
+(canonical), [`reference/mockgen`](../../reference/mockgen),
+[`plugins/generator/enum`](../../plugins/generator/enum)
+(template-driven variant)
 
 ```go
 package repogen
 
 import (
-    "go.thesmos.sh/eidos/emit"
-    "go.thesmos.sh/eidos/emit/builder"
-    "go.thesmos.sh/eidos/node"
     "go.thesmos.sh/eidos/sdk"
+    sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 const (
-    Name          = "repogen"
-    Capability    = "repository"
-    DirectiveName = sdk.DirectiveName("repo")
-    Language      = "golang"
+    Name           = "repogen"
+    Version        = "1.0.0"
+    Capability     = "repository"
+    DirectiveName  = sdk.DirectiveName("repo")
+    FilenameSuffix = "_repo.go"
 )
 
-// Options is the typed configuration the plugin declares through
-// sdk.OptionsProvider. Defaults are pre-applied at bind time.
+// Options is the typed configuration, declared through the embedded
+// holder. Defaults apply at bind time, so tests and direct calls see
+// populated values too.
 type Options struct {
     InterfaceSuffix string `eidos:"interface_suffix,default=Repository"`
     StructSuffix    string `eidos:"struct_suffix,default=Repo"`
-    Naming          string `eidos:"naming,one_of=Pascal|Camel,default=Pascal"`
 }
 
 type Plugin struct {
-    *sdk.Holder[Options]  // embeds the OptionsSchema / SetOptions methods
+    *sdkgo.Base
+    *sdk.Holder[Options]
     opts Options
 }
 
 func New() *Plugin {
-    p := &Plugin{}
+    p := &Plugin{Base: sdkgo.NewPlugin(Name).
+        Outputs(sdk.Output{Suffix: FilenameSuffix}).
+        BuiltinTemplates().
+        Version(Version).
+        Priority(sdk.GeneratorFoundation).
+        Provides(Capability).
+        Directives(
+            sdk.NewDirective(DirectiveName).
+                On(sdk.NodeKindStruct).
+                Describe("Forces (+) or suppresses (-) repository emission.").
+                Build(),
+        ).
+        Build()}
     p.Holder = sdk.BindOptions(&p.opts)
     return p
 }
 
-func (*Plugin) Name() string           { return Name }
-func (*Plugin) Priority() sdk.Priority   { return sdk.GeneratorFoundation }
-func (*Plugin) Provides() []string     { return []string{Capability} }
-func (*Plugin) Requires() []string     { return nil }
-func (*Plugin) Outputs(lang string) []sdk.Output {
-    if lang == Language {
-        return []sdk.Output{{Suffix: "_repo.go"}}
-    }
-    return nil
-}
-
-// Directives declares the +gen:repo schema with the pipeline.
-func (*Plugin) Directives() []sdk.DirectiveSchema {
-    return []sdk.DirectiveSchema{
-        sdk.NewDirective(DirectiveName).
-            On(node.KindStruct).
-            Describe("Forces (+) or suppresses (-) repository emission for the host struct.").
-            Build(),
-    }
-}
-
-// Generate walks every +gen:repo source struct and emits the
-// matching interface + struct + method set.
+// Generate emits one package of output per source package holding at
+// least one +gen:repo struct.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
-    structs := ctx.Reader.Structs().Where(func(s *node.Struct) bool {
+    structs := ctx.Reader.Structs().Where(func(s *sdk.Struct) bool {
         return s.HasPositiveDirective(DirectiveName)
     }).Slice()
 
     for _, src := range structs {
-        // node.Struct.Package is the import path, not the package
-        // name; the package node carries both.
+        // Struct.Package is the import path, not the package name;
+        // the package node carries both.
         srcPkg, ok := ctx.Reader.Store().Nodes().Packages().ByQName(src.Package)
         if !ok {
             continue
         }
-        c := sdk.NewProvenance(Name, sdk.EmitTarget{})
+        c := sdk.NewProvenance(Name)
         pkg := c.Package(srcPkg.Name, srcPkg.Path)
-        emitOne(pkg, src, p.opts)
+        p.emitOne(pkg, src, sdk.External(src.Package, src.Name))
         out, err := pkg.Build()
         if err != nil {
             return err
@@ -177,44 +193,48 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
     return nil
 }
 
-func emitOne(pkg *builder.PackageBuilder, src *node.Struct, opts Options) {
-    ifaceName := src.Name + opts.InterfaceSuffix       // UserRepository
-    structName := src.Name + opts.StructSuffix          // UserRepo
-    srcRef := emit.External(src.Package, src.Name)
-
-    pkg.Interface(ifaceName, func(i *builder.InterfaceBuilder) {
+func (p *Plugin) emitOne(pkg *sdk.PackageBuilder, src *sdk.Struct, srcRef sdk.Ref) {
+    pkg.Interface(src.Name+p.opts.InterfaceSuffix, func(i *sdk.InterfaceBuilder) {
         i.Origin(src)
-        i.Method("Get", func(m *builder.MethodBuilder) {
-            m.Param("ctx", emit.External("context", "Context"))
-            m.Param("id", emit.Builtin("string"))
-            m.Return(emit.Ptr(srcRef))
-            m.Return(emit.Builtin("error"))
+        i.Method("Get", func(m *sdk.MethodBuilder) {
+            m.Param("ctx", sdk.External("context", "Context"))
+            m.Param("id", sdk.Builtin("string"))
+            m.Return(sdk.Ptr(srcRef))
+            m.Return(sdk.Builtin("error"))
         })
-        // List, Save, Delete methods elided for brevity
     })
 
-    pkg.Struct(structName, func(s *builder.StructBuilder) {
+    pkg.Struct(src.Name+p.opts.StructSuffix, func(s *sdk.StructBuilder) {
         s.Origin(src)
-        // Implementing-struct stub fields elided
     })
 }
 ```
 
 **Key idioms:**
 
-- `*sdk.Holder[Options]` embedding satisfies `sdk.OptionsProvider`
-  without per-plugin boilerplate
-- `sdk.NewProvenance(Name, sdk.EmitTarget{})` returns a provenance
-  context scoped to the plugin's identity; its `Package(name, path)`
-  method opens a package builder, and every emit decl built through
-  it auto-stamps its SetBy attribution
-- `ctx.Reader.Structs().Where(...).Slice()` filters source-side
-  structs through the per-plugin read-tracking reader so reads
-  contribute to the plugin's cache key
-- `i.Origin(src)` back-links every emit decl to its source; the
-  layout phase composes `emit.Target` from the origin
-- `emit.External(pkg, name)` / `emit.Builtin(name)` / `emit.Ptr(ref)`
-  are the canonical type-reference constructors
+- Embedding `*sdk.Holder[Options]` and assigning `sdk.BindOptions`
+  in `New` satisfies the options contract with no per-plugin
+  boilerplate.
+- `sdk.NewProvenance(Name)` opens a provenance context scoped to the
+  plugin. Everything built through its `Package(name, path)` builder
+  carries that attribution automatically, which is what the backend
+  orders slot contributions by and what the manifest records.
+- `ctx.Reader.Structs().Where(...).Slice()` filters through the
+  read-tracking reader, so the filter lands in the cache key. The same
+  query off `ctx.Store` would not.
+- `i.Origin(src)` back-links each emitted declaration to its source.
+  **Layout composes the output path from that origin** — which is why
+  a generator never computes its own filename.
+- `sdk.External(pkg, name)`, `sdk.Builtin(name)`, `sdk.Ptr(ref)` are
+  the type-reference constructors. Cross-package references travel as
+  `External`, never as a rendered string: the backend registers the
+  import automatically, so templates carry no import block.
+
+**A note on the origin.** Because Layout routes from the origin, an
+output carrying *methods* cannot be moved out of its type's own
+package — Go permits a method declaration only there. An `+gen:out` on
+such a source produces a file naming an undefined type. If your
+primary output carries methods, say so in the package doc.
 
 **Conformance:** `RunSuite` + `RunGeneratorSuite` + `RunOptionsSuite`.
 
@@ -230,8 +250,6 @@ emitted), without owning your own routable output.
 package debugweaver
 
 import (
-    "go.thesmos.sh/eidos/emit"
-    "go.thesmos.sh/eidos/node"
     "go.thesmos.sh/eidos/sdk"
 )
 
@@ -269,7 +287,7 @@ func (*Plugin) Requires() []string     { return nil }
 func (*Plugin) Directives() []sdk.DirectiveSchema {
     return []sdk.DirectiveSchema{
         sdk.NewDirective(DirectiveName).
-            On(node.KindMethod).
+            On(sdk.NodeKindMethod).
             Describe("Suppresses (-) the debug-entry trace on the host method.").
             Build(),
     }
@@ -283,8 +301,8 @@ The skeleton above is the same either way. What differs is how the
 contributed statement gets its rendered form. Both options are
 supported; pick per contribution, not per project.
 
-The `prebody` / `postbody` slots are constrained to `emit.KindStmt`,
-so whatever you append has to *be* an `*emit.Stmt`. That constraint
+The `prebody` / `postbody` slots are constrained to `sdk.EmitKindStmt`,
+so whatever you append has to *be* an `*sdk.Stmt`. That constraint
 is what the two options work with.
 
 | | Option A — build it in Go | Option B — render your own template |
@@ -292,7 +310,7 @@ is what the two options work with.
 | Ships a template | no | yes |
 | Declares an emit kind | no | yes |
 | Implements `TemplateProvider` | no | yes (3 methods) |
-| Spelling lives in | the `emit.Stmt` union | a `.tmpl` file |
+| Spelling lives in | the `sdk.Stmt` union | a `.tmpl` file |
 | Best when | the contribution is one call and its shape will not change | the contribution has structure, or you want to restyle it without touching Go |
 
 #### Option A — build the statement in Go
@@ -309,10 +327,10 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
         if m.HasNegatedDirective(DirectiveName) {
             continue
         }
-        stmt := emit.NewExprStmt(emit.NewCall(
+        stmt := sdk.NewExprStmt(sdk.NewCall(
             sdk.NewExternal(p.opts.Package, p.opts.Func),
-            emit.NewLiteralString(p.opts.Format),
-            emit.NewLiteralString(m.OwnerName()+"."+m.Name),
+            sdk.NewLiteralString(p.opts.Format),
+            sdk.NewLiteralString(m.OwnerName()+"."+m.Name),
         ))
         // AppendPrebody only fails on a nil or unsupported host,
         // neither of which EmitMethods can yield.
@@ -323,13 +341,13 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 ```
 
 The cost shows up when the contribution grows. Anything the
-`emit.Stmt` union does not model has to become `emit.NewRawStmt`
+`sdk.Stmt` union does not model has to become `sdk.NewRawStmt`
 text, and at that point the plugin is formatting Go source by hand.
 
 #### Option B — render through your own template
 
 Declare an emit kind, ship its template, and wrap the value in
-`emit.NewRenderStmt`. The wrapper reports `emit.KindStmt`, so it
+`sdk.NewRenderStmt`. The wrapper reports `sdk.EmitKindStmt`, so it
 satisfies the slot; the backend then renders it by dispatching to
 the template registered under the wrapped node's `Kind`.
 
@@ -346,15 +364,15 @@ const Kind sdk.Kind = "debugweaver.trace"
 //go:embed templates/golang/*.tmpl
 var goTemplates embed.FS
 
-// Trace is the plugin's own emit value. The fields are emit.Expr
+// Trace is the plugin's own emit value. The fields are sdk.Expr
 // rather than strings so the backend does the literal escaping and
 // registers the import for FuncRef on the host file.
 type Trace struct {
     sdk.BaseEmit
 
-    FuncRef *emit.Expr
-    Format  *emit.Expr
-    Subject *emit.Expr
+    FuncRef *sdk.Expr
+    Format  *sdk.Expr
+    Subject *sdk.Expr
 }
 
 func (*Trace) Kind() sdk.Kind { return Kind }
@@ -385,10 +403,10 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
         trace := &Trace{
             BaseEmit: sdk.BaseEmit{SetByName: c.SetBy(), SourcePos: m.Pos()},
             FuncRef:  sdk.NewExternal(p.opts.Package, p.opts.Func),
-            Format:   emit.NewLiteralString(p.opts.Format),
-            Subject:  emit.NewLiteralString(m.OwnerName() + "." + m.Name),
+            Format:   sdk.NewLiteralString(p.opts.Format),
+            Subject:  sdk.NewLiteralString(m.OwnerName() + "." + m.Name),
         }
-        _ = c.AppendPrebody(m, emit.NewRenderStmt(trace), EntryID)
+        _ = c.AppendPrebody(m, sdk.NewRenderStmt(trace), EntryID)
     }
     return nil
 }
@@ -422,8 +440,8 @@ than at build time:
 - Contributions go through a `sdk.Provenance`, not through the
   slot directly: `c.AppendPrebody(host, stmt, id)` stamps SetBy
   attribution and the per-contribution ID that lets a later weaver
-  position itself with `builder.Before` / `builder.After`. The raw
-  `emit.Slot.Append` takes an `emit.Provenance` and returns an
+  position itself with `sdk.InsertBefore` / `sdk.InsertAfter`. The raw
+  `sdk.Slot.Append` takes an `sdk.EmitProvenance` and returns an
   error, so bypassing the context loses the attribution the
   manifest and file headers read
 - Opt-out beats opt-in for an unconditional cross-cutting concern:
@@ -458,8 +476,6 @@ import (
     "embed"
     "io/fs"
     "text/template"
-
-    "go.thesmos.sh/eidos/emit"
     "go.thesmos.sh/eidos/sdk"
 )
 
@@ -473,19 +489,19 @@ const Kind sdk.Kind = "registrygen.registration"
 // every registration routed to one file shares its func init().
 const SlotName = "init"
 
-// Registration is the plugin's emit type. Embeds emit.BaseEmit
+// Registration is the plugin's emit type. Embeds sdk.BaseEmit
 // for the shared Node methods (Pos, Docs, Directives, Meta,
 // Origin, SetBy).
 type Registration struct {
-    emit.BaseEmit
+    sdk.BaseEmit
     Name    string      // the key the registry records the value under
-    NameLit *emit.Expr  // that name, pre-quoted for renderExpr
-    Init    *emit.Expr  // the value expression evaluated at init time
+    NameLit *sdk.Expr  // that name, pre-quoted for renderExpr
+    Init    *sdk.Expr  // the value expression evaluated at init time
 }
 
 func (*Registration) Kind() sdk.Kind { return Kind }
 
-// Compile-time confirmation that *Registration satisfies emit.Node.
+// Compile-time confirmation that *Registration satisfies sdk.EmitNode.
 var _ sdk.EmitNode = (*Registration)(nil)
 
 type Plugin struct{ /* sdk.Holder elided */ }
@@ -541,7 +557,7 @@ func (*Plugin) TemplateOverrides(string) template.FuncMap { return nil }
   (`registrygen.registration`, `middlewaregen.stack`,
   `handlergen.handler`), and the string must match the `define`
   name in the shipped template or the value renders as nothing
-- `emit.BaseEmit` embedded on the custom type provides the
+- `sdk.BaseEmit` embedded on the custom type provides the
   shared `Pos`, `Docs`, `Directives`, `Meta`, `Origin`, and
   `SetBy` accessors
 - `var _ sdk.EmitNode = (*Registration)(nil)` is the compile-time
@@ -594,9 +610,9 @@ type MiddlewareStack struct {
     sdk.BaseEmit
     VarName    string
     TypeName   string
-    HandlerRef emit.Ref
+    HandlerRef sdk.Ref
 
-    chain *emit.Slot
+    chain *sdk.Slot
 }
 
 func (*MiddlewareStack) Kind() sdk.Kind { return Kind }
@@ -605,26 +621,26 @@ func (*MiddlewareStack) Kind() sdk.Kind { return Kind }
 // first use. The empty ElemKind leaves the slot unconstrained —
 // each contributor brings its own emit kind and template, so no
 // single kind could describe the contents.
-func (s *MiddlewareStack) Chain() *emit.Slot {
+func (s *MiddlewareStack) Chain() *sdk.Slot {
     if s.chain == nil {
-        s.chain = emit.NewSlot(ChainSlot, "")
+        s.chain = sdk.NewSlot(ChainSlot, "")
         s.chain.Owner = s
     }
     return s.chain
 }
 
-// Slot satisfies emit.SlotHost so the backend's `slot` template
+// Slot satisfies sdk.SlotHost so the backend's `slot` template
 // helper reaches the chain by name. An unknown name returns an
 // empty slot rather than nil, so a template asking for a slot this
 // kind lacks renders nothing instead of failing.
-func (s *MiddlewareStack) Slot(name string) *emit.Slot {
+func (s *MiddlewareStack) Slot(name string) *sdk.Slot {
     if name == ChainSlot {
         return s.Chain()
     }
-    return emit.NewSlot(name, "")
+    return sdk.NewSlot(name, "")
 }
 
-var _ emit.SlotHost = (*MiddlewareStack)(nil)
+var _ sdk.SlotHost = (*MiddlewareStack)(nil)
 ```
 
 The contributor side reaches the host value through the pending
@@ -661,11 +677,11 @@ var {{ .VarName }} = []func({{ renderType .HandlerRef }}) {{ renderType .Handler
 **Key idioms:**
 
 - `slot` takes the host first: `slot . "chain"`, not
-  `slot "chain" .`. It returns an `*emit.Slot`, which a template
+  `slot "chain" .`. It returns an `*sdk.Slot`, which a template
   cannot range over — iterate `.Items`
 - `render` dispatches an item to the template registered under its
   `Kind()`. `renderExpr` works only on a slot constrained to
-  `emit.KindExpr`; a heterogeneous slot needs `render`
+  `sdk.EmitKindExpr`; a heterogeneous slot needs `render`
 - `Slot.Append` appends to the end, so slot order is append order —
   and what decides append order is the plan, not registration
   order. The plan groups plugins into priority buckets and
@@ -702,9 +718,6 @@ package myfrontend
 
 import (
     "fmt"
-
-    "go.thesmos.sh/eidos/core/opt"
-    "go.thesmos.sh/eidos/node"
     "go.thesmos.sh/eidos/sdk"
 )
 
@@ -715,13 +728,13 @@ type Options struct {
 }
 
 type Plugin struct {
-    *opt.Holder[Options]
+    *sdk.Holder[Options]
     opts Options
 }
 
 func New() *Plugin {
     p := &Plugin{}
-    p.Holder = opt.Bind(&p.opts)
+    p.Holder = sdk.BindOptions(&p.opts)
     return p
 }
 
@@ -736,7 +749,7 @@ func (*Plugin) EmitVersions() []string  { return []string{"1"} }
 // populates ctx.Store.Nodes() via AddPackage. Per-input issues
 // attach to ctx.Diag; fatal failures return a non-nil error.
 func (p *Plugin) Load(ctx *sdk.FrontendContext) error {
-    pkg := &node.Package{Name: "example", Path: "example.com/parsed"}
+    pkg := &sdk.Package{Name: "example", Path: "example.com/parsed"}
     // ... parsing logic populates pkg.Structs, pkg.Interfaces, etc.
     if err := ctx.Store.Nodes().AddPackage(pkg); err != nil {
         return fmt.Errorf("myfrontend: AddPackage: %w", err)
@@ -753,8 +766,8 @@ func (p *Plugin) Load(ctx *sdk.FrontendContext) error {
 - `Versioned.Version` is the frontend's contribution to the
   run's composition fingerprint — bumping it invalidates
   downstream caches. `EmitVersioned.EmitVersions` is a separate
-  declaration: the pipeline checks it against the in-tree
-  `emit.Major` at Build time and rejects an incompatible plugin;
+  declaration: the pipeline checks it against the emit
+  model's own major version at Build time and rejects an incompatible plugin;
   it does not enter the cache key
 - `ctx.Store.Nodes().AddPackage(pkg)` is the canonical way to
   register a parsed package; the store auto-indexes by kind /
@@ -774,7 +787,6 @@ through a `sink.Sink`. Exactly one backend per pipeline.
 package mybackend
 
 import (
-    "go.thesmos.sh/eidos/emit"
     "go.thesmos.sh/eidos/sdk"
 )
 
@@ -793,7 +805,7 @@ func (*Plugin) Language() string { return Language }
 // Render walks every emit entity, groups them by Target, renders
 // one file per group, and writes through ctx.Sink.
 func (p *Plugin) Render(ctx *sdk.BackendContext) error {
-    byTarget := make(map[emit.Target][]emit.Node)
+    byTarget := make(map[sdk.EmitTarget][]sdk.EmitNode)
     for _, s := range ctx.Store.Emit().Structs().Items() {
         byTarget[s.Target] = append(byTarget[s.Target], s)
     }
@@ -806,7 +818,7 @@ func (p *Plugin) Render(ctx *sdk.BackendContext) error {
     return nil
 }
 
-func renderFile(decls []emit.Node) []byte {
+func renderFile(decls []sdk.EmitNode) []byte {
     // Render decls into your target language. The Go backend uses
     // text/template; a markdown backend might just concatenate
     // declarations; a binary backend might serialise protobuf.
@@ -854,7 +866,7 @@ capability name via `sdk.CapabilityProvider.Provides` /
   by Generate" check catches a generator that got past that by
   mutating the buckets some other way.
 
-- **Hand-constructing `emit.Target` literals in a generator.**
+- **Hand-constructing `sdk.EmitTarget` literals in a generator.**
   Generators set `Origin` on every emitted decl; the layout
   phase composes `Target.Dir` / `.Filename` / `.Package`
   downstream. Generators that build their own Target hardcode

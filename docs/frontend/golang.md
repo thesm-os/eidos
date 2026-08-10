@@ -3,28 +3,56 @@
 The Go frontend converts Go source packages — loaded via
 `golang.org/x/tools/go/packages` — into the language-agnostic `node`
 model. Language-specific facts ride on metadata keys in the `go.*`
-namespace rather than first-class node fields, keeping `node/` and
-`emit/` portable to other languages.
+namespace rather than first-class node fields, keeping `node` and
+`emit` portable to other languages.
 
-This document catalogues every `go.*` metadata key the frontend
-stamps and the node kinds it attaches to. It is the contract
-plugins read against; in source these keys live on the
-`golang.Meta*` package-level vars.
+This document catalogues every `go.*` key the frontend stamps and the
+node kinds it attaches to.
 
-## Reading and writing keys
+## Reading these keys from a plugin
 
-Plugin code reads via the typed `Key[T].Get` accessor:
+**Read them through `lang/golang`, never through `frontend/golang`.**
+A plugin importing a specific frontend fails the build: depguard
+denies `plugins/…` any dependency on `frontend/…` or `backend/…`,
+because a plugin that knows which frontend produced its input can
+only ever work with that one.
+
+`lang/golang` exists for exactly this. It owns the key vocabulary and
+the typed accessors, and it is language-conventions only — no parsing,
+no rendering — so both sides may depend on it.
+
+The accessors are the shortest path:
 
 ```go
-import "go.thesmos.sh/eidos/frontend/golang"
+import "go.thesmos.sh/eidos/lang/golang"
 
-if isCtx, _ := golang.MetaIsContext.Get(typeRef.Meta()); isCtx {
+if golang.IsContext(param.Type) {
+    // first parameter is a context.Context
+}
+if golang.ReceiverIsPointer(method) {
     // ...
 }
 ```
 
-Templates read via the funcmap helpers — they're string-keyed
-because templates are text:
+They answer the common questions — `IsError`, `IsContext`,
+`IsStringer`, `IsComparable`, `IsInterface`, `EmbedsInterface`,
+`IsEmptyInterface`, `IsConstraintInterface`, `ReceiverIsPointer`,
+`UnderlyingKind`, `IotaValue` — without the caller handling a
+two-value read.
+
+For a key with no accessor, read the exported `Meta*` var directly:
+
+```go
+if dir, ok := golang.MetaChanDir.Get(typeRef.Meta()); ok && dir == "recv" {
+    // <-chan T
+}
+```
+
+Use `Meta()` for reads. It returns `nil` for a node nothing has
+stamped, and the typed `Get` handles that — but a *write* needs
+`EnsureMeta()`, which allocates the bag.
+
+Templates read string-keyed, because templates are text:
 
 ```
 {{ if metaBool . "go.isContext" }} ctx {{ end }}
@@ -33,7 +61,7 @@ because templates are text:
 
 Every stamp records full provenance — author `"golang"`, authority
 `meta.AuthorityPlugin`, and the source position of the type
-expression. `eidos explain` surfaces this chain.
+expression. `eidos explain` surfaces that chain.
 
 ## Key catalogue
 
@@ -155,3 +183,21 @@ Stamping happens in `frontend/golang/stamp.go` via per-kind helpers:
 
 Type-set constraint terms are stamped on `*node.TypeParam` from
 `typeParamsFromList` via `MetaConstraintTerms.SetAt`.
+
+## Cross-language bridge keys
+
+These are not stamped by the Go frontend. A bridge annotator — the
+proto→Go bridge, and any future one targeting Go — stamps them on a
+*source* node so the Go backend renders a Go-shaped spelling for a
+type that came from another language.
+
+| Key | On | Meaning |
+|---|---|---|
+| `go.type` | TypeRef | Verbatim Go type spelling to render instead of the derived one |
+| `go.name` | Field, Method | Go identifier to render instead of the source name |
+| `go.import` | TypeRef | Import path to register for a `go.type` override |
+
+They are listed here because the Go backend *reads* them, so a
+plugin inspecting why a rendered type does not match its source node
+will find the answer among them. A plugin generating from Go source
+alone never sets them.

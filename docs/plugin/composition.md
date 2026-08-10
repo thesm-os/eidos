@@ -85,14 +85,14 @@ backend's core `emit.method` template renders it:
 serve := &emit.Method{
     Name:         "ServeHTTP",
     ReceiverName: "h",
-    Receiver:     emit.Ptr(emit.Internal(handler)),
+    Receiver:     sdk.Ptr(sdk.Internal(handler)),
     Params: []*emit.Param{
-        {Name: "w", Type: emit.External("net/http", "ResponseWriter")},
-        {Name: "r", Type: emit.Ptr(emit.External("net/http", "Request"))},
+        {Name: "w", Type: sdk.External("net/http", "ResponseWriter")},
+        {Name: "r", Type: sdk.Ptr(sdk.External("net/http", "Request"))},
     },
-    Body: []*emit.Stmt{
-        emit.NewRawStmt("// body owned by handlergen"),
-        emit.NewRawStmt("h.serve(w, r)"),
+    Body: []*sdk.Stmt{
+        sdk.NewRawStmt("// body owned by handlergen"),
+        sdk.NewRawStmt("h.serve(w, r)"),
     },
 }
 ```
@@ -121,22 +121,55 @@ the host method's `prebody` slot.
 
 ```go
 // validategen.Generate (excerpt)
-func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
-    for _, m := range ctx.Reader.EmitMethods().
-        Where(emit.WithMeta("http.handler.method")).Slice() {
-        host := m  // the ServeHTTP method handlergen emitted
-        validateCall := emit.NewExprStmt(emit.NewCall(
-            emit.NewIdent("Validate"),
-            emit.NewAddrOf(emit.NewIdent("req")),
+func (*Plugin) Generate(ctx *sdk.GeneratorContext) error {
+    c := sdk.NewProvenance(Name)
+    for _, pending := range ctx.Store.Emit().PendingOriginSlots() {
+        host, ok := pending.Item.(*handlergen.Handler)
+        if !ok {
+            continue
+        }
+        origin := host.Origin()
+
+        // The emitted Validate function, in validategen's own file.
+        v := &Validator{
+            BaseEmit: sdk.BaseEmit{OriginNode: origin, SetByName: c.SetBy()},
+            FuncName: "Validate" + host.Source,
+        }
+        if err := ctx.Store.Emit().AppendOriginSlot(
+            origin, "top", v, c.Provenance(Name+".validator."+host.Source),
+        ); err != nil {
+            return err
+        }
+
+        // The call to it, into the slot the host hands out.
+        call := sdk.NewExprStmt(sdk.NewCall(
+            sdk.NewIdent(v.FuncName),
+            sdk.NewAddr(sdk.NewIdent("req")),
         ))
-        host.Prebody().Append(
-            validateCall,
-            c.Provenance("http.validate."+m.Name),
-        )
+        if err := host.Prebody().Append(
+            call, c.Provenance(Name+".call."+host.Source),
+        ); err != nil {
+            return err
+        }
     }
     return nil
 }
 ```
+
+**The type assertion is the guard, and it is load-bearing.**
+`FileFor` is lookup-*or-create*, so a contributor that ran where its
+host did not would create the file alone — a fragment of declarations
+hanging off types nothing declared. `Requires` does not prevent that:
+an unsatisfied requirement is ignored silently. Nor does checking the
+source directive, which tells you what was *asked for* rather than
+what was *produced*. Matching on the host's own emit value is the only
+check that holds.
+
+It also hands you the host's projection — its method set, its names —
+so you read them off the host rather than re-deriving them from
+source. Two derivations of one thing are two chances to disagree, and
+the disagreement surfaces as generated code referencing a symbol the
+host never emitted.
 
 Plus a separate emit decl — the generated `Validate` function —
 which uses validategen's own template:
@@ -165,16 +198,19 @@ first within the cross-cutting bucket.
 
 ```go
 // authgen.Generate (excerpt)
-authStmt := emit.NewIfStmt(
-    emit.NewCallExpr(emit.NewExternal("myco/auth", "RequireToken"),
-        emit.NewSelector(emit.NewIdent("r"), "Context"),
-        emit.NewIdent("r")),
-    /* then */ emit.NewBlock(
-        emit.NewExprStmt(emit.NewCall(
-            emit.NewSelector(emit.NewIdent("h"), "respondError"),
-            emit.NewIdent("w"), emit.NewIdent("err"))),
-        emit.NewReturnStmt(),
+authStmt := sdk.NewIf(
+    sdk.NewCall(
+        sdk.External("myco/auth", "RequireToken"),
+        sdk.NewMethodCall(sdk.NewIdent("r"), "Context"),
+        sdk.NewIdent("r"),
     ),
+    []*sdk.Stmt{
+        sdk.NewExprStmt(sdk.NewMethodCall(
+            sdk.NewIdent("h"), "respondError",
+            sdk.NewIdent("w"), sdk.NewIdent("err"),
+        )),
+        sdk.NewReturn(),
+    },
 )
 host.Prebody().Prepend(authStmt, c.Provenance("http.auth.check"))
 ```
@@ -358,7 +394,7 @@ Note what the plugin author writing each plugin did NOT do:
   topo (`Provides` / `Requires` declarations) and the priority
   buckets did the ordering.
 - **No plugin built import paths by hand.** Every
-  `emit.External("myco/audit", "Log")` produces an expression
+  `sdk.External("myco/audit", "Log")` produces an expression
   the backend resolves into the file's import set
   automatically.
 - **No plugin rendered Go syntax directly.** Each template
@@ -485,48 +521,46 @@ Slot:     "chain" on each MiddlewareStack
 package middlewaregen
 
 import (
-    "go.thesmos.sh/eidos/core/kind"
-    "go.thesmos.sh/eidos/emit"
 )
 
-const Kind kind.Kind = "middlewaregen.stack"
+const Kind sdk.Kind = "middlewaregen.stack"
 
 type MiddlewareStack struct {
-    emit.BaseEmit
+    sdk.BaseEmit
 
     HandlerType string  // e.g. "CreateUserHandler"
-    Target      emit.Target
+    Target      sdk.EmitTarget
 
     // The custom slot for cross-plugin contributions.
-    chain *emit.Slot
+    chain *sdk.Slot
 }
 
-func (s *MiddlewareStack) Kind() kind.Kind { return Kind }
+func (s *MiddlewareStack) Kind() sdk.Kind { return Kind }
 
 // Chain returns the custom slot other plugins contribute into.
 // The framework's Slot machinery handles append-order
 // determinism, provenance tracking, and template-time access.
-func (s *MiddlewareStack) Chain() *emit.Slot {
+func (s *MiddlewareStack) Chain() *sdk.Slot {
     if s.chain == nil {
-        s.chain = emit.NewSlot("chain", emit.KindExpr)
+        s.chain = sdk.NewSlot("chain", sdk.EmitKindExpr)
     }
     return s.chain
 }
 
-// Slot satisfies emit.SlotHost so the generic `slot` template
+// Slot satisfies sdk.SlotHost so the generic `slot` template
 // helper can reach the chain by name.
-func (s *MiddlewareStack) Slot(name string) *emit.Slot {
+func (s *MiddlewareStack) Slot(name string) *sdk.Slot {
     if name == "chain" {
         return s.Chain()
     }
-    return emit.NewSlot(name, "")
+    return sdk.NewSlot(name, "")
 }
 
-var _ emit.SlotHost = (*MiddlewareStack)(nil)
+var _ sdk.SlotHost = (*MiddlewareStack)(nil)
 ```
 
 The slot's **element kind** is part of the contract. Declaring
-`emit.KindExpr` makes the framework reject a malformed append
+`sdk.EmitKindExpr` makes the framework reject a malformed append
 (a `*Statement` into an expression slot) at the append call,
 naming the contributing plugin, instead of producing broken
 output at render.
@@ -555,7 +589,7 @@ func (h *{{ .HandlerType }}) middleware(handler http.Handler) http.Handler {
 The new helper here is `slot . "chain"` — the generic accessor
 that returns the named slot. Note the argument order: the host
 comes first, the slot name second. The helper returns a
-`*emit.Slot`, which a template cannot range over directly, so
+`*sdk.Slot`, which a template cannot range over directly, so
 the iteration is over `.Items`.
 
 Each item is rendered with `render`, which dispatches on the
@@ -564,7 +598,7 @@ a contributor ship its own emit kind and its own template rather
 than handing over a bare expression — the host's template never
 learns what a contribution looks like. A slot whose entries are
 uniformly expressions can use `renderExpr` instead and declare
-`emit.KindExpr` as its element kind, trading that flexibility
+`sdk.EmitKindExpr` as its element kind, trading that flexibility
 for a kind check at append time.
 
 Two constraints that bite the moment a second contributor
@@ -595,7 +629,7 @@ func (*Plugin) Requires() []string { return []string{"http.middleware"} }
 
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
     for _, stack := range ctx.Reader.EmitOfKind(middlewaregen.Kind).Slice() {
-        wrapCall := emit.NewExternal("myco/middleware", "WrapAuth")
+        wrapCall := sdk.NewExternal("myco/middleware", "WrapAuth")
         stack.(*middlewaregen.MiddlewareStack).Chain().Append(
             wrapCall,
             c.Provenance("http.auth.middleware"),
@@ -611,7 +645,7 @@ func (*Plugin) Provides() []string { return []string{"http.metric"} }
 func (*Plugin) Requires() []string {
     return []string{"http.middleware", "http.auth"}
 }
-// Contributes emit.NewExternal("myco/middleware", "WrapMetrics") to chain
+// Contributes sdk.NewExternal("myco/middleware", "WrapMetrics") to chain
 ```
 
 ```go
@@ -620,7 +654,7 @@ func (*Plugin) Provides() []string { return []string{"http.trace"} }
 func (*Plugin) Requires() []string {
     return []string{"http.middleware", "http.metric"}
 }
-// Contributes emit.NewExternal("myco/middleware", "WrapTrace") to chain
+// Contributes sdk.NewExternal("myco/middleware", "WrapTrace") to chain
 ```
 
 Two things to notice:
@@ -724,8 +758,8 @@ the capability resolver detects the cycle and fails Build with
 a positioned diagnostic naming both plugins.
 
 **Slot kind mismatch.** A plugin trying to
-`Chain().Append(stmt)` (a `*emit.Stmt`) when the slot was
-declared `emit.KindExpr` is rejected at append time with
+`Chain().Append(stmt)` (a `*sdk.Stmt`) when the slot was
+declared `sdk.EmitKindExpr` is rejected at append time with
 `emit.ErrSlotKindMismatch`. The error pinpoints the offending
 plugin (via the Provenance argument) so the user knows which
 plugin needs fixing.
@@ -752,7 +786,7 @@ Custom slots are the right tool when:
   define the slot's contract.
 - **The slot's element kind is non-trivial.** Standard slots
   accept any statement; a custom slot can declare "this slot
-  takes only `*emit.Expr` values" or "this slot takes only the
+  takes only `*sdk.Expr` values" or "this slot takes only the
   plugin-defined `Middleware` kind", catching wrong appends at
   append time.
 - **Plugin ordering matters within the slot.** Capability

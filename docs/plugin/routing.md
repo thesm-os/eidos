@@ -5,7 +5,7 @@ emit decls land: which directory, which filename, which `package`
 clause. A plugin contributes three things and no more: the
 filename suffixes it declares through `Outputs(lang) []Output`,
 the source-node anchor it attaches to each decl, and — when it
-has an opinion — the `emit.Package` name it emits into.
+has an opinion — the `sdk.EmitPackage` name it emits into.
 Everything else — dir, import path, test-package shift — is
 computed by the pipeline's Layout phase from the directives on
 the source and the project's configured policy. Cross-package
@@ -47,9 +47,9 @@ mockgen emits a struct anchored on `Store`. The Layout phase
 reads the anchor and resolves placement:
 
 - **Dir** — source dir (where `store.go` lives).
-- **Filename** — `<source-basename><plugin.Output.Suffix>` →
+- **Filename** — `<source-basename><sdk.Output.Suffix>` →
   `store_mock_test.go` for mockgen (`_mock_test.go` suffix).
-- **Package** — the plugin's `emit.Package` name when it set
+- **Package** — the plugin's `sdk.EmitPackage` name when it set
   one, otherwise the source package, `store`. Either way a
   filename ending in `_test.go` triggers the shift below.
 - **ImportPath** — the import path matching that package;
@@ -57,8 +57,8 @@ reads the anchor and resolves placement:
 
 The output lands in **`package store_test`** — Go's external
 test convention — with no directive. mockgen reaches it by
-emitting into a `<srcPkg>_test` `emit.Package` of its own; a
-plugin that leaves `emit.Package.Name` empty and declares a
+emitting into a `<srcPkg>_test` `sdk.EmitPackage` of its own; a
+plugin that leaves `sdk.EmitPackage.Name` empty and declares a
 `_test.go` suffix reaches it through the framework shift
 instead. Neither route double-suffixes: a package already ending
 in `_test` is left alone.
@@ -156,7 +156,7 @@ Each layer overrides the previous when its field is set:
 
 1. **Framework default** — alongside source; `Dir` from the
    origin's source file, `Package` / `ImportPath` from the
-   plugin's `emit.Package` when it named one, otherwise from the
+   plugin's `sdk.EmitPackage` when it named one, otherwise from the
    origin's source package.
 2. **Plugin filename suffix** — appended to the source basename
    (`store.go` + `_mock_test.go` → `store_mock_test.go`).
@@ -202,11 +202,11 @@ shift: honouring `pkg=foo` literally on a `_test.go` file would
 turn an external test into an internal one silently. The one way
 to stop the shift is to resolve to a package that already ends
 in `_test` — by writing `pkg=<name>_test`, or by emitting into a
-`<pkg>_test` `emit.Package` as mockgen does.
+`<pkg>_test` `sdk.EmitPackage` as mockgen does.
 
 ## Cross-package references
 
-When a generator emits an `emit.Internal(target)` ref, the Go
+When a generator emits an `sdk.Internal(target)` ref, the Go
 backend resolves qualification at render time from the target's
 resolved `Target.ImportPath`:
 
@@ -218,7 +218,7 @@ resolved `Target.ImportPath`:
   routed) → bare name.
 
 This is what lets mockgen reference repogen's interface via
-`emit.Internal(i)` regardless of whether the mock lands in the
+`sdk.Internal(i)` regardless of whether the mock lands in the
 same package, `<pkg>_test`, or a sibling testkit package — the
 framework resolves the qualifier post-routing without the plugin
 knowing or caring.
@@ -228,8 +228,8 @@ knowing or caring.
 The plugin's entire contribution to routing is:
 
 ```go
-b := builder.For(p.Name()).Anchor(srcNode)
-b.Struct(name, func(s *builder.StructBuilder) { ... })
+b := sdk.NewProvenance(p.Name()).Anchor(srcNode)
+b.Struct(name, func(s *sdk.StructBuilder) { ... })
 out, err := b.Build()
 ```
 
@@ -240,12 +240,12 @@ anchor's source package and stamps the anchor as the default
 filename suffix via the `FilenameProvider` capability
 (`Outputs(lang) []Output`).
 
-Plugins leave `emit.Package.Name` empty — that is the "no
+Plugins leave `sdk.EmitPackage.Name` empty — that is the "no
 opinion" signal, and the framework fills `Package` and
 `ImportPath` from the origin's source package. A plugin with a
 real reason to land elsewhere names the package itself, as
 mockgen does with `c.Package(srcPkg.Name+"_test",
 srcPkg.Path+"_test")`; the Layout phase honours a non-empty name
 under alongside-source layout. What plugins never do is set
-`emit.Target` on a decl or look at the file's destination. The
+`sdk.EmitTarget` on a decl or look at the file's destination. The
 framework does all of that.

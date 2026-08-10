@@ -32,14 +32,13 @@ templates only to the Go backend returns `(nil, false)` from
 ## Step 1: define the emit kind
 
 A plugin-defined emit kind is a Go struct embedding
-`emit.BaseEmit` plus a `Kind()` method returning a namespaced
+`sdk.BaseEmit` plus a `Kind()` method returning a namespaced
 `sdk.Kind` constant. From registrygen:
 
 ```go
 package registrygen
 
 import (
-    "go.thesmos.sh/eidos/emit"
     "go.thesmos.sh/eidos/sdk"
 )
 
@@ -48,12 +47,12 @@ import (
 const Kind sdk.Kind = "registrygen.registration"
 
 type Registration struct {
-    emit.BaseEmit
+    sdk.BaseEmit
 
     Name         string
-    NameLit      *emit.Expr  // pre-built string literal
-    Init         *emit.Expr  // value passed to register call
-    RegisterFunc *emit.Expr  // the register call's callee
+    NameLit      *sdk.Expr  // pre-built string literal
+    Init         *sdk.Expr  // value passed to register call
+    RegisterFunc *sdk.Expr  // the register call's callee
 }
 
 func (*Registration) Kind() sdk.Kind { return Kind }
@@ -63,8 +62,8 @@ func (*Registration) Kind() sdk.Kind { return Kind }
 var _ sdk.EmitNode = (*Registration)(nil)
 ```
 
-`sdk.Kind` aliases `core/kind.Kind` and `sdk.EmitNode` aliases
-`emit.Node`, so the declaration reads through `sdk` without a
+`sdk.Kind` aliases `core/sdk.Kind` and `sdk.EmitNode` aliases
+`sdk.EmitNode`, so the declaration reads through `sdk` without a
 `core/kind` import.
 
 **Naming convention**: the kind string is `<plugin>.<entity>`.
@@ -103,38 +102,46 @@ selection is a string match.
 are reserved for future shared partials; using one fails Build
 with `ErrReservedTemplatePrefix`.
 
-## Step 3: ship the template via `Templates`
+## Step 3: ship the template
+
+A Go generator does not answer the template methods itself. It hands
+its embedded tree to `sdkgo.NewGenerator`, and the base answers
+`Templates`, `TemplateFuncs` and `TemplateOverrides` for Go — and
+reports *not provided* for every other language, which is what makes
+Layout report a missing provider rather than composing Go-shaped
+filenames for a non-Go backend.
 
 ```go
 //go:embed templates/golang/*.tmpl
-var templatesFS embed.FS
+var goTemplates embed.FS
 
-func (*Plugin) Templates(lang string) (fs.FS, bool) {
-    if lang != "golang" {
-        return nil, false
-    }
-    sub, _ := fs.Sub(templatesFS, "templates/golang")
-    return sub, true
+func New() *Plugin {
+    return &Plugin{Base: sdkgo.NewGenerator(
+        Name, goTemplates, sdk.Output{Suffix: FilenameSuffix},
+    ).
+        Version(Version).
+        Priority(sdk.GeneratorCrossCutting).
+        Provides(Capability).
+        Build()}
 }
 ```
 
-The backend's template-collection step walks every plugin's
-returned `fs.FS` looking for `*.tmpl` files, parses each, and
-adds the defined names to the rendering tree. A plugin can ship
-multiple `.tmpl` files; each may define multiple templates.
+The backend walks every plugin's tree for `*.tmpl` files, parses each,
+and adds the defined names to the rendering tree. A plugin may ship
+several files; each may define several templates.
 
-**Filenames are template names too.** `text/template` registers
-each parsed file under its own path inside the returned `fs.FS`,
-alongside the names its `define` blocks declare. Two plugins
-shipping a file at the same path — `registration.tmpl` from both
-— fail Build with `ErrTemplateNameCollision` naming the file,
-even when their `define` names differ. The core tree already
-occupies the bare names `alias.tmpl`, `constant.tmpl`,
-`enum.tmpl`, `function.tmpl`, `interface.tmpl`, `method.tmpl`,
-`struct.tmpl`, and `variable.tmpl`; a plugin file reusing one of
-those displaces the core entry and records an override Info
-diagnostic that reads as a mistake. Name the file after the emit
-kind that owns it, as registrygen does.
+**Filenames are template names too.** `text/template` registers each
+parsed file under its own path as well as the names its `define`
+blocks declare. Two plugins shipping `registration.tmpl` collide at
+Build with `ErrTemplateNameCollision` even when their `define` names
+differ — and the whole run then writes nothing. The core tree already
+occupies the bare names `alias.tmpl`, `constant.tmpl`, `enum.tmpl`,
+`function.tmpl`, `interface.tmpl`, `method.tmpl`, `struct.tmpl` and
+`variable.tmpl`; a plugin file reusing one displaces the core entry
+and records an override diagnostic that reads as a mistake.
+
+Name the file after the emit kind that owns it — `registrygen.entry.tmpl`,
+not `entry.tmpl`.
 
 ## Step 4: emit the entity in `Generate`
 
@@ -150,15 +157,15 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
             continue
         }
         reg := &Registration{
-            BaseEmit: emit.BaseEmit{
+            BaseEmit: sdk.BaseEmit{
                 OriginNode: s,
                 SetByName:  c.SetBy(),
                 SourcePos:  s.Pos(),
             },
             Name:         s.Name,
-            NameLit:      emit.NewLiteralString(s.Name),
-            Init:         emit.NewComposite(emit.External(s.Package, s.Name), nil),
-            RegisterFunc: emit.NewExternal(p.registerPackage(), p.registerFunc()),
+            NameLit:      sdk.NewLiteralString(s.Name),
+            Init:         sdk.NewComposite(sdk.External(s.Package, s.Name), nil),
+            RegisterFunc: sdk.NewExternal(p.registerPackage(), p.registerFunc()),
         }
         // Append into the file-level init slot — the layout phase
         // routes the slot's host file based on the source struct's
@@ -173,7 +180,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 }
 ```
 
-`emit.NewExternal` is the key: it produces an `Expr` referencing
+`sdk.NewExternal` is the key: it produces an `Expr` referencing
 an identifier in a specific package, and the backend
 automatically registers that package as an import on the
 rendered file. The plugin never touches the file's import set
@@ -183,7 +190,7 @@ directly.
 
 At render time, the backend:
 
-1. Groups every emit entity by its `emit.Target`
+1. Groups every emit entity by its `sdk.EmitTarget`
 2. For each target, calls the canonical template for each entity
    — `render <entity>` dispatches by `Node.Kind()` to the
    appropriately-named template
@@ -212,7 +219,7 @@ core funcmap, exposed by the Go backend, includes:
 - **Dispatch helpers** — `render`, `renderType`, `renderStmt`,
   `renderExpr` — route to the appropriate sub-template based on
   the value's kind. Most plugin templates use `renderExpr` to
-  render `*emit.Expr` values and `renderType` for type
+  render `*sdk.Expr` values and `renderType` for type
   references.
 - **Slot-composition helpers** — `renderStructFields`,
   `renderStructEmbeds`, `renderStructMethods`,
@@ -231,7 +238,7 @@ core funcmap, exposed by the Go backend, includes:
   blocks, and generic bracket clauses.
 - **Collision helpers** — `imp` (import path → alias), `slot`
   (named slot accessor on a host), `external` (build an
-  `*emit.Expr` referencing another package's identifier).
+  `*sdk.Expr` referencing another package's identifier).
 - **Metadata** — `provenance` (an emit value's attribution
   string, `emit.struct from pkg/user.go:42`).
 
@@ -245,7 +252,7 @@ shared `lang/golang` identifier-convention helpers — and are
 extended / overridden through the other two methods on
 `TemplateProvider`:
 
-## Funcmap extensions: `TemplateFuncs`
+## Funcmap extensions: `Funcs`
 
 Returns funcmap entries the plugin contributes. The backend
 merges every plugin's returned map at Build time; cross-plugin
@@ -255,32 +262,29 @@ overrideable entry are not caught — the extension wins, with no
 diagnostic — which is the second reason to prefix.
 
 ```go
-func (*Plugin) TemplateFuncs(lang string) template.FuncMap {
-    if lang != "golang" {
-        return nil
-    }
-    return template.FuncMap{
+sdkgo.NewGenerator(Name, goTemplates, outputs...).
+    Funcs(template.FuncMap{
         "myco_camelCase": camelCase,
         "myco_snakeCase": snakeCase,
-    }
-}
+    }).
+    Build()
 ```
 
-**Return `nil` unless the plugin owns a helper of its own.** The
+**Register nothing unless the plugin owns a helper of its own.** The
 shared `lang/golang.FuncMap()` — `isExported`, `isByteSlice`,
 `selfType`, … — is already merged into the backend's
 overrideable bucket, so plugin templates call it without
 registering anything. Returning it from `TemplateFuncs` adds
 nothing and collides with the next plugin that does the same:
 `ErrTemplateFuncCollision`, on `selfType`, from a plugin that
-never wrote it. registrygen returns `nil`.
+never wrote it. registrygen registers none, which is why its builder chain has no `Funcs` call at all.
 
 **Convention**: prefix extension names with your plugin
 identifier (`myco_camelCase`, not `camelCase`) to keep
 cross-plugin collisions rare. Reserved names (the dispatch
 helpers above) are off-limits regardless.
 
-## Funcmap overrides: `TemplateOverrides`
+## Funcmap overrides: `Overrides`
 
 Returns funcmap entries that **intentionally replace**
 previously-registered names. The backend records each override
@@ -323,8 +327,8 @@ fail with `ErrReservedFuncName`.
   `define` blocks inside are named.
 
 - **Manually composing imports inside the template.** The
-  backend resolves imports from `emit.NewExternal` /
-  `emit.External` references on emit entities; templates should
+  backend resolves imports from `sdk.NewExternal` /
+  `sdk.External` references on emit entities; templates should
   `renderExpr` against the entity, never embed raw package
   paths.
 

@@ -5,7 +5,7 @@ A single plugin can declare an **ordered set of outputs**
 belongs to. The framework routes decls to the matching file by
 suffix; the rest of the routing pipeline (Anchor, the `_test.go`
 package shift, `+gen:out` overrides, project / CLI policy, the
-cross-package qualifier on `emit.Internal` refs) flows on top
+cross-package qualifier on `sdk.Internal` refs) flows on top
 per output. This is how a single plugin emits, for example,
 both `<src>_enum.go` (production code) and `<src>_enum_test.go`
 (tests) from one source enum.
@@ -23,7 +23,7 @@ here.
 
 | Concept | Surface | Use |
 |--------|----------|-----|
-| Plugin declares outputs | `Outputs(lang) []plugin.Output` | One entry per rendered file the plugin produces |
+| Plugin declares outputs | `Outputs(lang) []sdk.Output` | One entry per rendered file the plugin produces |
 | Decl belongs to output | `BaseEmit.OutputTagName` field, read via `OutputTag()` | Set via `pkg.File(tag).<Decl>(...)`; empty = the plugin's primary output |
 | Layout looks up suffix | `resolveSuffix` reads `OutputTag()` | Matches against the plugin's declared `Output.Tag` |
 | Per-output override | `+gen:out tag=<tag> <path>` / `-o <plugin>:<tag>=<path>` | Scopes routing overrides to one output |
@@ -33,7 +33,7 @@ Single-file plugins declare one output, set no tags, and behave
 identically to the pre-multi-output framework. Multi-file plugins
 declare multiple outputs and tag their decls accordingly.
 
-## The contract — `plugin.Output` + `Outputs(lang)`
+## The contract — `sdk.Output` + `Outputs(lang)`
 
 The `FilenameProvider` capability returns a slice of outputs
 keyed by tag. Each `Output` is the plugin's declaration of one
@@ -95,11 +95,11 @@ sub-context:
 ```go
 // Default output — decls land in the plugin's primary file
 // (single-file plugin behaviour, OutputTag stays empty).
-pkg.Struct("Status", func(sb *builder.StructBuilder) { ... })
+pkg.Struct("Status", func(sb *sdk.StructBuilder) { ... })
 
 // Secondary output — decls built through the sub-context get
 // OutputTag = "test" stamped automatically.
-pkg.File("test").Function("TestStatusString_RoundTrip", func(fb *builder.FunctionBuilder) { ... })
+pkg.File("test").Function("TestStatusString_RoundTrip", func(fb *sdk.FunctionBuilder) { ... })
 ```
 
 `pkg.File(tag)` is memoised per tag on the root PackageBuilder.
@@ -121,7 +121,7 @@ sub-file as a single `pkg.File(<tag>)` call directly off the
 root `pkg`.
 
 The sub-context shares the root PackageBuilder's underlying
-`emit.Package`, its Anchor default origin, and its error sink —
+`sdk.EmitPackage`, its Anchor default origin, and its error sink —
 `Err` and `Build` on a sub-context report the root's accumulated
 state. Only the stamped tag differs.
 
@@ -396,45 +396,16 @@ same plugin entry already scopes the tag unambiguously, and
 structured consumers should read both fields together rather
 than reconstructing the `<plugin>:<tag>` string.
 
-## Migration from `FilenameSuffix`
-
-`FilenameSuffix(lang) string` is removed in favour of
-`Outputs(lang) []Output`. The single-file migration is one entry
-returning the existing suffix:
-
-```go
-// Before
-func (*Plugin) FilenameSuffix(lang string) string {
-    if lang == "golang" {
-        return "_mock.go"
-    }
-    return ""
-}
-
-// After
-func (*Plugin) Outputs(lang string) []plugin.Output {
-    if lang != "golang" {
-        return nil
-    }
-    return []plugin.Output{{Suffix: "_mock.go"}}
-}
-```
-
-Four reference plugins declared a suffix and migrated identically
-— `mockgen`, `registrygen`, `repogen`, and the since-removed
-`buildergen`. Test fixtures did the same. No behaviour change for
-any existing single-output plugin.
-
 ## Multi-output example — the enum stringer pattern
 
 A single enum plugin emitting both production code and tests:
 
 ```go
-func (*Plugin) Outputs(lang string) []plugin.Output {
+func (*Plugin) Outputs(lang string) []sdk.Output {
     if lang != "golang" {
         return nil
     }
-    return []plugin.Output{
+    return []sdk.Output{
         {Suffix: "_enum.go"},          // primary, empty tag
         {Tag: "test", Suffix: "_enum_test.go"},
     }
@@ -445,7 +416,7 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
         if !e.HasPositiveDirective(DirectiveName) {
             continue
         }
-        pkg := builder.For(Name).Anchor(e)
+        pkg := sdk.NewProvenance(Name).Anchor(e)
         p.emitProduction(pkg, e)
         p.emitTests(pkg.File("test"), e)
         out, err := pkg.Build()
@@ -599,11 +570,11 @@ the rendered text lands in; `Kind()` decides what the rendered
 text looks like.
 
 ```go
-type stringer struct{ emit.BaseEmit; ... }
-func (*stringer) Kind() kind.Kind { return "enum.stringer" }
+type stringer struct{ sdk.BaseEmit; ... }
+func (*stringer) Kind() sdk.Kind { return "enum.stringer" }
 
-type stringerTest struct{ emit.BaseEmit; ... }
-func (*stringerTest) Kind() kind.Kind { return "enum.stringer.test" }
+type stringerTest struct{ sdk.BaseEmit; ... }
+func (*stringerTest) Kind() sdk.Kind { return "enum.stringer.test" }
 ```
 
 The plugin ships `enum.stringer.tmpl` and `enum.stringer.test.tmpl`
@@ -642,7 +613,7 @@ need the generator's actual emissions:
   generator declares. An undeclared tag does not fail loudly at
   Layout; it routes somewhere other than the file the tag names.
 - **`output-package dispatch tolerates partial routing`** — every
-  `emit.OutputPackageSetter` the generator produced survives
+  `sdk.OutputPackageSetter` the generator produced survives
   being handed an empty map, a map of foreign tags, and a map
   carrying only the primary tag with no derivable path. Layout
   calls `SetOutputPackages` at most once per value, with only the

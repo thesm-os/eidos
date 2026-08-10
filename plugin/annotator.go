@@ -22,9 +22,10 @@ import (
 type Annotator interface {
 	Plugin
 
-	// Annotate runs the plugin's annotation pass against ctx.Store.
-	// Per-node issues attach to ctx.Diag; fatal failures return a
-	// non-nil error.
+	// Annotate runs the plugin's annotation pass: read through
+	// ctx.Reader, write through each node's EnsureMeta. Per-node
+	// issues attach to ctx.Diag; fatal failures return a non-nil
+	// error.
 	Annotate(ctx *AnnotatorContext) error
 }
 
@@ -33,14 +34,22 @@ type Annotator interface {
 // supplies the shared store and diagnostic sink along with a
 // per-plugin [store.Reader] for read-tracking.
 type AnnotatorContext struct {
-	// Store is the shared in-memory database. Annotators read from
-	// Store.Nodes() and write metadata via the [meta.Bag] on each
-	// visited node.
+	// Store is the shared in-memory database.
+	//
+	// Present for the operations Reader does not cover — chiefly
+	// the emit side, and store handles a plugin threads into its
+	// own helpers. Reads that decide what the plugin stamps belong
+	// on Reader; see that field.
 	Store *store.Store
 
-	// Reader is the per-plugin read-tracking handle. Annotators
-	// query through Reader so the captured reads contribute to the
-	// plugin's cache key.
+	// Reader is the per-plugin read-tracking handle, and the one
+	// annotators query through.
+	//
+	// Captured reads compose the plugin's cache key, so a read that
+	// bypasses Reader is a read the cache cannot invalidate on: the
+	// source changes, the fingerprint does not, and the run serves
+	// output that is stale but indistinguishable from current.
+	// Nothing reports it.
 	Reader *store.Reader
 
 	// Diag is the diagnostic sink shared with every plugin in the

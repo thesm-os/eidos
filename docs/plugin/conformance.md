@@ -104,7 +104,7 @@ per-language checks validate an empty slice.
 
 ### `RunAnnotatorSuite(t, annotator, fixtures)`
 
-For plugins satisfying `plugin.Annotator`. Pins:
+For plugins satisfying `sdk.Annotator`. Pins:
 
 - `Annotate` on an empty store doesn't panic
 - For each fixture: `Annotate` doesn't panic, doesn't change
@@ -122,7 +122,7 @@ guard makes the second pass a no-op — and fails determinism.
 ```go
 plugintest.AnnotatorFixture{
     Name: "package with three structs",
-    BuildStore: func(t *testing.T) *store.Store {
+    BuildStore: func(t *testing.T) *sdk.Store {
         t.Helper()
         return storefixture.New().
             Struct("User", nil).
@@ -138,7 +138,7 @@ fresh store each call.
 
 ### `RunGeneratorSuite(t, generator, fixtures)`
 
-For plugins satisfying `plugin.Generator`. Pins:
+For plugins satisfying `sdk.Generator`. Pins:
 
 - `Generate` on an empty store doesn't panic
 - For each fixture, six checks:
@@ -161,7 +161,7 @@ For plugins satisfying `plugin.Generator`. Pins:
     none). The empty primary tag is no longer exempt: Layout reports
     `ErrNoDefaultOutput` when a decl carries no tag and the plugin
     declares no empty-tag `Output`
-  - every `emit.OutputPackageSetter` among those contributions
+  - every `sdk.OutputPackageSetter` among those contributions
     tolerates a partial routing map — an empty one, one holding
     only foreign tags, one holding the primary tag with no
     derivable path — without panicking
@@ -180,7 +180,7 @@ called once per subtest — twice each for the determinism and
 
 ### `RunBackendSuite(t, backend, fixtures)`
 
-For plugins satisfying `plugin.Backend`. Pins:
+For plugins satisfying `sdk.Backend`. Pins:
 
 - `Render` on an empty emit graph doesn't panic
 - For each fixture: `Render` doesn't panic, doesn't emit
@@ -192,14 +192,14 @@ For plugins satisfying `plugin.Backend`. Pins:
 ```go
 plugintest.BackendFixture{
     Name: "single struct in one package",
-    BuildEmitPackages: func(t *testing.T) []*emit.Package {
+    BuildEmitPackages: func(t *testing.T) []*sdk.EmitPackage {
         t.Helper()
-        return []*emit.Package{{
+        return []*sdk.EmitPackage{{
             Name: "demo",
             Path: "example.com/demo",
-            Structs: []*emit.Struct{{
+            Structs: []*sdk.EmitStruct{{
                 Name: "User",
-                Target: emit.Target{
+                Target: sdk.EmitTarget{
                     Dir: "demo", Filename: "user_gen.go", Package: "demo",
                 },
             }},
@@ -209,14 +209,14 @@ plugintest.BackendFixture{
 }
 ```
 
-Backend fixtures supply pre-built `emit.Target` values on every
+Backend fixtures supply pre-built `sdk.EmitTarget` values on every
 decl — the suite skips the routing layer. The `Command` field
 stamps a stable string into the rendered file's `Command:`
 header line; pin it explicitly for reproducibility.
 
 ### `RunFrontendSuite(t, frontend, fixtures)`
 
-For plugins satisfying `plugin.Frontend`. Pins:
+For plugins satisfying `sdk.Frontend`. Pins:
 
 - `Load` on an empty pattern doesn't panic
 - For each fixture: `Load` doesn't panic, and is deterministic
@@ -313,7 +313,7 @@ plugin authors can use directly:
   `CapabilityProvider`, `DirectiveProvider`, `Versioned`,
   `EmitVersioned`, `FilenameProvider`, `NodesOnly`. Useful as a
   meta-test baseline: passing it to `RunSuite` always succeeds.
-- **`NewMinimalPlugin(name)`** — implements `plugin.Plugin`
+- **`NewMinimalPlugin(name)`** — implements `sdk.Plugin`
   only, no role. `RunSuite` against it fails the role probe and
   nothing else.
 - **`NewOptionsFixturePlugin(name)`** — a generator whose

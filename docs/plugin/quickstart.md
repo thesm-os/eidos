@@ -1,65 +1,82 @@
 # Quickstart — your first plugin
 
-This walkthrough builds an **annotator** from scratch. We'll
-write a plugin that detects every source struct whose name ends
-in `Repo` and stamps a `myco.repo` boolean on its metadata bag —
-the kind of foundational shape inference downstream generators
-read against.
+This walkthrough builds an **annotator**: a plugin that finds every
+source struct whose name ends in `Repo` and stamps a `myco.repo`
+boolean on its metadata. That is the foundational shape inference
+downstream generators read against.
 
-By the end you'll have:
+By the end you will have a plugin satisfying `sdk.Annotator`, a typed
+metadata key, and a `_test.go` running the framework conformance
+suites.
 
-- A working plugin satisfying `plugin.Annotator`
-- A meta key declaring its typed shape
-- A `_test.go` invoking the framework conformance suite
+About fifty lines of code.
 
-Total reading: ~10 minutes. Total writing: ~50 lines.
+## One import
 
-## The plugin contract in one paragraph
+A plugin imports the façade, not the framework's layering:
 
-Every eidos plugin satisfies `plugin.Plugin` (one method:
-`Name() string`) plus one or more **role interfaces**:
+```go
+import "go.thesmos.sh/eidos/sdk"
+```
 
-- **Frontend** — parses input into the source-side store
-- **Annotator** — stamps metadata on existing nodes (no add /
-  remove)
-- **Generator** — produces emit entities (CRUD repos, builders,
-  mocks, …)
-- **Backend** — renders emit entities to a target language
+`sdk` re-exports everything a plugin *names* — the role contracts, the
+source model it reads, the emit model it writes, and the metadata,
+diagnostic and position vocabulary joining them. A Go-generating
+plugin adds `sdk/golang` for the plugin base and `lang/golang` for Go
+conventions; an annotator needs neither.
 
-A plugin may also opt into **capabilities**: `CapabilityProvider`
-(priority + provides/requires), `OptionsProvider` (typed
-configuration), `DirectiveProvider` (`+gen:` schema declarations),
-`Versioned` (cache invalidation), and so on. Capabilities are
-plain interfaces — the pipeline detects each via type assertion.
+Reach past the façade only for something it deliberately excludes —
+see [the façade's own doc](../../sdk/doc.go) for what those are and
+why.
 
-## Step 1: the package and constructor
+## The plugin contract
+
+Every plugin satisfies `sdk.Plugin` — one method, `Name() string` —
+plus at least one **role**:
+
+| Role | Method | Does |
+|---|---|---|
+| `sdk.Frontend` | `Load` | Parses input into the source store |
+| `sdk.Annotator` | `Annotate` | Stamps metadata on existing nodes |
+| `sdk.Generator` | `Generate` | Produces emit values |
+| `sdk.Backend` | `Language`, `Render` | Renders emit values to a language |
+
+An annotator adds and removes nothing: the node graph is frozen
+between the frontend and generator phases, and annotators run inside
+that window. Its whole output is metadata.
+
+Beyond the roles, a plugin opts into **capabilities** — typed options,
+directive schemas, priority, versioning. Each is a plain interface the
+pipeline detects by assertion.
+
+## Step 1 — the package
 
 Create `myco/reporepo/reporepo.go`:
 
 ```go
-// Package reporepo stamps myco.repo=true on every source struct
-// whose name ends in "Repo". Other plugins read the key via
-// reporepo.MetaRepo.Get(node.Meta()).
+// Package reporepo stamps myco.repo=true on every source struct whose
+// name ends in "Repo". Downstream plugins read it with
+// reporepo.MetaRepo.Get(s.Meta()).
 package reporepo
 
 import (
     "strings"
 
-    "go.thesmos.sh/eidos/core/meta"
     "go.thesmos.sh/eidos/sdk"
 )
 
-// Name is the plugin's stable identifier — used in diagnostics
-// and cache-key composition.
+// Name is the plugin's stable identifier. It appears in diagnostics,
+// in every generated file's provenance header, and in the cache key.
 const Name = "reporepo"
 
-// MetaRepo is the typed meta key the plugin stamps. Plugin
-// authors read via MetaRepo.Get(s.Meta()).
-var MetaRepo = meta.NewKey[bool](
+// MetaRepo is the typed key this plugin stamps.
+//
+// The parser turns the serialised form back into a bool: metadata
+// survives a cache round trip as text, so a key that cannot parse
+// itself back cannot be read from a warm cache.
+var MetaRepo = sdk.NewKey[bool](
     "myco.repo",
-    func(raw string) (bool, error) {
-        return raw == "true", nil
-    },
+    func(raw string) (bool, error) { return raw == "true", nil },
 )
 
 // Plugin satisfies sdk.Annotator. The zero value is usable.
@@ -72,61 +89,75 @@ func New() *Plugin { return &Plugin{} }
 func (*Plugin) Name() string { return Name }
 ```
 
-That's the skeleton. We've declared the plugin name, a typed
-meta key, and the constructor.
+Use `sdk.NewKey` when this plugin owns the key. Use `sdk.EnsureKey`
+when several packages declare the same key and any of them may be
+first — `NewKey` panics on a duplicate, which is what you want for a
+key you own and not for one you share.
 
-## Step 2: implement Annotate
-
-Add the role method:
+## Step 2 — implement Annotate
 
 ```go
-// Annotate walks every source struct and stamps MetaRepo=true on
-// the ones whose name ends in "Repo".
+// Annotate stamps MetaRepo on every source struct named *Repo.
 func (*Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
-    for _, s := range ctx.Store.Nodes().Structs().Items() {
+    for s := range ctx.Reader.Structs().All() {
         if !strings.HasSuffix(s.Name, "Repo") {
             continue
         }
-        MetaRepo.Set(s.Meta(), true, Name)
+        MetaRepo.Set(s.EnsureMeta(), true, Name)
     }
     return nil
 }
 ```
 
-That's it. The plugin reads source structs from the store, picks
-the `*Repo` ones, and stamps their meta. The pipeline already
-indexes structs in stable insertion order, so iteration is
-deterministic.
+Two details in those four lines are the whole difference between a
+plugin that works and one that fails silently.
 
-## Step 3: declare a priority (optional)
+**Read through `ctx.Reader`, never `ctx.Store`.** Reads captured by
+the Reader compose the plugin's cache key. A read that goes around it
+is a read the cache cannot invalidate on: the source changes, the
+fingerprint does not, and the next run serves stale output that is
+indistinguishable from current. Nothing reports it. `ctx.Store` is
+present for what the Reader does not cover — chiefly the emit side.
 
-By default the plugin runs in `priority.Default`
-(`GeneratorCrossCutting`). Shape annotators conventionally run
-earlier, so the framework provides `priority.AnnotatorShape`.
-Declaring it requires implementing `CapabilityProvider`:
+**Write through `EnsureMeta()`, never `Meta()`.** `Meta()` is the read
+accessor and returns `nil` for a node nothing has stamped yet, which
+is every node on a cold run. Passing that to a setter panics.
+`EnsureMeta()` allocates the bag once, on first write.
+
+Iteration order is stable insertion order, so the pass is
+deterministic without sorting.
+
+## Step 3 — declare a priority
+
+Without one, the plugin lands in `sdk.DefaultPriority` (300 — the same
+value as `GeneratorCrossCutting`). Shape annotators run earlier so
+that refinement annotators and generators see populated values:
 
 ```go
-import "go.thesmos.sh/eidos/priority"
+// Priority places the plugin in the shape-detection bucket.
+func (*Plugin) Priority() sdk.Priority { return sdk.AnnotatorShape }
 
-// Priority places the plugin in the shape-detection bucket so
-// downstream annotators and generators see populated MetaRepo
-// values.
-func (*Plugin) Priority() priority.Priority {
-    return priority.AnnotatorShape
-}
+// Provides names the capability this plugin produces. A generator
+// depending on the shape lists it in Requires.
+func (*Plugin) Provides() []string { return []string{"myco.shape.repo"} }
 
-// Provides declares the capability name this plugin produces.
-// Generators that depend on the shape declare it as a Requires
-// entry to enforce ordering.
-func (*Plugin) Provides() []string {
-    return []string{"myco.shape.repo"}
-}
-
-// Requires returns nil — no upstream dependencies.
+// Requires is nil — nothing upstream.
 func (*Plugin) Requires() []string { return nil }
 ```
 
-## Step 4: write the conformance test
+**All three methods or none.** `CapabilityProvider` is a single
+interface, so a plugin declaring `Priority` alone satisfies neither it
+nor any consumer's check for it: the assertion fails, the plugin
+collapses to the default priority, and the ordering its author wrote
+down is discarded without a diagnostic. Returning `nil` from
+`Provides` and `Requires` is fine and common. Omitting them is the
+bug. The conformance suite fails a partial implementation.
+
+`Requires` resolves only *within* a priority bucket. A dependency
+across buckets is expressed by choosing the later bucket, not by
+naming a capability the sorter will not consult.
+
+## Step 4 — the conformance test
 
 Create `myco/reporepo/reporepo_test.go`:
 
@@ -138,14 +169,10 @@ import (
 
     "go.thesmos.sh/eidos/eidostest/plugintest"
     "go.thesmos.sh/eidos/eidostest/storefixture"
-    "go.thesmos.sh/eidos/store"
+    "go.thesmos.sh/eidos/sdk"
     "myco/reporepo"
 )
 
-// TestConformance pins every framework contract: stable Name,
-// role-interface compliance, deterministic capabilities, plus
-// the per-role annotator contracts (no panic on empty store,
-// idempotent meta stamping, frozen node count).
 func TestConformance(t *testing.T) {
     t.Parallel()
 
@@ -158,10 +185,11 @@ func TestConformance(t *testing.T) {
         t.Parallel()
         plugintest.RunAnnotatorSuite(t, reporepo.New(), []plugintest.AnnotatorFixture{
             {
-                Name: "package with a Repo-suffixed struct",
-                BuildStore: func(t *testing.T) *store.Store {
+                Name: "package with Repo-suffixed structs",
+                BuildStore: func(t *testing.T) *sdk.Store {
                     t.Helper()
                     return storefixture.New().
+                        Package("shop", "example.com/shop").
                         Struct("UserRepo", nil).
                         Struct("OrderRepo", nil).
                         Struct("Plain", nil).
@@ -173,65 +201,73 @@ func TestConformance(t *testing.T) {
 }
 ```
 
-Run it:
-
 ```sh
 go test ./...
 ```
 
-The two suites check: `Name()` returns a stable non-empty
-string; the plugin satisfies at least one role interface;
-`CapabilityProvider` is implemented in full, returns the same
-Provides / Requires on every call, and hands back a fresh slice
-each time rather than the plugin's own; `Annotate` on an empty
-store doesn't panic; node count is unchanged across Annotate;
-running Annotate twice produces identical meta state
-(idempotency).
+`RunSuite` pins the universal contracts: a stable non-empty `Name`; at
+least one role implemented; `CapabilityProvider` whole or absent;
+deterministic `Provides`/`Requires` returned as fresh slices rather
+than the plugin's own backing array; directive schemas uniquely named;
+declared outputs well-formed; shipped templates parsing and claiming
+no reserved name.
 
-A green test means the plugin satisfies every framework
-invariant the pipeline relies on at registration / build time.
+`RunAnnotatorSuite` adds the per-role contracts: `Annotate` does not
+panic on an empty store, the node count is unchanged across the pass,
+and running twice produces identical metadata.
 
-## What's next
+That last one is worth dwelling on. Annotators re-run against warm
+caches and partially annotated graphs, so a pass that is not
+idempotent produces different output on the second run than the first
+— and the second run is the one your users get.
 
-- **[recipes.md](recipes.md)** — pattern catalog for the other
-  three roles (Generator, Backend, Frontend) and the
+If you want to confirm the harness is wired up at all,
+`plugintest.BrokenPlugin(v)` returns a plugin violating exactly one
+contract. Watching your suite fail against it is the cheapest way to
+catch a test that is passing because it is not running.
+
+## Where to go next
+
+- **[recipes.md](recipes.md)** — the other three roles and the
   cross-cutting weaver pattern.
-- **[conformance.md](conformance.md)** — full reference for the
-  `plugintest` suite, fixture authoring, and per-role contracts.
-- **`reference/shapewriter`** — production-grade equivalent of
-  the plugin above; reads as the natural next step from this
-  quickstart.
+- **[conformance.md](conformance.md)** — the full `plugintest`
+  reference and fixture authoring.
+- **[`reference/shapewriter`](../../reference/shapewriter)** — the
+  production-grade equivalent of the plugin above.
 
-## Common next-step questions
+## Common next questions
 
-**My plugin needs typed options.** Embed `*sdk.Holder[Options]`
-on your plugin and assign `sdk.BindOptions(&p.opts)` to it in
-`New`. The pipeline calls `SetOptions` at build time; defaults
-are pre-applied at bind time, so even un-pipelined uses (tests,
-direct invocation) see populated values. See `reference/repogen`
-for a worked example.
+**My plugin needs typed options.** Embed `*sdk.Holder[Options]` and
+assign `sdk.BindOptions(&p.opts)` in `New`. The pipeline calls
+`SetOptions` at build time; defaults apply at bind time, so tests and
+direct invocation see populated values too. Worked example:
+[`reference/repogen`](../../reference/repogen).
 
-**My plugin needs to declare a `+gen:` directive.** Implement
+**My plugin needs a `+gen:` directive.** Implement
 `DirectiveProvider`:
 
 ```go
-import "go.thesmos.sh/eidos/node"
-
 func (*Plugin) Directives() []sdk.DirectiveSchema {
     return []sdk.DirectiveSchema{
         sdk.NewDirective("myco-repo").
-            On(node.KindStruct).
+            On(sdk.NodeKindStruct).
             Describe("Opts the struct into MyCo repository emission.").
             Build(),
     }
 }
 ```
 
-A directive name is not a meta-key name: the parser accepts a
-letter followed by letters, digits, `_` and `-`, so `myco.repo`
-names a key but never a directive. The framework auto-collects
-every plugin's schemas at build time and rejects duplicates.
+Scope with `sdk.NodeKind*`, not `sdk.EmitKind*`. Every declaration
+kind exists on both sides carrying a different value, and a directive
+scoped to an emit kind matches no source node — so the plugin never
+fires and nothing reports it.
 
-**My plugin emits code.** That's a Generator, not an Annotator.
-See `reference/repogen` for the canonical shape and the
-`emit/builder` package for the construction helpers.
+A directive name is not a metadata key name. The parser accepts a
+letter followed by letters, digits, `_` and `-`, so `myco.repo` names
+a key and can never name a directive. Names are collected at build
+time and duplicates rejected, so one plugin owns a directive and the
+rest read the stamp.
+
+**My plugin emits code.** That is a Generator. Start at
+[recipes.md](recipes.md); if it targets Go, embed `sdkgo.Base` from
+`sdk/golang` rather than answering the declaration methods yourself.
