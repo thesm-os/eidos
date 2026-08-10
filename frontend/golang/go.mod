@@ -3,7 +3,7 @@ module go.thesmos.sh/eidos/frontend/golang
 go 1.26.5
 
 require (
-	go.thesmos.sh/eidos v1.12.0
+	go.thesmos.sh/eidos v1.13.0
 	go.thesmos.sh/eidos/eidostest v1.9.0
 	golang.org/x/tools v0.48.0
 )
