@@ -15,21 +15,16 @@ omitted unless they change what a caller can rely on.
 
 ### Breaking
 
-- **`reference/stubgen`: recorded-call field names follow the framework's
-  rule.** The error slot is `Err` and a lone value slot is `Result`; several
-  value slots are `Result0`, `Result1`, … numbered across the value slots only.
-  `StoreListCall{Result0 []string; Result1 error}` becomes `{Err error; Result
-  []string}`.
+- **`lang/golang.MethodSet` is removed.** It walked an interface's embeds a
+  second time, beside `node.MethodSet`, with its own cycle guard and its own
+  vocabulary for a failed embed — and the type-set workaround had diverged
+  between the two, each catching a different half. Interface embedding has no
+  shadowing and no depth rule, which is every rule the promotion code around it
+  exists for, so the Go-side walk added nothing.
 
-  The plugin carried its own numbering, which counted every slot — so adding an
-  error return to a source method renumbered the value fields beside it, and a
-  consumer's assertions moved for a reason unrelated to what they assert. A test
-  naming `.Result0` has to update once; it then stops moving.
-
-- **`reference/registrygen`: slot entries carry a composed provenance id.** It
-  spelled its own, `registry.<name>`, where every sibling carries
-  `<kind>.<name>`. The id is what a later plugin targets to position its own
-  contribution, so a plugin that had matched the old spelling no longer will.
+  Migration: `node.MethodSet(i, resolve)`, or `ctx.Reader.MethodSet(i)` for a
+  caller holding the store. Its `[]InterfaceMethod` becomes
+  `MethodSetResult.Entries`, carrying the same method and attribution.
 
 ### Added
 
@@ -66,50 +61,63 @@ omitted unless they change what a caller can rely on.
   and `store` for one call apiece — leaving the façade in exactly the case it
   was written for.
 
-- **`sdk` is now the whole surface a plugin names.** A plugin had to know where
-  each part of the framework lived: `node` for the source model, `emit` and
-  `emit/builder` for output, `core/meta` to state a fact, `core/diag` to report
-  one, `core/position` to point at a line, `store` to read the graph, `plugin`
-  for the phase contexts. All of it is re-exported — 195 aliases across eight
-  files, source model unprefixed and emit carrying the `Emit` prefix, because
-  the two fail silently when confused: an emit value built against a source
-  shape never renders, and a source query against an emit shape never matches.
+- **`store.Reader.Resolve`, `PackageAt` and `FileAt`.** `lang/golang` hangs nine
+  functions off a `Resolver` port it declares and cannot implement —
+  `UnderlyingOf`, `ComparableDeep`, `SampleFor`, `ZeroLiteralFor`, `FieldSet`,
+  `PromotedFields`, `PromotedMethods`, `ExportedFieldSet`, `EmbedsType`. Nothing
+  in the tree supplied one, so a plugin holding a real graph wrote the adapter
+  before it could call any of them. Pass `ctx.Reader`; `sdk/golang` asserts the
+  connection, because it is the only place both packages are in scope.
 
-  Aliases throughout, so nothing that compiled against the old spelling stops.
+  `PackageAt` and `FileAt` hit the indexes those buckets already carry, where
+  filtering the full list turns a per-declaration lookup into a quadratic scan.
 
-- **`sdk/golang.FuncPrefix` folds a plugin name into a template-function
-  prefix.** `text/template` accepts only identifier-shaped function names and
-  panics inside `Funcs` on anything else, so a plugin named `debug-weaver` took
-  the whole run down. The name is a user-visible identity that provenance and
-  directive scoping key on, so it is the prefix that bends.
+- **`lang/golang.SampleRefFor`, `ZeroRefFor` and `Sample`.** The string-returning
+  forms composed a type with `QName` — the import path joined to the name — and
+  returned `example.com/cfg.Weekday(42)`, which is not Go and registers no
+  import. A spelling depends on the file the value lands in, so it travels as a
+  reference. The array and struct arms both types were missing are there too.
 
-- **`sdk/golang.BuiltinTemplates` declares a plugin that ships none.** A plugin
-  emitting only standard decls has no kind of its own for a template to resolve,
-  and the backend's missing-template diagnostic would otherwise point at the one
-  case that is deliberate.
+  `SampleFor` and `ZeroLiteralFor` keep their signatures and now answer only for
+  types a string can spell, which is the honest half of what they claimed.
 
-- **`eidostest/storefixture.Builder.GoSource` projects a fixture into the Go
-  source it describes.** Asserting that generated output compiles needs the
-  hand-written package it references; supplying that separately makes the
-  fixture that drove the run and the source it stands for two things that can
-  disagree — silently, since a stale support file still compiles.
+- **`core/directive.Last`** — last-wins lookup for a repeatable directive
+  carrying a value. First-wins is right for a flag and wrong for
+  `+gen:default limit=10` followed by `limit=50`, which emitted 10 against a
+  source that says 50, with no diagnostic because both lines are well-formed.
 
-- **`eidostest/golangtest.Render` and `Driver` drive a fixture to its files in
-  one call.** Both take the backend rather than constructing one, which keeps
-  the package out of `backend/golang`'s module graph. `AssertDoesNotSatisfy`
-  states what a shape detector is really claiming: not that the canonical shape
-  passes, but that every near miss fails.
+- **`lang/golang.IsSentinelName`**, the matcher `SentinelName`'s own docs referred
+  to. A generator composing a name with one rule and finding it with another
+  emits variables its own detector cannot see.
 
-- **`eidostest/plugintest.AssertRenderStmt` and `AssertExternalCall`.** A
-  contributor's tests read a slot entry's kind back, which `sdk` withholds on
-  grounds true of a generator and false of a test of one.
+- **`plugins/annotator/shape.Plugin.Annotators` and `shape/full`.** A complete
+  shape registration is three plugins; registering the umbrella alone still
+  stamps, so the output looks right while every `Contract.Required` declaration
+  and `Mixin.Validate` hook goes unenforced. What is lost is diagnostics, which
+  is the thing whose absence looks like success.
 
-- **`lang/golang.WithReceiverFromType` and `ParamIdentsFor`.** The receiver
-  identifier is the type name's initial made unique against the parameter
-  identifiers, an ordering a caller cannot resolve alone — one generator
-  projected its signature twice to get there. `ParamIdentsFor` takes declared
-  names, for a generator that lowered away its `node.Param` before it needed
-  identifiers and was reaching past the uniqueness pass.
+- **`eidostest/golangtest.DriverOf` and `RenderOf`** take more than one fixture
+  package, for a generator whose subject is what happens *between* packages.
+  `Source.AssertContains` / `AssertNotContains` reach what no scope can — a
+  comment explaining why a check was omitted belongs to no declaration's body.
+  `Generated.WithRequire` builds against a real dependency.
+
+- **`eidostest/plugintest.Annotate`, `Generate` and `GenerateWithReader`** drive
+  one plugin against a store. The conformance suites answer "is this
+  well-formed"; a plugin's own tests mostly ask "what did it do to this store",
+  and answering it meant building a phase context by hand.
+  `storefixture.Builder.Directive` attaches one to the package itself, which
+  every sub-builder could already do.
+
+### Changed
+
+- **`lang/golang.MethodSet` is deleted; `PromotedMethods` walks through
+  `node.MethodSet`.** Two walkers over one graph, each with its own cycle
+  guard, its own duplicate rule and its own vocabulary for a failed embed — and
+  the type-set workaround had diverged between them, each catching a different
+  half. The Go-side walk added nothing: interface embedding has no shadowing
+  and no depth rule, which is every rule the surrounding promotion code exists
+  for. It had no callers outside this package.
 
 ### Fixed
 
@@ -180,6 +188,83 @@ omitted unless they change what a caller can rely on.
   but the generated-by header, which reads as a generator that ran and failed
   rather than one that had nothing to do.
 
+- **`lang/golang.IsByteSlice` keyed on the literal element name**, so `[]byte`
+  and `[]uint8` — one type, recorded as the author wrote it — produced two
+  different builder APIs. `IsByteSliceAny` now delegates to it.
+
+- **`plugins/generator/builder`: `defaults=3.14` emitted a reference to the
+  symbol `14` in the package `3`.** The check tested for a leading or trailing
+  dot; both halves are now validated as an import path and an identifier.
+
+## v1.11.0 — 2026-08-10
+
+### Breaking
+
+- **`reference/stubgen`: recorded-call field names follow the framework's
+  rule.** The error slot is `Err` and a lone value slot is `Result`; several
+  value slots are `Result0`, `Result1`, … numbered across the value slots only.
+  `StoreListCall{Result0 []string; Result1 error}` becomes `{Err error; Result
+  []string}`.
+
+  The plugin carried its own numbering, which counted every slot — so adding an
+  error return to a source method renumbered the value fields beside it, and a
+  consumer's assertions moved for a reason unrelated to what they assert. A test
+  naming `.Result0` has to update once; it then stops moving.
+
+- **`reference/registrygen`: slot entries carry a composed provenance id.** It
+  spelled its own, `registry.<name>`, where every sibling carries
+  `<kind>.<name>`. The id is what a later plugin targets to position its own
+  contribution, so a plugin that had matched the old spelling no longer will.
+
+### Added
+
+- **`sdk` is now the whole surface a plugin names.** A plugin had to know where
+  each part of the framework lived: `node` for the source model, `emit` and
+  `emit/builder` for output, `core/meta` to state a fact, `core/diag` to report
+  one, `core/position` to point at a line, `store` to read the graph, `plugin`
+  for the phase contexts. All of it is re-exported — 195 aliases across eight
+  files, source model unprefixed and emit carrying the `Emit` prefix, because
+  the two fail silently when confused: an emit value built against a source
+  shape never renders, and a source query against an emit shape never matches.
+
+  Aliases throughout, so nothing that compiled against the old spelling stops.
+
+- **`sdk/golang.FuncPrefix` folds a plugin name into a template-function
+  prefix.** `text/template` accepts only identifier-shaped function names and
+  panics inside `Funcs` on anything else, so a plugin named `debug-weaver` took
+  the whole run down. The name is a user-visible identity that provenance and
+  directive scoping key on, so it is the prefix that bends.
+
+- **`sdk/golang.BuiltinTemplates` declares a plugin that ships none.** A plugin
+  emitting only standard decls has no kind of its own for a template to resolve,
+  and the backend's missing-template diagnostic would otherwise point at the one
+  case that is deliberate.
+
+- **`eidostest/storefixture.Builder.GoSource` projects a fixture into the Go
+  source it describes.** Asserting that generated output compiles needs the
+  hand-written package it references; supplying that separately makes the
+  fixture that drove the run and the source it stands for two things that can
+  disagree — silently, since a stale support file still compiles.
+
+- **`eidostest/golangtest.Render` and `Driver` drive a fixture to its files in
+  one call.** Both take the backend rather than constructing one, which keeps
+  the package out of `backend/golang`'s module graph. `AssertDoesNotSatisfy`
+  states what a shape detector is really claiming: not that the canonical shape
+  passes, but that every near miss fails.
+
+- **`eidostest/plugintest.AssertRenderStmt` and `AssertExternalCall`.** A
+  contributor's tests read a slot entry's kind back, which `sdk` withholds on
+  grounds true of a generator and false of a test of one.
+
+- **`lang/golang.WithReceiverFromType` and `ParamIdentsFor`.** The receiver
+  identifier is the type name's initial made unique against the parameter
+  identifiers, an ordering a caller cannot resolve alone — one generator
+  projected its signature twice to get there. `ParamIdentsFor` takes declared
+  names, for a generator that lowered away its `node.Param` before it needed
+  identifiers and was reaching past the uniqueness pass.
+
+### Fixed
+
 - **`lang/golang`: a variadic method matched a standard-library shape.** A
   frontend records a variadic parameter as its *element* type with `Variadic`
   set, so `Write(p ...[]byte)` arrives carrying exactly the `[]byte` that
@@ -200,14 +285,6 @@ omitted unless they change what a caller can rely on.
   the receiver letter ever reached it.
 
 ### Changed
-
-- **`lang/golang.MethodSet` is deleted; `PromotedMethods` walks through
-  `node.MethodSet`.** Two walkers over one graph, each with its own cycle
-  guard, its own duplicate rule and its own vocabulary for a failed embed — and
-  the type-set workaround had diverged between them, each catching a different
-  half. The Go-side walk added nothing: interface embedding has no shadowing
-  and no depth rule, which is every rule the surrounding promotion code exists
-  for. It had no callers outside this package.
 
 - **Seven reference plugins dropped private copies of rules the framework
   answers**, including four rewrites of the option-or-default accessor the
