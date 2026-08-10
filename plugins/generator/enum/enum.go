@@ -71,6 +71,7 @@ import (
 	"strconv"
 	"strings"
 
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
@@ -271,6 +272,34 @@ type API struct {
 	// puts language interpretation.
 	Underlying string
 
+	// FallbackConv is the type an out-of-set value converts
+	// through before the fallback prints it.
+	//
+	// The answer rather than the question, which is the
+	// opposite of what [API.Underlying] carries and is
+	// deliberate: this is the one part of the decision a
+	// template cannot take correctly. A set whose underlying
+	// type is declared in another package converts through a
+	// qualified reference, and a template composing that
+	// conversion from a name emits a file naming a package it
+	// never imported — text cannot register an import. Carried
+	// as an [sdk.Ref] so the backend's `renderType` registers
+	// one.
+	FallbackConv sdk.Ref
+
+	// FallbackVerb is the printf verb that renders a value of
+	// [API.FallbackConv] faithfully.
+	//
+	// Paired with FallbackConv by [golang.EnumFallback] rather
+	// than derived beside it, because the two drift: `%d`
+	// against a set declared over `float64` renders
+	// `%!d(float64=0.5)`, and `go vet` reports it in the
+	// consuming repository, where nobody wrote it.
+	//
+	// A non-Go adapter reads FallbackConv and ignores this; a
+	// printf verb means nothing to a language without printf.
+	FallbackVerb string
+
 	// Variants is the ordered variant list — declaration
 	// order in the source enum, so iota-based numeric
 	// values stay aligned with the rendered switch cases.
@@ -363,7 +392,8 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			ctx.Diag.Errorf(e.Pos(), "%s: enum %q", ErrEnumHasNoVariants.Error(), e.QName())
 			continue
 		}
-		underlying := underlyingName(e)
+		underlying := golang.EnumUnderlying(e)
+		fallbackConv, fallbackVerb := golang.EnumFallback(e)
 		variants := p.collectVariants(e, underlying)
 		parseName := p.parsePrefix() + e.Name
 		sentinelName := p.sentinelPrefix() + e.Name
@@ -378,6 +408,8 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			ParseName:    parseName,
 			SentinelName: sentinelName,
 			Underlying:   underlying,
+			FallbackConv: fallbackConv,
+			FallbackVerb: fallbackVerb,
 			Variants:     variants,
 		}
 		if err := ctx.Store.Emit().AppendOriginSlot(e, SlotName, api, c.Provenance("enum.api."+e.Name)); err != nil {
@@ -409,19 +441,6 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		}
 	}
 	return nil
-}
-
-// underlyingName returns the enum's underlying type name, or the
-// empty string when the source model declares none. Frontends that
-// produce typeless enums leave [sdk.Enum.Underlying] nil, and an
-// enum with no stated underlying type is treated as numeric —
-// the historical behaviour, and the only one a Go const group
-// without an explicit type can have.
-func underlyingName(e *sdk.Enum) string {
-	if !e.HasUnderlying() {
-		return ""
-	}
-	return e.Underlying.Name
 }
 
 // collectVariants returns the variant list for e with each

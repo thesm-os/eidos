@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
@@ -572,6 +573,106 @@ func TestOutOfRangeLiteral(t *testing.T) {
 		}
 		if got, ok := golang.OutOfRangeLiteral(e); ok {
 			t.Fatalf("OutOfRangeLiteral = %q for a saturated set", got)
+		}
+	})
+}
+
+// TestEnumFallback pins the pairing of the out-of-set conversion
+// with the verb that prints it.
+//
+// The two have drifted apart independently in two generators in this
+// workspace, and both times the output compiled: `%d` against a
+// `float64` is a vet finding in the consuming repository, and an
+// unqualified conversion of a cross-package underlying type is a
+// build failure there. Neither is visible in the generator's own
+// tests, which is why the pairing is asserted here rather than left
+// to the caller.
+func TestEnumFallback(t *testing.T) {
+	t.Parallel()
+
+	over := func(underlying *node.TypeRef) *node.Enum {
+		return &node.Enum{Name: "Status", Package: "example.com/x", Underlying: underlying}
+	}
+
+	assertBuiltin := func(t *testing.T, ref emit.Ref, want string) {
+		t.Helper()
+		b, ok := ref.(*emit.BuiltinRef)
+		if !ok {
+			t.Fatalf("conversion is %T, want *emit.BuiltinRef", ref)
+		}
+		if b.Name != want {
+			t.Fatalf("conversion = %q, want %q", b.Name, want)
+		}
+	}
+
+	t.Run("a builtin underlying converts through itself", func(t *testing.T) {
+		t.Parallel()
+		conv, verb := golang.EnumFallback(over(builtinRef("int64")))
+		assertBuiltin(t, conv, "int64")
+		if verb != "%d" {
+			t.Fatalf("verb = %q, want %%d", verb)
+		}
+	})
+
+	t.Run("a float set takes the float verb", func(t *testing.T) {
+		t.Parallel()
+		// The regression: %d against a float64 renders
+		// %!d(float64=0.5), which go vet reports in the consumer's
+		// repository, where nobody wrote it.
+		conv, verb := golang.EnumFallback(over(builtinRef("float64")))
+		assertBuiltin(t, conv, "float64")
+		if verb != "%g" {
+			t.Fatalf("verb = %q, want %%g", verb)
+		}
+	})
+
+	t.Run("a string set takes the quoting verb", func(t *testing.T) {
+		t.Parallel()
+		conv, verb := golang.EnumFallback(over(builtinRef("string")))
+		assertBuiltin(t, conv, "string")
+		if verb != "%q" {
+			t.Fatalf("verb = %q, want %%q", verb)
+		}
+	})
+
+	t.Run("a cross-package underlying converts through a qualified reference", func(t *testing.T) {
+		t.Parallel()
+		// The whole reason the conversion is a ref rather than a name:
+		// composed as text from EnumUnderlying this renders `Status(v)`,
+		// naming a type the generated file never imported.
+		conv, verb := golang.EnumFallback(over(namedTypeRef("example.com/cfg", "Status")))
+		ext, ok := conv.(*emit.ExternalRef)
+		if !ok {
+			t.Fatalf("conversion is %T, want *emit.ExternalRef", conv)
+		}
+		if ext.Package != "example.com/cfg" || ext.Name != "Status" {
+			t.Fatalf("conversion = %s.%s, want example.com/cfg.Status", ext.Package, ext.Name)
+		}
+		if verb != "%v" {
+			t.Fatalf("verb = %q, want %%v", verb)
+		}
+	})
+
+	t.Run("a set recording no underlying type converts through int", func(t *testing.T) {
+		t.Parallel()
+		// The same assumption OutOfRangeValue bounds such a set with: a
+		// Go const group with no explicit type is an untyped integer.
+		conv, verb := golang.EnumFallback(over(nil))
+		assertBuiltin(t, conv, "int")
+		if verb != "%d" {
+			t.Fatalf("verb = %q, want %%d", verb)
+		}
+	})
+
+	t.Run("a nil enum answers rather than yielding a nil ref", func(t *testing.T) {
+		t.Parallel()
+		// The conversion is total, so there is no absent answer to
+		// report — and a nil ref is the one thing a caller cannot
+		// render.
+		conv, verb := golang.EnumFallback(nil)
+		assertBuiltin(t, conv, "int")
+		if verb != "%d" {
+			t.Fatalf("verb = %q, want %%d", verb)
 		}
 	})
 }

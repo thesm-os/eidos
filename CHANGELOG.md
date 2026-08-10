@@ -28,6 +28,24 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`lang/golang.EnumFallback` pairs an enum's out-of-set conversion with the
+  verb that prints it.** A generated `String` converts a value outside the
+  declared set and formats the result, and the two have to agree — but nothing
+  related them, so both generators in this workspace derived them separately and
+  both got it wrong. `int(v)` truncates a set declared over `float64` to its
+  integer part, prints as `Ratio(0)`, and neither the compiler nor `go vet`
+  objects; for a set declared over another package's string type it does not
+  compile at all, and the numeric verb beside it prints the wrong thing either
+  way. `EnumFallback` returns the conversion as an `emit.Ref` rather than a
+  name, which is what makes a cross-package underlying type render qualified and
+  register its import — text cannot ask for one.
+
+  The reference `enum` generator now reads it, so its emitted `String` is
+  correct for float-backed and cross-package sets; output for an `int`-backed
+  enum is byte-identical. Its `API` emit value gains `FallbackConv` and
+  `FallbackVerb`, and its private `underlyingName` copy of
+  `lang/golang.EnumUnderlying` is gone.
+
 - **`lang/golang`: the enum vocabulary answers for float-backed sets** (#1).
   `EnumValues` parsed every variant through `ParseIntValue` and returned false
   for the whole set on the first non-integer, so `OutOfRangeValue` returned

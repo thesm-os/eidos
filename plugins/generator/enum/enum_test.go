@@ -10,6 +10,7 @@ import (
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/emit"
 	enumplugin "go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -381,5 +382,89 @@ func TestStringValuedEnum(t *testing.T) {
 			}
 		}
 		t.Fatalf("plugin queued no API contribution")
+	})
+}
+
+// TestFallbackReachesTheTemplate pins that the emit value carries the
+// conversion and the verb as an answer rather than as a question.
+//
+// [enumplugin.API.Underlying] is deliberately the source fact, leaving
+// the template to interpret it — and for this one decision the template
+// cannot. A set defined over another package's type converts through a
+// reference the rendered file has to import, and no amount of template
+// logic over a bare type *name* can register one.
+func TestFallbackReachesTheTemplate(t *testing.T) {
+	t.Parallel()
+
+	// apiFor drives Generate over one enum declared with the supplied
+	// underlying type, and returns the queued production contribution.
+	apiFor := func(t *testing.T, underlying *sdk.TypeRef) *enumplugin.API {
+		t.Helper()
+		s := storefixture.New().
+			Package("shop", "example.com/shop").
+			Enum("Tier", func(eb *storefixture.EnumBuilder) {
+				eb.Pos(sdk.At("shop/tier.go", 1, 1))
+				eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
+				if underlying != nil {
+					eb.Underlying(underlying)
+				}
+				eb.Variant("TierFree", "0")
+			}).
+			Build()
+		d := diag.Capture()
+		if err := enumplugin.New().Generate(&sdk.GeneratorContext{
+			Store: s, Reader: store.NewReader(s), Diag: d,
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		for _, slot := range s.Emit().PendingOriginSlots() {
+			if api, ok := slot.Item.(*enumplugin.API); ok {
+				return api
+			}
+		}
+		t.Fatalf("plugin queued no API contribution")
+		return nil
+	}
+
+	t.Run("a float set carries the float conversion and verb", func(t *testing.T) {
+		t.Parallel()
+		// int(v) here compiles and vets, and prints Ratio(0.5) as
+		// "Ratio(0)". The toolchain never objects; the consumer's log
+		// does.
+		api := apiFor(t, storefixture.Named("float64"))
+		if got, ok := api.FallbackConv.(*emit.BuiltinRef); !ok || got.Name != "float64" {
+			t.Fatalf("FallbackConv = %#v, want the float64 builtin", api.FallbackConv)
+		}
+		if api.FallbackVerb != "%g" {
+			t.Fatalf("FallbackVerb = %q, want %%g", api.FallbackVerb)
+		}
+	})
+
+	t.Run("a cross-package underlying carries a qualified conversion", func(t *testing.T) {
+		t.Parallel()
+		// An ExternalRef is what makes the backend register the import.
+		// Carried as a name, this renders a conversion to a type the
+		// generated file never imported.
+		api := apiFor(t, storefixture.PkgNamed("example.com/cfg", "Name"))
+		ext, ok := api.FallbackConv.(*emit.ExternalRef)
+		if !ok {
+			t.Fatalf("FallbackConv = %#v, want an external ref", api.FallbackConv)
+		}
+		if ext.Package != "example.com/cfg" || ext.Name != "Name" {
+			t.Fatalf("FallbackConv = %s.%s, want example.com/cfg.Name", ext.Package, ext.Name)
+		}
+	})
+
+	t.Run("a typeless set converts through int", func(t *testing.T) {
+		t.Parallel()
+		// The rule OutOfRangeValue already applies: a Go const group
+		// with no explicit type is an untyped integer.
+		api := apiFor(t, nil)
+		if got, ok := api.FallbackConv.(*emit.BuiltinRef); !ok || got.Name != "int" {
+			t.Fatalf("FallbackConv = %#v, want the int builtin", api.FallbackConv)
+		}
+		if api.FallbackVerb != "%d" {
+			t.Fatalf("FallbackVerb = %q, want %%d", api.FallbackVerb)
+		}
 	})
 }

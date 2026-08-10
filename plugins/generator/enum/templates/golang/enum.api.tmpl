@@ -11,10 +11,18 @@ func (v {{ .TypeName }}) String() string {
 	{{- /* A string enum's value is already its textual form, so an
 	       undeclared one renders as itself: compilable, and the
 	       string that failed to match is exactly what a caller
-	       needs to see. int(v) does not compile here at all. */}}
+	       needs to see. A Sprintf fallback says strictly less. */}}
 	return string(v)
 {{- else }}
-	return {{ renderExpr (external "fmt" "Sprintf") }}({{ printf "%q" (printf "%s(%%d)" .TypeName) }}, int(v))
+	{{- /* Conversion and verb both come from golang.EnumFallback, which
+	       pairs them. Spelling either here re-decides it, and both prior
+	       spellings were wrong in ways no render assertion can see:
+	       `int(v)` truncates a float set to its integer part and does not
+	       compile at all for one defined over another package's string
+	       type, while `%d` then prints the wrong thing for either.
+	       renderType registers the import a qualified conversion needs;
+	       a name written into the template cannot ask for one. */}}
+	return {{ renderExpr (external "fmt" "Sprintf") }}({{ printf "%q" (printf "%s(%s)" .TypeName .FallbackVerb) }}, {{ renderType .FallbackConv }}(v))
 {{- end }}
 }
 

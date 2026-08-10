@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/node"
 )
 
@@ -62,6 +63,51 @@ func EnumUnderlying(e *node.Enum) string {
 		return ""
 	}
 	return e.Underlying.Name
+}
+
+// EnumFallback returns the conversion a generated `String` applies
+// to a value outside the declared set, and the printf verb that
+// renders the result.
+//
+// Returned together because the verb follows the conversion and
+// nothing else relates the two. `%d` on a set declared over
+// `float64` prints `%!d(float64=0.5)`, and `go vet` reports it
+// against the consuming repository, where nobody wrote it. Two
+// calls — one for the type, one for the verb — is precisely the
+// shape that drifts, and it has drifted independently in two
+// generators in this workspace.
+//
+// An [emit.Ref] rather than a name, because a set whose underlying
+// type is declared in another package converts through a qualified
+// reference and the rendered file has to register the import. Text
+// cannot ask for one: a generator composing the conversion from
+// [EnumUnderlying] writes `Status(v)` for a `cfg.Status`, which
+// names a type the file never imported.
+//
+// A set recording no underlying type converts through `int` — a Go
+// const group without one is an untyped integer, the same
+// assumption [OutOfRangeValue] bounds such a set with. A nil enum
+// answers the same way rather than yielding a nil ref: the
+// conversion is total, so there is no absent answer to report, and
+// a nil ref is the one thing a caller cannot render.
+func EnumFallback(e *node.Enum) (emit.Ref, string) {
+	t := enumFallbackType(e)
+	return FromNode(t), FormatVerb(t)
+}
+
+// enumFallbackType returns the type an out-of-set value converts
+// through — the declared underlying type, or `int` when the model
+// records none.
+//
+// Built fresh per call rather than shared from a package-level
+// value: the result is handed to [FromNode], which stamps it as the
+// produced ref's origin, and a shared node would then be reachable
+// for mutation from every generated ref that ever took this branch.
+func enumFallbackType(e *node.Enum) *node.TypeRef {
+	if e != nil && e.Underlying != nil {
+		return e.Underlying
+	}
+	return &node.TypeRef{TypeKind: node.TypeRefNamed, Name: typeInt}
 }
 
 // EnumFormOf decides how the enum's variants render as text.

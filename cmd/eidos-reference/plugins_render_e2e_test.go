@@ -81,6 +81,97 @@ func TestPluginsRender_StringValuedEnum(t *testing.T) {
 	})
 }
 
+// TestPluginsRender_NonIntegerEnumUnderlying pins the two shapes the
+// numeric fixture's `int` underlying type hides.
+//
+// The `String` fallback converts the value and prints it, and both
+// halves used to be written into the template as `int(v)` and `%d`.
+// That pair is right for exactly the enum demoproject carries — a
+// typed-iota `int` — and wrong in two different ways elsewhere, neither
+// of which a structural assertion about the emit graph can see.
+func TestPluginsRender_NonIntegerEnumUnderlying(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a float set converts and prints without truncating", func(t *testing.T) {
+		t.Parallel()
+		// The quiet one: `int(v)` on a float64 compiles and vets, and
+		// prints Ratio(0.5) as "Ratio(0)". The output is wrong and
+		// nothing in the toolchain says so, which is why this is
+		// asserted on the method body rather than left to a build.
+		fixture := storefixture.New().
+			Package("shop", "example.com/shop").
+			Enum("Ratio", func(e *storefixture.EnumBuilder) {
+				e.Directive(storefixture.Directive("enum"))
+				e.Underlying(storefixture.Named("float64"))
+				e.Variant("RatioHalf", "0.5")
+				e.Variant("RatioFull", "1")
+			})
+		gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), enum.New()).
+			WithSource(golangtest.GoFile(fixture.GoSource()))
+
+		body := gen.Primary(t).InMethod(t, "Ratio", "String")
+		body.AssertNotContains(t, "int(v)")
+		body.AssertContains(t, "float64(v)")
+		body.AssertContains(t, "%g")
+		gen.AssertVets(t)
+	})
+
+	t.Run("a set over another package's type converts through a qualified reference", func(t *testing.T) {
+		t.Parallel()
+		// The loud one, once the underlying type is not numeric:
+		// `int(v)` applied to a string-defined type does not compile,
+		// and the string branch does not catch it because the enum's
+		// underlying type is spelled `Name`, not `string`.
+		fixture := storefixture.New().
+			Package("shop", "example.com/shop").
+			Import("example.com/cfg").
+			Enum("Tier", func(e *storefixture.EnumBuilder) {
+				e.Directive(storefixture.Directive("enum"))
+				e.Underlying(storefixture.PkgNamed("example.com/cfg", "Name"))
+				e.Variant("TierFree", `"free"`)
+				e.Variant("TierPaid", `"paid"`)
+			})
+		gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), enum.New()).
+			WithSource(
+				golangtest.GoFile("cfg/cfg.go", cfgSource),
+				golangtest.GoFile("shop/tier.go", tierSource),
+			)
+
+		// The conversion has to name cfg and the file has to import it.
+		// Composed from the underlying type's name alone it renders
+		// `Name(v)`, which names nothing in scope.
+		gen.AssertCompiles(t)
+		gen.AssertVets(t)
+	})
+}
+
+// cfgSource declares the package a cross-package enum's underlying type
+// lives in. A string type, because that is what makes the old numeric
+// conversion a compile error rather than a silent narrowing.
+const cfgSource = `package cfg
+
+// Name is the underlying type example.com/shop's Tier is defined over,
+// declared here so the generated conversion has to qualify and import.
+type Name string
+`
+
+// tierSource is the hand-written shop package. Written out rather than
+// projected because pinning what the *generator* does with a
+// cross-package underlying type should not also depend on what the
+// fixture's projection does with one.
+const tierSource = `package shop
+
+import "example.com/cfg"
+
+// Tier is defined over another package's type on purpose.
+type Tier cfg.Name
+
+const (
+	TierFree Tier = "free"
+	TierPaid Tier = "paid"
+)
+`
+
 // TestPluginsRender_NarrowWidthSentinelFields pins the guard the
 // demoproject fixture cannot reach.
 //
