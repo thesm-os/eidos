@@ -5,6 +5,8 @@ package storefixture_test
 
 import (
 	"errors"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -613,4 +615,174 @@ func requireUnspellable(t *testing.T, construct, where string, fn func()) {
 		}
 	}()
 	fn()
+}
+
+// TestGoSource_TextRefsKeepTheirImports covers the imports an
+// initialiser needs.
+//
+// GoSource drops the imports a fixture records via Import and rebuilds
+// the set from the *type* expressions it renders, which is deliberate:
+// an import nothing references is a compile error. An initialiser is
+// opaque Go text, so it was a reference the type walk could not see —
+// a fixture declaring `errors` and initialising a sentinel with
+// errors.New projected to source that named errors and imported
+// nothing, which is the one outcome GoSource documents that it will
+// never produce.
+func TestGoSource_TextRefsKeepTheirImports(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a variable initialiser keeps its import", func(t *testing.T) {
+		t.Parallel()
+		b := storefixture.New().Package("cfg", "example.com/cfg")
+		b.Import("errors")
+		b.Variable("ErrEmpty", func(v *storefixture.VariableBuilder) {
+			v.Type(storefixture.Named("error"))
+			v.InitExpr(`errors.New("cfg: empty")`)
+		})
+		_, src := b.GoSource()
+		if !strings.Contains(src, `"errors"`) {
+			t.Fatalf("the initialiser's import was dropped:\n%s", src)
+		}
+	})
+
+	t.Run("a constant value keeps its import", func(t *testing.T) {
+		t.Parallel()
+		// Constant.Value is verbatim text on the same footing as an
+		// initialiser, and had the same defect.
+		b := storefixture.New().Package("cfg", "example.com/cfg")
+		b.Import("time")
+		b.Constant("Timeout", func(c *storefixture.ConstantBuilder) {
+			c.Value("time.Second")
+		})
+		_, src := b.GoSource()
+		if !strings.Contains(src, `"time"`) {
+			t.Fatalf("the constant's import was dropped:\n%s", src)
+		}
+	})
+
+	t.Run("an aliased import is matched by its alias", func(t *testing.T) {
+		t.Parallel()
+		b := storefixture.New().Package("cfg", "example.com/cfg")
+		b.ImportAs("pb", "example.com/gen/shopv1")
+		b.Variable("Default", func(v *storefixture.VariableBuilder) {
+			v.InitExpr("pb.NewItem()")
+		})
+		_, src := b.GoSource()
+		if !strings.Contains(src, "example.com/gen/shopv1") {
+			t.Fatalf("the aliased import was dropped:\n%s", src)
+		}
+	})
+
+	t.Run("an undeclared import is not invented", func(t *testing.T) {
+		t.Parallel()
+		// The property that makes the scan safe: it can only ever
+		// activate an import the fixture already declared, so the
+		// worst outcome is today's behaviour rather than a wrong one.
+		// A declared import is required for the scan to run at all,
+		// and the assertion is about the *other* qualifier: without
+		// one, markTextRefs returns early and this passes without
+		// exercising anything.
+		b := storefixture.New().Package("cfg", "example.com/cfg")
+		b.Import("errors")
+		b.Variable("Bad", func(v *storefixture.VariableBuilder) {
+			v.Type(storefixture.Named("error"))
+			v.InitExpr(`errors.New(fmt.Sprint("x"))`)
+		})
+		_, src := b.GoSource()
+		if strings.Contains(src, `"fmt"`) {
+			t.Fatalf("an import the fixture never declared was invented:\n%s", src)
+		}
+	})
+
+	t.Run("a qualifier inside a string literal is not a reference", func(t *testing.T) {
+		t.Parallel()
+		// The message names a path; the fixture declares `errors` but
+		// not `a`. Matching text inside the literal would try to
+		// resolve one and, in a refusing variant, reject a valid
+		// fixture.
+		b := storefixture.New().Package("cfg", "example.com/cfg")
+		b.Import("errors")
+		b.Variable("ErrPath", func(v *storefixture.VariableBuilder) {
+			v.Type(storefixture.Named("error"))
+			v.InitExpr(`errors.New("cfg: a.b failed")`)
+		})
+		_, src := b.GoSource()
+		if !strings.Contains(src, `"errors"`) {
+			t.Fatalf("the real import was dropped:\n%s", src)
+		}
+		if strings.Count(src, "import") != 1 {
+			t.Fatalf("a literal's contents produced an import:\n%s", src)
+		}
+	})
+
+	t.Run("only the head of a selector chain names a package", func(t *testing.T) {
+		t.Parallel()
+		// `cfg.Default.Timeout` has one qualifier, not two. Treating
+		// `Default` as a package is how a chain-walking scan invents
+		// or, worse, refuses.
+		b := storefixture.New().Package("app", "example.com/app")
+		b.Import("example.com/cfg")
+		b.Variable("T", func(v *storefixture.VariableBuilder) {
+			v.InitExpr("cfg.Default.Timeout")
+		})
+		_, src := b.GoSource()
+		if !strings.Contains(src, `"example.com/cfg"`) {
+			t.Fatalf("the chain head's import was dropped:\n%s", src)
+		}
+		if strings.Contains(src, `"Default"`) {
+			t.Fatalf("a selector segment was treated as a package:\n%s", src)
+		}
+	})
+
+	t.Run("a declared import named inside a literal is not activated", func(t *testing.T) {
+		t.Parallel()
+		// The case that makes literal-stripping observable. The fixture
+		// declares `time` and uses it, and mentions "errors." only in
+		// text. Scanning the literal would emit an `errors` import
+		// nothing references — the compile error the pruning exists to
+		// prevent, reintroduced by the fix for it.
+		b := storefixture.New().Package("cfg", "example.com/cfg")
+		b.Import("time")
+		b.Import("errors")
+		b.Variable("Timeout", func(v *storefixture.VariableBuilder) {
+			v.InitExpr("time.Second // see errors.New for the message form")
+		})
+		_, src := b.GoSource()
+		if strings.Contains(src, `"errors"`) {
+			t.Fatalf("a declared import named only in text was activated:\n%s", src)
+		}
+	})
+
+	t.Run("a declared import named as a selector segment is not activated", func(t *testing.T) {
+		t.Parallel()
+		// The case that makes the chain-head rule observable. `cfg` is
+		// a declared import *and* a field name in the chain; only the
+		// head names a package.
+		b := storefixture.New().Package("app", "example.com/app")
+		b.Import("example.com/app/inner")
+		b.Import("example.com/cfg")
+		b.Variable("T", func(v *storefixture.VariableBuilder) {
+			v.InitExpr("inner.Holder.cfg.Timeout")
+		})
+		_, src := b.GoSource()
+		if strings.Contains(src, `"example.com/cfg"`) {
+			t.Fatalf("a selector segment activated a declared import:\n%s", src)
+		}
+	})
+
+	t.Run("the projected package compiles", func(t *testing.T) {
+		t.Parallel()
+		// The property the projection exists for: what it emits must
+		// build. This is the assertion the reported fixture failed.
+		b := storefixture.New().Package("cfg", "example.com/cfg")
+		b.Import("errors")
+		b.Variable("ErrEmpty", func(v *storefixture.VariableBuilder) {
+			v.Type(storefixture.Named("error"))
+			v.InitExpr(`errors.New("cfg: empty")`)
+		})
+		_, src := b.GoSource()
+		if _, err := parser.ParseFile(token.NewFileSet(), "cfg.go", src, 0); err != nil {
+			t.Fatalf("projected source does not parse: %v\n%s", err, src)
+		}
+	})
 }

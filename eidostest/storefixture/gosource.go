@@ -8,6 +8,7 @@ import (
 	"go/format"
 	"maps"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -156,6 +157,12 @@ type goPrinter struct {
 	// where names the declaration being rendered, for a failure that
 	// has to be actionable from the message alone.
 	where string
+
+	// declared indexes the imports the fixture recorded via
+	// [Builder.Import] / [Builder.ImportAs], keyed by the identifier a
+	// qualifier would spell them as. Built on first use; nil until a
+	// declaration carries verbatim text worth scanning.
+	declared map[string]string
 }
 
 // file assembles the complete source file.
@@ -273,6 +280,71 @@ func (p *goPrinter) decls() string {
 //
 // A single import takes the unparenthesised form an author writes,
 // because the file this stands in for is one an author wrote.
+// literalPattern matches the spans of Go source that carry text
+// rather than code — string, raw-string and rune literals, and both
+// comment forms — so markTextRefs can blank them before looking for
+// qualifiers.
+//
+// A path inside a message (`errors.New("cfg: a.b failed")`) or a
+// package named in a note (`// see errors.New`) is prose, not a
+// selector. Matching either activates an import on the strength of
+// text, and when that import is one the fixture declared but does not
+// otherwise use, the projection emits an unused import — the compile
+// error the pruning exists to prevent, reintroduced by the fix for it.
+var literalPattern = regexp.MustCompile(
+	"`[^`]*`" + `|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|//[^\n]*|/\*(?s:.*?)\*/`)
+
+// qualifierPattern matches an identifier that begins a selector chain:
+// one not preceded by a dot or a word character. The leading-dot
+// exclusion is what keeps `cfg.Default.Timeout` from treating
+// `Default` as a package — only `cfg` starts the chain, and only it
+// can name an import.
+var qualifierPattern = regexp.MustCompile(`(^|[^\w.])([A-Za-z_]\w*)\s*\.`)
+
+// markTextRefs records every declared import whose qualifier appears
+// in expr, so an initialiser keeps the import it needs.
+//
+// [Builder.Import] entries are otherwise dropped — see [Builder.GoSource]
+// — and the import set is accumulated from *type* expressions as they
+// render. An initialiser is opaque Go text, so it is a reference the
+// type walk structurally cannot see: a fixture declaring
+// `errors` and initialising a sentinel with `errors.New(...)`
+// projected to source that named `errors` and imported nothing.
+//
+// Only imports the fixture already declared can be activated. A
+// qualifier matching none is left alone rather than refused, because
+// at package level `var A = B.Field` legitimately names another
+// declaration in the same package, and text alone cannot separate
+// that from a genuinely missing import. The unmatched case therefore
+// behaves exactly as it does today, and a truly absent import stays
+// the compile error it already was.
+func (p *goPrinter) markTextRefs(expr string) {
+	if expr == "" || len(p.pkg.Imports) == 0 {
+		return
+	}
+	if p.declared == nil {
+		p.declared = make(map[string]string, len(p.pkg.Imports))
+		for _, imp := range p.pkg.Imports {
+			if imp == nil || imp.Path == "" {
+				continue
+			}
+			name := imp.Alias
+			if name == "" {
+				name = golang.PackageName(imp.Path)
+			}
+			if name != "" {
+				p.declared[name] = imp.Path
+			}
+		}
+	}
+	scanned := literalPattern.ReplaceAllString(expr, `""`)
+	for _, m := range qualifierPattern.FindAllStringSubmatch(scanned, -1) {
+		if path, ok := p.declared[m[2]]; ok {
+			p.qualifier(path)
+		}
+	}
+}
+
 func (p *goPrinter) importBlock() string {
 	paths := slices.Sorted(maps.Keys(p.imports))
 	switch len(paths) {
@@ -476,6 +548,10 @@ func (p *goPrinter) printConstant(b *strings.Builder, c *node.Constant) {
 		p.fail("a constant with no value, which Go has no declaration for")
 	}
 	openDecl(b, c.DocLines)
+	// Value is verbatim Go text on the same footing as a variable's
+	// initialiser: `const Timeout = time.Second` references an import
+	// no type expression mentions.
+	p.markTextRefs(c.Value)
 	if c.Type == nil {
 		fmt.Fprintf(b, "const %s = %s\n", c.Name, c.Value)
 		return
@@ -501,6 +577,7 @@ func (p *goPrinter) printVariable(b *strings.Builder, v *node.Variable) {
 		b.WriteString(" " + p.typeExpr(v.Type, maxTypeDepth))
 	}
 	if v.InitExpr != "" {
+		p.markTextRefs(v.InitExpr)
 		b.WriteString(" = " + v.InitExpr)
 	}
 	b.WriteString("\n")
