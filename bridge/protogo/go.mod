@@ -3,7 +3,7 @@ module go.thesmos.sh/eidos/bridge/protogo
 go 1.26.5
 
 require (
-	go.thesmos.sh/eidos v0.13.1
+	go.thesmos.sh/eidos v1.13.1
 	go.thesmos.sh/eidos/eidostest v0.13.1
 	go.thesmos.sh/eidos/frontend/golang v0.13.1
 	go.thesmos.sh/eidos/frontend/protobuf v0.13.1
