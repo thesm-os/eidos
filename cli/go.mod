@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/goccy/go-yaml v1.19.2
-	go.thesmos.sh/eidos v1.13.0
+	go.thesmos.sh/eidos v0.13.1
 	golang.org/x/mod v0.38.0
 )
 
