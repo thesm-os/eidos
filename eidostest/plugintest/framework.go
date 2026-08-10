@@ -16,6 +16,7 @@ import (
 	"text/template"
 
 	"go.thesmos.sh/eidos/core/directive"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugin"
 )
 
@@ -177,6 +178,11 @@ func frameworkChecks() []check {
 			"TemplateProvider funcmap entries avoid the backend's reserved names",
 			assertTemplateFuncsAvoidReservedNames,
 			ViolationReservedFuncName,
+		},
+		{
+			"TemplateProvider ships templates whose function calls resolve",
+			assertTemplateFuncsResolveIn,
+			ViolationUnresolvedTemplateFunc,
 		},
 		{
 			"declaration accessors return slices the caller may keep",
@@ -964,6 +970,61 @@ func parseStubbing(name string, body []byte, seed template.FuncMap) (*template.T
 	}
 	return nil, stubbed, fmt.Errorf("template references more than %d undefined functions",
 		maxStubbedTemplateFuncs)
+}
+
+// reservedFuncMap returns the backend's reserved names as a funcmap
+// of stubs.
+//
+// [AssertTemplateFuncsResolve] takes the reserved set as a parameter
+// because this package may not import a backend and a caller
+// targeting a different one must be able to say so. The suite has no
+// such caller, so it builds the set from [reservedFuncNames] — the
+// copy this package already keeps, which `backend/golang` owns a
+// drift test against.
+//
+// Stubs rather than the real helpers because parsing is all that is
+// asked of them: [parseStubbing] only needs the name to be bound for
+// the parse to resolve it.
+//
+// Both halves of what the backend offers, not only the reserved one.
+// A plugin template legitimately calls the language-conventions
+// bundle — `isSlice`, `selfType`, `typeParams` — which the backend
+// merges into its overrideable bucket, and seeding the reserved names
+// alone reports every one of those as unresolved. That is a false
+// failure against a plugin doing exactly what the templates
+// documentation tells it to.
+func reservedFuncMap(lang string) template.FuncMap {
+	fm := make(template.FuncMap, len(reservedFuncNames))
+	for _, name := range reservedFuncNames {
+		fm[name] = func(_ ...any) any { return nil }
+	}
+	if lang == ConformanceLanguage {
+		for name := range golang.FuncMap() {
+			fm[name] = func(_ ...any) any { return nil }
+		}
+	}
+	return fm
+}
+
+// assertTemplateFuncsResolveIn adapts [AssertTemplateFuncsResolve] to
+// the suite's check signature, running it per probed language.
+func assertTemplateFuncsResolveIn(tb testing.TB, p plugin.Plugin, languages ...string) {
+	tb.Helper()
+	// probeLanguagesFor, not the raw slice: a caller supplying none
+	// means the default language, and iterating an empty slice would
+	// assert nothing while reporting green — the exact shape
+	// TestBrokenPlugin_DefeatsTheCheckItNames exists to catch.
+	for _, lang := range probeLanguagesFor(languages...) {
+		// A funcmap carrying a name text/template cannot bind makes
+		// Funcs panic, and the resolve check seeds one to parse with.
+		// That is assertFuncMapsBind's failure to report; recovering
+		// keeps this check from reporting it a second time as a
+		// panic, and from masking its own result behind one.
+		func() {
+			defer func() { _ = recover() }()
+			AssertTemplateFuncsResolve(tb, p, reservedFuncMap(lang), lang)
+		}()
+	}
 }
 
 // AssertTemplateFuncsResolve fails for every function a shipped

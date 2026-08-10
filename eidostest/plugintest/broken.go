@@ -130,6 +130,19 @@ const (
 	// the composition rather than only this one.
 	ViolationReservedFuncName Violation = "reserved-func-name"
 
+	// ViolationUnresolvedTemplateFunc ships a template calling a
+	// function name nobody brings — neither the plugin's own funcmap
+	// nor the backend's reserved set.
+	//
+	// text/template resolves function names at execute time, so the
+	// template parses, ships, and fails midway through Render in a
+	// consumer's build. A call inside a branch no fixture reaches
+	// fails nowhere at all: the file simply comes out short. The
+	// prefix makes it easy to reach, because the author does not write
+	// it — sdk/golang composes it from the plugin name, so a rename
+	// changes every call site in every template and nothing objects.
+	ViolationUnresolvedTemplateFunc Violation = "unresolved-template-func"
+
 	// ViolationUnbindableFuncName registers a funcmap entry under a
 	// name that is not a Go identifier. text/template panics rather
 	// than erroring on one, so the backend takes the panic mid-render
@@ -154,6 +167,7 @@ func Violations() []Violation {
 		ViolationUnstableVersion,
 		ViolationUnstableEmitVersions,
 		ViolationUnstableNodesOnly,
+		ViolationUnresolvedTemplateFunc,
 		ViolationUnstableOutputs,
 		ViolationEmptySuffix,
 		ViolationDuplicateTag,
@@ -247,6 +261,8 @@ func BrokenPlugin(v Violation) plugin.Plugin {
 		return &brokenTemplateProvider{FixturePlugin: base, reservedFunc: true}
 	case ViolationUnbindableFuncName:
 		return &brokenTemplateProvider{FixturePlugin: base, unbindableFunc: true}
+	case ViolationUnresolvedTemplateFunc:
+		return &brokenTemplateProvider{FixturePlugin: base, unresolvedFunc: true}
 	default:
 		return base
 	}
@@ -380,6 +396,7 @@ type brokenTemplateProvider struct {
 	unparsable     bool
 	reservedFunc   bool
 	unbindableFunc bool
+	unresolvedFunc bool
 }
 
 // fixtureTemplateDir is the directory the fixture nests its template
@@ -395,6 +412,11 @@ func (p *brokenTemplateProvider) Templates(lang string) (fs.FS, bool) {
 		return nil, false
 	}
 	body := `{{ define "fixture.ok" }}ok{{ end }}`
+	if p.unresolvedFunc {
+		// Calls a name one character off the helper TemplateFuncs
+		// registers. Parses cleanly; fails at Render, or never.
+		body = `{{ define "fixture.ok" }}{{ fixtureHelpe }}{{ end }}`
+	}
 	if p.unparsable {
 		// An unterminated action: parses as text/template only up to
 		// the opening brace, which is exactly the failure that
