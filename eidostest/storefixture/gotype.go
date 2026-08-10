@@ -228,8 +228,22 @@ func (p *goPrinter) typeParamUse(params []*node.TypeParam) string {
 // `interface{ A; B }` — not into the `A | B` a type set would spell.
 // Getting that backwards produces a constraint that compiles and
 // admits the wrong types.
+//
+// A constraint carrying only [node.Constraint.Raw] is printed
+// verbatim, because that is the one case where the structured field
+// says nothing: Go's type-set form (`~int | ~string`) has no Embedded
+// representation at all, and [node.Constraint.IsAny] reads it as the
+// unbounded constraint. Printing `any` for it would compile and admit
+// every type the author excluded. Verbatim text registers no import,
+// so a raw form naming another package needs that package imported by
+// the fixture — the one place this projection is not correct by
+// construction, and the reason a bound with structured embeds still
+// prefers them.
 func (p *goPrinter) constraintExpr(c *node.Constraint) string {
 	if c.IsAny() {
+		if raw := rawBound(c); raw != "" {
+			return raw
+		}
 		return typeAny
 	}
 	if len(c.Embedded) == 1 {
@@ -240,6 +254,16 @@ func (p *goPrinter) constraintExpr(c *node.Constraint) string {
 		parts = append(parts, p.typeExpr(e, maxTypeDepth))
 	}
 	return "interface{ " + strings.Join(parts, "; ") + " }"
+}
+
+// rawBound returns the constraint's printed source form, or empty for
+// a nil constraint. Split out so the nil check sits at one site rather
+// than beside every read of a field that only a frontend populates.
+func rawBound(c *node.Constraint) string {
+	if c == nil {
+		return ""
+	}
+	return c.Raw
 }
 
 // fieldTag renders a struct tag as the backquoted literal Go wants,

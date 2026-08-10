@@ -156,11 +156,27 @@ func (b *Builder) Package(name, path string) *Builder {
 }
 
 // Import records an import path on the package's deduped import set.
-// Imports are rarely meaningful in unit-test fixtures but the option
-// is here so test cases that inspect the import view of a frontend's
-// output have a way to seed entries.
+//
+// The package-level union, not a file's import block. Anything
+// resolving a qualifier reads a [node.File], because Go scopes a
+// qualifier to the file that wrote the import — declare the file with
+// [Builder.File] when that is what the test is about.
 func (b *Builder) Import(path string) *Builder {
-	b.pkg.Imports = append(b.pkg.Imports, &node.Import{Path: path, Owner: b.pkg})
+	return b.ImportAs("", path)
+}
+
+// ImportAs records an import under an explicit local name on the
+// package's deduped set — Go's `import pb "example.com/gen/shopv1"`.
+//
+// Package-scoped, like [Builder.Import], and subject to the same
+// caveat: the union is a view over every file's imports and no
+// qualifier resolves against it, because two files may bind one path
+// to different names. It exists so a test inspecting the import view a
+// frontend produces can seed one with an alias in it.
+func (b *Builder) ImportAs(alias, path string) *Builder {
+	b.pkg.Imports = append(b.pkg.Imports, &node.Import{
+		Path: path, Alias: alias, Owner: b.pkg,
+	})
 	return b
 }
 

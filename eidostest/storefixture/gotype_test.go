@@ -118,17 +118,17 @@ func TestGoSource_TypeExpressions(t *testing.T) {
 		},
 		{
 			name: "a bidirectional channel",
-			ref:  channelRef(golang.ChanBoth),
+			ref:  storefixture.Chan(storefixture.Named("int")),
 			want: "X chan int",
 		},
 		{
 			name: "a send-only channel",
-			ref:  channelRef(golang.ChanSend),
+			ref:  storefixture.SendChan(storefixture.Named("int")),
 			want: "X chan<- int",
 		},
 		{
 			name: "a receive-only channel",
-			ref:  channelRef(golang.ChanRecv),
+			ref:  storefixture.RecvChan(storefixture.Named("int")),
 			want: "X <-chan int",
 		},
 	}
@@ -194,6 +194,32 @@ func TestGoSource_TypeParameters(t *testing.T) {
 				s.TypeParam("K", storefixture.Constraint(storefixture.Named("comparable")))
 				s.TypeParam("V", nil)
 			}), "type Pair[K comparable, V any] struct")
+	})
+
+	t.Run("a type-set bound renders the source form it was written in", func(t *testing.T) {
+		t.Parallel()
+		// Go's `~int | ~string` has no [node.Constraint.Embedded]
+		// representation, so the structured field is empty and
+		// IsAny reads the constraint as unbounded. Printing `any`
+		// for it compiles and admits every type the author excluded
+		// — the same failure mode as getting union and embedding
+		// backwards, one level down.
+		requireProjects(t, storefixture.New().
+			Struct("Num", func(s *storefixture.StructBuilder) {
+				s.TypeParam("T", storefixture.Bound("~int | ~string"))
+			}), "type Num[T ~int | ~string] struct")
+	})
+
+	t.Run("a bound carrying both prefers the structured bounds", func(t *testing.T) {
+		t.Parallel()
+		// Embedded refs register their own imports; raw text cannot.
+		// Where both are present the projection stays correct by
+		// construction, which is the property it exists for.
+		requireProjects(t, storefixture.New().
+			Struct("Box", func(s *storefixture.StructBuilder) {
+				s.TypeParam("T", storefixture.Bound("fmt.Stringer",
+					storefixture.PkgNamed("fmt", "Stringer")))
+			}), "type Box[T fmt.Stringer] struct")
 	})
 }
 
@@ -262,16 +288,6 @@ func TestGoSource_TypeRefusals(t *testing.T) {
 			}).GoSource()
 		})
 	})
-}
-
-// channelRef builds the shape a Go frontend records a channel as: a
-// named reference carrying its direction as metadata and its element
-// as the first type argument.
-func channelRef(dir golang.ChanDirection) *node.TypeRef {
-	ref := storefixture.WithArgs(storefixture.Named("chan"), storefixture.Named("int"))
-	golang.MetaIsChannel.Set(ref.EnsureMeta(), true, "test")
-	golang.MetaChanDir.Set(ref.EnsureMeta(), string(dir), "test")
-	return ref
 }
 
 // requireProjects asserts that b's projection contains want, matched

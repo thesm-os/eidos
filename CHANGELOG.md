@@ -28,6 +28,31 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`eidostest/storefixture` can build the three shapes a Go frontend produces
+  and the fixture could not spell.** Each was a hole in the harness rather than
+  a missing convenience: a test written against a shape no run produces asserts
+  on nothing, and passes.
+
+  `Chan`, `RecvChan` and `SendChan` build a channel the way the Go frontend
+  records one — a named `go`.`chan` ref with the element on `TypeArgs[0]` and
+  `go.isChannel` / `go.chanDir` / `go.chanElem` stamped beside it. Getting it
+  half right is worse than not expressing it: the structure without the stamp
+  renders as `go.chan[T]`, and the stamp without the structure renders as an
+  error naming a plugin that did not build the ref.
+
+  `Bound(raw, embeds…)` carries `node.Constraint.Raw` as well as `Embedded`.
+  `Constraint` populates only the latter, which no frontend does, and anything
+  reading `Raw` as authoritative — including every derivation over Go's type-set
+  form, which `Embedded` cannot express at all — sees a constraint stating no
+  bound. `Builder.GoSource` now prints a raw-only constraint verbatim rather
+  than as `any`, which compiled and admitted every type the author excluded.
+
+  `Builder.File` declares a source file with its own import block, and
+  `FileBuilder.ImportAs` / `Builder.ImportAs` record an explicit local name. Go
+  scopes a qualifier to the file that wrote the import, so anything resolving
+  one reads a `node.File`; `Builder.Import` populated only the package-level
+  union, which has no aliases and no per-file scope.
+
 - **`lang/golang.EnumFallback` pairs an enum's out-of-set conversion with the
   verb that prints it.** A generated `String` converts a value outside the
   declared set and formats the result, and the two have to agree — but nothing

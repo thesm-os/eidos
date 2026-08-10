@@ -45,6 +45,12 @@ func projectionFixture() *storefixture.Builder {
 			s.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
 			s.Field("Meta", storefixture.Map(
 				storefixture.Named("string"), storefixture.Named("any")), nil)
+			// Both channel directions, one with a cross-package element,
+			// so the round trip covers the direction spelling and the
+			// element's own import registration in the same build.
+			s.Field("Events", storefixture.RecvChan(storefixture.Named("Status")), nil)
+			s.Field("Ticks", storefixture.SendChan(
+				storefixture.PkgNamed("time", "Time")), nil)
 			s.Method("Validate", func(m *storefixture.MethodBuilder) {
 				m.ReceiverName("u")
 				m.Param("ctx", storefixture.PkgNamed("context", "Context"))
@@ -86,6 +92,14 @@ func projectionFixture() *storefixture.Builder {
 				m.Return(storefixture.TypeParamRef("T"))
 				m.Return(storefixture.Named("bool"))
 			})
+		}).
+		Struct("Sum", func(s *storefixture.StructBuilder) {
+			// A type-set bound, which only [storefixture.Bound] can
+			// state: Embedded cannot hold `~int | ~float64` at all, so
+			// a fixture without it declares an unbounded parameter and
+			// the round trip never compiles the form under test.
+			s.TypeParam("N", storefixture.Bound("~int | ~float64"))
+			s.Field("Total", storefixture.TypeParamRef("N"), nil)
 		}).
 		Constant("MaxUsers", func(c *storefixture.ConstantBuilder) {
 			c.Type(storefixture.Named("int")).Value("100")
