@@ -2,7 +2,7 @@ module go.thesmos.sh/eidos/eidostest
 
 go 1.26.5
 
-require go.thesmos.sh/eidos v1.11.0
+require go.thesmos.sh/eidos v1.12.0
 
 replace (
 	go.thesmos.sh/eidos => ../
