@@ -547,3 +547,41 @@ func TestHasTagOptionEdges(t *testing.T) {
 		}
 	})
 }
+
+// TestIsSentinelName pins the matcher half of [golang.SentinelName].
+//
+// The pair has to agree: a generator composing a name with one rule
+// and finding it with another emits variables its own detector cannot
+// see, and nothing fails until a consumer notices the sentinel it
+// declared was ignored.
+func TestIsSentinelName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("matches what SentinelName composes", func(t *testing.T) {
+		t.Parallel()
+		for _, subject := range []string{"NotFound", "conflict", "Timeout"} {
+			if got := golang.SentinelName(subject); !golang.IsSentinelName(got) {
+				t.Errorf("SentinelName(%q) = %q, which IsSentinelName rejects", subject, got)
+			}
+		}
+	})
+
+	t.Run("Err alone is not a sentinel name", func(t *testing.T) {
+		t.Parallel()
+		// It carries the prefix and no subject, so it names nothing in
+		// particular; admitting it would classify a package's generic
+		// error variable as a sentinel for a type.
+		if golang.IsSentinelName("Err") {
+			t.Errorf("bare Err must not match")
+		}
+	})
+
+	t.Run("rejects names that are not sentinels", func(t *testing.T) {
+		t.Parallel()
+		for _, ident := range []string{"", "NotFound", "errNotFound", "Errors", "Erro"} {
+			if golang.IsSentinelName(ident) {
+				t.Errorf("IsSentinelName(%q) = true, want false", ident)
+			}
+		}
+	})
+}

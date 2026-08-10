@@ -20,7 +20,7 @@
 // Consumers register the [Detector] alongside other shape
 // detectors when constructing the umbrella plugin:
 //
-//	pipe.Use(shape.New().Detectors(writer.Detector()))
+//	pipe.WithAnnotator(shape.New().Detectors(writer.Detector()))
 //
 // Detector ordering matters when multiple shapes share a
 // signature ([shape.New] honours registration order); writer is

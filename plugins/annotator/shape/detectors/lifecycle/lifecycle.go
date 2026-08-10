@@ -17,7 +17,7 @@ const Name = "lifecycle"
 // to the umbrella shape plugin. Register one instance per
 // pipeline:
 //
-//	pipe.Use(shape.New().Detectors(lifecycle.Detector()))
+//	pipe.WithAnnotator(shape.New().Detectors(lifecycle.Detector()))
 func Detector() shape.Detector {
 	return shape.Detector{
 		Name:     Name,

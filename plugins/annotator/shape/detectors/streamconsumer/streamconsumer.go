@@ -39,7 +39,7 @@ var (
 // to the umbrella shape plugin. Register one instance per
 // pipeline:
 //
-//	pipe.Use(shape.New().Detectors(streamconsumer.Detector()))
+//	pipe.WithAnnotator(shape.New().Detectors(streamconsumer.Detector()))
 //
 // Priority 470 places it above `reader` (420), which would
 // otherwise claim these signatures and label the stream a key, and

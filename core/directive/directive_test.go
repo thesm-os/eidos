@@ -131,3 +131,44 @@ func TestHasNegated(t *testing.T) {
 		}
 	})
 }
+
+// TestLast pins the last-wins lookup a repeatable value directive
+// needs, against the first-wins rule a flag uses.
+func TestLast(t *testing.T) {
+	t.Parallel()
+
+	list := []*directive.Directive{
+		{Name: "default", KV: map[string]string{"limit": "10"}},
+		{Name: "other"},
+		nil,
+		{Name: "default", KV: map[string]string{"limit": "50"}},
+	}
+
+	t.Run("returns the final entry of that name", func(t *testing.T) {
+		t.Parallel()
+		// An author writing the directive twice has said the second
+		// thing; reading the first emits a value the source contradicts
+		// two lines further down, with no diagnostic.
+		got := directive.Last(list, "default")
+		if got == nil || got.Value("limit") != "50" {
+			t.Fatalf("Last = %+v, want the limit=50 entry", got)
+		}
+	})
+
+	t.Run("a single entry is both first and last", func(t *testing.T) {
+		t.Parallel()
+		if got := directive.Last(list, "other"); got == nil || got.Name != "other" {
+			t.Fatalf("Last = %+v, want the sole entry", got)
+		}
+	})
+
+	t.Run("an absent name and an empty list report nothing", func(t *testing.T) {
+		t.Parallel()
+		if got := directive.Last(list, "absent"); got != nil {
+			t.Errorf("Last = %+v, want nil", got)
+		}
+		if got := directive.Last(nil, "default"); got != nil {
+			t.Errorf("Last over an empty list = %+v, want nil", got)
+		}
+	})
+}

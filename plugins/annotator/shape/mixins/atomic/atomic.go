@@ -15,7 +15,7 @@ const Name = "atomic"
 // the umbrella shape plugin. Register one instance per
 // pipeline:
 //
-//	pipe.Use(shape.New().Mixins(atomic.Mixin()))
+//	pipe.WithAnnotator(shape.New().Mixins(atomic.Mixin()))
 func Mixin() shape.Mixin {
 	return shape.Mixin{Name: Name}
 }

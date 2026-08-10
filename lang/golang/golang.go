@@ -61,11 +61,18 @@ func IsMap(t *node.TypeRef) bool {
 // shape Go renders idiomatically through a bytes-string
 // convenience setter pair rather than the variadic /
 // append pair every other slice uses.
+//
+// Either element spelling, via [IsByte]. `byte` and `uint8` are one
+// type, and the frontend records whichever the author wrote, so
+// keying on the literal name generated a bytes-string setter pair
+// for `[]byte` and a variadic `...uint8` pair for the identical
+// `[]uint8` — the same field shape yielding two different builder
+// APIs depending on how it was spelled.
 func IsByteSlice(t *node.TypeRef) bool {
-	if t == nil || !t.IsSlice() || t.Elem == nil {
+	if t == nil || !t.IsSlice() {
 		return false
 	}
-	return t.Elem.IsBuiltin() && t.Elem.Name == typeByte
+	return IsByte(t.Elem)
 }
 
 // FieldType returns the [emit.Ref] for a field's declared

@@ -183,6 +183,23 @@ func WithName(field string) string { return "With" + ExportedName(field) }
 // under any other name produces one nothing finds.
 func SentinelName(subject string) string { return "Err" + ExportedName(subject) }
 
+// IsSentinelName reports whether ident is spelled as a sentinel error
+// variable — the matcher [SentinelName]'s own documentation refers to
+// and that this package did not have.
+//
+// The composer and the matcher belong together: a generator that
+// composes a name with one rule and finds it with another emits
+// variables its own detector cannot see, and nothing fails until a
+// consumer notices the sentinel it declared was ignored.
+//
+// `Err` alone is not one. It carries the prefix and no subject, so it
+// names nothing in particular — and admitting it would classify a
+// package's own generic error variable as a sentinel for a type.
+func IsSentinelName(ident string) bool {
+	rest, found := strings.CutPrefix(ident, "Err")
+	return found && rest != "" && IsExported(rest)
+}
+
 // ParseFuncName composes a parse function's identifier —
 // `Parse<Type>`.
 func ParseFuncName(typeName string) string { return "Parse" + ExportedName(typeName) }

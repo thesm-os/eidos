@@ -402,12 +402,14 @@ func bytesInErr(m *node.Method) bool {
 // IsByteSliceAny reports whether t is `[]byte` in either element
 // spelling.
 //
-// Distinct from [IsByteSlice], which additionally requires the
-// frontend's byte stamp for its template-branching role. A
-// signature check wants the structural answer and both spellings:
-// `[]uint8` is the same type an author may have written either way.
+// Retained spelling of [IsByteSlice], which it now delegates to. The
+// two were distinct while IsByteSlice keyed on the literal element
+// name, and that distinction was the defect rather than the design:
+// a caller had to know that the predicate named for the type gave the
+// narrower answer, and the plugin templates — the callers least able
+// to check — bound the narrow one. Prefer [IsByteSlice].
 func IsByteSliceAny(t *node.TypeRef) bool {
-	return t != nil && t.TypeKind == node.TypeRefSlice && IsByte(t.Elem)
+	return IsByteSlice(t)
 }
 
 // named reports whether m is non-nil and carries the given name.

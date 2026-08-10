@@ -8,7 +8,7 @@
 // Consumers that want the full built-in catalog import this
 // package and call [All]:
 //
-//	pipe.Use(shape.New().Contracts(contracts.All()...))
+//	pipe.WithAnnotator(shape.New().Contracts(contracts.All()...))
 //
 // Consumers wanting a curated subset import the per-contract
 // sub-packages directly and pick what they need.

@@ -6,6 +6,7 @@ package golangtest
 import (
 	"bytes"
 	"fmt"
+	"go/parser"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,6 +131,9 @@ func (g *Generated) AssertSatisfiesAll(tb testing.TB, claims ...Satisfaction) *G
 		tb.Errorf("golangtest: AssertSatisfiesAll was given no claims, so it proves nothing")
 		return g
 	}
+	if !checkClaims(tb, claims) {
+		return g
+	}
 	pkg, dir := g.primaryPackage(tb)
 	if pkg == "" {
 		return g
@@ -162,6 +166,9 @@ func (g *Generated) AssertSatisfiesAll(tb testing.TB, claims ...Satisfaction) *G
 // than any other kind.
 func (g *Generated) AssertDoesNotSatisfy(tb testing.TB, typeName, iface string) *Generated {
 	tb.Helper()
+	if !checkClaims(tb, []Satisfaction{{Type: typeName, Interface: iface}}) {
+		return g
+	}
 	pkg, dir := g.primaryPackage(tb)
 	if pkg == "" {
 		return g
@@ -200,6 +207,59 @@ func (g *Generated) AssertDoesNotSatisfy(tb testing.TB, typeName, iface string) 
 // passing it quietly, which is the right way round for the mistake to
 // go.
 const notImplementedMarker = "does not implement"
+
+// checkClaims reports whether every claim names something that can
+// stand as a type, failing tb with the reason when one cannot.
+//
+// Both names are written verbatim into a generated file, so a caller
+// passing something that is not a type expression gets a compiler
+// error about a file they did not write, attributed to a line they
+// cannot see. The observed mistake is passing an interface's *import
+// path* where its spelling in the output package belongs —
+// `example.com/storepkg.Store`, which surfaces as `syntax error:
+// unexpected / after top level declaration` and names neither the
+// assertion nor the argument.
+//
+// Checked here rather than left to the compiler because this is the
+// one failure in the file that is the caller's error rather than the
+// generator's, and the whole point of the assertion is that a build
+// failure means the method sets disagree.
+func checkClaims(tb testing.TB, claims []Satisfaction) bool {
+	tb.Helper()
+	ok := true
+	for _, c := range claims {
+		ok = checkTypeExpr(tb, "Type", c.Type) && ok
+		ok = checkTypeExpr(tb, "Interface", c.Interface) && ok
+	}
+	return ok
+}
+
+// checkTypeExpr reports whether name can appear where the
+// satisfaction file puts it.
+//
+// The slash is tested before the parser because an import path parses
+// cleanly — `example.com/storepkg.Store` is a division of two selector
+// expressions, a valid Go expression and never a type — so the parser
+// alone accepts exactly the input this guard exists to reject.
+func checkTypeExpr(tb testing.TB, role, name string) bool {
+	tb.Helper()
+	switch {
+	case strings.TrimSpace(name) == "":
+		tb.Errorf("golangtest: %s is empty, so there is nothing to assert about", role)
+		return false
+	case strings.Contains(name, "/"):
+		tb.Errorf("golangtest: %s %q looks like an import path, not a type. Spell it as the "+
+			"output package sees it — `storepkg.Store` — and make the declaring file "+
+			"reachable with WithSource; a path here compiles to a division and reports a "+
+			"syntax error against a file golangtest wrote", role, name)
+		return false
+	}
+	if _, err := parser.ParseExpr(name); err != nil {
+		tb.Errorf("golangtest: %s %q is not a Go type expression: %v", role, name, err)
+		return false
+	}
+	return true
+}
 
 // satisfactionFile writes the file that makes the compiler answer a
 // satisfaction question.
@@ -358,14 +418,20 @@ func (g *Generated) moduleDir(tb testing.TB, cacheable bool) string {
 		return g.built
 	}
 	dir := tb.TempDir()
-	if g.baseModule != "" {
+	switch {
+	case g.baseModule != "" && len(g.requires) > 0:
+		// Composing them would mean rewriting a go.mod this package did
+		// not write. Reported rather than silently dropping one, since
+		// either outcome builds and only one is what the caller asked
+		// for.
+		tb.Fatalf("golangtest: InModule and WithRequire cannot both be set — " +
+			"the base module's go.mod already declares its dependencies; " +
+			"add the requirement there, or drop InModule")
+		return ""
+	case g.baseModule != "":
 		copyTree(tb, g.baseModule, dir)
-	} else {
-		writeFile(tb, dir, File{
-			Path: "go.mod",
-			Src: fmt.Appendf(nil, "module %s\n\ngo %s\n",
-				g.modulePathOf(), g.goVersionOf()),
-		})
+	default:
+		writeFile(tb, dir, File{Path: goModFilename, Src: g.goModSrc(tb)})
 	}
 	for _, f := range append(cloned(g.support), g.files...) {
 		writeFile(tb, dir, f)

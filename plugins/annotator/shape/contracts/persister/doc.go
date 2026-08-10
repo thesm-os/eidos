@@ -33,7 +33,7 @@
 // Consumers register the [Contract] alongside other contracts
 // when constructing the umbrella plugin:
 //
-//	pipe.Use(shape.New().Contracts(persister.Contract()))
+//	pipe.WithAnnotator(shape.New().Contracts(persister.Contract()))
 //
 // Persister is the canonical N=2 contract — every plugin author
 // writing a multi-member contract should read this package's

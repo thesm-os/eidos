@@ -17,5 +17,5 @@
 // Consumers register the [Mixin] alongside other mixins when
 // constructing the umbrella plugin:
 //
-//	pipe.Use(shape.New().Mixins(idempotent.Mixin()))
+//	pipe.WithAnnotator(shape.New().Mixins(idempotent.Mixin()))
 package idempotent

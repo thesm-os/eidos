@@ -66,6 +66,18 @@ func TestIsByteSlice(t *testing.T) {
 		}
 	})
 
+	t.Run("uint8 slice matches", func(t *testing.T) {
+		t.Parallel()
+		// `byte` and `uint8` are one type and the frontend records
+		// whichever the author wrote. Keying on the literal name gave
+		// `[]byte` a bytes-string setter pair and the identical
+		// `[]uint8` a variadic `...uint8` pair — two builder APIs for
+		// one field shape, chosen by spelling.
+		if !golang.IsByteSlice(sliceRef(&node.TypeRef{Name: "uint8"})) {
+			t.Errorf("[]uint8 must be recognised as byte slice; it is the same type as []byte")
+		}
+	})
+
 	t.Run("string slice does not match", func(t *testing.T) {
 		t.Parallel()
 		if golang.IsByteSlice(sliceRef(&node.TypeRef{Name: "string"})) {
@@ -107,6 +119,16 @@ func TestIsSlice(t *testing.T) {
 		t.Parallel()
 		if golang.IsSlice(sliceRef(&node.TypeRef{Name: "byte"})) {
 			t.Errorf("[]byte must route through IsByteSlice, not IsSlice")
+		}
+	})
+
+	t.Run("uint8 slice does not match", func(t *testing.T) {
+		t.Parallel()
+		// The complement of the IsByteSlice widening: a template
+		// branching `isSlice`-then-`isByteSlice` must not see `[]uint8`
+		// twice, and must not see it on the variadic arm at all.
+		if golang.IsSlice(sliceRef(&node.TypeRef{Name: "uint8"})) {
+			t.Errorf("[]uint8 must route through IsByteSlice, not IsSlice")
 		}
 	})
 

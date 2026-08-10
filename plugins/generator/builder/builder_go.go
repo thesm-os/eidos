@@ -7,8 +7,10 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"go/token"
 	"strings"
 
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -66,9 +68,13 @@ func GoOutputs() []sdk.Output {
 // unexported, turns a reference that would bind to nothing
 // into a compile error naming the symbol.
 //
-// Malformed input — empty string, leading `.`, trailing `.` —
-// returns [ErrMalformedDefaults] wrapped with the offending
-// value, surfaced as a render-time error.
+// Malformed input returns [ErrMalformedDefaults] wrapped with the
+// offending value, surfaced as a render-time error. Both halves are
+// checked, not just the split: the function half must be a Go
+// identifier and the package half a legal import path. Testing only
+// for a leading or trailing dot accepted `defaults=3.14` and emitted
+// a reference to the symbol `14` in the package `3` — a value that is
+// not a function name at all, rendered as though it were.
 //
 // The template guards the call with `{{if .DefaultsArg}}` so
 // the empty case never reaches the parser under normal
@@ -82,15 +88,19 @@ func GoOutputs() []sdk.Output {
 // one under the plugin's name prefix, so the template calls it
 // as `builder_defaultsExpr`.
 func GoDefaultsExpr(raw, srcPkg string) (*sdk.Expr, error) {
+	malformed := func() (*sdk.Expr, error) {
+		return nil, fmt.Errorf("%w (got %q)", ErrMalformedDefaults, raw)
+	}
 	i := strings.LastIndex(raw, ".")
 	if i < 0 {
-		if raw == "" {
-			return nil, fmt.Errorf("%w (got %q)", ErrMalformedDefaults, raw)
+		if !token.IsIdentifier(raw) {
+			return malformed()
 		}
 		return sdk.NewExternal(srcPkg, raw), nil
 	}
-	if i == 0 || i == len(raw)-1 {
-		return nil, fmt.Errorf("%w (got %q)", ErrMalformedDefaults, raw)
+	pkg, fn := raw[:i], raw[i+1:]
+	if !golang.IsValidImportPath(pkg) || !token.IsIdentifier(fn) {
+		return malformed()
 	}
-	return sdk.NewExternal(raw[:i], raw[i+1:]), nil
+	return sdk.NewExternal(pkg, fn), nil
 }

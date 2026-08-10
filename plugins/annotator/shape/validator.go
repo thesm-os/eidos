@@ -48,14 +48,38 @@ type Validator struct {
 // resolver so the three run in priority order:
 //
 //	s := shape.New().Detectors(...).Contracts(...)
-//	pipe.Use(s)
-//	pipe.Use(s.Resolver())
-//	pipe.Use(s.Validator())
+//	pipe.WithAnnotator(s)
+//	pipe.WithAnnotator(s.Resolver())
+//	pipe.WithAnnotator(s.Validator())
 func (p *Plugin) Validator() *Validator {
 	return &Validator{
 		contracts: p.contracts,
 		mixins:    p.mixins,
 	}
+}
+
+// Annotators returns the three plugins that make up a complete shape
+// registration, in the order the pipeline runs them.
+//
+// The registration is three instances rather than one, and getting it
+// wrong is silent. Registering the umbrella alone still stamps shapes,
+// so every structural assertion about the output passes — but partner
+// names stay raw, and every [Contract.Required] declaration and
+// [Mixin.Validate] hook goes unenforced. What a consumer loses is
+// diagnostics, which is precisely the thing whose absence looks like
+// success.
+//
+//	for _, a := range shape.New().Contracts(contracts.All()...).Annotators() {
+//	    pipe.WithAnnotator(a)
+//	}
+//
+// Order is the contract: the umbrella stamps, the resolver qualifies
+// what it stamped, the validator checks the result. Each depends on
+// its predecessor having run, and the priorities enforce that
+// independently — this returns them in the same order so a caller
+// reading the slice sees the sequence rather than having to know it.
+func (p *Plugin) Annotators() []sdk.Annotator {
+	return []sdk.Annotator{p, p.Resolver(), p.Validator()}
 }
 
 // Name returns [ValidatorName].

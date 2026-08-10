@@ -96,16 +96,41 @@ func TestSampleFor(t *testing.T) {
 		}
 	})
 
-	t.Run("a defined type keeps its own spelling", func(t *testing.T) {
+	t.Run("a type needing an import yields nothing", func(t *testing.T) {
 		t.Parallel()
-		// A bare 42 compiles today and stops compiling the moment the
-		// field's type moves.
-		r := mapResolver{"x.Weekday": &node.Alias{
-			Name: "Weekday", Package: "x", Target: builtinRef("int"),
+		// This used to compose the spelling with QName and return
+		// `example.com/cfg.Weekday(42)` — not Go, and no import
+		// registered. The old test hid it by using "x" as the package,
+		// which is short enough to pass for a qualifier.
+		r := mapResolver{"example.com/cfg.Weekday": &node.Alias{
+			Name: "Weekday", Package: "example.com/cfg", Target: builtinRef("int"),
 		}}
-		s, a := golang.SampleFor(namedTypeRef("x", "Weekday"), "Day", r)
-		if s != "x.Weekday(42)" || a != "x.Weekday(7)" {
-			t.Fatalf("SampleFor = %q, %q", s, a)
+		s, a := golang.SampleFor(namedTypeRef("example.com/cfg", "Weekday"), "Day", r)
+		if s != "" || a != "" {
+			t.Fatalf("SampleFor = %q, %q; a string cannot spell a type that needs an import",
+				s, a)
+		}
+	})
+
+	t.Run("SampleRefFor answers what SampleFor cannot", func(t *testing.T) {
+		t.Parallel()
+		// The ref beside the text is what lets the backend spell the
+		// type for the file it lands in and register the import.
+		r := mapResolver{"example.com/cfg.Weekday": &node.Alias{
+			Name: "Weekday", Package: "example.com/cfg", Target: builtinRef("int"),
+		}}
+		s, a := golang.SampleRefFor(namedTypeRef("example.com/cfg", "Weekday"), "Day", r)
+		if !s.OK() || !a.OK() {
+			t.Fatalf("SampleRefFor derived nothing for a resolvable defined type")
+		}
+		if s.Ref == nil {
+			t.Errorf("sample carries no ref, so the import would go unregistered")
+		}
+		if s.Text != "42" || a.Text != "7" {
+			t.Errorf("Text = %q, %q; want the underlying literals", s.Text, a.Text)
+		}
+		if s.Composite {
+			t.Errorf("a defined type renders as a conversion, not a composite literal")
 		}
 	})
 
@@ -145,25 +170,51 @@ func TestZeroLiteralFor(t *testing.T) {
 		}
 	})
 
-	t.Run("resolves a defined numeric type", func(t *testing.T) {
+	t.Run("resolves a local defined numeric type", func(t *testing.T) {
 		t.Parallel()
 		// The answer ZeroLiteral refuses, available once the caller
 		// supplies the graph.
-		r := mapResolver{"x.Weekday": &node.Alias{
-			Name: "Weekday", Package: "x", Target: builtinRef("int"),
+		r := mapResolver{"Weekday": &node.Alias{
+			Name: "Weekday", Target: builtinRef("int"),
 		}}
-		got, ok := golang.ZeroLiteralFor(namedTypeRef("x", "Weekday"), r)
-		if !ok || got != "x.Weekday(0)" {
+		got, ok := golang.ZeroLiteralFor(namedTypeRef("", "Weekday"), r)
+		if !ok || got != "Weekday(0)" {
 			t.Fatalf("ZeroLiteralFor = %q, %v", got, ok)
 		}
 	})
 
-	t.Run("a struct zeroes to a composite literal", func(t *testing.T) {
+	t.Run("a local struct zeroes to a composite literal", func(t *testing.T) {
 		t.Parallel()
-		r := mapResolver{"x.User": &node.Struct{Name: "User", Package: "x"}}
-		got, ok := golang.ZeroLiteralFor(namedTypeRef("x", "User"), r)
-		if !ok || got != "x.User{}" {
+		r := mapResolver{"User": &node.Struct{Name: "User"}}
+		got, ok := golang.ZeroLiteralFor(namedTypeRef("", "User"), r)
+		if !ok || got != "User{}" {
 			t.Fatalf("ZeroLiteralFor = %q, %v", got, ok)
+		}
+	})
+
+	t.Run("a type needing an import is refused", func(t *testing.T) {
+		t.Parallel()
+		// Same defect as SampleFor's: the spelling depends on the file
+		// the zero lands in, which a string cannot carry.
+		r := mapResolver{"example.com/cfg.User": &node.Struct{
+			Name: "User", Package: "example.com/cfg",
+		}}
+		if got, ok := golang.ZeroLiteralFor(namedTypeRef("example.com/cfg", "User"), r); ok {
+			t.Fatalf("ZeroLiteralFor = %q, want a refusal", got)
+		}
+	})
+
+	t.Run("ZeroRefFor answers it instead", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{"example.com/cfg.User": &node.Struct{
+			Name: "User", Package: "example.com/cfg",
+		}}
+		got, ok := golang.ZeroRefFor(namedTypeRef("example.com/cfg", "User"), r)
+		if !ok || !got.OK() {
+			t.Fatalf("ZeroRefFor derived nothing for a resolvable struct")
+		}
+		if got.Ref == nil || !got.Composite || got.Text != "{}" {
+			t.Errorf("ZeroRefFor = %+v; want a composite literal carrying its ref", got)
 		}
 	})
 

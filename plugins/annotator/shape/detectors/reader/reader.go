@@ -17,7 +17,7 @@ const Name = "reader"
 // to the umbrella shape plugin. Register one instance per
 // pipeline:
 //
-//	pipe.Use(shape.New().Detectors(reader.Detector()))
+//	pipe.WithAnnotator(shape.New().Detectors(reader.Detector()))
 func Detector() shape.Detector {
 	return shape.Detector{
 		Name:     Name,

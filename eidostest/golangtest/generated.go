@@ -79,6 +79,7 @@ type Generated struct {
 	modulePath string
 	goVersion  string
 	baseModule string
+	requires   []requirement
 
 	// mu guards the built-module cache only. The `go` invocation
 	// itself runs outside it, so parallel subtests still overlap on

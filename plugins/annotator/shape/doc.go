@@ -53,11 +53,11 @@
 //
 // # Composition
 //
-// The umbrella [Plugin] takes every shape's [Detector] at
-// construction time and runs them in registration order on every
+// The umbrella [Plugin] takes every shape's [Detector] through
+// [Plugin.Detectors] and runs them in registration order on every
 // callable in the store:
 //
-//	pipe.Use(shape.New(
+//	pipe.WithAnnotator(shape.New().Detectors(
 //	    reader.Detector(),
 //	    writer.Detector(),
 //	    lifecycle.Detector(),

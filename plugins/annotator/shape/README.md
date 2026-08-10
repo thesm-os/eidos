@@ -43,12 +43,19 @@ s := shape.New().
     Contracts(persister.Contract()).
     Mixins(atomic.Mixin(), idempotent.Mixin())
 
-pipe := pipeline.New().
+pipe, err := pipeline.New().
     WithFrontend(...).
-    WithAnnotators(s, s.Resolver(), s.Validator()).
-    WithGenerators(...).
+    WithAnnotator(s).
+    WithAnnotator(s.Resolver()).
+    WithAnnotator(s.Validator()).
+    WithGenerator(...).
     Build()
 ```
+
+All three instances must be registered. Registering `s` alone
+stamps shapes but leaves partner names unqualified and every
+[`Contract.Required`] declaration and [`Mixin.Validate`] hook
+unenforced — a silent loss of diagnostics, not a build failure.
 
 Three plugin instances run in priority order:
 

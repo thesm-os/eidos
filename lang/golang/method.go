@@ -252,10 +252,19 @@ func SigOf(m *node.Method, opts ...SigOption) *Sig {
 		receiverIdent: o.receiver,
 	}
 	s.Params = paramsFrom(m.Params, o)
-	// After the parameters, because the derived form is the type's
-	// initial made unique against exactly those identifiers.
-	if o.receiverType != "" {
+	// After the parameters, because both forms are made unique against
+	// exactly those identifiers.
+	switch {
+	case o.receiverType != "":
 		s.receiverIdent = ReceiverIdent(o.receiverType, s.Idents()...)
+	case o.receiver != "":
+		// A literal receiver is disambiguated too. It used not to be,
+		// so `WithReceiverIdent("s")` on a method taking a parameter
+		// named `s` bound both to the same identifier and the generated
+		// body silently read the parameter where it meant the receiver
+		// — the collision this projection reserves an identifier to
+		// prevent, reintroduced by the option that names it.
+		s.receiverIdent = UniqueIdent(o.receiver, s.Idents()...)
 	}
 	s.NamedReturns = NamedReturnsUsable(m.Returns, s.Taken()...)
 	s.Returns = returnsFrom(m.Returns, s.Params, s.NamedReturns, o)
@@ -477,6 +486,30 @@ func (s *Sig) HasResults() bool { return s != nil && len(s.Returns) > 0 }
 
 // ReturnsError reports whether any slot carries the builtin error.
 func (s *Sig) ReturnsError() bool { return s.ErrReturn() != nil }
+
+// ParamByField returns the parameter whose recorded-call field is
+// named field, and whether there is one.
+//
+// [Param.Field] is this package's own projection — the Pascal form it
+// chose, after keyword adjustment and uniquing — so a consumer holding
+// a field name has no way back to the parameter without repeating that
+// derivation and trusting the two to agree. A generator reading a
+// directive that names a recorded field is exactly that consumer.
+//
+// Matched on Field rather than Name because the field is what appears
+// in the generated struct, which is the name a directive or a template
+// is written against.
+func (s *Sig) ParamByField(field string) (Param, bool) {
+	if s == nil {
+		return Param{}, false
+	}
+	for _, p := range s.Params {
+		if p.Field == field {
+			return p, true
+		}
+	}
+	return Param{}, false
+}
 
 // IsGeneric reports whether the callable carries type parameters.
 func (s *Sig) IsGeneric() bool { return s != nil && len(s.TypeParams) > 0 }

@@ -16,5 +16,5 @@
 // Consumers register the [Mixin] alongside other mixins when
 // constructing the umbrella plugin:
 //
-//	pipe.Use(shape.New().Mixins(atomic.Mixin()))
+//	pipe.WithAnnotator(shape.New().Mixins(atomic.Mixin()))
 package atomic

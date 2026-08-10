@@ -47,7 +47,34 @@ func Driver(
 	gens ...plugin.Generator,
 ) *pipelinetest.Builder {
 	tb.Helper()
-	b := pipelinetest.New(tb).WithFrontend(pipelinetest.FromNodes(pkg))
+	return DriverOf(tb, backend, []*node.Package{pkg}, gens...)
+}
+
+// DriverOf is [Driver] over more than one fixture package.
+//
+// Two variadic parameters cannot sit in one signature, so the
+// multi-package form takes a slice and the common single-package form
+// keeps the ergonomic spelling.
+//
+// Worth having because a generator whose whole subject is what happens
+// *between* packages — a type in one, its sentinel in another, a
+// reference that must qualify — cannot be exercised by a fixture with
+// one package in it. [pipelinetest.FromNodes] has always been
+// variadic; only these two wrappers narrowed it, so such a test
+// re-hand-rolled the wiring these exist to collapse.
+func DriverOf(
+	tb testing.TB,
+	backend plugin.Backend,
+	pkgs []*node.Package,
+	gens ...plugin.Generator,
+) *pipelinetest.Builder {
+	tb.Helper()
+	if len(pkgs) == 0 {
+		tb.Fatalf("golangtest: no fixture packages, so the run would generate nothing " +
+			"and every assertion about its output would pass having looked at nothing")
+		return nil
+	}
+	b := pipelinetest.New(tb).WithFrontend(pipelinetest.FromNodes(pkgs...))
 	for _, g := range gens {
 		b = b.WithGenerator(g)
 	}
@@ -76,5 +103,22 @@ func Render(
 	gens ...plugin.Generator,
 ) *Generated {
 	tb.Helper()
-	return Rendered(tb, Driver(tb, backend, pkg, gens...).Build().Run(renderPattern))
+	return RenderOf(tb, backend, []*node.Package{pkg}, gens...)
+}
+
+// RenderOf is [Render] over more than one fixture package — the
+// end-to-end form of [DriverOf].
+//
+// The cross-package assertions worth making need it: that a generated
+// reference to a type in another package renders qualified and
+// registers its import, and that a generator declining to look outside
+// its own package is caught doing so.
+func RenderOf(
+	tb testing.TB,
+	backend plugin.Backend,
+	pkgs []*node.Package,
+	gens ...plugin.Generator,
+) *Generated {
+	tb.Helper()
+	return Rendered(tb, DriverOf(tb, backend, pkgs, gens...).Build().Run(renderPattern))
 }

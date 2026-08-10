@@ -146,6 +146,16 @@ func TestGoDefaultsExpr(t *testing.T) {
 			"",
 			".leading_dot",
 			"trailing_dot.",
+			// Split-only validation accepted these: the dot is
+			// neither leading nor trailing, so each parsed into a
+			// package and a symbol that are not a package and a
+			// symbol. `3.14` emitted a reference to `14` in `3`.
+			"3.14",
+			"pkg.2ndFunc",
+			"pkg.has-dash",
+			"123",
+			"has space",
+			"pkg.func",
 		}
 		for _, raw := range malformed {
 			t.Run(raw, func(t *testing.T) {

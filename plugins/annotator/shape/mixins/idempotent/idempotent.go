@@ -15,7 +15,7 @@ const Name = "idempotent"
 // the umbrella shape plugin. Register one instance per
 // pipeline:
 //
-//	pipe.Use(shape.New().Mixins(idempotent.Mixin()))
+//	pipe.WithAnnotator(shape.New().Mixins(idempotent.Mixin()))
 func Mixin() shape.Mixin {
 	return shape.Mixin{Name: Name}
 }

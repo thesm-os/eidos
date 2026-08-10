@@ -106,8 +106,7 @@ func TestPluginsRender_NarrowWidthSentinelFields(t *testing.T) {
 			})
 		})
 	// The directive is package-scoped, not per-type.
-	pkg := fixture.PackageNode()
-	pkg.DirectiveList = append(pkg.DirectiveList, storefixture.Directive(sentinel.DirectiveName))
+	pkg := fixture.Directive(storefixture.Directive(sentinel.DirectiveName)).PackageNode()
 
 	// Hand-written rather than projected: the emitted suite exercises
 	// behaviour, and a projection emits shape with panicking bodies.

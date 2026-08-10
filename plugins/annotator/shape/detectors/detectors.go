@@ -8,7 +8,7 @@
 // Consumers that want the full built-in catalog import this
 // package and call [All]:
 //
-//	pipe.Use(shape.New().Detectors(detectors.All()...))
+//	pipe.WithAnnotator(shape.New().Detectors(detectors.All()...))
 //
 // Consumers wanting a curated subset import the per-detector
 // sub-packages directly and pick what they need.

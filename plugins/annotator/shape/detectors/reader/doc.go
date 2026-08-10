@@ -20,7 +20,7 @@
 // Consumers register the [Detector] alongside other shape
 // detectors when constructing the umbrella plugin:
 //
-//	pipe.Use(shape.New().Detectors(reader.Detector()))
+//	pipe.WithAnnotator(shape.New().Detectors(reader.Detector()))
 //
 // Reader is the canonical shape for the "one key in, one value +
 // error out" pattern. Dispatch is by [shape.Detector.Priority]

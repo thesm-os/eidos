@@ -57,8 +57,8 @@ type methodOwner struct {
 // it runs in the refinement bucket after the umbrella plugin:
 //
 //	s := shape.New().Detectors(...).Contracts(...)
-//	pipe.Use(s)
-//	pipe.Use(s.Resolver())
+//	pipe.WithAnnotator(s)
+//	pipe.WithAnnotator(s.Resolver())
 func (p *Plugin) Resolver() *Resolver {
 	return &Resolver{
 		contracts: p.contracts,

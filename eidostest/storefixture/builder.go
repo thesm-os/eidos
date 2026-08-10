@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
@@ -160,6 +161,23 @@ func (b *Builder) Package(name, path string) *Builder {
 // output have a way to seed entries.
 func (b *Builder) Import(path string) *Builder {
 	b.pkg.Imports = append(b.pkg.Imports, &node.Import{Path: path, Owner: b.pkg})
+	return b
+}
+
+// Directive attaches d to the package's own directive list.
+//
+// Every sub-builder has had one and the package had not, so a fixture
+// for a package-scoped plugin — one reading `+gen:x` off the package
+// rather than off a declaration — had to append to
+// [Builder.PackageNode]'s DirectiveList by hand. That is the only
+// reason such a test touched the node graph directly, and it put the
+// fixture's one interesting fact outside the fixture.
+//
+// Distinct from a directive on a declaration: a plugin keyed to the
+// package applies to everything in it, which is what makes it
+// package-scoped rather than a shorthand for repeating the directive.
+func (b *Builder) Directive(d *directive.Directive) *Builder {
+	b.pkg.DirectiveList = append(b.pkg.DirectiveList, d)
 	return b
 }
 

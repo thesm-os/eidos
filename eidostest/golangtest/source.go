@@ -117,6 +117,42 @@ func (s *Source) AssertNoImport(tb testing.TB, path string) *Source {
 	return s
 }
 
+// AssertContains fails when substr does not appear anywhere in the
+// file.
+//
+// The whole-file counterpart to [Scope.AssertContains], and the last
+// resort rather than the first: an assertion scoped to a function or a
+// variable says where it expects the text, so an unrelated occurrence
+// elsewhere cannot satisfy it.
+//
+// What it reaches that no scope can is everything outside a
+// declaration — a package doc comment, a build constraint, and the
+// case it exists for: a generator that deliberately omits a check
+// should say why in a comment in the emitted file, and a comment
+// belongs to no declaration's body.
+func (s *Source) AssertContains(tb testing.TB, substr string) *Source {
+	tb.Helper()
+	if !strings.Contains(string(s.src), substr) {
+		tb.Errorf("golangtest: %s does not contain %q\n--- source ---\n%s",
+			s.path, substr, s.src)
+	}
+	return s
+}
+
+// AssertNotContains fails when substr appears anywhere in the file.
+//
+// Carries more weight than its positive counterpart: absence across a
+// whole file is a claim no scope can make, because text a scope does
+// not cover is text it cannot rule out.
+func (s *Source) AssertNotContains(tb testing.TB, substr string) *Source {
+	tb.Helper()
+	if strings.Contains(string(s.src), substr) {
+		tb.Errorf("golangtest: %s contains %q, which it must not\n--- source ---\n%s",
+			s.path, substr, s.src)
+	}
+	return s
+}
+
 // AssertImportsOnly fails when the file's import set is anything
 // other than exactly the named paths.
 //

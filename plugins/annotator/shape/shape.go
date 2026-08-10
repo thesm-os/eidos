@@ -190,7 +190,7 @@ type Plugin struct {
 // Configure it through [Plugin.Detectors], [Plugin.Contracts] and
 // [Plugin.Mixins] before passing to the pipeline:
 //
-//	pipe.Use(shape.New().
+//	pipe.WithAnnotator(shape.New().
 //	    Detectors(reader.Detector(), writer.Detector()).
 //	    Contracts(persister.Contract(), saga.Contract()),
 //	)

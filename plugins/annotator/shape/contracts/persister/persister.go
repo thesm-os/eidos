@@ -25,7 +25,7 @@ var Roles = []string{"writer", "reader"}
 // to the umbrella shape plugin. Register one instance per
 // pipeline:
 //
-//	pipe.Use(shape.New().Contracts(persister.Contract()))
+//	pipe.WithAnnotator(shape.New().Contracts(persister.Contract()))
 func Contract() shape.Contract {
 	return shape.Contract{
 		Name:  Name,

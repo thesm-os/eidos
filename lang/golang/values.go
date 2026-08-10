@@ -35,6 +35,10 @@ import (
 // an integer. A caller holding the graph can resolve it, and this
 // is the narrow interface that lets one — satisfied by a
 // store-backed index without this package depending on the store.
+//
+// `store.Reader.Resolve` is that index, so a plugin passes the reader
+// it was handed and writes no adapter: `SampleFor(t, name,
+// ctx.Reader)`. Every function here taking a Resolver accepts it.
 type Resolver interface {
 	// Resolve returns the declaration a type reference names, and
 	// whether the run loaded one. A type from a package the run
@@ -99,40 +103,47 @@ func SampleValues(typeName, fieldName string) (sample, alternate string) {
 // the check rather than write one that cannot fail.
 //
 // Pass a nil resolver to answer for builtins only.
+//
+// # Only what a string can spell
+//
+// A type from another package cannot be written into generated source
+// as a string: the spelling depends on the file the value lands in,
+// and the import has to be registered. This used to compose it with
+// [QName] and emit `example.com/cfg.Weekday(42)`, which is not Go and
+// registers nothing. Such a type now yields two empty strings — the
+// same "omit the check" signal an unresolvable type gives, and honest
+// where the old answer was not.
+//
+// [SampleRefFor] is the form that answers for those: it returns the
+// reference beside the text, which is what lets the backend spell it
+// for the file and register the import.
 func SampleFor(t *node.TypeRef, fieldName string, r Resolver) (sample, alternate string) {
 	return sampleFor(t, fieldName, r, maxResolveDepth)
 }
 
-// sampleFor is [SampleFor] with the recursion budget threaded
-// through.
+// spellableAsString reports whether t can be written into generated
+// source without an import being registered for it.
+//
+// A reference carrying no package is either a builtin or local to
+// whatever file the caller is emitting, so its name is its spelling.
+// Anything else needs [SampleRefFor] or [ZeroRefFor].
+func spellableAsString(t *node.TypeRef) bool {
+	return t != nil && t.Package == ""
+}
+
+// sampleFor is [SampleFor] over [SampleRefFor], keeping only the
+// answers a string can carry.
+//
+// One walk rather than two. Every type this can answer for,
+// [SampleRefFor] answers with a nil Ref — and every type it answers
+// with a Ref is one a string cannot spell, because the Ref is exactly
+// the import that would have to be registered.
 func sampleFor(t *node.TypeRef, fieldName string, r Resolver, depth int) (sample, alternate string) {
-	if t == nil || depth <= 0 {
+	s, a := sampleRefFor(t, fieldName, r, depth)
+	if s.Ref != nil || a.Ref != nil {
 		return "", ""
 	}
-	if IsAny(t) {
-		// `any` admits every value, so the string pair serves.
-		return SampleValues(typeString, fieldName)
-	}
-	if t.IsBuiltin() {
-		return SampleValues(t.Name, fieldName)
-	}
-	if r == nil || t.TypeKind != node.TypeRefNamed {
-		return "", ""
-	}
-	target, found := r.Resolve(t)
-	if !found {
-		return "", ""
-	}
-	alias, ok := target.(*node.Alias)
-	if !ok || alias.Target == nil {
-		return "", ""
-	}
-	inner, innerAlt := sampleFor(alias.Target, fieldName, r, depth-1)
-	if inner == "" {
-		return "", ""
-	}
-	name := QName(t)
-	return name + "(" + inner + ")", name + "(" + innerAlt + ")"
+	return s.Text, a.Text
 }
 
 // ZeroLiteralFor returns a type's zero as source text, resolving
@@ -158,7 +169,7 @@ func zeroLiteralFor(t *node.TypeRef, r Resolver, depth int) (string, bool) {
 	if t.IsArray() {
 		// An array's zero is a composite literal of itself, which needs
 		// the element spelling — available here where it was not.
-		if elem, _ := ArrayElem(t); elem != nil {
+		if elem, _ := ArrayElem(t); spellableAsString(elem) {
 			return "[" + strconv.Itoa(t.ArrayLen) + "]" + QName(elem) + "{}", true
 		}
 		return "", false
@@ -182,8 +193,14 @@ func zeroLiteralFor(t *node.TypeRef, r Resolver, depth int) (string, bool) {
 		if inner == litNil {
 			return litNil, true
 		}
+		if !spellableAsString(t) {
+			return "", false
+		}
 		return QName(t) + "(" + inner + ")", true
 	case *node.Struct:
+		if !spellableAsString(t) {
+			return "", false
+		}
 		return QName(t) + "{}", true
 	case *node.Interface:
 		return litNil, true

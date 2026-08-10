@@ -537,3 +537,57 @@ func TestWithReceiverFromType(t *testing.T) {
 		}
 	})
 }
+
+// TestSig_ParamByField pins the reverse lookup from a recorded-call
+// field to the parameter it came from.
+//
+// [golang.Param.Field] is this package's own projection, so a consumer
+// holding a field name has no way back without repeating the
+// derivation and trusting the two to agree.
+func TestSig_ParamByField(t *testing.T) {
+	t.Parallel()
+
+	sig := golang.SigOf(&node.Method{
+		Name: "Put",
+		Params: []*node.Param{
+			{Name: "key", Type: builtinRef("string")},
+			{Name: "limit", Type: builtinRef("int")},
+		},
+	})
+
+	t.Run("finds the parameter behind a field name", func(t *testing.T) {
+		t.Parallel()
+		got, ok := sig.ParamByField("Limit")
+		if !ok {
+			t.Fatalf("ParamByField(Limit) found nothing; fields are %v", fieldsOf(sig))
+		}
+		if got.Name != "limit" {
+			t.Errorf("Name = %q, want the declared parameter identifier", got.Name)
+		}
+	})
+
+	t.Run("an unknown field reports not found", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := sig.ParamByField("Absent"); ok {
+			t.Errorf("ParamByField(Absent) = true, want false")
+		}
+	})
+
+	t.Run("a nil signature reports not found", func(t *testing.T) {
+		t.Parallel()
+		var nilSig *golang.Sig
+		if _, ok := nilSig.ParamByField("Limit"); ok {
+			t.Errorf("a nil Sig must find nothing")
+		}
+	})
+}
+
+// fieldsOf lists a signature's recorded-call field names, so a failure
+// says what was available rather than only what was missing.
+func fieldsOf(s *golang.Sig) []string {
+	out := make([]string, 0, len(s.Params))
+	for _, p := range s.Params {
+		out = append(out, p.Field)
+	}
+	return out
+}

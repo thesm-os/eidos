@@ -8,7 +8,7 @@
 // Consumers that want the full built-in catalog import this
 // package and call [All]:
 //
-//	pipe.Use(shape.New().Mixins(mixins.All()...))
+//	pipe.WithAnnotator(shape.New().Mixins(mixins.All()...))
 //
 // Consumers wanting a curated subset import the per-mixin
 // sub-packages directly and pick what they need.

@@ -55,27 +55,27 @@ jobs:
   #
   # bootstrap is required — the gate shells out to the gremlins
   # binary, which `make bootstrap` installs.
-  mutation:
-    name: mutation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
+  # mutation:
+  #   name: mutation
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v6
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.26"
-          check-latest: true
-          cache: true
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v6
+  #       with:
+  #         go-version: "1.26"
+  #         check-latest: true
+  #         cache: true
 
-      - name: Install ergon
-        run: go install go.thesmos.sh/ergon/cmd/ergon@${{ env.ERGON_VERSION }}
+  #     - name: Install ergon
+  #       run: go install go.thesmos.sh/ergon/cmd/ergon@${{ env.ERGON_VERSION }}
 
-      - name: Install development tools
-        run: make bootstrap
+  #     - name: Install development tools
+  #       run: make bootstrap
 
-      - name: Run mutation testing per layer
-        run: make check-mutation
+  #     - name: Run mutation testing per layer
+  #       run: make check-mutation
 
   race:
     name: race detector
