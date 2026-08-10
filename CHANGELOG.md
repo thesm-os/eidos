@@ -13,18 +13,7 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
-### Breaking
-
-- **`lang/golang.MethodSet` is removed.** It walked an interface's embeds a
-  second time, beside `node.MethodSet`, with its own cycle guard and its own
-  vocabulary for a failed embed — and the type-set workaround had diverged
-  between the two, each catching a different half. Interface embedding has no
-  shadowing and no depth rule, which is every rule the promotion code around it
-  exists for, so the Go-side walk added nothing.
-
-  Migration: `node.MethodSet(i, resolve)`, or `ctx.Reader.MethodSet(i)` for a
-  caller holding the store. Its `[]InterfaceMethod` becomes
-  `MethodSetResult.Entries`, carrying the same method and attribution.
+## v1.13.0 — 2026-08-10
 
 ### Added
 
@@ -190,6 +179,23 @@ omitted unless they change what a caller can rely on.
   enum is byte-identical. Its `API` emit value gains `FallbackConv` and
   `FallbackVerb`, and its private `underlyingName` copy of
   `lang/golang.EnumUnderlying` is gone.
+
+## v1.12.0 — 2026-08-10
+
+### Breaking
+
+- **`lang/golang.MethodSet` is removed.** It walked an interface's embeds a
+  second time, beside `node.MethodSet`, with its own cycle guard and its own
+  vocabulary for a failed embed — and the type-set workaround had diverged
+  between the two, each catching a different half. Interface embedding has no
+  shadowing and no depth rule, which is every rule the promotion code around it
+  exists for, so the Go-side walk added nothing.
+
+  Migration: `node.MethodSet(i, resolve)`, or `ctx.Reader.MethodSet(i)` for a
+  caller holding the store. Its `[]InterfaceMethod` becomes
+  `MethodSetResult.Entries`, carrying the same method and attribution.
+
+### Added
 
 - **`lang/golang`: the enum vocabulary answers for float-backed sets** (#1).
   `EnumValues` parsed every variant through `ParseIntValue` and returned false
