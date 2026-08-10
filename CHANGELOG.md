@@ -13,6 +13,109 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Breaking
+
+- **`reference/stubgen`: recorded-call field names follow the framework's
+  rule.** The error slot is `Err` and a lone value slot is `Result`; several
+  value slots are `Result0`, `Result1`, … numbered across the value slots only.
+  `StoreListCall{Result0 []string; Result1 error}` becomes `{Err error; Result
+  []string}`.
+
+  The plugin carried its own numbering, which counted every slot — so adding an
+  error return to a source method renumbered the value fields beside it, and a
+  consumer's assertions moved for a reason unrelated to what they assert. A test
+  naming `.Result0` has to update once; it then stops moving.
+
+- **`reference/registrygen`: slot entries carry a composed provenance id.** It
+  spelled its own, `registry.<name>`, where every sibling carries
+  `<kind>.<name>`. The id is what a later plugin targets to position its own
+  contribution, so a plugin that had matched the old spelling no longer will.
+
+### Added
+
+- **`sdk` is now the whole surface a plugin names.** A plugin had to know where
+  each part of the framework lived: `node` for the source model, `emit` and
+  `emit/builder` for output, `core/meta` to state a fact, `core/diag` to report
+  one, `core/position` to point at a line, `store` to read the graph, `plugin`
+  for the phase contexts. All of it is re-exported — 195 aliases across eight
+  files, source model unprefixed and emit carrying the `Emit` prefix, because
+  the two fail silently when confused: an emit value built against a source
+  shape never renders, and a source query against an emit shape never matches.
+
+  Aliases throughout, so nothing that compiled against the old spelling stops.
+
+- **`sdk/golang.FuncPrefix` folds a plugin name into a template-function
+  prefix.** `text/template` accepts only identifier-shaped function names and
+  panics inside `Funcs` on anything else, so a plugin named `debug-weaver` took
+  the whole run down. The name is a user-visible identity that provenance and
+  directive scoping key on, so it is the prefix that bends.
+
+- **`sdk/golang.BuiltinTemplates` declares a plugin that ships none.** A plugin
+  emitting only standard decls has no kind of its own for a template to resolve,
+  and the backend's missing-template diagnostic would otherwise point at the one
+  case that is deliberate.
+
+- **`eidostest/storefixture.Builder.GoSource` projects a fixture into the Go
+  source it describes.** Asserting that generated output compiles needs the
+  hand-written package it references; supplying that separately makes the
+  fixture that drove the run and the source it stands for two things that can
+  disagree — silently, since a stale support file still compiles.
+
+- **`eidostest/golangtest.Render` and `Driver` drive a fixture to its files in
+  one call.** Both take the backend rather than constructing one, which keeps
+  the package out of `backend/golang`'s module graph. `AssertDoesNotSatisfy`
+  states what a shape detector is really claiming: not that the canonical shape
+  passes, but that every near miss fails.
+
+- **`eidostest/plugintest.AssertRenderStmt` and `AssertExternalCall`.** A
+  contributor's tests read a slot entry's kind back, which `sdk` withholds on
+  grounds true of a generator and false of a test of one.
+
+- **`lang/golang.WithReceiverFromType` and `ParamIdentsFor`.** The receiver
+  identifier is the type name's initial made unique against the parameter
+  identifiers, an ordering a caller cannot resolve alone — one generator
+  projected its signature twice to get there. `ParamIdentsFor` takes declared
+  names, for a generator that lowered away its `node.Param` before it needed
+  identifiers and was reaching past the uniqueness pass.
+
+### Fixed
+
+- **`lang/golang`: a variadic method matched a standard-library shape.** A
+  frontend records a variadic parameter as its *element* type with `Variadic`
+  set, so `Write(p ...[]byte)` arrives carrying exactly the `[]byte` that
+  `io.Writer` wants, and every shape in `sigshape.go` read the type alone and
+  answered yes — reporting a method that cannot satisfy the interface.
+  `SameSignature`, in the same package, compared the flag correctly. Every shape
+  there is a fixed-arity stdlib contract and none admits a `...T`, so the guard
+  is on arity rather than per-shape.
+
+- **`reference/validategen` never qualified a subject type.** `pkgPathOf`
+  asserted on a `PkgPath()` method no node kind implements — every node spells
+  the field `Package` — so it always answered empty, and a validator routed into
+  its own package named a subject type that was not in scope there.
+
+- **`reference/mockgen`: a parameter could shadow the receiver.** A source
+  interface declaring `Do(m string)` emitted `func (m *FooMock) Do(m string)`,
+  where `m.DoFunc` resolves against a string. No fixture whose parameters avoid
+  the receiver letter ever reached it.
+
+### Changed
+
+- **Seven reference plugins dropped private copies of rules the framework
+  answers**, including four rewrites of the option-or-default accessor the
+  schema tag already carries, `stubgen`'s whole signature projection, and
+  `shapewriter`'s restatement of `io.Writer`'s signature. `auditweaver` builds
+  its contribution from the emit constructors and drops its template;
+  `debugweaver` keeps the custom-kind route, so the pair documents the choice
+  rather than implying one answer.
+
+- **The reference plugins' generated output is now compiled and run.**
+  `plugins/` may not import a backend, so the assertion lives in
+  `cmd/eidos-reference`, which already registers every plugin and backend and is
+  depended on by nothing.
+
+## v1.10.0 — 2026-08-07
+
 At v1.9.0 `lang/golang` was three files — `doc.go`, `golang.go`, `refconv.go` —
 exporting fourteen symbols, every one of which is still present and unchanged.
 Everything this release adds to that package is therefore new, not altered:
