@@ -65,10 +65,10 @@ func literalSample(text string) Sample { return Sample{Text: text} }
 // comparing against a single value passes whenever the subject already
 // held it.
 //
-// Handles builtins, `any`, defined types, arrays and structs. A type
-// the resolver cannot reach, or one admitting no distinguishable
-// values, yields two zero Samples — ask [Sample.OK] rather than
-// comparing against the zero value.
+// Handles builtins, `any`, defined types, arrays, slices, maps and
+// structs. A type the resolver cannot reach, or one admitting no
+// distinguishable values, yields two zero Samples — ask [Sample.OK]
+// rather than comparing against the zero value.
 //
 // # Allocation
 //
@@ -102,6 +102,12 @@ func sampleRefFor(
 	}
 	if t.IsArray() {
 		return arraySample(t, fieldName, r, depth)
+	}
+	if t.IsSlice() {
+		return sliceSample(t, fieldName, r, depth)
+	}
+	if t.IsMap() {
+		return mapSample(t, fieldName, r, depth)
 	}
 	if t.TypeKind != node.TypeRefNamed || r == nil {
 		return Sample{}, Sample{}
@@ -203,6 +209,59 @@ func ZeroRefFor(t *node.TypeRef, r Resolver) (Sample, bool) {
 	default:
 		return Sample{}, false
 	}
+}
+
+// sliceSample derives a one-element literal per half, so the pair
+// differs in the element rather than in the length.
+//
+// A length-only difference — `{x}` against `{x, x}` — is invisible to
+// a subject that reads the contents and only shows up in one that
+// counts them, which is the rarer shape. Differing in the element
+// distinguishes both.
+//
+// An element deriving nothing yields nothing for the slice. `[]T{}`
+// and `[]T{x}` are different claims and only the second is a sample:
+// a check built from an empty literal passes against an
+// implementation that reads no element at all.
+func sliceSample(
+	t *node.TypeRef, fieldName string, r Resolver, depth int,
+) (sample, alternate Sample) {
+	inner, innerAlt := sampleRefFor(SliceElem(t), fieldName, r, depth-1)
+	if !inner.OK() {
+		return Sample{}, Sample{}
+	}
+	ref := FromNode(t)
+	return Sample{Ref: ref, Text: "{" + inner.Text + "}", Composite: true},
+		Sample{Ref: ref, Text: "{" + innerAlt.Text + "}", Composite: true}
+}
+
+// mapSample derives a one-entry literal per half, differing in the
+// key.
+//
+// The key rather than the value, because `map[K]struct{}` is how Go
+// spells a set: a pair differing only in the value produces two
+// identical literals for it, and a check comparing them cannot fail.
+// Keying the difference works for both shapes.
+//
+// Key and value must both derive, for the reason the element case
+// gives: a literal missing either half is a different claim, not a
+// smaller one. That the pair's two keys differ follows from the pair
+// [sampleRefFor] returns — every arm answers with two distinct texts
+// or with nothing — so it is not rechecked here.
+func mapSample(
+	t *node.TypeRef, fieldName string, r Resolver, depth int,
+) (sample, alternate Sample) {
+	keySample, keyAlt := sampleRefFor(MapKey(t), fieldName, r, depth-1)
+	if !keySample.OK() {
+		return Sample{}, Sample{}
+	}
+	valSample, _ := sampleRefFor(MapValue(t), fieldName, r, depth-1)
+	if !valSample.OK() {
+		return Sample{}, Sample{}
+	}
+	ref := FromNode(t)
+	return Sample{Ref: ref, Text: "{" + keySample.Text + ": " + valSample.Text + "}", Composite: true},
+		Sample{Ref: ref, Text: "{" + keyAlt.Text + ": " + valSample.Text + "}", Composite: true}
 }
 
 // arraySample renders an array's sample as a composite literal holding
