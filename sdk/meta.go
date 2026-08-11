@@ -91,10 +91,11 @@ var NewBag = meta.NewBag
 //
 // Registration is what lets the directive-override step find the
 // parser by name, so a key declared without it is invisible to
-// `+gen:` overrides. Registering the same name twice returns
-// [meta.ErrDuplicateKey] — which for a package-level `var` means a
-// panic at init. Use [EnsureKey] where two packages may legitimately
-// declare the same key.
+// `+gen:` overrides. Registering the same name twice panics with an
+// error wrapping [ErrDuplicateKey] — at init, for a package-level
+// `var`, which is where a duplicate belongs rather than at the first
+// read. Use [EnsureKey] where two packages may legitimately declare
+// the same key.
 //
 // Generic re-exports are thin wrappers rather than `var` bindings
 // because Go cannot bind an uninstantiated generic function to a
@@ -115,3 +116,56 @@ func NewKey[T any](name string, parser MetaParser[T]) Key[T] {
 func EnsureKey[T any](name string, parser MetaParser[T]) Key[T] {
 	return meta.EnsureKey(name, parser)
 }
+
+// AnyKey is the type-erased view of a [Key] — the operations that do
+// not need its static type. The directive-override step holds one to
+// stamp a directive's raw string into a [Bag] through the key's
+// registered parser, without knowing what the key carries.
+type AnyKey = meta.AnyKey
+
+// Observer is the callback [Bag.AddObserver] fires on every Set
+// against the bag, carrying the name written.
+type Observer = meta.Observer
+
+// LookupKey returns the registered key of a given name.
+//
+// Most plugins hold their own typed [Key] and never need this — it is
+// for a caller resolving a name it was handed rather than one it
+// declared, which is what the directive-override step does. Reports
+// an error wrapping [ErrUnregisteredKey] when the name was never
+// registered.
+//
+// Named LookupKey rather than Lookup because a bare Lookup on a façade
+// spanning the whole plugin surface names no registry.
+//
+//nolint:gochecknoglobals // alias re-export of a stable function.
+var LookupKey = meta.Lookup
+
+// ParseAuthority converts an authority's string spelling to its
+// [MetaAuthority] constant, reporting an error wrapping
+// [ErrUnknownAuthority] for a string naming none.
+//
+//nolint:gochecknoglobals // alias re-export of a stable function.
+var ParseAuthority = meta.ParseAuthority
+
+// Error sentinels surfaced by key registration, value parsing, and
+// authority lookup. Plugin code that wants to distinguish failure
+// modes wraps them with [errors.Is].
+var (
+	// ErrParse is wrapped by every stock parser when its input is not
+	// a value of the key's type — [IntParser] on "abc" reports it.
+	ErrParse = meta.ErrParse
+
+	// ErrDuplicateKey is wrapped by the value [NewKey] panics with
+	// when the name is already registered. [EnsureKey] returns the
+	// existing key rather than raising it.
+	ErrDuplicateKey = meta.ErrDuplicateKey
+
+	// ErrUnregisteredKey is returned by [LookupKey] when no key
+	// matches the name.
+	ErrUnregisteredKey = meta.ErrUnregisteredKey
+
+	// ErrUnknownAuthority is returned by [ParseAuthority] for a string
+	// naming no authority.
+	ErrUnknownAuthority = meta.ErrUnknownAuthority
+)

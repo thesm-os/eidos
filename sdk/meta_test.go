@@ -4,6 +4,7 @@
 package sdk_test
 
 import (
+	"errors"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -60,6 +61,12 @@ func TestMetaAliasesPreserveIdentity(t *testing.T) {
 		var a1 sdk.MetaAuthority
 		var a2 meta.Authority = a1
 		_ = a2
+		var ak1 sdk.AnyKey
+		var ak2 meta.AnyKey = ak1
+		_ = ak2
+		var ob1 sdk.Observer
+		var ob2 meta.Observer = ob1
+		_ = ob2
 	})
 }
 
@@ -197,6 +204,139 @@ func TestParsersProxyUnderlying(t *testing.T) {
 		got, err := sdk.NodeRefParser("pkg.Type")
 		if err != nil || got != "pkg.Type" {
 			t.Fatalf("NodeRefParser = (%q, %v), want (pkg.Type, nil)", got, err)
+		}
+	})
+}
+
+func TestMetaSentinels(t *testing.T) {
+	t.Parallel()
+
+	t.Run("each sentinel is the meta sentinel it re-exports", func(t *testing.T) {
+		t.Parallel()
+		pairs := []struct {
+			name string
+			got  error
+			want error
+		}{
+			{"ErrParse", sdk.ErrParse, meta.ErrParse},
+			{"ErrDuplicateKey", sdk.ErrDuplicateKey, meta.ErrDuplicateKey},
+			{"ErrUnregisteredKey", sdk.ErrUnregisteredKey, meta.ErrUnregisteredKey},
+			{"ErrUnknownAuthority", sdk.ErrUnknownAuthority, meta.ErrUnknownAuthority},
+		}
+		for _, pair := range pairs {
+			if !errors.Is(pair.got, pair.want) {
+				t.Errorf("sdk.%s does not match its meta sentinel", pair.name)
+			}
+		}
+	})
+
+	t.Run("a parse failure is not a registration failure", func(t *testing.T) {
+		t.Parallel()
+		// A caller branching on a bad directive value must not catch a
+		// key the registry never saw; the two are raised by different
+		// halves of the surface.
+		if errors.Is(sdk.ErrParse, sdk.ErrUnregisteredKey) {
+			t.Error("ErrParse must not match ErrUnregisteredKey")
+		}
+		if errors.Is(sdk.ErrDuplicateKey, sdk.ErrUnknownAuthority) {
+			t.Error("ErrDuplicateKey must not match ErrUnknownAuthority")
+		}
+	})
+
+	t.Run("a stock parser reports ErrParse through the facade", func(t *testing.T) {
+		t.Parallel()
+		if _, err := sdk.IntParser("not-a-number"); !errors.Is(err, sdk.ErrParse) {
+			t.Errorf("got %v, want an error wrapping ErrParse", err)
+		}
+	})
+}
+
+func TestLookupKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a registered key is found by name", func(t *testing.T) {
+		t.Parallel()
+		key := sdk.EnsureKey("sdk.test.lookup", sdk.StringParser)
+		got, err := sdk.LookupKey("sdk.test.lookup")
+		if err != nil {
+			t.Fatalf("LookupKey on a registered name: %v", err)
+		}
+		if got.Name() != key.Name() {
+			t.Errorf("LookupKey returned %q, want %q", got.Name(), key.Name())
+		}
+	})
+
+	t.Run("an unregistered name reports ErrUnregisteredKey", func(t *testing.T) {
+		t.Parallel()
+		_, err := sdk.LookupKey("sdk.test.never-declared")
+		if !errors.Is(err, sdk.ErrUnregisteredKey) {
+			t.Errorf("got %v, want an error wrapping ErrUnregisteredKey", err)
+		}
+	})
+
+	t.Run("the returned key parses through its registered parser", func(t *testing.T) {
+		t.Parallel()
+		// What AnyKey is for: stamping a directive's raw string without
+		// knowing the type the key carries. Identity of the alias is
+		// pinned in TestMetaAliasesPreserveIdentity.
+		key := sdk.EnsureKey("sdk.test.anykey", sdk.IntParser)
+		erased, err := sdk.LookupKey("sdk.test.anykey")
+		if err != nil {
+			t.Fatalf("LookupKey: %v", err)
+		}
+		bag := sdk.NewBag()
+		if err := erased.SetDirectiveFromString(bag, "7", sdk.Pos{}); err != nil {
+			t.Fatalf("SetDirectiveFromString: %v", err)
+		}
+		if got, ok := key.Get(bag); !ok || got != 7 {
+			t.Errorf("Get after the erased set = (%d, %v), want (7, true)", got, ok)
+		}
+	})
+}
+
+func TestParseAuthority(t *testing.T) {
+	t.Parallel()
+
+	t.Run("every authority round-trips its string form", func(t *testing.T) {
+		t.Parallel()
+		for _, want := range []sdk.MetaAuthority{
+			sdk.AuthorityPlugin, sdk.AuthorityDirective, sdk.AuthorityManual,
+		} {
+			got, err := sdk.ParseAuthority(want.String())
+			if err != nil {
+				t.Errorf("ParseAuthority(%q): %v", want.String(), err)
+				continue
+			}
+			if got != want {
+				t.Errorf("ParseAuthority(%q) = %v, want %v", want.String(), got, want)
+			}
+		}
+	})
+
+	t.Run("a string naming no authority reports ErrUnknownAuthority", func(t *testing.T) {
+		t.Parallel()
+		_, err := sdk.ParseAuthority("frontend")
+		if !errors.Is(err, sdk.ErrUnknownAuthority) {
+			t.Errorf("got %v, want an error wrapping ErrUnknownAuthority", err)
+		}
+	})
+}
+
+func TestObserverIsTheBagCallback(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an Observer variable binds to AddObserver", func(t *testing.T) {
+		t.Parallel()
+		// The alias earns its place by letting a caller hold the
+		// callback in a named variable; a func literal never needs it.
+		var seen atomic.Int64
+		var obs sdk.Observer = func(string) { seen.Add(1) }
+		bag := sdk.NewBag()
+		bag.AddObserver(obs)
+		key := sdk.EnsureKey("sdk.test.observer", sdk.StringParser)
+		key.Set(bag, "v", "sdktest")
+		if seen.Load() != 1 {
+			t.Errorf("observer fired %d times, want 1", seen.Load())
 		}
 	})
 }
