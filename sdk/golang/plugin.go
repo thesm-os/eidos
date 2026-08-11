@@ -16,6 +16,19 @@ import (
 	"go.thesmos.sh/eidos/sdk"
 )
 
+// Language is the identifier the Go adapter answers to, re-exported
+// so a plugin dispatching on it need not import the language package
+// beside this one.
+//
+// [Base] answers the language-keyed declaration methods already, so a
+// plugin built on it never spells this. It is for the plugin that
+// implements Outputs, Templates or TemplateFuncs itself and has to
+// compare the argument — where the literal "golang" is the failure
+// mode the constant exists to prevent, since a plugin returning
+// nothing for an unrecognised language emits nothing and reports no
+// error.
+const Language = golang.Language
+
 // DefaultTemplateDir is where a plugin keeps its Go templates,
 // relative to its own package.
 //

@@ -500,3 +500,30 @@ func TestBuilderFreezesTheDeclaration(t *testing.T) {
 		}
 	})
 }
+
+// TestLanguageMatchesTheAdapter pins the re-export against the
+// language package. A plugin comparing its dispatch argument to a
+// constant that has drifted returns nothing for every call, emits no
+// output, and reports no error — the silent failure the constant
+// exists to prevent.
+func TestLanguageMatchesTheAdapter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the re-export is the adapter's identifier", func(t *testing.T) {
+		t.Parallel()
+		if sdkgo.Language != langgo.Language {
+			t.Errorf("sdkgo.Language = %q, want %q", sdkgo.Language, langgo.Language)
+		}
+	})
+
+	t.Run("Base answers the language it names", func(t *testing.T) {
+		t.Parallel()
+		// The constant is only useful if the builder dispatches on the
+		// same string a hand-written plugin would compare against.
+		base := sdkgo.NewGenerator("langcheck", goTemplates,
+			sdk.Output{Suffix: ".gen.go"}).Build()
+		if got := base.Outputs(sdkgo.Language); len(got) == 0 {
+			t.Errorf("Outputs(%q) returned nothing", sdkgo.Language)
+		}
+	})
+}
