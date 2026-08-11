@@ -47,6 +47,21 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **`if-match` can name its predicate as a callable.** The contract carried one
+  spelling — `pred=`, an opaque expression the resolver never inspects — so a
+  consumer naming a method through it got no qualification, no diagnostic when
+  the method did not exist, and nothing back-stamped on the predicate to find
+  the writer from. `ifmatch.RoleMatch` (`match=Match`) is that callable as a
+  partner role, resolved like any other.
+
+  `ParamPred` is unchanged and stays opaque, because it genuinely is:
+  `pred=Version==Expected` names no callable, and handing it to the resolver
+  reports every correct directive as unresolved. The two are separate keys for
+  that reason — a value that gets qualified and one that must be left verbatim
+  cannot share a key without the resolver guessing which it received.
+
+  Additive: every existing `pred=` directive stays valid.
+
 - **`mixintest.RunWithValidator`** drives the umbrella, resolver and validator
   over a package and returns the diagnostics, for a mixin carrying a `Validate`
   hook. The internal test helper had no way to reach the validation pass.
