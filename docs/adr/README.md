@@ -11,6 +11,11 @@ evidence of what was true at the time.
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-use-adrs-for-architecture-decisions.md) | Use ADRs for architecture decisions | Accepted |
+| [0002](0002-compile-plugins-as-static-imports.md) | Compile plugins into the binary as static imports | Accepted |
+| [0003](0003-metadata-as-the-extension-mechanism.md) | Use metadata as the sole inter-plugin extension mechanism | Accepted |
+| [0004](0004-compose-output-through-slots.md) | Compose generated output through slots, not inheritance | Accepted |
+| [0005](0005-own-templates-per-backend-and-plugin.md) | Own templates per backend and per plugin | Accepted |
+| [0006](0006-one-backend-per-pipeline-run.md) | Target one backend per pipeline run | Accepted |
 
 ## Writing one
 
@@ -25,10 +30,12 @@ reason it lost. "Too complex" is not a reason.
 If there were genuinely no alternatives — a process bootstrap — say
 so explicitly rather than leaving the section empty.
 
-## Not yet recorded
+## Reading order
 
-`README.md`'s `## Design decisions` section states five architectural
-choices without the alternatives they beat: static plugin imports,
-metadata as the extension mechanism, slot composition, per-backend
-template ownership, and one backend per run. Each is ADR-shaped and
-none is written up. See [ADR-0001](0001-use-adrs-for-architecture-decisions.md).
+[ADR-0002](0002-compile-plugins-as-static-imports.md) through
+[ADR-0006](0006-one-backend-per-pipeline-run.md) are the five choices
+that shape everything else, and they build on each other in that order:
+plugins are compiled in, so they exchange facts through typed metadata
+rather than calls; facts are not output, so shared output composes
+through slots; slots render through templates their owners control; and
+rendering answers for one language at a time.

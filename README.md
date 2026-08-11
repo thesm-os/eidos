@@ -292,38 +292,14 @@ Layering is enforced by `depguard` in `.golangci.yml`.
 
 ## Design decisions
 
-A few choices worth being explicit about — each one trades something
-away, deliberately.
+Five choices shape everything else: plugins are compiled in rather than
+loaded, they exchange facts through typed metadata rather than calls,
+shared output composes through slots rather than inheritance, templates
+are owned by backends and plugins rather than the framework, and a run
+targets one backend.
 
-**Plugins are static Go imports, not dynamically loaded.** A
-different pipeline is a different binary. The cost is that swapping
-plugins requires a rebuild; the wins are compile-time type-checking
-on plugin contracts, deterministic ordering, single-binary deployment,
-and no `plugin.Open` complexity.
-
-**Metadata is the universal extension mechanism.** Plugins do not
-subclass each other or call into each other directly. They
-communicate through typed, namespaced metadata keys with explicit
-authority levels (plugin / directive / manual) and full provenance.
-Source can override anything with `+gen:meta KEY=value` or delete it
-with `-gen:meta KEY` — no plugin code change required.
-
-**Composition through slots, not inheritance.** A generator emits
-emit-entities with named slots typed by content kind. Cross-cutting
-plugins append into the relevant slot; ordering is capability-topo
-across plugins with alphabetical tie-break.
-
-**Templates are owned by each backend and each plugin, not the
-framework.** Adding a target language is mostly authoring templates
-plus a small format/imports pass. The Go backend's core templates
-live in `backend/golang/templates/`; plugins ship their own templates
-that merge into the same funcmap, with override resolution by
-capability topology.
-
-**Single backend per pipeline run.** Generating the same project to
-multiple languages = multiple pipeline runs. Keeps import resolution,
-formatting, and target conventions monolingual and predictable per
-invocation.
+Each is recorded with the alternatives it beat and what it costs in
+[`docs/adr/`](docs/adr/README.md).
 
 ## Contributing
 
