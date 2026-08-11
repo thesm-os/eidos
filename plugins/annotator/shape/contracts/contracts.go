@@ -21,7 +21,9 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/appender"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/batchwriter"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/cas"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/chain"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/circuitbreaker"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/codec"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/cursor"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/ifabsent"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts/ifmatch"
@@ -53,7 +55,9 @@ func All() []shape.Contract {
 		appender.Contract(),
 		batchwriter.Contract(),
 		cas.Contract(),
+		chain.Contract(),
 		circuitbreaker.Contract(),
+		codec.Contract(),
 		cursor.Contract(),
 		ifabsent.Contract(),
 		ifmatch.Contract(),

@@ -47,6 +47,25 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **Two contracts for pairs the vocabulary could not express: `codec` and
+  `chain`.** Both are shapes eidos already detects structurally — a `pure` or
+  `mutator` encoding, a `writer` plus a `streamreader` — with no way to say which
+  callable completes the pair, so the property they exist to state had nowhere to
+  live.
+
+  `codec` declares `forward` and `inverse`, with a required inverse: a forward
+  naming none states a round-trip property nothing can check. Its `fidelity`
+  param picks the law — `exact` for `inverse(forward(x)) == x`, `lossy` for
+  `forward(inverse(forward(x))) == forward(x)`, which is the strongest true claim
+  for an encoding that normalises or discards input.
+
+  `chain` declares `append`, `replay` and an optional `verify`. The replay is
+  required, because append-only is a claim about history and there is otherwise
+  no way to read it. `verify` names an explicit integrity check where an
+  implementation offers one; a chain reporting corruption through a poison
+  accessor is checkable without it, so requiring it would rule out the commoner
+  spelling.
+
 - **`if-match` can name its predicate as a callable.** The contract carried one
   spelling — `pred=`, an opaque expression the resolver never inspects — so a
   consumer naming a method through it got no qualification, no diagnostic when
