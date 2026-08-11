@@ -135,3 +135,37 @@ func AssertParam(t *testing.T, bag *sdk.Bag, mixinName, param, want string) {
 		t.Fatalf("param %q for %q = %q, want %q", param, mixinName, got, want)
 	}
 }
+
+// RunWithValidator drives the umbrella, the resolver and the
+// validator over pkg and returns every diagnostic raised.
+//
+// The sibling of [RunWithResolver] for a mixin carrying a
+// [shape.Mixin.Validate] hook. Resolution runs first because a
+// validator reads params after the resolver has rewritten the ones it
+// owns, so a test skipping that step would check the wrong values.
+func RunWithValidator(t *testing.T, m shape.Mixin, pkg *sdk.Package) []sdk.Diag {
+	t.Helper()
+	s := store.New()
+	if err := s.Nodes().AddPackage(pkg); err != nil {
+		t.Fatalf("AddPackage: %v", err)
+	}
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
+
+	umbrella := shape.New().Mixins(m)
+	sink := diag.New()
+	ctx := &sdk.AnnotatorContext{
+		Store:  s,
+		Reader: store.NewReader(s),
+		Diag:   sink,
+	}
+	if err := umbrella.Annotate(ctx); err != nil {
+		t.Fatalf("umbrella.Annotate: %v", err)
+	}
+	if err := umbrella.Resolver().Annotate(ctx); err != nil {
+		t.Fatalf("resolver.Annotate: %v", err)
+	}
+	if err := umbrella.Validator().Annotate(ctx); err != nil {
+		t.Fatalf("validator.Annotate: %v", err)
+	}
+	return sink.Diagnostics()
+}

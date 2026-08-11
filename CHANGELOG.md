@@ -13,6 +13,31 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Added
+
+- **`partition` names the parameter it isolates on.** `read=` said what observes
+  a partition and nothing said which parameter carries one, so a generated check
+  had to guess between position and parameter name. Neither is safe: a callable
+  taking `(ctx, partition, key, value)` offers two strings of the same type, and
+  a check varying both writes to two different keys — passing against an
+  implementation that ignores partitions entirely. That check cannot fail, which
+  is worse than generating none.
+
+  `partition.ParamAxis` (`axis=`) names the parameter to vary while the rest are
+  held fixed. It is deliberately not a sibling param: a parameter has no
+  qualified name, so asking the resolver to look one up in scope reports every
+  correct axis as not found. It is validated instead — `partition.Mixin()` now
+  carries a `Validate` hook reporting an axis that names no parameter of the
+  annotated callable, which is the first use of a `shape.Mixin` field that had
+  never been set.
+
+  Absence stays legal: the bare form is still a classification, and whether a
+  check is worth emitting without an axis belongs to the generator.
+
+- **`mixintest.RunWithValidator`** drives the umbrella, resolver and validator
+  over a package and returns the diagnostics, for a mixin carrying a `Validate`
+  hook. The internal test helper had no way to reach the validation pass.
+
 ## plugins/v1.14.0 — 2026-08-11
 
 ### Added
