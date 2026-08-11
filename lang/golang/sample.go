@@ -45,6 +45,60 @@ type Sample struct {
 	// interchangeable, and which one applies is a property of the type
 	// rather than of the value.
 	Composite bool
+
+	// Refusal says why Text is empty. [RefusedNone] when a value was
+	// derived, so the zero Sample reads as "nothing was attempted"
+	// rather than as a refusal with a reason.
+	//
+	// Meaningful only when [Sample.OK] is false. A caller emitting is
+	// not interested; a caller explaining an assertion it declined to
+	// write is, and could not previously tell an incomplete run from a
+	// type that genuinely has no literal.
+	Refusal SampleRefusal
+}
+
+// SampleRefusal says why a sample could not be derived.
+//
+// Twelve refusal sites in this package answered with the same empty
+// [Sample], and only [RefusedNoLiteral] is a fact about the type. The
+// rest describe an input the caller could fix — which matters because
+// the response to all of them is to omit the check, so a run missing a
+// package silently produces a test that asserts less than it appears
+// to.
+type SampleRefusal uint8
+
+const (
+	// RefusedNone is the zero value: no refusal, a value was derived.
+	RefusedNone SampleRefusal = iota
+
+	// RefusedNoResolver is a nil [Resolver] where a named type needed
+	// one, or a nil type reference. The caller's own input.
+	RefusedNoResolver
+
+	// RefusedDepth is a walk that hit the recursion budget, which a
+	// self-referential type reaches before it terminates.
+	RefusedDepth
+
+	// RefusedUnresolved is a named type the resolver could not reach —
+	// ordinarily a package the run's patterns did not load.
+	RefusedUnresolved
+
+	// RefusedNoLiteral is a type that admits no distinguishable
+	// literal: a builtin outside the value table, a struct with no
+	// exported settable field, or a declaration with no sample form.
+	// The only refusal that is settled rather than fixable.
+	RefusedNoLiteral
+)
+
+// Incomplete reports whether the refusal describes the input rather
+// than the type.
+//
+// The distinction that earns the enum: a caller warning "no check was
+// written for this field" wants to say so only when the answer might
+// have been different under a wider run. [RefusedNoLiteral] never
+// would be.
+func (r SampleRefusal) Incomplete() bool {
+	return r == RefusedNoResolver || r == RefusedDepth || r == RefusedUnresolved
 }
 
 // OK reports whether a value was derived.
@@ -56,6 +110,11 @@ func (s Sample) OK() bool { return s.Text != "" }
 
 // literalSample returns a sample needing no type beside it.
 func literalSample(text string) Sample { return Sample{Text: text} }
+
+// refused returns the empty sample pair carrying why.
+func refused(why SampleRefusal) (sample, alternate Sample) {
+	return Sample{Refusal: why}, Sample{Refusal: why}
+}
 
 // SampleRefFor returns two distinct sample values for a source type,
 // resolving named types through r.
@@ -84,8 +143,11 @@ func SampleRefFor(t *node.TypeRef, fieldName string, r Resolver) (sample, altern
 func sampleRefFor(
 	t *node.TypeRef, fieldName string, r Resolver, depth int,
 ) (sample, alternate Sample) {
-	if t == nil || depth <= 0 {
-		return Sample{}, Sample{}
+	if t == nil {
+		return refused(RefusedNoResolver)
+	}
+	if depth <= 0 {
+		return refused(RefusedDepth)
 	}
 	if IsAny(t) {
 		// `any` admits every value, so the string pair serves and needs
@@ -96,7 +158,7 @@ func sampleRefFor(
 	if t.IsBuiltin() {
 		s, a := SampleValues(t.Name, fieldName)
 		if s == "" {
-			return Sample{}, Sample{}
+			return refused(RefusedNoLiteral)
 		}
 		return literalSample(s), literalSample(a)
 	}
@@ -109,12 +171,17 @@ func sampleRefFor(
 	if t.IsMap() {
 		return mapSample(t, fieldName, r, depth)
 	}
-	if t.TypeKind != node.TypeRefNamed || r == nil {
-		return Sample{}, Sample{}
+	if t.TypeKind != node.TypeRefNamed {
+		// A kind with no arm above — a func or channel type — has no
+		// literal to write, whatever the resolver holds.
+		return refused(RefusedNoLiteral)
+	}
+	if r == nil {
+		return refused(RefusedNoResolver)
 	}
 	target, found := r.Resolve(t)
 	if !found {
-		return Sample{}, Sample{}
+		return refused(RefusedUnresolved)
 	}
 	switch decl := target.(type) {
 	case *node.Alias:
@@ -122,7 +189,7 @@ func sampleRefFor(
 	case *node.Struct:
 		return structSample(t, decl, fieldName, r, depth)
 	default:
-		return Sample{}, Sample{}
+		return refused(RefusedNoLiteral)
 	}
 }
 
@@ -134,11 +201,14 @@ func definedSample(
 	t *node.TypeRef, decl *node.Alias, fieldName string, r Resolver, depth int,
 ) (sample, alternate Sample) {
 	if decl.Target == nil {
-		return Sample{}, Sample{}
+		return refused(RefusedUnresolved)
 	}
 	inner, innerAlt := sampleRefFor(decl.Target, fieldName, r, depth-1)
 	if !inner.OK() {
-		return Sample{}, Sample{}
+		// The underlying type's reason, not this one's: an alias over an
+		// unloaded type is unresolved, and saying "no literal" would
+		// report a fixable run as a settled fact.
+		return refused(inner.Refusal)
 	}
 	ref := FromNode(t)
 	return Sample{Ref: ref, Text: inner.Text}, Sample{Ref: ref, Text: innerAlt.Text}
@@ -156,18 +226,28 @@ func structSample(
 	t *node.TypeRef, decl *node.Struct, fieldName string, r Resolver, depth int,
 ) (sample, alternate Sample) {
 	ref := FromNode(t)
+	// The first fixable reason a field gave, kept so a struct whose only
+	// candidates were unloaded reports that rather than claiming it has
+	// no literal — the answer would differ under a wider run.
+	incomplete := RefusedNone
 	for _, f := range decl.Fields {
 		if f == nil || !IsExported(f.Name) {
 			continue
 		}
 		inner, innerAlt := sampleRefFor(f.Type, fieldName, r, depth-1)
 		if !inner.OK() {
+			if incomplete == RefusedNone && inner.Refusal.Incomplete() {
+				incomplete = inner.Refusal
+			}
 			continue
 		}
 		return Sample{Ref: ref, Text: "{" + f.Name + ": " + inner.Text + "}", Composite: true},
 			Sample{Ref: ref, Text: "{" + f.Name + ": " + innerAlt.Text + "}", Composite: true}
 	}
-	return Sample{}, Sample{}
+	if incomplete != RefusedNone {
+		return refused(incomplete)
+	}
+	return refused(RefusedNoLiteral)
 }
 
 // ZeroRefFor returns a type's zero as a [Sample], resolving named
@@ -179,7 +259,9 @@ func structSample(
 //
 // Reports false when no zero could be derived, which is the same
 // signal [ZeroLiteralFor] gives and means the same thing: emit
-// nothing rather than a comparison against an undefined value.
+// nothing rather than a comparison against an undefined value. The
+// returned Sample carries [Sample.Refusal] either way, so a caller
+// that declined can say whether a wider run would have answered.
 func ZeroRefFor(t *node.TypeRef, r Resolver) (Sample, bool) {
 	// The literal forms answer first, because a type spellable without
 	// an import wants no ref beside it and a Sample carrying one would
@@ -187,27 +269,35 @@ func ZeroRefFor(t *node.TypeRef, r Resolver) (Sample, bool) {
 	if lit, ok := ZeroLiteralFor(t, r); ok {
 		return literalSample(lit), true
 	}
-	if t == nil || r == nil || t.TypeKind != node.TypeRefNamed {
-		return Sample{}, false
+	if t == nil || r == nil {
+		return Sample{Refusal: RefusedNoResolver}, false
+	}
+	if t.TypeKind != node.TypeRefNamed {
+		return Sample{Refusal: RefusedNoLiteral}, false
 	}
 	target, found := r.Resolve(t)
 	if !found {
-		return Sample{}, false
+		return Sample{Refusal: RefusedUnresolved}, false
 	}
 	switch decl := target.(type) {
 	case *node.Alias:
 		if decl.Target == nil {
-			return Sample{}, false
+			return Sample{Refusal: RefusedUnresolved}, false
 		}
 		inner, ok := ZeroRefFor(decl.Target, r)
-		if !ok || inner.Ref != nil {
-			return Sample{}, false
+		if !ok {
+			return Sample{Refusal: inner.Refusal}, false
+		}
+		if inner.Ref != nil {
+			// The inner zero already carries a ref, so wrapping it would
+			// spell one type and import another. Settled, not fixable.
+			return Sample{Refusal: RefusedNoLiteral}, false
 		}
 		return Sample{Ref: FromNode(t), Text: inner.Text}, true
 	case *node.Struct:
 		return Sample{Ref: FromNode(t), Text: "{}", Composite: true}, true
 	default:
-		return Sample{}, false
+		return Sample{Refusal: RefusedNoLiteral}, false
 	}
 }
 
@@ -228,7 +318,7 @@ func sliceSample(
 ) (sample, alternate Sample) {
 	inner, innerAlt := sampleRefFor(SliceElem(t), fieldName, r, depth-1)
 	if !inner.OK() {
-		return Sample{}, Sample{}
+		return refused(inner.Refusal)
 	}
 	ref := FromNode(t)
 	return Sample{Ref: ref, Text: "{" + inner.Text + "}", Composite: true},
@@ -253,11 +343,11 @@ func mapSample(
 ) (sample, alternate Sample) {
 	keySample, keyAlt := sampleRefFor(MapKey(t), fieldName, r, depth-1)
 	if !keySample.OK() {
-		return Sample{}, Sample{}
+		return refused(keySample.Refusal)
 	}
 	valSample, _ := sampleRefFor(MapValue(t), fieldName, r, depth-1)
 	if !valSample.OK() {
-		return Sample{}, Sample{}
+		return refused(valSample.Refusal)
 	}
 	ref := FromNode(t)
 	return Sample{Ref: ref, Text: "{" + keySample.Text + ": " + valSample.Text + "}", Composite: true},
@@ -272,7 +362,7 @@ func arraySample(
 	elem, _ := ArrayElem(t)
 	inner, innerAlt := sampleRefFor(elem, fieldName, r, depth-1)
 	if !inner.OK() {
-		return Sample{}, Sample{}
+		return refused(inner.Refusal)
 	}
 	ref := FromNode(t)
 	return Sample{Ref: ref, Text: "{" + inner.Text + "}", Composite: true},

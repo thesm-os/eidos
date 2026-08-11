@@ -271,3 +271,199 @@ func TestSampleRefFor_UnsampleableDeclaration(t *testing.T) {
 		}
 	})
 }
+
+// TestSampleRefusal_Causes pins each refusal to the cause that raised
+// it. The point of the enum is that a caller can tell a run that was
+// too narrow from a type that has no literal, so a site reporting the
+// wrong one is worse than the single signal it replaced.
+func TestSampleRefusal_Causes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a derived sample refuses nothing", func(t *testing.T) {
+		t.Parallel()
+		s, _ := golang.SampleRefFor(builtinRef("int"), "n", nil)
+		if s.Refusal != golang.RefusedNone {
+			t.Errorf("Refusal = %d on a derived sample, want RefusedNone", s.Refusal)
+		}
+	})
+
+	t.Run("a nil type reports the caller's input", func(t *testing.T) {
+		t.Parallel()
+		s, _ := golang.SampleRefFor(nil, "f", mapResolver{})
+		if s.Refusal != golang.RefusedNoResolver {
+			t.Errorf("Refusal = %d, want RefusedNoResolver", s.Refusal)
+		}
+	})
+
+	t.Run("a named type with no resolver reports the caller's input", func(t *testing.T) {
+		t.Parallel()
+		s, _ := golang.SampleRefFor(namedTypeRef("x", "T"), "f", nil)
+		if s.Refusal != golang.RefusedNoResolver {
+			t.Errorf("Refusal = %d, want RefusedNoResolver", s.Refusal)
+		}
+	})
+
+	t.Run("a type the resolver cannot reach reports unresolved", func(t *testing.T) {
+		t.Parallel()
+		s, _ := golang.SampleRefFor(namedTypeRef("x", "Absent"), "f", mapResolver{})
+		if s.Refusal != golang.RefusedUnresolved {
+			t.Errorf("Refusal = %d, want RefusedUnresolved", s.Refusal)
+		}
+	})
+
+	t.Run("a builtin outside the value table reports no literal", func(t *testing.T) {
+		t.Parallel()
+		s, _ := golang.SampleRefFor(builtinRef("chan"), "c", mapResolver{})
+		if s.Refusal != golang.RefusedNoLiteral {
+			t.Errorf("Refusal = %d, want RefusedNoLiteral", s.Refusal)
+		}
+	})
+
+	t.Run("a declaration with no sample form reports no literal", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{"x.E": &node.Enum{Name: "E", Package: "x"}}
+		s, _ := golang.SampleRefFor(namedTypeRef("x", "E"), "f", r)
+		if s.Refusal != golang.RefusedNoLiteral {
+			t.Errorf("Refusal = %d, want RefusedNoLiteral", s.Refusal)
+		}
+	})
+
+	t.Run("both halves of the pair carry the same reason", func(t *testing.T) {
+		t.Parallel()
+		s, a := golang.SampleRefFor(namedTypeRef("x", "Absent"), "f", mapResolver{})
+		if s.Refusal != a.Refusal {
+			t.Errorf("halves disagree: %d and %d", s.Refusal, a.Refusal)
+		}
+	})
+}
+
+// TestSampleRefusal_Propagates pins the composite arms. A slice of an
+// unloaded type is a narrow run, not a type without a literal, and
+// reporting the latter would send a caller looking for a defect in a
+// type that is fine.
+func TestSampleRefusal_Propagates(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a slice reports its element's reason", func(t *testing.T) {
+		t.Parallel()
+		s, _ := golang.SampleRefFor(
+			sliceRef(namedTypeRef("x", "Absent")), "v", mapResolver{})
+		if s.Refusal != golang.RefusedUnresolved {
+			t.Errorf("Refusal = %d, want the element's RefusedUnresolved", s.Refusal)
+		}
+	})
+
+	t.Run("a map reports its value's reason", func(t *testing.T) {
+		t.Parallel()
+		s, _ := golang.SampleRefFor(
+			mapRef(builtinRef("string"), namedTypeRef("x", "Absent")), "v", mapResolver{})
+		if s.Refusal != golang.RefusedUnresolved {
+			t.Errorf("Refusal = %d, want the value's RefusedUnresolved", s.Refusal)
+		}
+	})
+
+	t.Run("a struct whose only candidate was unloaded reports unresolved", func(t *testing.T) {
+		t.Parallel()
+		// Not RefusedNoLiteral: the struct would have sampled under a run
+		// that loaded the field's type.
+		r := mapResolver{"x.Holder": &node.Struct{
+			Name: "Holder", Package: "x",
+			Fields: []*node.Field{{Name: "Inner", Type: namedTypeRef("y", "Absent")}},
+		}}
+		s, _ := golang.SampleRefFor(namedTypeRef("x", "Holder"), "h", r)
+		if s.Refusal != golang.RefusedUnresolved {
+			t.Errorf("Refusal = %d, want RefusedUnresolved", s.Refusal)
+		}
+	})
+
+	t.Run("a struct with only unexported fields reports no literal", func(t *testing.T) {
+		t.Parallel()
+		// Nothing a wider run would change: the fields exist and cannot
+		// be set from another package.
+		r := mapResolver{"x.Hidden": &node.Struct{
+			Name: "Hidden", Package: "x",
+			Fields: []*node.Field{{Name: "secret", Type: builtinRef("int")}},
+		}}
+		s, _ := golang.SampleRefFor(namedTypeRef("x", "Hidden"), "h", r)
+		if s.Refusal != golang.RefusedNoLiteral {
+			t.Errorf("Refusal = %d, want RefusedNoLiteral", s.Refusal)
+		}
+	})
+}
+
+// TestSampleRefusal_Incomplete pins the partition the enum exists to
+// express: fixable input against a settled fact about the type.
+func TestSampleRefusal_Incomplete(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the input causes report incomplete", func(t *testing.T) {
+		t.Parallel()
+		for _, r := range []golang.SampleRefusal{
+			golang.RefusedNoResolver, golang.RefusedDepth, golang.RefusedUnresolved,
+		} {
+			if !r.Incomplete() {
+				t.Errorf("refusal %d does not report incomplete", r)
+			}
+		}
+	})
+
+	t.Run("no-literal and no-refusal are not incomplete", func(t *testing.T) {
+		t.Parallel()
+		if golang.RefusedNoLiteral.Incomplete() {
+			t.Error("RefusedNoLiteral reported as incomplete")
+		}
+		if golang.RefusedNone.Incomplete() {
+			t.Error("RefusedNone reported as incomplete")
+		}
+	})
+}
+
+// TestZeroRefFor_ReportsWhy pins the same reporting on the zero form,
+// which had the identical gap behind a bare bool.
+func TestZeroRefFor_ReportsWhy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an unreachable type reports unresolved", func(t *testing.T) {
+		t.Parallel()
+		s, ok := golang.ZeroRefFor(namedTypeRef("x", "Absent"), mapResolver{})
+		if ok {
+			t.Fatal("an unresolvable type reported a zero")
+		}
+		if s.Refusal != golang.RefusedUnresolved {
+			t.Errorf("Refusal = %d, want RefusedUnresolved", s.Refusal)
+		}
+	})
+
+	t.Run("a declaration with no zero form reports no literal", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{"x.E": &node.Enum{Name: "E", Package: "x"}}
+		s, ok := golang.ZeroRefFor(namedTypeRef("x", "E"), r)
+		if ok {
+			t.Fatal("an enum reported a zero through the named path")
+		}
+		if s.Refusal != golang.RefusedNoLiteral {
+			t.Errorf("Refusal = %d, want RefusedNoLiteral", s.Refusal)
+		}
+	})
+}
+
+// TestSampleRefusal_Depth pins the one cause no direct call can raise.
+// A type that refers to itself exhausts the budget rather than the
+// stack, and the caller needs to know the walk stopped early rather
+// than that the type has nothing to offer.
+func TestSampleRefusal_Depth(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a self-referential struct reports the exhausted budget", func(t *testing.T) {
+		t.Parallel()
+		loop := &node.Struct{Name: "Loop", Package: "x"}
+		loop.Fields = []*node.Field{{Name: "Next", Type: namedTypeRef("x", "Loop")}}
+		s, _ := golang.SampleRefFor(namedTypeRef("x", "Loop"), "l", mapResolver{"x.Loop": loop})
+		if s.OK() {
+			t.Fatalf("a self-referential struct derived %q", s.Text)
+		}
+		if s.Refusal != golang.RefusedDepth {
+			t.Errorf("Refusal = %d, want RefusedDepth", s.Refusal)
+		}
+	})
+}
