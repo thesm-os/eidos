@@ -17,10 +17,20 @@ const Name = "lease"
 // without a sentinel declines to state it.
 const ParamHeld = "held"
 
+// ParamTimeout is the KV key naming how long the lease is held before it lapses.
+//
+// A law checking that a cancelled acquire releases has to wait past it. A
+// bound nobody declared is a number the generator invented, and a law
+// enforcing an invented bound fails implementations that are correct against
+// the one their author meant.
+//
+// Opaque to the resolver: a quantity names neither a callable nor a var.
+const ParamTimeout = "timeout"
+
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Params = []string{ParamHeld}
+var Params = []string{ParamHeld, ParamTimeout}
 
 // SiblingVars enumerates the param keys whose values name
 // package-level vars the resolver rewrites into qualified names.

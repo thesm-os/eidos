@@ -73,15 +73,19 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonicreads"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonicwrites"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/nilsafe"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/noduplicates"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/orderafter"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/overmatch"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/partition"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/permutation"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/pointintime"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/poisonable"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/pure"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/readafterwrite"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/readyourwrites"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/retrysucceeds"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sample"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scheduled"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scope"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sideeffect"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/snapshotisolation"
@@ -92,6 +96,7 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/timeaware"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/timeout"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/total"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/ttl"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/validates"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/windowed"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/wrappedvia"
@@ -141,6 +146,11 @@ func All() []shape.Mixin {
 		integrationonly.Mixin(),
 		lifecycleafterclose.Mixin(),
 		monotonic.Mixin(),
+		noduplicates.Mixin(),
+		pointintime.Mixin(),
+		readyourwrites.Mixin(),
+		scheduled.Mixin(),
+		ttl.Mixin(),
 		nilsafe.Mixin(),
 		orderafter.Mixin(),
 		partition.Mixin(),

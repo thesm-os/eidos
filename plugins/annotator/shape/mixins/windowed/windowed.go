@@ -24,10 +24,19 @@ const ParamIncr = "incr"
 // reports every implementation as correct.
 const ParamCount = "count"
 
+// ParamWindow is the KV key naming the interval the result covers.
+//
+// A law advances a controlled clock past it and requires the count to drop.
+// With no window it advances past zero, which either fails a correct
+// implementation or passes vacuously depending on where zero lands.
+//
+// Opaque to the resolver: a quantity names neither a callable nor a var.
+const ParamWindow = "window"
+
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamIncr, ParamCount}
+var Params = []string{ParamIncr, ParamCount, ParamWindow}
 
 // SiblingParams enumerates the param keys whose values name sibling
 // callables the resolver rewrites into qualified names.

@@ -1,0 +1,14 @@
+// Copyright Thesmos B.V. 2026
+// SPDX-License-Identifier: MIT
+
+package noduplicates
+
+import "go.thesmos.sh/eidos/plugins/annotator/shape"
+
+// Name is the canonical mixin name this package stamps.
+const Name = "noduplicates"
+
+// Mixin returns the [shape.Mixin] this package contributes.
+func Mixin() shape.Mixin {
+	return shape.Mixin{Name: Name}
+}

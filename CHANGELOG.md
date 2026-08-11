@@ -47,6 +47,28 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **Five classifications can name the bound their claim turns on.** `bounded
+  min=` beside its existing `limit=`, which is a ceiling and said nothing about
+  the floor; `windowed window=`, `lease timeout=`, and a `ttl duration=`. A bound
+  nobody declared is a number the generator invents, and a law enforcing an
+  invented bound fails implementations that are correct against the one their
+  author meant.
+
+- **Four laws that had no classification at all now have one.**
+  `readyourwrites`, `noduplicates`, `pointintime` and `scheduled schedule=
+  fired=`.
+
+  The first two complete sets whose other members already shipped —
+  `readyourwrites` is the fourth session guarantee beside `monotonicreads`,
+  `monotonicwrites` and `writesfollowreads`, and `noduplicates` the fourth
+  stream claim beside `stableorder`, `permutation` and `overmatch`. It is
+  distinct from the existing `readafterwrite`, which names a write partner and
+  makes a per-method claim rather than one checked across a client's trace.
+
+  `ttl` is the first classification using all three reference kinds at once:
+  `put=`/`read=` through the callable scope, `notfound=` through the package's
+  vars, and `duration=` left verbatim.
+
 - **Seven more classifications can reach the second method their law calls.**
   Following the relational-mixin work, another set named a relationship without
   naming the method on the other side of it — and a law that cannot call the
