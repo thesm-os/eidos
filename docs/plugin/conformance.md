@@ -246,14 +246,36 @@ For plugins satisfying `plugin.OptionsProvider`. Pins:
 - The fixture's `Valid` map covers every required field (a
   fixture-shape check — if Valid misses a required field,
   rejection-path probes downstream get masked by
-  `opt.ErrMissingRequired`)
+  `sdk.ErrMissingRequired`)
 - `SetOptions(Valid)` succeeds
 - `SetOptions(Valid + UnknownKey)` returns an error wrapping
-  `opt.ErrUnknownField`. `UnknownKey` is now optional — the suite
+  `sdk.ErrUnknownField`. `UnknownKey` is now optional — the suite
   synthesises a name the schema does not declare when the fixture
   omits one, so the probe is unconditional
 - `SetOptions` with every required field omitted returns an error
-  wrapping `opt.ErrMissingRequired`
+  wrapping `sdk.ErrMissingRequired`
+
+The suite asserts these itself; the sentinels are named here because a
+plugin writing its own option tests wants the same ones. `sdk`
+re-exports the whole set — `ErrMissingRequired`, `ErrUnknownField`,
+`ErrInvalidValue`, `ErrInvalidDecodeTarget`, and the two schema-time
+ones below — so a plugin never imports `core/opt` to branch on a
+failure.
+
+`sdk.BindOptions` panics on a malformed `eidos:` tag, which is right in
+production and wrong in a test: the panic fails the suite before any
+subtest names the field at fault. `sdk.ReflectOptions` returns that
+same failure as an error wrapping `sdk.ErrInvalidTag` or
+`sdk.ErrUnsupportedFieldType`, so a plugin can pin its own options
+struct the way it pins the rest of its contract:
+
+```go
+func TestOptionsStructIsWellFormed(t *testing.T) {
+    if _, err := sdk.ReflectOptions(Options{}); err != nil {
+        t.Fatalf("options struct does not reflect: %v", err)
+    }
+}
+```
 
 **Fixture shape:**
 

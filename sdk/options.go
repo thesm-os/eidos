@@ -56,3 +56,54 @@ type Schema = opt.Schema
 //
 //nolint:gochecknoglobals // alias re-export of a stable constructor.
 var NewOptions = opt.New
+
+// ReflectOptions derives a [Schema] from a struct value, reporting a
+// malformed tag rather than panicking on it.
+//
+// [BindOptions] is the production path and treats a bad `eidos:` tag as
+// an init-time programmer error: it panics, which is right for a plugin
+// whose tags are correct and wrong for a test asserting that they are.
+// A panic inside Bind takes down the suite before any subtest names the
+// field at fault. This returns that failure as an error wrapping
+// [ErrInvalidTag] or [ErrUnsupportedFieldType], so a plugin can pin its
+// own options struct the way it pins the rest of its contract.
+//
+// Named for what it reflects rather than carrying the underlying
+// Checked suffix, which distinguishes it from a panicking sibling this
+// package deliberately does not re-export.
+//
+//nolint:gochecknoglobals // alias re-export of a stable function.
+var ReflectOptions = opt.ReflectChecked
+
+// Error sentinels surfaced when an options schema is derived and when
+// values are decoded against it. Plugin code that wants to distinguish
+// failure modes wraps them with [errors.Is].
+var (
+	// ErrInvalidTag is returned by [ReflectOptions] for a malformed
+	// `eidos:` tag, or one naming a tag option the package does not
+	// define. [BindOptions] panics on the same condition.
+	ErrInvalidTag = opt.ErrInvalidTag
+
+	// ErrUnsupportedFieldType is returned by [ReflectOptions] for an
+	// options field whose Go type the decoder cannot parse.
+	ErrUnsupportedFieldType = opt.ErrUnsupportedFieldType
+
+	// ErrMissingRequired is returned by [Holder.SetOptions] when a
+	// field the schema marks required was not supplied.
+	ErrMissingRequired = opt.ErrMissingRequired
+
+	// ErrUnknownField is returned by [Holder.SetOptions] for an input
+	// key the schema does not declare. Strict by default, so a typo
+	// fails at the config file that carries it rather than being
+	// silently dropped.
+	ErrUnknownField = opt.ErrUnknownField
+
+	// ErrInvalidValue is returned by [Holder.SetOptions] for a value
+	// that fails per-kind parsing, or one outside the field's OneOf
+	// enumeration.
+	ErrInvalidValue = opt.ErrInvalidValue
+
+	// ErrInvalidDecodeTarget is returned by [Options.Decode] when the
+	// destination passed in is not a pointer to a struct.
+	ErrInvalidDecodeTarget = opt.ErrInvalidDecodeTarget
+)
