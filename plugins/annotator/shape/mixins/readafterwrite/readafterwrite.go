@@ -23,7 +23,17 @@ const ParamWrite = "write"
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []string{ParamWrite}
 
+// SiblingParams enumerates the param keys whose values name
+// sibling callables the resolver rewrites into qualified names.
+//
+//nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
+var SiblingParams = []string{ParamWrite}
+
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {
-	return shape.Mixin{Name: Name, Params: Params}
+	return shape.Mixin{
+		Name:          Name,
+		Params:        Params,
+		SiblingParams: SiblingParams,
+	}
 }
