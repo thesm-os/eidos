@@ -597,3 +597,107 @@ func TestMethodSet_TypeSetTerms(t *testing.T) {
 		}
 	})
 }
+
+// TestMethodSet_ResolvedEmbed covers the projection an embed carries
+// for a declaration the run did not load.
+//
+// The shape that motivated it — an interface embedding io.Closer
+// beside a domain method — reported ReasonUnresolved and took the
+// whole declaration out of scope, because a projection missing a
+// method describes a type that does not satisfy what it claims to.
+func TestMethodSet_ResolvedEmbed(t *testing.T) {
+	t.Parallel()
+
+	// foreign stands in for io.Closer: a declaration outside the run,
+	// projected from the type-checker rather than loaded.
+	foreign := func() *node.Interface {
+		i := &node.Interface{Name: "Closer", Package: "io"}
+		i.Methods = []*node.Method{{Name: "Close", Owner: i}}
+		return i
+	}
+
+	t.Run("an unloaded embed completes from its projection", func(t *testing.T) {
+		t.Parallel()
+		host := ifaceOf("Stream", "Read")
+		e := embed(host, "io", "Closer")
+		e.Resolved = foreign()
+
+		got := node.MethodSet(host, resolverFor())
+		if len(got.Issues) != 0 {
+			t.Fatalf("Issues = %v, want none", got.Issues)
+		}
+		if len(got.Methods) != 2 {
+			t.Fatalf("Methods = %d, want Read and Close", len(got.Methods))
+		}
+	})
+
+	t.Run("the projected method is attributed to the embed", func(t *testing.T) {
+		t.Parallel()
+		host := ifaceOf("Stream", "Read")
+		e := embed(host, "io", "Closer")
+		e.Resolved = foreign()
+
+		got := node.MethodSet(host, resolverFor())
+		for _, entry := range got.Entries {
+			if entry.Method.Name == "Close" && entry.From != e {
+				t.Errorf("Close attributed to %v, want the embed that carried it", entry.From)
+			}
+		}
+	})
+
+	t.Run("a loaded declaration still wins", func(t *testing.T) {
+		t.Parallel()
+		// The projection carries no directives, docs or positions, so a
+		// run that loaded the real declaration must read that instead.
+		loaded := ifaceOf("Closer", "Close")
+		host := ifaceOf("Stream", "Read")
+		e := embed(host, "io", "Closer")
+		e.Resolved = foreign()
+
+		got := node.MethodSet(host, resolverFor(loaded))
+		for _, m := range got.Methods {
+			if m.Name != "Close" {
+				continue
+			}
+			// Identity, not equality: the two carry the same name and
+			// only the loaded one carries what the projection cannot.
+			if m != loaded.Methods[0] {
+				t.Error("the projection was preferred over a loaded declaration")
+			}
+		}
+	})
+
+	t.Run("an embed with neither still reports unresolved", func(t *testing.T) {
+		t.Parallel()
+		// The existing diagnostic must stay reachable, or a consumer's
+		// handling of it becomes dead code.
+		host := ifaceOf("Stream", "Read")
+		embed(host, "io", "Closer")
+
+		got := node.MethodSet(host, resolverFor())
+		if len(got.Issues) != 1 || got.Issues[0].Reason != node.ReasonUnresolved {
+			t.Fatalf("Issues = %v, want one ReasonUnresolved", got.Issues)
+		}
+	})
+
+	t.Run("the projected method keeps its declaring package", func(t *testing.T) {
+		t.Parallel()
+		// What the whole shape is for: a method's owner is how it
+		// answers which package it came from, and the answer must not
+		// depend on whether the run happened to load it.
+		host := ifaceOf("Stream", "Read")
+		e := embed(host, "io", "Closer")
+		e.Resolved = foreign()
+
+		got := node.MethodSet(host, resolverFor())
+		for _, m := range got.Methods {
+			if m.Name != "Close" {
+				continue
+			}
+			owner, ok := m.Owner.(*node.Interface)
+			if !ok || owner.Package != "io" {
+				t.Errorf("Close owner = %v, want the io.Closer projection", m.Owner)
+			}
+		}
+	})
+}

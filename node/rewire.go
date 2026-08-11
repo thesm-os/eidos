@@ -88,6 +88,13 @@ func rewireInterface(i *Interface) {
 	for _, e := range i.Embeds {
 		e.Owner = i
 		rewireTypeRef(e.Type)
+		if e.Resolved != nil {
+			// The projection is a whole interface, so it re-wires as
+			// one: its methods take it as their owner, which is what
+			// keeps [PkgPathOf] answering the declaring package rather
+			// than the embedding one after a round-trip.
+			rewireInterface(e.Resolved)
+		}
 	}
 }
 

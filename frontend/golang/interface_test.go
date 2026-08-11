@@ -304,3 +304,72 @@ func TestInterfaceMethod_TrailingDirective(t *testing.T) {
 		}
 	})
 }
+
+// TestConvertInterface_ForeignEmbedProjection covers the shape that
+// could not be generated for at all: an interface embedding a
+// standard-library one.
+//
+// The method set is type-checked by the time conversion runs, and
+// recording only a type reference discarded it, so the walk reported
+// ReasonUnresolved and every consumer's correct response was to emit
+// nothing.
+func TestConvertInterface_ForeignEmbedProjection(t *testing.T) {
+	t.Parallel()
+
+	const src = "package a\n\nimport (\n\t\"context\"\n\t\"io\"\n)\n\n" +
+		"type Stream interface {\n\tio.Closer\n\n" +
+		"\tRead(ctx context.Context, key string) (string, error)\n}\n"
+
+	t.Run("a standard-library embed carries its projection", func(t *testing.T) {
+		t.Parallel()
+		pkg := requirePackage(t, map[string]string{"a.go": src})
+		i := pkg.InterfaceByName("Stream")
+		if i == nil || len(i.Embeds) != 1 {
+			t.Fatalf("Stream missing or has %d embeds", len(i.Embeds))
+		}
+		resolved := i.Embeds[0].Resolved
+		if resolved == nil {
+			t.Fatal("io.Closer embed carries no projection")
+		}
+		if resolved.Package != "io" || resolved.Name != "Closer" {
+			t.Errorf("projection = %s.%s, want io.Closer", resolved.Package, resolved.Name)
+		}
+		if len(resolved.Methods) != 1 || resolved.Methods[0].Name != "Close" {
+			t.Errorf("projected methods = %+v, want Close", resolved.Methods)
+		}
+	})
+
+	t.Run("the method set completes without an issue", func(t *testing.T) {
+		t.Parallel()
+		// The whole point: a consumer that refused this declaration
+		// because a method was missing now has every one of them.
+		pkg := requirePackage(t, map[string]string{"a.go": src})
+		got := node.MethodSet(pkg.InterfaceByName("Stream"), nil)
+		if len(got.Issues) != 0 {
+			t.Fatalf("Issues = %+v, want none", got.Issues)
+		}
+		names := map[string]bool{}
+		for _, m := range got.Methods {
+			names[m.Name] = true
+		}
+		if !names["Close"] || !names["Read"] {
+			t.Errorf("method set = %v, want both Close and Read", names)
+		}
+	})
+
+	t.Run("a same-package embed carries no projection", func(t *testing.T) {
+		t.Parallel()
+		// Its own conversion is the better answer, and duplicating it
+		// would put two versions of one declaration in the graph.
+		pkg := requirePackage(t, map[string]string{
+			"a.go": "package a\n\ntype Base interface{ Do() }\n\ntype Op interface{ Base }\n",
+		})
+		i := pkg.InterfaceByName("Op")
+		if i == nil || len(i.Embeds) != 1 {
+			t.Fatalf("Op missing or has %d embeds", len(i.Embeds))
+		}
+		if i.Embeds[0].Resolved != nil {
+			t.Error("a same-package embed carries a projection it does not need")
+		}
+	})
+}

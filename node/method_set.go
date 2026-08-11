@@ -275,11 +275,23 @@ func collect(
 			out.Issues = append(out.Issues, MethodSetIssue{Embed: e, Reason: ReasonGeneric})
 			continue
 		}
-		if resolve == nil {
-			out.Issues = append(out.Issues, MethodSetIssue{Embed: e, Reason: ReasonUnresolved})
-			continue
+		var embedded *Interface
+		var found bool
+		if resolve != nil {
+			embedded, found = resolve(e.Type)
 		}
-		embedded, found := resolve(e.Type)
+		if !found && e.Resolved != nil {
+			// The frontend type-checked this embed without loading its
+			// declaration. Second, never first: a loaded declaration
+			// carries directives, docs and positions the projection
+			// cannot, so it wins wherever the run has one.
+			//
+			// Reached with no resolver at all, which is the point — an
+			// embed carrying its own projection needs nothing looked
+			// up, and refusing it for want of a resolver would leave
+			// the caller asking for a lookup that cannot succeed.
+			embedded, found = e.Resolved, true
+		}
 		switch {
 		case embedded == nil && !found:
 			out.Issues = append(out.Issues, MethodSetIssue{Embed: e, Reason: ReasonUnresolved})

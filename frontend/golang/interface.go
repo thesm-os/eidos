@@ -94,7 +94,10 @@ func (c *converter) populateInterfaceFromTypeOnly(i *node.Interface, it *types.I
 		i.Methods = append(i.Methods, method)
 	}
 	for emb := range it.EmbeddedTypes() {
-		i.Embeds = append(i.Embeds, &node.Embed{Type: c.typeRefOf(emb)})
+		i.Embeds = append(i.Embeds, &node.Embed{
+			Type:     c.typeRefOf(emb),
+			Resolved: c.projectForeignInterface(emb),
+		})
 	}
 }
 
@@ -114,14 +117,18 @@ func (c *converter) appendInterfaceEmbed(
 	if ref != nil {
 		ref.SourcePos = typePos
 	}
-	i.Embeds = append(i.Embeds, &node.Embed{
+	embed := &node.Embed{
 		BaseNode: node.BaseNode{
 			SourcePos:     posOf(c.fset, field.Pos()),
 			DocLines:      docs,
 			DirectiveList: dirs,
 		},
 		Type: ref,
-	})
+	}
+	if c.pkg.TypesInfo != nil {
+		embed.Resolved = c.projectForeignInterface(c.pkg.TypesInfo.TypeOf(field.Type))
+	}
+	i.Embeds = append(i.Embeds, embed)
 }
 
 // typeRefForInterfaceEmbed resolves an interface-embed AST
@@ -229,4 +236,60 @@ func (c *converter) methodFromSignature(name string, sig *types.Signature) *node
 		}
 	}
 	return m
+}
+
+// projectForeignInterface renders an embedded interface declared
+// outside the package being converted as a [node.Interface] the
+// method-set walk can complete against.
+//
+// The type-checker has the whole method set in hand at conversion
+// time, and recording only a type reference discarded it — which took
+// every interface embedding `io.Closer` or `fmt.Stringer` out of scope
+// for generation, because a projection missing a method describes a
+// type that does not satisfy what it claims to.
+//
+// Nil for anything declared in this package, whose own conversion
+// produces the better answer, and for a non-interface embed, which is
+// a type-set term rather than a method contributor.
+//
+// The full method set rather than the explicit one, so the projection
+// arrives flattened and the walk needs no second level of recursion
+// into it. That also means the result carries no embeds of its own.
+//
+// The returned interface is not registered in ifaceByQName or emitted
+// into the package: it hangs off the embed that needed it, so nothing
+// walking the graph sees a declaration no pattern asked for.
+func (c *converter) projectForeignInterface(t types.Type) *node.Interface {
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return nil
+	}
+	if named.Obj().Pkg().Path() == c.pkg.PkgPath {
+		return nil
+	}
+	it, ok := named.Underlying().(*types.Interface)
+	if !ok {
+		return nil
+	}
+	projected := &node.Interface{
+		Name:    named.Obj().Name(),
+		Package: named.Obj().Pkg().Path(),
+	}
+	for m := range it.Methods() {
+		sig, isSig := m.Type().(*types.Signature)
+		if !isSig {
+			continue
+		}
+		method := c.methodFromSignature(m.Name(), sig)
+		method.SourcePos = posOf(c.fset, m.Pos())
+		method.Owner = projected
+		projected.Methods = append(projected.Methods, method)
+	}
+	if len(projected.Methods) == 0 {
+		// An interface contributing no methods completes no walk, and
+		// recording it would turn "nothing to add" into a resolution
+		// the walk reports as successful.
+		return nil
+	}
+	return projected
 }
