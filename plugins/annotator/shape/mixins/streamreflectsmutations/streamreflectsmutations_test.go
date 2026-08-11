@@ -55,3 +55,40 @@ func TestMixin(t *testing.T) {
 		}
 	})
 }
+
+// TestMixin_Delete covers the removal half.
+//
+// `mutate` reaches the write only, and a stream that reflects an
+// insert while missing a removal is the commoner bug — a law with no
+// delete to call cannot see it.
+func TestMixin_Delete(t *testing.T) {
+	t.Parallel()
+
+	host := &sdk.Function{
+		Name: "Stream", Package: "x",
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
+				mixintest.HostDirective(streamreflectsmutations.Name, map[string]string{
+					streamreflectsmutations.ParamMutate: "Put",
+					streamreflectsmutations.ParamDelete: "Delete",
+				}),
+			},
+		},
+	}
+	mixintest.RunWithResolver(t, streamreflectsmutations.Mixin(), &sdk.Package{
+		Name: "x", Path: "x",
+		Functions: []*sdk.Function{
+			host,
+			{Name: "Put", Package: "x"},
+			{Name: "Delete", Package: "x"},
+		},
+	})
+
+	key := shape.MixinParamKey(
+		streamreflectsmutations.Name,
+		streamreflectsmutations.ParamDelete,
+	)
+	if got, _ := key.Get(host.Meta()); got != "x.Delete" {
+		t.Fatalf("delete = %q, want %q", got, "x.Delete")
+	}
+}

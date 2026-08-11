@@ -42,6 +42,7 @@ type Resolver struct {
 	// Annotate call.
 	methodOwner map[*sdk.Method]methodOwner
 	funcPkg     map[*sdk.Function]*sdk.Package
+	hostPkg     map[sdk.Node]*sdk.Package
 }
 
 // methodOwner is the per-method index entry: the owning struct or
@@ -105,21 +106,25 @@ func (r *Resolver) Annotate(ctx *sdk.AnnotatorContext) error {
 func (r *Resolver) BeforeNodes(ctx *sdk.AnnotatorContext) {
 	r.methodOwner = make(map[*sdk.Method]methodOwner)
 	r.funcPkg = make(map[*sdk.Function]*sdk.Package)
+	r.hostPkg = make(map[sdk.Node]*sdk.Package)
 	ctx.Reader.Packages().Each(func(pkg *sdk.Package) {
 		for _, s := range pkg.Structs {
 			owner := methodOwner{qname: s.QName(), methods: s.Methods}
 			for _, m := range s.Methods {
 				r.methodOwner[m] = owner
+				r.hostPkg[m] = pkg
 			}
 		}
 		for _, i := range pkg.Interfaces {
 			owner := methodOwner{qname: i.QName(), methods: i.Methods}
 			for _, m := range i.Methods {
 				r.methodOwner[m] = owner
+				r.hostPkg[m] = pkg
 			}
 		}
 		for _, fn := range pkg.Functions {
 			r.funcPkg[fn] = pkg
+			r.hostPkg[fn] = pkg
 		}
 	})
 }
@@ -181,6 +186,27 @@ func packageScope(pkg *sdk.Package) resolveScope {
 		for _, fn := range pkg.Functions {
 			if fn.Name == name {
 				return fn.QName()
+			}
+		}
+		return ""
+	}
+}
+
+// varScope returns a [resolveScope] searching pkg's package-level
+// vars for a name match, returning the qualified name on hit.
+//
+// The scope a sentinel resolves in, and the reason [Mixin.SiblingVars]
+// is a separate declaration from [Mixin.SiblingParams]: a var is not
+// in the callable scope, so resolving one there reports every correct
+// sentinel as missing.
+func varScope(pkg *sdk.Package) resolveScope {
+	if pkg == nil {
+		return emptyScope
+	}
+	return func(name string) string {
+		for _, v := range pkg.Variables {
+			if v != nil && v.Name == name {
+				return v.QName()
 			}
 		}
 		return ""
@@ -256,7 +282,44 @@ func (r *Resolver) resolveOne(
 		}
 		r.resolvePartner(host, bag, hostQName, role, partnerRole, scope, spec, sink)
 	}
+	r.resolveContractVars(host, bag, spec, sink)
 	r.flagUnknownPartnerRoles(host, bag, spec, sink)
+}
+
+// resolveContractVars rewrites every declared [Contract.SiblingVars]
+// value on host from a raw name to the qualified name of the
+// package-level var it names.
+//
+// Separate from the partner loop above because the scope differs: a
+// partner is a callable reached through the host's own scope, and a
+// var is reached through the package — the same for a method host as
+// for a function one, since a sentinel is declared beside the type
+// rather than on it.
+func (r *Resolver) resolveContractVars(
+	host sdk.Node,
+	bag *sdk.Bag,
+	spec Contract,
+	sink *sdk.PluginSink,
+) {
+	if len(spec.SiblingVars) == 0 {
+		return
+	}
+	vars := varScope(r.hostPkg[host])
+	for _, param := range spec.SiblingVars {
+		key := ContractParamKey(spec.Name, param)
+		raw, present := key.Get(bag)
+		if !present || raw == "" || isQualified(raw) {
+			continue
+		}
+		qname := vars(raw)
+		if qname == "" {
+			sink.Errorf(host.Pos(),
+				"shape.contract %q: %s=%q names no package-level var in scope",
+				spec.Name, param, raw)
+			continue
+		}
+		key.Set(bag, qname, ResolverName)
+	}
 }
 
 // resolvePartner resolves a single partner reference for the
@@ -399,6 +462,16 @@ func (r *Resolver) resolveMixins(ctx *sdk.AnnotatorContext, host sdk.Node, bag *
 		}
 		for _, param := range spec.SiblingParams {
 			r.resolveMixinSibling(host, bag, spec.Name, param, scope, sink)
+		}
+		if len(spec.SiblingVars) == 0 {
+			continue
+		}
+		// Vars resolve against the package rather than the callable
+		// scope, for a method host as much as a function one: a
+		// sentinel is declared beside the type, not on it.
+		vars := varScope(r.hostPkg[host])
+		for _, param := range spec.SiblingVars {
+			r.resolveMixinSibling(host, bag, spec.Name, param, vars, sink)
 		}
 	}
 }

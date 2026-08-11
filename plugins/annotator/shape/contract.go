@@ -43,6 +43,19 @@ type Contract struct {
 	// callable.
 	Params []string
 
+	// SiblingVars enumerates KV keys whose VALUES name package-level
+	// vars the refinement resolver rewrites into qualified names —
+	// e.g. `tx closed=ErrTxClosed`.
+	//
+	// Distinct from [Contract.Roles], which name callables, and from
+	// [Contract.Params], which are left verbatim. A sentinel is
+	// neither: it has a definition to resolve against, and resolving
+	// it in the callable scope reports every correct one as missing.
+	//
+	// Vars resolve against the package in every case, including for a
+	// method host: a sentinel is not declared on the receiver.
+	SiblingVars []string
+
 	// Required maps a role to the partner roles that must be
 	// specified when this role's directive appears. The refinement
 	// resolver emits a positioned diagnostic when any required

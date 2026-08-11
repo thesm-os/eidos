@@ -47,6 +47,51 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **Seven more classifications can reach the second method their law calls.**
+  Following the relational-mixin work, another set named a relationship without
+  naming the method on the other side of it — and a law that cannot call the
+  method never exercises the behaviour, so it reports every implementation as
+  correct.
+
+  `leakfree open= close=`, `tamperevident tamper= verify=`, `windowed incr=
+  count=`, `eventually settle= sync=`, `streamreflectsmutations delete=` beside
+  its existing `mutate=`, and a `redeliver` role on `publisher` — without which
+  at-least-once and exactly-once cannot be told apart, since they differ only in
+  what a subscriber sees after a redelivery.
+
+- **A `poisonable` mixin naming what induces a sticky failure.** The
+  `poisonaccessor` shape recognises `func() error` and that is all a signature
+  can say; which operation breaks the subject is a fact about the type.
+  `Detector` carries no params and `+gen:shape` accepts only `key=`/`value=`, so
+  this lands as a mixin on the detected shape — `poisonable induce=Poison` —
+  rather than by giving detectors a parameter mechanism, which would blur the
+  line between what is detected and what is declared.
+
+- **Seven classifications can name the sentinel their law compares against, and
+  the resolver can qualify a package-level var.** Eight laws select on a
+  classification carrying an `error` field, and none could say which error — so
+  the field stayed nil, `errors.Is(err, nil)` is false for everything a correct
+  implementation returns, and the law failed every subject including the right
+  ones. Not a weaker check: no check.
+
+  `cursor sentinel=`, `lease held=`, `transaction notfound=`, `tx closed=`,
+  `cas mismatch=`, `deleteremoves sentinel=` and `lifecycleafterclose sentinel=`
+  each name theirs. The key is named for the law field it binds, so the binding
+  stays a table lookup.
+
+  A sentinel is a package-level var, which neither existing declaration
+  resolves: `Roles` and `Mixin.SiblingParams` search callables, and `Params` are
+  left verbatim. `shape.Contract.SiblingVars` and `shape.Mixin.SiblingVars` are
+  the third kind — resolved against the package, reported when they name
+  nothing, and rewritten to a qualified name. Widening the callable declarations
+  to also accept vars was the alternative and would have cost the property that
+  makes either useful: a key declared as a callable reference would silently
+  accept a var of the same name.
+
+  Vars resolve against the package for a method host as much as a function one,
+  since a sentinel is declared beside the type rather than on it. Absence stays
+  legal, as with every other partner: the bare form is still a classification.
+
 - **Twenty mixins covering the properties a signature cannot reveal.**
   `associative`, `causal`, `commutative`, `conservative`, `defaultonerror`,
   `injectionsafe`, `leakfree`, `monotonicreads`, `monotonicwrites`, `overmatch`,

@@ -103,3 +103,35 @@ func TestContract_DeliveryMode(t *testing.T) {
 		}
 	})
 }
+
+// TestContract_RedeliverRole covers the partner the delivery bound
+// needs.
+//
+// at-least-once and exactly-once differ only in what a subscriber sees
+// after a redelivery, so a suite that never redelivers cannot tell the
+// two modes apart and the bound is unverifiable.
+func TestContract_RedeliverRole(t *testing.T) {
+	t.Parallel()
+
+	pub := &sdk.Function{
+		Name: "Publish", Package: "x",
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
+				contracttest.HostDirective(publisher.Name, "publish", map[string]string{
+					"subscribe":             "Subscribe",
+					publisher.RoleRedeliver: "Republish",
+				}),
+			},
+		},
+	}
+	diags := contracttest.RunPipeline(t, publisher.Contract(), &sdk.Package{
+		Name: "x", Path: "x",
+		Functions: []*sdk.Function{
+			pub,
+			{Name: "Subscribe", Package: "x"},
+			{Name: "Republish", Package: "x"},
+		},
+	})
+	contracttest.AssertNoErrorDiag(t, diags)
+	contracttest.AssertPartner(t, pub.Meta(), publisher.Name, publisher.RoleRedeliver, "x.Republish")
+}

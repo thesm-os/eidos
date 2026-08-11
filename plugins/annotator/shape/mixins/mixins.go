@@ -77,6 +77,7 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/overmatch"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/partition"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/permutation"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/poisonable"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/pure"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/readafterwrite"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/retrysucceeds"
@@ -116,6 +117,7 @@ func All() []shape.Mixin {
 		monotonicwrites.Mixin(),
 		overmatch.Mixin(),
 		permutation.Mixin(),
+		poisonable.Mixin(),
 		snapshotisolation.Mixin(),
 		stableorder.Mixin(),
 		sticky.Mixin(),

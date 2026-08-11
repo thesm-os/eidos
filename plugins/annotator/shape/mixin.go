@@ -48,6 +48,21 @@ type Mixin struct {
 	// Leave empty when every param is an opaque literal.
 	SiblingParams []string
 
+	// SiblingVars enumerates param keys whose VALUES name
+	// package-level vars the refinement resolver should rewrite into
+	// qualified names — e.g. `deleteremoves sentinel=ErrNotFound`
+	// resolves `ErrNotFound` against the host's package and rewrites
+	// the stamp to its qname.
+	//
+	// Distinct from [Mixin.SiblingParams], which searches callables.
+	// A sentinel is a var, so the callable scope reports every correct
+	// one as not found; keeping the two declarations apart is what
+	// lets the resolver say which it expected.
+	//
+	// Vars resolve against the package in every case, including for a
+	// method host: a sentinel is not declared on the receiver.
+	SiblingVars []string
+
 	// Validate, when non-nil, runs in the validation-bucket
 	// annotator pass after sibling resolution completes. Receives
 	// every callable the mixin is attached to (across the store)
