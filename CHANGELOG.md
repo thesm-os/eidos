@@ -47,6 +47,25 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **Twenty mixins covering the properties a signature cannot reveal.**
+  `associative`, `causal`, `commutative`, `conservative`, `defaultonerror`,
+  `injectionsafe`, `leakfree`, `monotonicreads`, `monotonicwrites`, `overmatch`,
+  `permutation`, `snapshotisolation`, `stableorder`, `sticky`, `tamperevident`,
+  `timeaware`, `total`, `windowed`, `writesfollowreads` and `xsssafe`.
+
+  Each sits on a structure eidos already detects — an `aggregator`, a
+  `streamreader`, a `reader`, a `lifecycle` — and states the promise that
+  structure cannot. A `(T, T) T` signature makes associativity askable, never
+  true, so these are declared rather than inferred.
+
+  Three carry a param: `conservative field=`, `sticky key=` and `total domain=`.
+
+- **`publisher` gains a `mode` param** naming the delivery guarantee —
+  `at-least-once`, `at-most-once` or `exactly-once`. Absent means unstated
+  rather than defaulted, because the three imply different assertions and
+  choosing one for a publisher that did not say produces a check that fails on
+  correct code.
+
 - **Two contracts for pairs the vocabulary could not express: `codec` and
   `chain`.** Both are shapes eidos already detects structurally — a `pure` or
   `mutator` encoding, a `writer` plus a `streamreader` — with no way to say which

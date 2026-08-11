@@ -48,34 +48,54 @@ import (
 	"slices"
 
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/associative"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/atomic"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/bounded"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/cacheable"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/causal"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/commutative"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/concurrent"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/concurrentreaders"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/conservative"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/crdtmerge"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/defaultonerror"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/deleteremoves"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/deprecated"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/errors"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/eventually"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/hooks"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/idempotent"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/injectionsafe"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/integrationonly"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/leakfree"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/lifecycleafterclose"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonic"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonicreads"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonicwrites"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/nilsafe"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/orderafter"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/overmatch"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/partition"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/permutation"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/pure"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/readafterwrite"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/retrysucceeds"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sample"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scope"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sideeffect"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/snapshotisolation"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/stableorder"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sticky"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/streamreflectsmutations"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/tamperevident"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/timeaware"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/timeout"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/total"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/validates"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/windowed"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/wrappedvia"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/writesfollowreads"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/xsssafe"
 )
 
 // All returns every [shape.Mixin] shipped in this repository,
@@ -85,6 +105,26 @@ import (
 func All() []shape.Mixin {
 	out := []shape.Mixin{
 		atomic.Mixin(),
+		associative.Mixin(),
+		causal.Mixin(),
+		commutative.Mixin(),
+		conservative.Mixin(),
+		defaultonerror.Mixin(),
+		injectionsafe.Mixin(),
+		leakfree.Mixin(),
+		monotonicreads.Mixin(),
+		monotonicwrites.Mixin(),
+		overmatch.Mixin(),
+		permutation.Mixin(),
+		snapshotisolation.Mixin(),
+		stableorder.Mixin(),
+		sticky.Mixin(),
+		tamperevident.Mixin(),
+		timeaware.Mixin(),
+		total.Mixin(),
+		windowed.Mixin(),
+		writesfollowreads.Mixin(),
+		xsssafe.Mixin(),
 		bounded.Mixin(),
 		cacheable.Mixin(),
 		concurrent.Mixin(),
