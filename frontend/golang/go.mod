@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	go.thesmos.sh/eidos v1.14.0
-	go.thesmos.sh/eidos/eidostest v1.13.2
+	go.thesmos.sh/eidos/eidostest v1.14.0
 	golang.org/x/tools v0.48.0
 )
 
