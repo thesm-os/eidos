@@ -134,3 +134,121 @@ func TestMixin_AxisValidation(t *testing.T) {
 		}
 	})
 }
+
+// ifacePair builds the corpus shape: a writer and a reader declared on
+// one interface, so the validator can reach the partner through the
+// host's Owner.
+func ifacePair(t *testing.T, axis string, readParams []string) []sdk.Diag {
+	t.Helper()
+	params := func(names ...string) []*sdk.Param {
+		out := make([]*sdk.Param, 0, len(names))
+		for _, n := range names {
+			out = append(out, &sdk.Param{Name: n, Type: &sdk.TypeRef{Name: "string"}})
+		}
+		return out
+	}
+	put := &sdk.Method{
+		Name: "Put", Params: params("partition", "key", "value"),
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
+				mixintest.HostDirective(partition.Name, map[string]string{
+					partition.ParamRead: "Read",
+					partition.ParamAxis: axis,
+				}),
+			},
+		},
+	}
+	read := &sdk.Method{Name: "Read", Params: params(readParams...)}
+	store := &sdk.Interface{Name: "Store", Package: "x", Methods: []*sdk.Method{put, read}}
+	put.Owner, read.Owner = store, store
+
+	return mixintest.RunWithValidator(t, partition.Mixin(), &sdk.Package{
+		Name: "x", Path: "x", Interfaces: []*sdk.Interface{store},
+	})
+}
+
+// TestMixin_AxisCorrespondence covers the half that makes the axis
+// usable rather than merely present.
+//
+// A check writes through the host and reads through the partner, so it
+// carries one partition value across both calls. The axis names a
+// parameter of the host only, so a generator matching the two by name
+// is guessing — unless the pair is checked, which is what this does.
+func TestMixin_AxisCorrespondence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an axis both halves declare raises nothing", func(t *testing.T) {
+		t.Parallel()
+		got := ifacePair(t, "partition", []string{"partition", "key"})
+		if len(got) != 0 {
+			t.Fatalf("diagnostics = %+v, want none", got)
+		}
+	})
+
+	t.Run("an axis the reader does not declare is reported", func(t *testing.T) {
+		t.Parallel()
+		// Read(ctx, tenant, key) cannot be handed the host's partition
+		// by name, so the pair does not compose and a generator has
+		// nothing sound to emit.
+		got := ifacePair(t, "partition", []string{"tenant", "key"})
+		if len(got) != 1 {
+			t.Fatalf("diagnostics = %+v, want one", got)
+		}
+		if !strings.Contains(got[0].Message, "Read") {
+			t.Errorf("message = %q, want it to name the read partner", got[0].Message)
+		}
+	})
+
+	t.Run("a host-side miss is reported once, not twice", func(t *testing.T) {
+		t.Parallel()
+		// The pair check is unreachable when the axis is not on the
+		// host at all; reporting both would name the reader for a
+		// mistake made on the writer.
+		got := ifacePair(t, "shard", []string{"partition", "key"})
+		if len(got) != 1 {
+			t.Fatalf("diagnostics = %+v, want one", got)
+		}
+		if !strings.Contains(got[0].Message, "annotated callable") {
+			t.Errorf("message = %q, want the host-side diagnostic", got[0].Message)
+		}
+	})
+}
+
+// TestMixin_UnresolvableRead pins the no-double-report rule.
+//
+// A read naming nothing in scope is already the resolver's
+// diagnostic, and the stamp stays a bare name — so the partner cannot
+// be reached and the axis cannot be checked against it. Adding a
+// second violation there would report the same mistake twice and
+// blame the axis for the read's error.
+func TestMixin_UnresolvableRead(t *testing.T) {
+	t.Parallel()
+
+	put := &sdk.Method{
+		Name: "Put",
+		Params: []*sdk.Param{
+			{Name: "partition", Type: &sdk.TypeRef{Name: "string"}},
+			{Name: "key", Type: &sdk.TypeRef{Name: "string"}},
+		},
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
+				mixintest.HostDirective(partition.Name, map[string]string{
+					partition.ParamRead: "Absent",
+					partition.ParamAxis: "partition",
+				}),
+			},
+		},
+	}
+	store := &sdk.Interface{Name: "Store", Package: "x", Methods: []*sdk.Method{put}}
+	put.Owner = store
+
+	got := mixintest.RunWithValidator(t, partition.Mixin(), &sdk.Package{
+		Name: "x", Path: "x", Interfaces: []*sdk.Interface{store},
+	})
+	if len(got) != 1 {
+		t.Fatalf("diagnostics = %+v, want only the resolver's", got)
+	}
+	if !strings.Contains(got[0].Message, "not found in scope") {
+		t.Errorf("message = %q, want the resolver's sibling diagnostic", got[0].Message)
+	}
+}

@@ -18,11 +18,23 @@
 // check that cannot fail is worse than none, and the axis is what
 // separates the two writes onto one key.
 //
+// The axis has to name a parameter on both halves, because a check
+// writes through the annotated callable and reads through the partner
+// while carrying one partition value across both calls. The validator
+// requires the partner to spell it identically, which is what lets a
+// generator match the two by name rather than guess — the invariant is
+// checked here so it need not be assumed there.
+//
+// With the pair pinned, the rest follows from the signatures: a
+// parameter the reader also takes is identity and is held fixed, and
+// one only the writer takes is payload and is varied. Both writes must
+// differ in payload or the read cannot tell them apart.
+//
 // Both params are optional: the bare form still classifies the
 // callable, and a consumer wanting only the classification writes it.
 // A read naming nothing in scope is reported by the resolver; an axis
-// naming no parameter of the callable is reported by this mixin's
-// validator.
+// naming no parameter of the callable, or none of its partner, is
+// reported by this mixin's validator.
 //
 // The recognised directive is:
 //

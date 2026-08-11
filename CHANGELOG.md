@@ -27,9 +27,22 @@ omitted unless they change what a caller can rely on.
   held fixed. It is deliberately not a sibling param: a parameter has no
   qualified name, so asking the resolver to look one up in scope reports every
   correct axis as not found. It is validated instead — `partition.Mixin()` now
-  carries a `Validate` hook reporting an axis that names no parameter of the
-  annotated callable, which is the first use of a `shape.Mixin` field that had
+  carries a `Validate` hook, the first use of a `shape.Mixin` field that had
   never been set.
+
+  The hook checks both halves. An axis naming no parameter of the annotated
+  callable is reported, and so is one the `read=` partner does not also declare:
+  a check carries one partition value across a write and a read, so the pair has
+  to spell it identically. Requiring that turns host-to-partner name matching
+  from a generator's guess into a checked invariant — and with the pair pinned,
+  hold-versus-vary follows from the signatures, since a parameter the reader
+  also takes is identity and one only the writer takes is payload.
+
+  The partner check reaches the sibling list through the host's owner, so it
+  applies to methods. A free function records a package path rather than a node,
+  so its pair goes unchecked rather than falsely reported, and a `read=` that
+  named nothing in scope is left to the resolver's own diagnostic rather than
+  reported twice.
 
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
