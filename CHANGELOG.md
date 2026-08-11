@@ -13,6 +13,40 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+## plugins/v1.14.0 — 2026-08-11
+
+### Added
+
+- **A relational shape mixin can name its second callable.** Eight of the eleven
+  mixins whose assertion spans two callables had no way to say which second
+  callable they mean, so a generator could act on three of them. Stamping is
+  permissive, so `sideeffect observe=Observed` reached the meta key — but only a
+  declared sibling param makes the resolver rewrite a bare name into a qualified
+  one, and without that a consumer holds `"Observed"` with no package and no
+  owner.
+
+  `sideeffect`, `partition`, `hooks`, `sample`, `deleteremoves`,
+  `streamreflectsmutations` and `lifecycleafterclose` each gain an exported
+  param constant with `Params` and `SiblingParams` composed from it —
+  `ParamObserve`, `ParamRead`, `ParamRegister`, `ParamBuilder`, `ParamMutate`,
+  `ParamClose`. The key names the partner's role, and mixins wanting the same
+  role share one: `partition` and `deleteremoves` both take `read`.
+
+  The partner is optional. The bare form still classifies the callable, and a
+  consumer wanting only the classification writes it. A partner that names
+  nothing in scope was already reported by the resolver against the host's
+  position; declaring the param is what turns that diagnostic on.
+
+### Fixed
+
+- **`readafterwrite` participates in the sibling resolution its documentation
+  describes.** It exported `ParamWrite` and composed `Params` from it while
+  omitting `SiblingParams`, so `write=Save` stamped as a bare name and the
+  rewrite never ran — against a package that names it as the worked example of
+  that field in three places, including a `Validate` invariant ("every
+  readafterwrite's write partner resolves to a known callable") that could not
+  hold.
+
 ## v1.14.0 — 2026-08-11
 
 ### Added
