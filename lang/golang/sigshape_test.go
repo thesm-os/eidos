@@ -564,3 +564,37 @@ func TestShapesRejectAVariadicParameter(t *testing.T) {
 		}
 	})
 }
+
+// TestSignatureMatches_ReturnMismatch pins the return half of the
+// comparison, including the slot that does not exist.
+//
+// A classifier asking for more returns than a method declares must
+// read the absence as a mismatch. Reading it as a match would accept
+// every nullary method as the shape it is looking for.
+func TestSignatureMatches_ReturnMismatch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a method returning nothing does not match one return", func(t *testing.T) {
+		t.Parallel()
+		m := &node.Method{Name: "Close"}
+		if golang.SignatureMatches(m, nil, []string{"error"}) {
+			t.Error("a method with no returns matched a one-return shape")
+		}
+	})
+
+	t.Run("a method returning the wrong type does not match", func(t *testing.T) {
+		t.Parallel()
+		m := &node.Method{Name: "Len", Returns: []*node.Return{ret(builtinRef("int"))}}
+		if golang.SignatureMatches(m, nil, []string{"error"}) {
+			t.Error("an int return matched an error shape")
+		}
+	})
+
+	t.Run("a method returning the declared type matches", func(t *testing.T) {
+		t.Parallel()
+		m := &node.Method{Name: "Len", Returns: []*node.Return{ret(builtinRef("int"))}}
+		if !golang.SignatureMatches(m, nil, []string{"int"}) {
+			t.Error("an int return did not match an int shape")
+		}
+	})
+}

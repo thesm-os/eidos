@@ -659,3 +659,26 @@ func TestSentinelSubject(t *testing.T) {
 		}
 	})
 }
+
+// TestHasTagOption_Absent pins the miss. A tag that is present but
+// carries a different option must read as absent, or a generator emits
+// the behaviour the author spelled off.
+func TestHasTagOption_Absent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an option the tag does not carry reads false", func(t *testing.T) {
+		t.Parallel()
+		f := &node.Field{Name: "ID", Type: builtinRef("string"), Tag: `json:"id,omitempty"`}
+		if golang.HasTagOption(f, "json", "string") {
+			t.Error("an option absent from the tag reported present")
+		}
+	})
+
+	t.Run("an option the tag does carry still reads true", func(t *testing.T) {
+		t.Parallel()
+		f := &node.Field{Name: "ID", Type: builtinRef("string"), Tag: `json:"id,omitempty"`}
+		if !golang.HasTagOption(f, "json", "omitempty") {
+			t.Error("an option present in the tag reported absent")
+		}
+	})
+}

@@ -763,3 +763,36 @@ func TestForeignVariants(t *testing.T) {
 		}
 	})
 }
+
+// TestEnumFloatValues_Refusals pins the all-or-nothing contract. A
+// bound derived from part of a set is a bound over the variants that
+// happened to parse, which is worse than no bound at all.
+func TestEnumFloatValues_Refusals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a nil enum yields nothing", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.EnumFloatValues(nil); ok {
+			t.Error("a nil enum reported float values")
+		}
+	})
+
+	t.Run("an enum with no variants yields nothing", func(t *testing.T) {
+		t.Parallel()
+		e := &node.Enum{Name: "Ratio", Package: "x", Underlying: builtinRef("float64")}
+		if _, ok := golang.EnumFloatValues(e); ok {
+			t.Error("an empty set reported float values")
+		}
+	})
+
+	t.Run("a nil variant refuses the whole set", func(t *testing.T) {
+		t.Parallel()
+		e := &node.Enum{
+			Name: "Ratio", Package: "x", Underlying: builtinRef("float64"),
+			Variants: []*node.EnumVariant{{Name: "Half", Value: "0.5"}, nil},
+		}
+		if _, ok := golang.EnumFloatValues(e); ok {
+			t.Error("a set carrying a nil variant reported float values")
+		}
+	})
+}

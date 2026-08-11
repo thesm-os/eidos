@@ -276,3 +276,39 @@ func TestImportAliasSanitising(t *testing.T) {
 		}
 	})
 }
+
+// TestIdentSanitisationInvariants pins what [ImportAlias] and
+// [PackageClauseFor] rely on instead of re-guarding.
+//
+// Both delegate to naming.Identifier, which answers "_" for empty
+// input and prefixes a leading digit. Each carried a guard for the
+// case it cannot receive; these are the assertions that keep that
+// true, since a change upstream would otherwise surface as generated
+// source that does not compile.
+func TestIdentSanitisationInvariants(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a path with no usable segment aliases to an underscore", func(t *testing.T) {
+		t.Parallel()
+		for _, path := range []string{"", "/"} {
+			if got := golang.ImportAlias(path); got == "" {
+				t.Errorf("ImportAlias(%q) = %q, want a usable identifier", path, got)
+			}
+		}
+	})
+
+	t.Run("a digit-leading segment opens with an underscore", func(t *testing.T) {
+		t.Parallel()
+		got := golang.PackageClauseFor("example.com/2fa")
+		if got != "_2fa" {
+			t.Errorf("PackageClauseFor = %q, want _2fa", got)
+		}
+	})
+
+	t.Run("a segment that is not an identifier is made into one", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.PackageClauseFor("example.com/go-cmp"); got != "go_cmp" {
+			t.Errorf("PackageClauseFor = %q, want go_cmp", got)
+		}
+	})
+}

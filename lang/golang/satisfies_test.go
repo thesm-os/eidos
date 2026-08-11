@@ -551,3 +551,39 @@ func TestComparableDeepReportsWhatItCouldNotReach(t *testing.T) {
 		}
 	})
 }
+
+// TestComparableDeep_InterfacesAndCycles covers the two arms that
+// answer true without walking further.
+func TestComparableDeep_InterfacesAndCycles(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an anonymous interface is comparable", func(t *testing.T) {
+		t.Parallel()
+		// Reported comparable because the code compiles: refusing would
+		// rule out every interface-keyed map Go admits, and whether the
+		// dynamic type compares is not knowable here.
+		iface := &node.TypeRef{TypeKind: node.TypeRefAnonInterface}
+		got, problems := golang.ComparableDeep(iface, mapResolver{})
+		if len(problems) != 0 || !got {
+			t.Errorf("ComparableDeep(interface{}) = %v, %v; want true with no problems",
+				got, problems)
+		}
+	})
+
+	t.Run("a self-referential type terminates and reports comparable", func(t *testing.T) {
+		t.Parallel()
+		// The cycle guard: revisiting a type already on the walk answers
+		// true rather than recursing, so a linked structure does not
+		// exhaust the budget on its way to the same answer.
+		self := &node.Struct{Name: "Node", Package: "x"}
+		self.Fields = []*node.Field{field("Next", namedTypeRef("x", "Node"))}
+		got, problems := golang.ComparableDeep(namedTypeRef("x", "Node"),
+			mapResolver{"x.Node": self})
+		if len(problems) != 0 {
+			t.Fatalf("ComparableDeep problems = %v", problems)
+		}
+		if !got {
+			t.Error("a self-referential struct of comparable fields reported not comparable")
+		}
+	})
+}

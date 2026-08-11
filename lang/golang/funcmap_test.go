@@ -291,3 +291,239 @@ func TestAreaBundles(t *testing.T) {
 		}
 	})
 }
+
+// TestTemplateWalkAdapters covers the three siblings of
+// [golang.TemplateFieldSet]. Each drops the problem slice for an
+// error, which is what makes an incomplete walk abort the render
+// instead of emitting an answer smaller than the truth.
+func TestTemplateWalkAdapters(t *testing.T) {
+	t.Parallel()
+
+	base := &node.Struct{
+		Name: "Base", Package: "x",
+		Fields:  []*node.Field{field("ID", builtinRef("string")), field("created", builtinRef("int"))},
+		Methods: []*node.Method{{Name: "Read"}},
+	}
+	resolved := mapResolver{"x.Base": base}
+
+	reachable := func() *node.Struct {
+		return &node.Struct{
+			Name: "User", Package: "x",
+			Fields: []*node.Field{field("Name", builtinRef("string"))},
+			Embeds: []*node.Embed{embed("x", "Base", false)},
+		}
+	}
+	unreachable := func() *node.Struct {
+		return &node.Struct{
+			Name: "User", Package: "x",
+			Embeds: []*node.Embed{{Type: namedTypeRef("io", "Reader")}},
+		}
+	}
+
+	t.Run("PromotedFields reports an unreachable embed", func(t *testing.T) {
+		t.Parallel()
+		_, err := golang.TemplatePromotedFields(unreachable(), mapResolver{})
+		if !errors.Is(err, golang.ErrIncompleteWalk) {
+			t.Fatalf("err = %v, want ErrIncompleteWalk", err)
+		}
+	})
+
+	t.Run("PromotedFields returns the promoted set when the walk completes", func(t *testing.T) {
+		t.Parallel()
+		got, err := golang.TemplatePromotedFields(reachable(), resolved)
+		if err != nil {
+			t.Fatalf("TemplatePromotedFields: %v", err)
+		}
+		if len(got) == 0 {
+			t.Error("a reachable embed promoted nothing")
+		}
+	})
+
+	t.Run("ExportedFieldSet reports an unreachable embed", func(t *testing.T) {
+		t.Parallel()
+		_, err := golang.TemplateExportedFieldSet(unreachable(), mapResolver{})
+		if !errors.Is(err, golang.ErrIncompleteWalk) {
+			t.Fatalf("err = %v, want ErrIncompleteWalk", err)
+		}
+	})
+
+	t.Run("ExportedFieldSet drops the unexported field", func(t *testing.T) {
+		t.Parallel()
+		// The distinction from FieldSet, and the reason a template has
+		// both: an unexported promoted field is not addressable from
+		// the generated package.
+		got, err := golang.TemplateExportedFieldSet(reachable(), resolved)
+		if err != nil {
+			t.Fatalf("TemplateExportedFieldSet: %v", err)
+		}
+		for _, name := range names(got) {
+			if name == "created" {
+				t.Error("the unexported field survived the exported set")
+			}
+		}
+	})
+
+	t.Run("PromotedMethods reports an unreachable embed", func(t *testing.T) {
+		t.Parallel()
+		_, err := golang.TemplatePromotedMethods(unreachable(), mapResolver{})
+		if !errors.Is(err, golang.ErrIncompleteWalk) {
+			t.Fatalf("err = %v, want ErrIncompleteWalk", err)
+		}
+	})
+
+	t.Run("PromotedMethods returns the embedded method when the walk completes", func(t *testing.T) {
+		t.Parallel()
+		got, err := golang.TemplatePromotedMethods(reachable(), resolved)
+		if err != nil {
+			t.Fatalf("TemplatePromotedMethods: %v", err)
+		}
+		if len(got) == 0 {
+			t.Error("a reachable embed promoted no method")
+		}
+	})
+}
+
+// TestTemplateComparableDeep pins the one walk whose refusal is not
+// about embeds. An unreachable type is not evidence of comparability,
+// so the adapter reports false with an error rather than a verdict.
+func TestTemplateComparableDeep(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a builtin answers without an error", func(t *testing.T) {
+		t.Parallel()
+		got, err := golang.TemplateComparableDeep(builtinRef("string"), mapResolver{})
+		if err != nil || !got {
+			t.Fatalf("TemplateComparableDeep(string) = %v, %v, want true, nil", got, err)
+		}
+	})
+
+	t.Run("a slice is not comparable and that is not an error", func(t *testing.T) {
+		t.Parallel()
+		got, err := golang.TemplateComparableDeep(sliceRef(builtinRef("string")), mapResolver{})
+		if err != nil || got {
+			t.Fatalf("TemplateComparableDeep([]string) = %v, %v, want false, nil", got, err)
+		}
+	})
+
+	t.Run("an unreachable type reports rather than answering", func(t *testing.T) {
+		t.Parallel()
+		// False-with-an-error, not false: a template keying a map on a
+		// bare false would emit one the consumer cannot compile.
+		got, err := golang.TemplateComparableDeep(namedTypeRef("io", "Reader"), mapResolver{})
+		if !errors.Is(err, golang.ErrIncompleteWalk) {
+			t.Fatalf("err = %v, want ErrIncompleteWalk", err)
+		}
+		if got {
+			t.Error("an unreachable type was reported comparable")
+		}
+	})
+}
+
+// TestTemplateValueAdapters covers the adapters that drop a bool for
+// an empty string. Each absence is an ordinary answer a template
+// branches on with `{{ if }}`, not a failure.
+func TestTemplateValueAdapters(t *testing.T) {
+	t.Parallel()
+
+	t.Run("SentinelSubject strips the prefix a sentinel carries", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.TemplateSentinelSubject("ErrNotFound"); got != "NotFound" {
+			t.Errorf("TemplateSentinelSubject = %q, want NotFound", got)
+		}
+	})
+
+	t.Run("SentinelSubject returns an unprefixed name whole", func(t *testing.T) {
+		t.Parallel()
+		// The dropped flag carries no failure: a name with no prefix is
+		// already the subject a template wants to interpolate.
+		if got := golang.TemplateSentinelSubject("NotFound"); got != "NotFound" {
+			t.Errorf("TemplateSentinelSubject = %q, want NotFound", got)
+		}
+	})
+
+	t.Run("OutOfRangeText yields a marker outside the declared set", func(t *testing.T) {
+		t.Parallel()
+		e := stringEnum([2]string{"EU", "eu"}, [2]string{"US", "us"})
+		got := golang.TemplateOutOfRangeText(e)
+		if got == "" {
+			t.Fatal("a set without the marker derived no out-of-range text")
+		}
+		for _, text := range golang.EnumTexts(e) {
+			if text == got {
+				t.Errorf("out-of-range text %q is in the declared set", got)
+			}
+		}
+	})
+
+	t.Run("OutOfRangeText withholds when the set carries the marker", func(t *testing.T) {
+		t.Parallel()
+		// The one case a probe would assert the opposite of what it
+		// means, so the adapter yields the empty string a template skips.
+		marker := golang.TemplateOutOfRangeText(stringEnum([2]string{"EU", "eu"}))
+		e := stringEnum([2]string{"EU", "eu"}, [2]string{"Unknown", marker})
+		if got := golang.TemplateOutOfRangeText(e); got != "" {
+			t.Errorf("TemplateOutOfRangeText = %q, want empty", got)
+		}
+	})
+
+	t.Run("EmbedIdent names the field an embed contributes", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.TemplateEmbedIdent(embed("x", "Base", false)); got != "Base" {
+			t.Errorf("TemplateEmbedIdent = %q, want Base", got)
+		}
+	})
+
+	t.Run("EmbedIdent names it identically through a pointer", func(t *testing.T) {
+		t.Parallel()
+		// The dropped half: a template asking for the name is spelling a
+		// selector, and a pointer embed spells the same one.
+		if got := golang.TemplateEmbedIdent(embed("x", "Base", true)); got != "Base" {
+			t.Errorf("TemplateEmbedIdent = %q, want Base", got)
+		}
+	})
+
+	t.Run("DuplicateText names a text two variants share", func(t *testing.T) {
+		t.Parallel()
+		e := stringEnum([2]string{"EU", "eu"}, [2]string{"Europe", "eu"})
+		if got := golang.TemplateDuplicateText(e); got != "eu" {
+			t.Errorf("TemplateDuplicateText = %q, want eu", got)
+		}
+	})
+
+	t.Run("DuplicateText is empty for a set with no collision", func(t *testing.T) {
+		t.Parallel()
+		e := stringEnum([2]string{"EU", "eu"}, [2]string{"US", "us"})
+		if got := golang.TemplateDuplicateText(e); got != "" {
+			t.Errorf("TemplateDuplicateText = %q, want empty", got)
+		}
+	})
+}
+
+// TestTemplateEnumAdapters covers the halves of the enum adapters the
+// existing absence test does not reach: the variant that exists, and
+// the set with no value past it.
+func TestTemplateEnumAdapters(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ZeroVariant returns the variant whose value is the zero", func(t *testing.T) {
+		t.Parallel()
+		e := numericEnum("0", "1")
+		got := golang.TemplateZeroVariant(e)
+		if got == nil {
+			t.Fatal("a set declaring a zero variant returned nil")
+		}
+		if got.Value != "0" {
+			t.Errorf("TemplateZeroVariant = %q, want the variant valued 0", got.Value)
+		}
+	})
+
+	t.Run("OutOfRange is empty for a set with no numeric bound", func(t *testing.T) {
+		t.Parallel()
+		// A string-valued set has no value "past" it, and a generator's
+		// correct response is to omit the probe rather than abort.
+		e := stringEnum([2]string{"EU", "eu"}, [2]string{"US", "us"})
+		if got := golang.TemplateOutOfRange(e); got != "" {
+			t.Errorf("TemplateOutOfRange = %q, want empty", got)
+		}
+	})
+}

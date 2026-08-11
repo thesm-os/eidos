@@ -716,3 +716,19 @@ func TestSequenceOf(t *testing.T) {
 		}
 	})
 }
+
+// TestNilable_Channel pins the channel arm. A channel's zero is nil,
+// so a generated guard comparing one against its zero must be spelled
+// as a nil check rather than as an equality against a literal.
+func TestNilable_Channel(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a channel is nilable", func(t *testing.T) {
+		t.Parallel()
+		r := namedTypeRef("", "chan int")
+		golang.MetaIsChannel.Set(r.EnsureMeta(), true, "test")
+		if !golang.Nilable(r) {
+			t.Error("a channel reported as not nilable")
+		}
+	})
+}

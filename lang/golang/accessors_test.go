@@ -554,3 +554,25 @@ func TestRefIsEmptyInterface(t *testing.T) {
 		}
 	})
 }
+
+// TestRefIsEmptyInterface_OtherKinds pins the arm every non-interface
+// kind falls to. `any` is the widest type there is, so a helper that
+// answered true for a kind it does not model would let a generator
+// treat a concrete type as accepting anything.
+func TestRefIsEmptyInterface_OtherKinds(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a builtin is not an empty interface", func(t *testing.T) {
+		t.Parallel()
+		if golang.RefIsEmptyInterface(builtinRef("int")) {
+			t.Error("int reported as an empty interface")
+		}
+	})
+
+	t.Run("a slice is not an empty interface", func(t *testing.T) {
+		t.Parallel()
+		if golang.RefIsEmptyInterface(sliceRef(builtinRef("string"))) {
+			t.Error("[]string reported as an empty interface")
+		}
+	})
+}

@@ -203,3 +203,71 @@ func TestSampleRefFor_SliceAndMap(t *testing.T) {
 		}
 	})
 }
+
+// TestZeroRefFor_Refusals covers every path on which a zero cannot be
+// derived. Each returns false rather than an empty Sample a caller
+// might render: a comparison against an undefined zero passes whatever
+// the subject does, which is the assertion that never fails.
+func TestZeroRefFor_Refusals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a nil type derives nothing", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.ZeroRefFor(nil, mapResolver{}); ok {
+			t.Error("a nil type reported a zero")
+		}
+	})
+
+	t.Run("a named type the resolver cannot reach derives nothing", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.ZeroRefFor(namedTypeRef("x", "Absent"), mapResolver{}); ok {
+			t.Error("an unresolvable type reported a zero")
+		}
+	})
+
+	t.Run("an alias with no target derives nothing", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{"x.A": &node.Alias{Name: "A", Package: "x"}}
+		if _, ok := golang.ZeroRefFor(namedTypeRef("x", "A"), r); ok {
+			t.Error("an alias with no target reported a zero")
+		}
+	})
+
+	t.Run("an alias over a type needing its own ref derives nothing", func(t *testing.T) {
+		t.Parallel()
+		// The inner zero is `x.S{}`, which already carries a ref. Wrapping
+		// it in the alias's ref would spell one type and import another.
+		r := mapResolver{
+			"x.A": &node.Alias{Name: "A", Package: "x", Target: namedTypeRef("x", "S")},
+			"x.S": &node.Struct{Name: "S", Package: "x"},
+		}
+		if _, ok := golang.ZeroRefFor(namedTypeRef("x", "A"), r); ok {
+			t.Error("an alias over a struct reported a bare zero")
+		}
+	})
+
+	t.Run("a declaration that is neither alias nor struct derives nothing", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{"x.E": &node.Enum{Name: "E", Package: "x"}}
+		if _, ok := golang.ZeroRefFor(namedTypeRef("x", "E"), r); ok {
+			t.Error("an enum reported a zero through the named path")
+		}
+	})
+}
+
+// TestSampleRefFor_UnsampleableDeclaration pins the arm for a named
+// type that resolves to a declaration with no sample form. An enum
+// resolves through the same registry as a struct and has no composite
+// literal, so it must derive nothing rather than an empty one.
+func TestSampleRefFor_UnsampleableDeclaration(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a declaration that is neither alias nor struct derives nothing", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{"x.E": &node.Enum{Name: "E", Package: "x"}}
+		s, a := golang.SampleRefFor(namedTypeRef("x", "E"), "f", r)
+		if s.OK() || a.OK() {
+			t.Errorf("derived %q / %q for an enum", s.Text, a.Text)
+		}
+	})
+}

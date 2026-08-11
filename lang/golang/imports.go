@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 // Import-path rules: what a path means, and what a generator may
@@ -106,11 +105,11 @@ func IsExternalTestPackage(pkg string) bool {
 // need not be one: `go-cmp` and `yaml.v3` are legal segments and
 // neither is a legal Go identifier.
 func ImportAlias(importPath string, taken ...string) string {
-	base := SafeIdent(PackageName(importPath))
-	if base == "" {
-		base = "pkg"
-	}
-	return UniqueIdent(base, taken...)
+	// No empty-base guard: [SafeIdent] sanitises through
+	// [naming.Identifier], which answers "_" for empty input, so a path
+	// with no usable segment aliases to an underscore rather than to
+	// nothing.
+	return UniqueIdent(SafeIdent(PackageName(importPath)), taken...)
 }
 
 // TrimVersionSuffix removes a module path's major-version suffix.
@@ -142,12 +141,8 @@ func PackageClauseFor(importPath string) string {
 	if name == "" {
 		return ""
 	}
-	safe := SafeIdent(name)
-	// A leading digit survives identifier sanitisation — `1x` is not
-	// a keyword and its runes are all legal — but cannot open an
-	// identifier. Prefixing is the one adjustment that always works.
-	if r, _ := utf8.DecodeRuneInString(safe); unicode.IsDigit(r) {
-		return "p" + safe
-	}
-	return safe
+	// No leading-digit guard: [naming.Identifier] prefixes one with an
+	// underscore, so `2fa` arrives as `_2fa` and there is nothing left
+	// to adjust.
+	return SafeIdent(name)
 }
