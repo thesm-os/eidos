@@ -13,6 +13,90 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+## v1.14.0 — 2026-08-11
+
+### Added
+
+- **`node.Embed` carries the method set of an interface the run did not
+  load.** An interface embedding `io.Closer` or `fmt.Stringer` could not be
+  generated for at all: the method-set walk resolves an embed only through a
+  loaded declaration, so it reported `ReasonUnresolved` and every correct
+  consumer emitted nothing, because a projection missing a method describes a
+  type that does not satisfy what it claims to. The frontend already
+  type-checked the embed and discarded the result. `Embed.Resolved` is that
+  projection, as an `*Interface` rather than a method slice so its methods have
+  a real declaring owner — `PkgPathOf` walks up to it, and a loaded embed's
+  methods are owned by the interface that declares them, so anything else would
+  make the same source produce different origins depending on what the run
+  loaded.
+
+  A loaded declaration always wins: `MethodSet` consults its resolver first and
+  reads the projection only on a miss. `ReasonUnresolved` still fires for an
+  embed with neither. The projection is not indexed, so `Interfaces()` returns
+  what the patterns asked for.
+
+  `MethodSet` called with a nil resolver now completes an embed carrying a
+  projection, where before a nil resolver meant every embed was unresolved. An
+  embed holding its own method set needs nothing looked up.
+
+- **`lang/golang.Sample` reports why it derived nothing.** Twelve refusal sites
+  answered with the same empty `Sample`, and only one of them was a fact about
+  the type. Passing a nil `Resolver` is legal, so every named-type field derived
+  nothing and a generator emitted a test asserting nothing about them —
+  compiling, passing, and indistinguishable from a builtin that genuinely has no
+  literal. `Sample.Refusal` carries a `SampleRefusal`, and
+  `SampleRefusal.Incomplete` separates an input a caller could fix from a
+  settled fact. Composites report their element's reason rather than their own.
+  `ZeroRefFor` reports through the same field.
+
+- **`lang/golang.SampleRefFor` handles slices and maps.** Both fell through to
+  the named-type bail, so a field of `[]string` or `map[string]int` derived no
+  sample. The map pair differs in the key, because `map[K]struct{}` is how Go
+  spells a set and a value-side difference renders two identical literals for
+  it.
+
+- **`sdk` re-exports the sentinels its own surface raises.** The façade carried
+  `Options`, `Schema`, `BindOptions`, `Bag`, `Key` and the stock parsers, and
+  none of the errors those paths return — so a plugin branching on a decode
+  failure or a bad directive value imported `core/opt` and `core/meta`, the
+  imports the façade exists to remove. All ten now re-export, with the producers
+  that make them reachable: `ReflectOptions` reports a malformed `eidos:` tag as
+  an error where `BindOptions` panics, and `LookupKey` / `ParseAuthority` /
+  `AnyKey` / `Observer` complete the metadata registry.
+
+- **`sdk/golang.Language`.** A plugin implementing `Outputs`, `Templates` or
+  `TemplateFuncs` itself had to import `lang/golang` beside `sdk/golang` to name
+  the identifier it dispatches on. The failure the constant prevents is silent:
+  a plugin returning nothing for an unrecognised language emits no output and
+  reports no error.
+
+- **Architecture decision records.** `docs/adr/0002`–`0006` record the five
+  choices `README.md` stated as conclusions — static plugin imports, metadata as
+  the extension mechanism, slot composition, per-owner template ownership, and
+  one backend per run — each with the alternatives it beat and what it costs.
+  `README.md` keeps a summary pointing at the tree.
+
+### Fixed
+
+- **`eidostest/storefixture.GoSource` keeps the imports an initialiser
+  references.** The projection rebuilds the import set from rendered type
+  expressions, and an initialiser is opaque text the type walk cannot see, so a
+  fixture declaring `errors` and initialising a sentinel with `errors.New`
+  projected over an empty import block — the one outcome the projection
+  documents it will never produce. `Constant.Value` carried the same defect.
+
+- **`eidostest/plugintest` runs the template-resolve check for every plugin,
+  against the funcmap a backend actually provides.** The check existed and
+  nothing called it, and its seed modelled the reserved names only — so a
+  template calling `camel` or `metaStr` failed its own conformance suite against
+  output the backend renders correctly. `ReservedTemplateFuncs` exposes the
+  assembled set the assertion takes.
+
+- **`lang/golang.ImportAlias` and `PackageClauseFor` drop unreachable guards.**
+  Both defended against conditions `naming.Identifier` documents it never
+  produces — empty output, and a leading digit — and `PackageClauseFor`'s
+  comment asserted the opposite of its dependency's contract.
+
 ## v1.13.0 — 2026-08-10
 
 ### Added
