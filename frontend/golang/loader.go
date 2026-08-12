@@ -32,6 +32,34 @@ var ErrEmptyPattern = errors.New("golang: empty pattern")
 // declarations: package + module identity, imports, syntax trees,
 // fully-resolved type information including type-checker errors,
 // and embedded file contents.
+// # Race-detector reports from go/types
+//
+// Requesting NeedTypes makes [packages.Load] type-check in
+// dependency-parallel goroutines, and on Go 1.26.5 that trips a data
+// race inside go/types itself. `Unalias` memoizes lazily without
+// synchronisation — `alias.go` reads `a0.actual` and then writes it —
+// so two importers resolving the same alias concurrently race. It
+// surfaces through `Context.instanceHash`, which stringifies a generic
+// instantiation and unaliases along the way, and it needs generics,
+// aliases and enough packages for the window to open: a corpus of ~140
+// reports it on most runs, one of ~40 almost never.
+//
+// Nothing here can fix it. The race is over before Load returns, so
+// resolving aliases eagerly afterwards is too late, and there is no
+// public knob for the loader's parallelism. It is Go's to fix — the
+// memoization wants an atomic or a mutex — and no caller of
+// packages.Load can do it on Go's behalf.
+//
+// GODEBUG=gotypesalias=0 does not help. The setting is still listed in
+// internal/godebugs, but go/types no longer reads it: aliases are
+// materialised unconditionally, and only a test file and a stale
+// comment still mention the name. Measured, not assumed.
+//
+// What does silence it, for a suite that must run under -race, is
+// GOMAXPROCS=1 — the checker's goroutines then interleave rarely
+// enough that the window effectively closes. That is a mitigation and
+// not a fix: it narrows the race rather than removing it, and it costs
+// the parallelism that makes a large load fast.
 const loadMode = packages.NeedName |
 	packages.NeedFiles |
 	packages.NeedImports |
