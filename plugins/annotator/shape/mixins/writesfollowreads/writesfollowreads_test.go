@@ -12,5 +12,5 @@ import (
 
 func TestMixin_Identity(t *testing.T) {
 	t.Parallel()
-	mixintest.AssertIdentity(t, writesfollowreads.Mixin(), writesfollowreads.Name, nil)
+	mixintest.AssertIdentity(t, writesfollowreads.Mixin(), writesfollowreads.Name, writesfollowreads.Params)
 }

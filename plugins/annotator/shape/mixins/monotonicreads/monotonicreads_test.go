@@ -12,5 +12,5 @@ import (
 
 func TestMixin_Identity(t *testing.T) {
 	t.Parallel()
-	mixintest.AssertIdentity(t, monotonicreads.Mixin(), monotonicreads.Name, nil)
+	mixintest.AssertIdentity(t, monotonicreads.Mixin(), monotonicreads.Name, monotonicreads.Params)
 }
