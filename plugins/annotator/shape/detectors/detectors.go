@@ -19,6 +19,7 @@ import (
 
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/aggregator"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/answeringwriter"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/batchreader"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/compositewriter"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors/lifecycle"
@@ -52,6 +53,7 @@ import (
 func All() []shape.Detector {
 	out := []shape.Detector{
 		aggregator.Detector(),
+		answeringwriter.Detector(),
 		batchreader.Detector(),
 		compositewriter.Detector(),
 		lifecycle.Detector(),

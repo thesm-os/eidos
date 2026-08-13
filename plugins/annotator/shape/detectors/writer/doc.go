@@ -8,8 +8,12 @@
 //
 //	func (r *Repo) Save(ctx context.Context, v V) error
 //	func (r *Repo) Save(v V) error                      // ctx-optional
-//	func (r *Repo) Save(ctx context.Context, v V) (R, error)
 //	func (r *Repo) Save(v V) (R, error)                 // with-result
+//
+// A write answering a value beside the error is NOT this shape. The
+// detector requires no non-error result, because accepting one made
+// every reader a subset of this rule and labelled a read key as the
+// written value. The answered form is [answeringwriter].
 //
 // A positive detection stamps the standard meta triple on the
 // callable's bag (via the umbrella shape plugin):

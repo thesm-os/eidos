@@ -44,3 +44,40 @@ func TestMixin(t *testing.T) {
 		}
 	})
 }
+
+// TestMixin_UnreadySentinel pins the early-call refusal's identity.
+//
+// Without it "calling early fails" is a bare non-nil check, which an
+// implementation failing for an unrelated reason — a nil map, a
+// refused connection — passes as ordering enforcement.
+func TestMixin_UnreadySentinel(t *testing.T) {
+	t.Parallel()
+
+	host := &sdk.Function{
+		Name: "DoWork", Package: "x",
+		BaseNode: sdk.BaseNode{
+			DirectiveList: []*sdk.Directive{
+				mixintest.HostDirective(orderafter.Name, map[string]string{
+					orderafter.ParamFn:      "Initialise",
+					orderafter.ParamUnready: "ErrNotReady",
+				}),
+			},
+		},
+	}
+	mixintest.RunWithResolver(t, orderafter.Mixin(), &sdk.Package{
+		Name: "x", Path: "x",
+		Functions: []*sdk.Function{host, {Name: "Initialise", Package: "x"}},
+		Variables: []*sdk.Variable{{Name: "ErrNotReady", Package: "x"}},
+	})
+
+	// The callable through the callable scope, the sentinel through
+	// the package's vars — both on one directive.
+	fn, _ := shape.MixinParamKey(orderafter.Name, orderafter.ParamFn).Get(host.Meta())
+	unready, _ := shape.MixinParamKey(orderafter.Name, orderafter.ParamUnready).Get(host.Meta())
+	if fn != "x.Initialise" {
+		t.Errorf("fn = %q, want x.Initialise", fn)
+	}
+	if unready != "x.ErrNotReady" {
+		t.Errorf("unready = %q, want x.ErrNotReady", unready)
+	}
+}
