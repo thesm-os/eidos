@@ -26,32 +26,23 @@ const ParamRead = "read"
 // once the entry has expired.
 //
 // A sentinel is a package-level var, so it resolves through the var
-// scope rather than the callable one — see [shape.Mixin.SiblingVars].
+// scope rather than the callable one — see [shape.KindVar].
 const ParamNotFound = "notfound"
 
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamDuration, ParamPut, ParamRead, ParamNotFound}
-
-// SiblingParams enumerates the param keys whose values name sibling
-// callables the resolver rewrites into qualified names.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var SiblingParams = []string{ParamPut, ParamRead}
-
-// SiblingVars enumerates the param keys whose values name
-// package-level vars the resolver rewrites into qualified names.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var SiblingVars = []string{ParamNotFound}
+var Params = []shape.Param{
+	{Key: ParamDuration, Kind: shape.KindOpaque},
+	{Key: ParamPut, Kind: shape.KindCallable},
+	{Key: ParamRead, Kind: shape.KindCallable},
+	{Key: ParamNotFound, Kind: shape.KindVar},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {
 	return shape.Mixin{
-		Name:          Name,
-		Params:        Params,
-		SiblingParams: SiblingParams,
-		SiblingVars:   SiblingVars,
+		Name:   Name,
+		Params: Params,
 	}
 }

@@ -144,7 +144,7 @@
 //     can describe.
 //   - `shape.mixin.<name>.<param>` — string; one KV parameter of
 //     the named mixin. Values are opaque by default; for keys
-//     listed in [Mixin.SiblingParams] the [Resolver] rewrites the
+//     listed in [KindCallable] the [Resolver] rewrites the
 //     value from a raw sibling name to a qualified name, the same
 //     two-pass treatment contract partners get. Parameters are
 //     dropped (with a diagnostic) when a single directive pairs

@@ -45,7 +45,9 @@ const (
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Params = []string{ParamMode}
+var Params = []shape.Param{
+	{Key: ParamMode, Kind: shape.KindOpaque},
+}
 
 // Contract returns the [shape.Contract] this package contributes.
 func Contract() shape.Contract {

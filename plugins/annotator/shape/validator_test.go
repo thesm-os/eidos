@@ -356,7 +356,7 @@ func TestValidator_MixinValidate(t *testing.T) {
 		var captured []shape.MixinAttachment
 		spec := shape.Mixin{
 			Name:   "tagged",
-			Params: []string{"tag"},
+			Params: []shape.Param{{Key: "tag"}},
 			Validate: func(attachments []shape.MixinAttachment) []shape.MixinViolation {
 				captured = attachments
 				return nil

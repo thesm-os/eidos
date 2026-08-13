@@ -12,7 +12,7 @@ const Name = "tx"
 //
 // A sentinel is a package-level var, so the resolver rewrites it
 // through the var scope rather than the callable one — see
-// [shape.Contract.SiblingVars]. Absence is not an error: the bare
+// [shape.KindVar]. Absence is not an error: the bare
 // form still classifies, and a suite that cannot state the law
 // without a sentinel declines to state it.
 const ParamClosed = "closed"
@@ -20,13 +20,9 @@ const ParamClosed = "closed"
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Params = []string{ParamClosed}
-
-// SiblingVars enumerates the param keys whose values name
-// package-level vars the resolver rewrites into qualified names.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var SiblingVars = []string{ParamClosed}
+var Params = []shape.Param{
+	{Key: ParamClosed, Kind: shape.KindVar},
+}
 
 // Roles enumerates the contract's role vocabulary.
 //
@@ -38,10 +34,9 @@ var Roles = []string{"begin", "commit", "rollback"}
 // validator flags any Begin declaration missing either side.
 func Contract() shape.Contract {
 	return shape.Contract{
-		Name:        Name,
-		Roles:       Roles,
-		Params:      Params,
-		SiblingVars: SiblingVars,
-		Required:    map[string][]string{"begin": {"commit", "rollback"}},
+		Name:     Name,
+		Roles:    Roles,
+		Params:   Params,
+		Required: map[string][]string{"begin": {"commit", "rollback"}},
 	}
 }

@@ -17,7 +17,9 @@ const ParamKey = "key"
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamKey}
+var Params = []shape.Param{
+	{Key: ParamKey, Kind: shape.KindOpaque},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {

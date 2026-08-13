@@ -24,32 +24,21 @@ const ParamFn = "fn"
 // — a nil map, a refused connection — passes as ordering enforcement.
 //
 // A sentinel is a package-level var, so it resolves through the var
-// scope rather than the callable one — see [shape.Mixin.SiblingVars].
+// scope rather than the callable one — see [shape.KindVar].
 const ParamUnready = "unready"
 
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamFn, ParamUnready}
-
-// SiblingParams enumerates the param keys whose values name
-// sibling callables the resolver rewrites into qualified names.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var SiblingParams = []string{ParamFn}
-
-// SiblingVars enumerates the param keys whose values name
-// package-level vars the resolver rewrites into qualified names.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var SiblingVars = []string{ParamUnready}
+var Params = []shape.Param{
+	{Key: ParamFn, Kind: shape.KindCallable},
+	{Key: ParamUnready, Kind: shape.KindVar},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {
 	return shape.Mixin{
-		Name:          Name,
-		Params:        Params,
-		SiblingParams: SiblingParams,
-		SiblingVars:   SiblingVars,
+		Name:   Name,
+		Params: Params,
 	}
 }

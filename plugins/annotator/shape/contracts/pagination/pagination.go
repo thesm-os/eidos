@@ -16,7 +16,9 @@ var Roles = []string{"reader"}
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Params = []string{"cursor"}
+var Params = []shape.Param{
+	{Key: "cursor", Kind: shape.KindOpaque},
+}
 
 // Contract returns the [shape.Contract] this package contributes.
 // The `cursor` KV is an opaque field-name reference.

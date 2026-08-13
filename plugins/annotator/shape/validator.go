@@ -254,8 +254,8 @@ func (v *Validator) accumulateMixin(spec Mixin, host sdk.Node, bag *sdk.Bag) {
 	}
 	params := make(map[string]string)
 	for _, p := range spec.Params {
-		if val, ok := MixinParamKey(spec.Name, p).Get(bag); ok && val != "" {
-			params[p] = val
+		if val, ok := MixinParamKey(spec.Name, p.Key).Get(bag); ok && val != "" {
+			params[p.Key] = val
 		}
 	}
 	v.attachments[spec.Name] = append(v.attachments[spec.Name],

@@ -17,7 +17,9 @@ const ParamDomain = "domain"
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamDomain}
+var Params = []shape.Param{
+	{Key: ParamDomain, Kind: shape.KindOpaque},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {

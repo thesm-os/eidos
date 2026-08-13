@@ -16,7 +16,9 @@ var Roles = []string{"writer"}
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Params = []string{"mode"}
+var Params = []shape.Param{
+	{Key: "mode", Kind: shape.KindOpaque},
+}
 
 // Contract returns the [shape.Contract] this package contributes.
 func Contract() shape.Contract {

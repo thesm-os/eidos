@@ -27,19 +27,15 @@ const ParamSync = "sync"
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamSettle, ParamSync}
-
-// SiblingParams enumerates the param keys whose values name sibling
-// callables the resolver rewrites into qualified names.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var SiblingParams = []string{ParamSettle, ParamSync}
+var Params = []shape.Param{
+	{Key: ParamSettle, Kind: shape.KindCallable},
+	{Key: ParamSync, Kind: shape.KindCallable},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {
 	return shape.Mixin{
-		Name:          Name,
-		Params:        Params,
-		SiblingParams: SiblingParams,
+		Name:   Name,
+		Params: Params,
 	}
 }

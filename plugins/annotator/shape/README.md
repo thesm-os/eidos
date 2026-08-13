@@ -227,16 +227,28 @@ import "go.thesmos.sh/eidos/plugins/annotator/shape"
 
 const Name = "mymixin"
 
-var Params = []string{"limit"}
+var Params = []shape.Param{
+    {Key: "limit", Kind: shape.KindOpaque},
+}
 
 func Mixin() shape.Mixin {
     return shape.Mixin{Name: Name, Params: Params}
 }
 ```
 
-When a mixin param's value names a sibling callable rather than
-a literal, declare it in `Mixin.SiblingParams` — the resolver
-rewrites it to a qualified name.
+Each param declares what its value names, and the resolver treats
+it accordingly:
+
+| Kind | The value names | Resolved through |
+|---|---|---|
+| `KindOpaque` | nothing to look up — a literal, a quantity, a field name | left verbatim |
+| `KindCallable` | a sibling callable | the host's own scope |
+| `KindVar` | a package-level var, typically a sentinel | the package |
+| `KindMember` | a method on the type a role's callable answers | that type's declaration |
+
+`KindOpaque` is the zero value, so `{Key: "limit"}` reads as a
+literal. Anything else is rewritten to a qualified name, and a value
+naming nothing in its scope is reported against the directive.
 
 ## Sub-package layout
 

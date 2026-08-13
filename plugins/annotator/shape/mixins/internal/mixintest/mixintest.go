@@ -29,7 +29,7 @@ var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 // AssertIdentity fails the test when m does not match the
 // expected name + params. Use as the canonical body of every
 // per-mixin `TestMixin_Identity` test.
-func AssertIdentity(t *testing.T, m shape.Mixin, wantName string, wantParams []string) {
+func AssertIdentity(t *testing.T, m shape.Mixin, wantName string, wantParams []shape.Param) {
 	t.Helper()
 	if m.Name != wantName {
 		t.Fatalf("Mixin().Name = %q, want %q", m.Name, wantName)
@@ -89,7 +89,7 @@ func RunPipeline(t *testing.T, m shape.Mixin, fn *sdk.Function) *sdk.Bag {
 // RunWithResolver wires pkg into a fresh store, stamps the
 // "golang" frontend marker, and runs the umbrella → resolver
 // sequence with m as the sole registered mixin. Use for testing
-// [shape.Mixin.SiblingParams] resolution where the test fixture
+// sibling-param resolution where the test fixture
 // needs more than one callable in scope.
 func RunWithResolver(t *testing.T, m shape.Mixin, pkg *sdk.Package) {
 	t.Helper()

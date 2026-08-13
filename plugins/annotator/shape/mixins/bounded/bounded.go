@@ -28,7 +28,10 @@ const ParamMin = "min"
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamMin, ParamLimit}
+var Params = []shape.Param{
+	{Key: ParamMin, Kind: shape.KindOpaque},
+	{Key: ParamLimit, Kind: shape.KindOpaque},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {

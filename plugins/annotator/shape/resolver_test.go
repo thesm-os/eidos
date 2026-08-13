@@ -424,7 +424,7 @@ func TestResolver_DecliningEntryDoesNotStopTheRest(t *testing.T) {
 // `shape.contract.tx.param.…` precedes `shape.contract.tx.partner.…`.
 func txContractWithParam() shape.Contract {
 	c := txContract()
-	c.Params = []string{"mode"}
+	c.Params = []shape.Param{{Key: "mode"}}
 	return c
 }
 

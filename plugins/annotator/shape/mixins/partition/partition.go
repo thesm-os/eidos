@@ -41,17 +41,10 @@ const ParamAxis = "axis"
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamRead, ParamAxis}
-
-// SiblingParams enumerates the param keys whose values name
-// sibling callables the resolver rewrites into qualified names.
-//
-// [ParamAxis] is deliberately absent: a parameter has no qualified
-// name, and asking the resolver to look one up in scope would report
-// every correct axis as not found.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var SiblingParams = []string{ParamRead}
+var Params = []shape.Param{
+	{Key: ParamRead, Kind: shape.KindCallable},
+	{Key: ParamAxis, Kind: shape.KindOpaque},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 //
@@ -62,10 +55,9 @@ var SiblingParams = []string{ParamRead}
 // one — that judgement belongs to the generator rather than here.
 func Mixin() shape.Mixin {
 	return shape.Mixin{
-		Name:          Name,
-		Params:        Params,
-		SiblingParams: SiblingParams,
-		Validate:      validateAxis,
+		Name:     Name,
+		Params:   Params,
+		Validate: validateAxis,
 	}
 }
 

@@ -39,7 +39,9 @@ var Roles = []string{RoleForward, RoleInverse}
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Params = []string{ParamFidelity}
+var Params = []shape.Param{
+	{Key: ParamFidelity, Kind: shape.KindOpaque},
+}
 
 // Required pins the inverse to the forward.
 //

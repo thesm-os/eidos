@@ -33,35 +33,11 @@ type Mixin struct {
 	// per-mixin param meta key.
 	Name string
 
-	// Params enumerates the KV parameter names the mixin accepts.
-	// Exported for documentation and future validation; the
-	// umbrella plugin's stamping is permissive and accepts any
-	// KV (unknown keys still stamp).
-	Params []string
-
-	// SiblingParams enumerates param keys whose VALUES are sibling
-	// callable names the refinement resolver should rewrite into
-	// qualified names — e.g. `readafterwrite write=Save` has
-	// `SiblingParams: []string{"write"}` so the resolver looks
-	// `Save` up in scope and rewrites the stamp to its qname.
-	//
-	// Leave empty when every param is an opaque literal.
-	SiblingParams []string
-
-	// SiblingVars enumerates param keys whose VALUES name
-	// package-level vars the refinement resolver should rewrite into
-	// qualified names — e.g. `deleteremoves sentinel=ErrNotFound`
-	// resolves `ErrNotFound` against the host's package and rewrites
-	// the stamp to its qname.
-	//
-	// Distinct from [Mixin.SiblingParams], which searches callables.
-	// A sentinel is a var, so the callable scope reports every correct
-	// one as not found; keeping the two declarations apart is what
-	// lets the resolver say which it expected.
-	//
-	// Vars resolve against the package in every case, including for a
-	// method host: a sentinel is not declared on the receiver.
-	SiblingVars []string
+	// Params enumerates the KV keys the directive accepts, each with
+	// how its value resolves — see [ParamKind]. A key with no
+	// declaration to resolve against is [KindOpaque], which is the zero
+	// value.
+	Params []Param
 
 	// Validate, when non-nil, runs in the validation-bucket
 	// annotator pass after sibling resolution completes. Receives

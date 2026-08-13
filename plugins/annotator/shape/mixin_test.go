@@ -25,7 +25,7 @@ func atomicMixin() shape.Mixin {
 func rateLimitedMixin() shape.Mixin {
 	return shape.Mixin{
 		Name:   "rate-limited",
-		Params: []string{"limit", "burst"},
+		Params: []shape.Param{{Key: "limit"}, {Key: "burst"}},
 	}
 }
 
@@ -229,9 +229,8 @@ func assertMixins(t *testing.T, bag *sdk.Bag, want []string) {
 func TestMixin_SiblingResolution(t *testing.T) {
 	t.Parallel()
 	rafw := shape.Mixin{
-		Name:          "readafterwrite",
-		Params:        []string{"write"},
-		SiblingParams: []string{"write"},
+		Name:   "readafterwrite",
+		Params: []shape.Param{{Key: "write", Kind: shape.KindCallable}},
 	}
 	find := mixinFn("Find", &sdk.Directive{
 		Name: shape.MixinDirectiveName,
@@ -628,8 +627,15 @@ func TestMixin_NamelessDirectiveIsIgnoredByStamping(t *testing.T) {
 // in.
 func retryingMixin() shape.Mixin {
 	return shape.Mixin{
-		Name:   "retrying",
-		Params: []string{"attempts", "backoff", "jitter", "budget", "ceiling", "floor"},
+		Name: "retrying",
+		Params: []shape.Param{
+			{Key: "attempts"},
+			{Key: "backoff"},
+			{Key: "jitter"},
+			{Key: "budget"},
+			{Key: "ceiling"},
+			{Key: "floor"},
+		},
 	}
 }
 

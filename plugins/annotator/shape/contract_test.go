@@ -246,7 +246,7 @@ func TestContract_DirectiveStamping(t *testing.T) {
 		spec := shape.Contract{
 			Name:   "tx",
 			Roles:  []string{"begin"},
-			Params: []string{"isolation"},
+			Params: []shape.Param{{Key: "isolation"}},
 		}
 		fn := contractFn("Begin",
 			&sdk.Directive{

@@ -32,29 +32,13 @@ type Contract struct {
 	// resolver rejects directives that name an undeclared role.
 	Roles []string
 
-	// Params enumerates KV keys the directive accepts as opaque
-	// parameters rather than partner-callable references. Use for
-	// non-callable arguments like a field name (`cas version=Version`)
-	// or a literal value (`rate-limit limit=100 burst=10`). Params
-	// land under `shape.contract.<name>.param.<key>`; the resolver
-	// never tries to look them up as siblings.
+	// Params enumerates the KV keys the directive accepts, each with
+	// how its value resolves — see [ParamKind]. A key with no
+	// declaration to resolve against is [KindOpaque], which is the zero
+	// value, so `{Key: "version"}` reads as a literal reference.
 	//
-	// Leave empty when every KV besides `role=` names a partner
-	// callable.
-	Params []string
-
-	// SiblingVars enumerates KV keys whose VALUES name package-level
-	// vars the refinement resolver rewrites into qualified names —
-	// e.g. `tx closed=ErrTxClosed`.
-	//
-	// Distinct from [Contract.Roles], which name callables, and from
-	// [Contract.Params], which are left verbatim. A sentinel is
-	// neither: it has a definition to resolve against, and resolving
-	// it in the callable scope reports every correct one as missing.
-	//
-	// Vars resolve against the package in every case, including for a
-	// method host: a sentinel is not declared on the receiver.
-	SiblingVars []string
+	// Params land under `shape.contract.<name>.param.<key>`.
+	Params []Param
 
 	// Required maps a role to the partner roles that must be
 	// specified when this role's directive appears. The refinement
@@ -199,7 +183,7 @@ func (p *Plugin) applyContracts(bag *sdk.Bag, dirs []*sdk.Directive) {
 			continue
 		}
 		ContractRoleKey(name).Set(bag, role, contractStampedBy)
-		params := paramSet(spec.Params)
+		params := paramSet(ParamKeys(spec.Params))
 		for k, v := range d.KV {
 			if k == "role" || v == "" {
 				continue

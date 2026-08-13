@@ -12,7 +12,7 @@ const Name = "lease"
 //
 // A sentinel is a package-level var, so the resolver rewrites it
 // through the var scope rather than the callable one — see
-// [shape.Contract.SiblingVars]. Absence is not an error: the bare
+// [shape.KindVar]. Absence is not an error: the bare
 // form still classifies, and a suite that cannot state the law
 // without a sentinel declines to state it.
 const ParamHeld = "held"
@@ -30,13 +30,10 @@ const ParamTimeout = "timeout"
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Params = []string{ParamHeld, ParamTimeout}
-
-// SiblingVars enumerates the param keys whose values name
-// package-level vars the resolver rewrites into qualified names.
-//
-//nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var SiblingVars = []string{ParamHeld}
+var Params = []shape.Param{
+	{Key: ParamHeld, Kind: shape.KindVar},
+	{Key: ParamTimeout, Kind: shape.KindOpaque},
+}
 
 // Roles enumerates the contract's role vocabulary.
 //
@@ -47,10 +44,9 @@ var Roles = []string{"acquire", "release"}
 // The acquire side requires a release partner.
 func Contract() shape.Contract {
 	return shape.Contract{
-		Name:        Name,
-		Roles:       Roles,
-		Params:      Params,
-		SiblingVars: SiblingVars,
-		Required:    map[string][]string{"acquire": {"release"}},
+		Name:     Name,
+		Roles:    Roles,
+		Params:   Params,
+		Required: map[string][]string{"acquire": {"release"}},
 	}
 }

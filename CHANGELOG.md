@@ -13,6 +13,35 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Breaking
+
+- **A param declares its own kind: `Params` is now `[]shape.Param`.** The
+  parallel `SiblingParams` and `SiblingVars` lists are gone, and every key
+  carries a `Kind` saying what its value names — `KindOpaque`, `KindCallable`,
+  `KindVar`, or the new `KindMember`.
+
+  The lists had to be kept in agreement by hand and nothing checked they were:
+  a key named as a sibling but omitted from `Params` resolved correctly and was
+  invisible to every `Validate` hook, because those read `Params` alone. One
+  declaration per key removes the class.
+
+  `KindOpaque` is the zero value, so a literal param is `{Key: "limit"}`. Every
+  shipped contract and mixin is migrated; a shape package declaring its own
+  params updates the literal and drops the sibling lists.
+
+### Added
+
+- **A resolver scope for members of a role's answered type.** `KindMember`
+  resolves a param naming a method on the handle a role's callable returns —
+  `watcher next=Next stop=Stop`, where both are declared on the subscription
+  `Watch` answers rather than on the interface `Watch` belongs to. Neither
+  existing scope could reach them.
+
+  When the run did not load the answered type's declaration the param stamps
+  unvalidated rather than reporting, since the resolver has nothing to check
+  against. That is the one place a diagnostic's presence depends on the run's
+  patterns, and silence there is not a pass.
+
 ### Added
 
 - **`partition` names the parameter it isolates on.** `read=` said what observes

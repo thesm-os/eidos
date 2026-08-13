@@ -43,6 +43,7 @@ type Resolver struct {
 	methodOwner map[*sdk.Method]methodOwner
 	funcPkg     map[*sdk.Function]*sdk.Package
 	hostPkg     map[sdk.Node]*sdk.Package
+	typeMethods map[string][]*sdk.Method
 }
 
 // methodOwner is the per-method index entry: the owning struct or
@@ -107,9 +108,11 @@ func (r *Resolver) BeforeNodes(ctx *sdk.AnnotatorContext) {
 	r.methodOwner = make(map[*sdk.Method]methodOwner)
 	r.funcPkg = make(map[*sdk.Function]*sdk.Package)
 	r.hostPkg = make(map[sdk.Node]*sdk.Package)
+	r.typeMethods = make(map[string][]*sdk.Method)
 	ctx.Reader.Packages().Each(func(pkg *sdk.Package) {
 		for _, s := range pkg.Structs {
 			owner := methodOwner{qname: s.QName(), methods: s.Methods}
+			r.typeMethods[owner.qname] = s.Methods
 			for _, m := range s.Methods {
 				r.methodOwner[m] = owner
 				r.hostPkg[m] = pkg
@@ -117,6 +120,7 @@ func (r *Resolver) BeforeNodes(ctx *sdk.AnnotatorContext) {
 		}
 		for _, i := range pkg.Interfaces {
 			owner := methodOwner{qname: i.QName(), methods: i.Methods}
+			r.typeMethods[owner.qname] = i.Methods
 			for _, m := range i.Methods {
 				r.methodOwner[m] = owner
 				r.hostPkg[m] = pkg
@@ -192,11 +196,103 @@ func packageScope(pkg *sdk.Package) resolveScope {
 	}
 }
 
+// scopeFor returns the lookup a param of the given kind resolves
+// through, or nil when the kind needs no resolution.
+//
+// One place decides what each kind means, so a new kind is a case here
+// rather than a branch at every call site. [KindOpaque] returns nil
+// because the value names nothing to look up — a literal handed to any
+// scope would report every correct one as missing.
+//
+// callable is the host's own scope, threaded in by the caller that
+// already computed it; the others derive from the host.
+func (r *Resolver) scopeFor(kind ParamKind, host sdk.Node, callable resolveScope) resolveScope {
+	switch kind {
+	case KindCallable:
+		if callable == nil {
+			return r.callableScope(host)
+		}
+		return callable
+	case KindVar:
+		return varScope(r.hostPkg[host])
+	case KindMember:
+		return r.memberScope(host)
+	case KindOpaque:
+		return nil
+	default:
+		return nil
+	}
+}
+
+// callableScope recovers the host's own sibling scope.
+//
+// The contract path resolves params after the partner loop, which does
+// not thread its scope down, so this rebuilds it from the same indexes
+// [Resolver.BeforeNodes] fills.
+func (r *Resolver) callableScope(host sdk.Node) resolveScope {
+	switch h := host.(type) {
+	case *sdk.Method:
+		return methodScope(r.methodOwner[h])
+	case *sdk.Function:
+		return packageScope(r.funcPkg[h])
+	default:
+		return emptyScope
+	}
+}
+
+// memberScope returns a [resolveScope] searching the methods of the
+// type host answers — the handle a role's callable returns.
+//
+// The third scope, and the one whose reach depends on the run rather
+// than on the declaration. A watcher's Next and Stop live on the
+// subscription Watch returns, not on the interface Watch is declared
+// on, so neither the callable scope nor the var scope sees them.
+//
+// The answered type is the first non-error result, pointer stripped: a
+// handle is returned by pointer as often as by value and the members
+// are the same either way.
+//
+// Returns the empty scope when the run did not load the answered
+// type's declaration, which is the one place in this vocabulary where
+// a diagnostic's presence depends on the run's patterns. A handle from
+// an unloaded package stamps unvalidated and the generated file's
+// compile is the loud failure; silence here is not a pass.
+func (r *Resolver) memberScope(host sdk.Node) resolveScope {
+	params, returns := GoCallable(host)
+	_ = params
+	results := GoStripError(returns)
+	if len(results) == 0 {
+		return nil
+	}
+	answered := results[0]
+	if elem := GoPointerElem(answered); elem != nil {
+		answered = elem
+	}
+	owner := QName(answered)
+	methods := r.typeMethods[owner]
+	if owner == "" || len(methods) == 0 {
+		// Nil rather than the empty scope, which always misses and
+		// would be read as "the member is not there". The run did not
+		// load the declaration, so there is nothing to check against —
+		// the param stamps unvalidated and the generated file's
+		// compile is the loud failure.
+		return nil
+	}
+	return func(name string) string {
+		for _, m := range methods {
+			if m != nil && m.Name == name {
+				return methodQName(owner, m.Name)
+			}
+		}
+		return ""
+	}
+}
+
 // varScope returns a [resolveScope] searching pkg's package-level
 // vars for a name match, returning the qualified name on hit.
 //
-// The scope a sentinel resolves in, and the reason [Mixin.SiblingVars]
-// is a separate declaration from [Mixin.SiblingParams]: a var is not
+// The scope a sentinel resolves in, and the reason [KindVar]
+// is a separate declaration from [KindCallable]: a var is not
 // in the callable scope, so resolving one there reports every correct
 // sentinel as missing.
 func varScope(pkg *sdk.Package) resolveScope {
@@ -286,7 +382,7 @@ func (r *Resolver) resolveOne(
 	r.flagUnknownPartnerRoles(host, bag, spec, sink)
 }
 
-// resolveContractVars rewrites every declared [Contract.SiblingVars]
+// resolveContractVars rewrites every declared [KindVar]
 // value on host from a raw name to the qualified name of the
 // package-level var it names.
 //
@@ -301,21 +397,22 @@ func (r *Resolver) resolveContractVars(
 	spec Contract,
 	sink *sdk.PluginSink,
 ) {
-	if len(spec.SiblingVars) == 0 {
-		return
-	}
-	vars := varScope(r.hostPkg[host])
-	for _, param := range spec.SiblingVars {
+	for _, p := range spec.Params {
+		resolveIn := r.scopeFor(p.Kind, host, nil)
+		if resolveIn == nil {
+			continue
+		}
+		param := p.Key
 		key := ContractParamKey(spec.Name, param)
 		raw, present := key.Get(bag)
 		if !present || raw == "" || isQualified(raw) {
 			continue
 		}
-		qname := vars(raw)
+		qname := resolveIn(raw)
 		if qname == "" {
 			sink.Errorf(host.Pos(),
-				"shape.contract %q: %s=%q names no package-level var in scope",
-				spec.Name, param, raw)
+				"shape.contract %q: %s=%q names no %s",
+				spec.Name, param, raw, p.Kind.scopeNoun())
 			continue
 		}
 		key.Set(bag, qname, ResolverName)
@@ -446,9 +543,9 @@ func isQualified(name string) bool {
 }
 
 // resolveMixins iterates every mixin attached to bag and rewrites
-// declared [Mixin.SiblingParams] values from raw names to
+// declared [KindCallable] values from raw names to
 // qualified names sourced from the host's scope. Mixins without
-// SiblingParams are no-ops here.
+// Params of [KindOpaque] are no-ops here.
 func (r *Resolver) resolveMixins(ctx *sdk.AnnotatorContext, host sdk.Node, bag *sdk.Bag, scope resolveScope) {
 	attached := Mixins(bag)
 	if len(attached) == 0 {
@@ -460,18 +557,12 @@ func (r *Resolver) resolveMixins(ctx *sdk.AnnotatorContext, host sdk.Node, bag *
 		if !ok {
 			continue
 		}
-		for _, param := range spec.SiblingParams {
-			r.resolveMixinSibling(host, bag, spec.Name, param, scope, sink)
-		}
-		if len(spec.SiblingVars) == 0 {
-			continue
-		}
-		// Vars resolve against the package rather than the callable
-		// scope, for a method host as much as a function one: a
-		// sentinel is declared beside the type, not on it.
-		vars := varScope(r.hostPkg[host])
-		for _, param := range spec.SiblingVars {
-			r.resolveMixinSibling(host, bag, spec.Name, param, vars, sink)
+		for _, p := range spec.Params {
+			resolveIn := r.scopeFor(p.Kind, host, scope)
+			if resolveIn == nil {
+				continue
+			}
+			r.resolveMixinSibling(host, bag, spec.Name, p.Key, resolveIn, sink)
 		}
 	}
 }

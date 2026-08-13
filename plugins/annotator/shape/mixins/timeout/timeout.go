@@ -19,7 +19,9 @@ const ParamDuration = "duration"
 // Params enumerates the KV parameter names this mixin accepts.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
-var Params = []string{ParamDuration}
+var Params = []shape.Param{
+	{Key: ParamDuration, Kind: shape.KindOpaque},
+}
 
 // Mixin returns the [shape.Mixin] this package contributes.
 func Mixin() shape.Mixin {

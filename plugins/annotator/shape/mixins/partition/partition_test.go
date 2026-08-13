@@ -52,9 +52,11 @@ func TestMixin(t *testing.T) {
 		// A parameter has no qualified name, so asking the resolver to
 		// look one up in scope would report every correct axis as not
 		// found.
-		for _, p := range partition.SiblingParams {
-			if p == partition.ParamAxis {
-				t.Errorf("%q is declared as a sibling param", partition.ParamAxis)
+		for _, p := range partition.Params {
+			if p.Key == partition.ParamAxis && p.Kind != shape.KindOpaque {
+				t.Errorf("%q resolves as %s; a parameter of the callable has no"+
+					" qualified name and every correct axis would report missing",
+					partition.ParamAxis, p.Kind)
 			}
 		}
 	})
