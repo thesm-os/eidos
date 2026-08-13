@@ -17,12 +17,18 @@ const Name = "readyourwrites"
 // which member that is, and two candidates of the same type are
 // ordinary.
 //
-// Opaque, like the cas contract's version=: the value names a field or
-// a zero-argument method of the value type rather than a callable in
-// scope or a package-level var, and neither resolver scope reaches a
-// member of a type. Validating it would need a scope resolved against
-// another declaration's type, which is the same mechanism deferred for
-// a watcher's handle methods.
+// Opaque, like the cas contract's version=: the value names a field of
+// the value type rather than a callable in scope or a package-level
+// var, and neither resolver scope reaches a member of a type.
+// Validating it would need a scope resolved against another
+// declaration's type, which is the same mechanism deferred for a
+// watcher's handle methods.
+//
+// A field, never a method. The projections built from this stamp read
+// it as a selector and the cas stamp assigns it — `v.Version =
+// cur.Version + 1` — and no method form can sit on the left of that
+// assignment. A directive naming a method fails in the consumer, so
+// the promise is not made here.
 const ParamVersion = "version"
 
 // Params enumerates the KV parameter names this mixin accepts.

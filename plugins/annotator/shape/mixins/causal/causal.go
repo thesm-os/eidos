@@ -16,11 +16,14 @@ const Name = "causal"
 // store-assigned stamp — a logical clock, a row version, the global
 // write order — and nothing in a signature says which member holds it.
 //
-// Opaque, like theirs: the value names a field or a zero-argument
-// method of the value type rather than a callable in scope or a
-// package-level var, and reaching a member of a *value* type is not
-// what [shape.KindMember] resolves — that answers a role's returned
-// handle.
+// Opaque, like theirs: the value names a field of the value type
+// rather than a callable in scope or a package-level var, and reaching
+// a member of a *value* type is not what [shape.KindMember] resolves —
+// that answers a role's returned handle.
+//
+// A field, never a method, for the reason the session mixins give: the
+// cas stamp assigns the member, and no method form can sit on the left
+// of that assignment.
 const ParamVersion = "version"
 
 // Params enumerates the KV keys the directive accepts.

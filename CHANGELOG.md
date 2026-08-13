@@ -118,9 +118,10 @@ omitted unless they change what a caller can rely on.
   `monotonicwrites`, `readyourwrites` and `writesfollowreads` are defined
   against an ordering oracle — a logical clock, a row version, the global write
   order — and a law replaying a trace has to read it off each operation.
-  Nothing in a signature says which member carries it, and two candidates of
-  the same type are ordinary. Opaque like `cas version=`, since a member of the
-  read or written type is neither a callable in scope nor a package-level var.
+  Nothing in a signature says which field carries it, and two candidates of
+  the same type are ordinary. Opaque like `cas version=`, since a field of the
+  read or written type is neither a callable in scope nor a package-level var —
+  and a field rather than a method, because the cas stamp assigns it.
 
 - **Five classifications can name the bound their claim turns on.** `bounded
   min=` beside its existing `limit=`, which is a ceiling and said nothing about
