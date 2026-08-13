@@ -65,6 +65,7 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/eventually"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/hooks"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/idempotent"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/indexed"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/injectionsafe"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/integrationonly"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/leakfree"
@@ -145,6 +146,7 @@ func All() []shape.Mixin {
 		eventually.Mixin(),
 		hooks.Mixin(),
 		idempotent.Mixin(),
+		indexed.Mixin(),
 		integrationonly.Mixin(),
 		lifecycleafterclose.Mixin(),
 		monotonic.Mixin(),

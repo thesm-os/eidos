@@ -81,6 +81,25 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **An `indexed` mixin naming what sizes a callable'''s integer parameters.**
+  `SampleValues` draws a magnitude for every integer, which is right for a value
+  set through a setter and read back and wrong for one handed to a subject:
+  `Less(i, j int) bool` against a five-element slice given 42 panics. `bounded`
+  cannot state it — its `limit`/`min` constrain a value a method answers, not a
+  domain a parameter is drawn from.
+
+  `indexed by=Len` says the callable'''s integer parameters are positions into
+  the collection `Len` sizes. Per callable, since `Less` and `Swap` are wholly
+  indices and a key holds one value; over-applying it to a count draws a small
+  limit, which costs a little coverage where the alternative costs a panic on
+  correct code.
+
+  The declaration only names the sizing method. The bound is a runtime fact
+  about seeded state, so a consumer calls it on the subject and draws inside
+  what it answers — including the empty case, where no index exists and no check
+  should be generated. `by=` resolves as a sibling callable, so a misspelling
+  fails at the directive rather than as an out-of-range index in generated code.
+
 - **A `serializable` mixin, distinct from `snapshotisolation`.** Snapshot
   isolation prevents dirty writes, dirty reads and read skew, and *permits write
   skew* — that permission is the model'''s defining property and the reason a
