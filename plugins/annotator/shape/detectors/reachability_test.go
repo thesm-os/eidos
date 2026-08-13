@@ -158,27 +158,46 @@ func sweepDispatch(all []shape.Detector) (matches, wins map[string]int) {
 	matches = make(map[string]int, len(all))
 	wins = make(map[string]int, len(all))
 
-	for _, ps := range paramSpace() {
-		for _, rs := range returnSpace() {
-			callable := &sdk.Method{Name: "M", Params: ps, Returns: sdk.AnonReturns(rs...)}
-			claimed := false
-			for _, d := range all {
-				detect, ok := d.Detect["golang"]
-				if !ok {
-					continue
-				}
-				if _, hit := detect(callable); !hit {
-					continue
-				}
-				matches[d.Name]++
-				if !claimed {
-					wins[d.Name]++
-					claimed = true
+	for _, name := range nameSpace() {
+		for _, ps := range paramSpace() {
+			for _, rs := range returnSpace() {
+				callable := &sdk.Method{Name: name, Params: ps, Returns: sdk.AnonReturns(rs...)}
+				claimed := false
+				for _, d := range all {
+					detect, ok := d.Detect["golang"]
+					if !ok {
+						continue
+					}
+					if _, hit := detect(callable); !hit {
+						continue
+					}
+					matches[d.Name]++
+					if !claimed {
+						wins[d.Name]++
+						claimed = true
+					}
 				}
 			}
 		}
 	}
 	return matches, wins
+}
+
+// nameSpace returns the callable names the sweep probes.
+//
+// Every other axis varies the signature, because every other detector
+// reads only the signature. [closer] is the exception — it separates a
+// teardown from a poison probe by name, the two being identical as
+// shapes — so a sweep holding one name constant could never reach it,
+// and would report its predicate unsatisfiable rather than its pool
+// too narrow.
+//
+// Two entries and no more: one name that detector claims and one it
+// does not, which is the whole discrimination. The pair also keeps
+// [poisonaccessor] reachable, since the claimed name would otherwise
+// take every signature the two share.
+func nameSpace() []string {
+	return []string{"M", "Close"}
 }
 
 // TestAll_Reachability pins that every shipped detector both

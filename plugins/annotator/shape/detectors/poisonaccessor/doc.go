@@ -12,4 +12,17 @@
 //
 // No key or value type is stamped — poison accessors have
 // neither.
+//
+// A teardown wears the same signature and is claimed first by
+// [closer], which gates on the method name. The two carry opposite
+// semantics — a latch answers the same every time, a close-once
+// teardown deliberately does not — so a law selecting on this shape
+// would redden a correct Close. Structure cannot separate them; the
+// name is the only signal there is.
+//
+// This shape says a callable reports a latched failure. It does not
+// say anything can cause one: an Err() with nothing that trips it is a
+// signature, not a latch. The claim that a subject can be poisoned,
+// and by what, is the poisonable mixin”'s induce= — a promise, and so
+// declared rather than detected.
 package poisonaccessor

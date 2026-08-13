@@ -81,6 +81,20 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **A `closer` shape — the bare teardown `Close() error`.** `poisonaccessor`
+  accepted any nullary bare-error callable and nothing above it could claim the
+  teardown spelling: `lifecycle` needs a context parameter, `voidlifecycle` no
+  returns. So `io.Closer` and most of real Go classified as a poison probe, and
+  a read-purity law over that shape reddens a correct close-once teardown, which
+  answers differently the second time by contract.
+
+  The catalogue'''s first name-gated detector, deliberately: `Close() error` and
+  `Err() error` are the same signature, so no structural rule separates them.
+  `Close`, `Shutdown`, `Stop`, `Disconnect` and `Terminate` are claimed; every
+  other bare-error nullary still falls to `poisonaccessor`. Both directions
+  escape through `+gen:shape`, since pinning to another shape is allowed and
+  only suppression is not.
+
 - **An `answeringwriter` shape — a write that answers the stored state.**
   `(ctx, V) (V, error)` had no classification: `writer` requires no non-error
   result, and the form fell to `reader`, which recorded the written value as a
