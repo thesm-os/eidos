@@ -81,6 +81,20 @@ omitted unless they change what a caller can rely on.
   Absence stays legal: the bare form is still a classification, and whether a
   check is worth emitting without an axis belongs to the generator.
 
+- **A `serializable` mixin, distinct from `snapshotisolation`.** Snapshot
+  isolation prevents dirty writes, dirty reads and read skew, and *permits write
+  skew* — that permission is the model'''s defining property and the reason a
+  system wanting serializability asks for more than a snapshot. There was no way
+  to state the stronger claim, so a store that ruled out write skew could not say
+  so.
+
+  A sibling rather than a `level=` param on the existing mixin: the two are
+  different claims, not one claim with a knob, and a store is not
+  snapshot-isolated at level serializable. `snapshotisolation`'''s own doc now
+  names what it permits and points at the sibling, since the distinction decides
+  which anomaly checks apply — an anti-dependency-cycle check is correct against
+  serializability and reddens a correct snapshot store.
+
 - **A `closer` shape — the bare teardown `Close() error`.** `poisonaccessor`
   accepted any nullary bare-error callable and nothing above it could claim the
   teardown spelling: `lifecycle` needs a context parameter, `voidlifecycle` no

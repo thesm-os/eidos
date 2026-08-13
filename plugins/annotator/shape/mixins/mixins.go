@@ -87,6 +87,7 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sample"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scheduled"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scope"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/serializable"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/sideeffect"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/snapshotisolation"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/stableorder"
@@ -123,6 +124,7 @@ func All() []shape.Mixin {
 		overmatch.Mixin(),
 		permutation.Mixin(),
 		poisonable.Mixin(),
+		serializable.Mixin(),
 		snapshotisolation.Mixin(),
 		stableorder.Mixin(),
 		sticky.Mixin(),
