@@ -31,6 +31,11 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`causal` takes `version=`.** The same ordering stamp the four session
+  guarantees carry: a law reading a trace per client orders operations by a
+  store-assigned version, and without the member named, no operation carries an
+  ordering. Opaque, as theirs are.
+
 - **A resolver scope for members of a role's answered type.** `KindMember`
   resolves a param naming a method on the handle a role's callable returns —
   `watcher next=Next stop=Stop`, where both are declared on the subscription
