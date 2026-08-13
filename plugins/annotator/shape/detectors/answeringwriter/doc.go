@@ -17,11 +17,18 @@
 // dies with the call and the value the store actually kept is never
 // observed.
 //
-// Drawn by parameter type equalling the first result type, which is
-// the whole definition. The one signature it takes from [reader] is a
-// read whose key and value types are identical, and a lookup keyed by
-// the type it returns is not a shape worth preserving the ambiguity
-// for.
+// Drawn by a package-qualified parameter type equalling the first
+// result type. Both halves are load-bearing. Identity alone takes every
+// coincidentally-typed read with it — a string-keyed string cache, a
+// codec's transformers, a classifier, a loader — none of which answers
+// a stored state; the qualifier separates them, since a predeclared
+// type carries no package and the state this detector exists for is a
+// declared type carrying identity and stamps.
+//
+// What it still takes from [reader] is a read keyed by a struct and
+// returning that same struct. That shape is genuinely undecidable from
+// the signature alone, and [shape.DirectiveName] pins it where it
+// occurs.
 //
 // Named for what it does rather than `upserter`, which is already a
 // contract in this vocabulary — a writer paired with a reader under

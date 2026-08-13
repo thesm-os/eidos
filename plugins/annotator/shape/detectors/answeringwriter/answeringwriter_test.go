@@ -33,6 +33,22 @@ func fn(name, param, result string) *sdk.Function {
 	}
 }
 
+// builtinFn builds a callable whose parameter and first result are the
+// same predeclared type — the coincidence the corpus is full of.
+func builtinFn(name, typ string) *sdk.Function {
+	return &sdk.Function{
+		Name: name, Package: "x",
+		Params: []*sdk.Param{
+			{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
+			{Name: "v", Type: &sdk.TypeRef{Name: typ}},
+		},
+		Returns: sdk.AnonReturns(
+			&sdk.TypeRef{Name: typ},
+			&sdk.TypeRef{Name: "error"},
+		),
+	}
+}
+
 // run dispatches the umbrella over pkg with the supplied detectors, in
 // registration order.
 func run(t *testing.T, pkg *sdk.Package, dets ...shape.Detector) {
@@ -85,6 +101,33 @@ func TestDetector(t *testing.T) {
 			answeringwriter.Detector())
 		if got := stamped(get.Meta()); got == answeringwriter.Name {
 			t.Fatal("a read with distinct key and value types was drawn")
+		}
+	})
+
+	t.Run("a predeclared type is not an answered stored state", func(t *testing.T) {
+		t.Parallel()
+		// The corpus's most common coincidence: a string-keyed string
+		// cache, a codec's transformers, a classifier, a loader. Each
+		// has parameter type equal to first result and none is a write
+		// answering what it stored. Twenty-one fixtures reclassified
+		// before this guard existed.
+		for _, typ := range []string{"string", "int", "bool"} {
+			get := builtinFn("Get", typ)
+			run(t, &sdk.Package{Name: "x", Path: "x", Functions: []*sdk.Function{get}},
+				answeringwriter.Detector())
+			if got := stamped(get.Meta()); got == answeringwriter.Name {
+				t.Errorf("(%s) (%s, error) was drawn as an answered write", typ, typ)
+			}
+		}
+	})
+
+	t.Run("a predeclared-typed read stays with reader", func(t *testing.T) {
+		t.Parallel()
+		get := builtinFn("Get", "string")
+		run(t, &sdk.Package{Name: "x", Path: "x", Functions: []*sdk.Function{get}},
+			answeringwriter.Detector(), reader.Detector())
+		if got := stamped(get.Meta()); got != reader.Name {
+			t.Fatalf("shape = %q, want reader to keep it", got)
 		}
 	})
 

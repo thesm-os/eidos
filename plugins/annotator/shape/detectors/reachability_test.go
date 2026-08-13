@@ -116,12 +116,19 @@ func paramSpace() [][]*sdk.Param {
 
 // returnSpace returns every return list the sweep probes: 0-3
 // returns drawn from a pool reaching each predicate the catalog
-// discriminates on — pointer, slice, bool, error, and iter.Seq.
+// discriminates on — pointer, slice, bool, error, iter.Seq, and a
+// package-qualified named type.
+//
+// The named entry matches one in the parameter pool on purpose:
+// answeringwriter discriminates on the parameter's type equalling the
+// first result's, so a pool whose two halves share no named type
+// cannot reach it.
 func returnSpace() [][]*sdk.TypeRef {
 	doc := refNamed("example.com/x", "Doc")
 	pool := []*sdk.TypeRef{
 		refBuiltin("string"), refPointer(doc), refBuiltin("bool"),
 		refBuiltin("error"), refIterSeq(refBuiltin("string")), refSlice(refBuiltin("string")),
+		refNamed("io", "Reader"),
 	}
 
 	var out [][]*sdk.TypeRef

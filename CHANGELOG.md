@@ -54,10 +54,13 @@ omitted unless they change what a caller can rely on.
   since a `(ctx, V) error` writer answers nothing and the stamp dies with the
   call.
 
-  Drawn by the parameter type equalling the first result type, which is the
-  whole rule — accepting any single non-error result would take every reader
-  with it. It runs above `reader` and below `pointerreader`, which returns a
-  bare pointer with no error and cannot collide.
+  Drawn by a package-qualified parameter type equalling the first result type.
+  Both halves are load-bearing: identity alone takes every coincidentally-typed
+  read with it — a string-keyed string cache, a codec's transformers, a
+  classifier — and the qualifier separates them, since a predeclared type
+  carries no package while an answered stored state is a declared type. It runs
+  above `reader` and below `pointerreader`, which returns a bare pointer with
+  no error and cannot collide.
 
   Named for what it does rather than `upserter`, which is already a contract
   here: one is a signature, the other a writer-and-reader protocol.

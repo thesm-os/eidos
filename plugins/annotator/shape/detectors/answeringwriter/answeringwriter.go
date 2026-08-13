@@ -31,14 +31,27 @@ func Detector() shape.Detector {
 	}
 }
 
-// detectGolang recognises one non-context parameter answered by its
-// own type beside an error.
+// detectGolang recognises one non-context parameter of a
+// package-qualified type, answered by that same type beside an error.
 //
-// Type identity is the whole rule. Accepting any single non-error
-// result would take every reader with it, which is the failure the
-// [writer] detector's own comment records from the other direction:
-// a permissive rule at a higher priority claimed reads and labelled
-// the key as the written value.
+// Type identity alone is too wide, and the corpus says so: a
+// `Get(ctx, key string) (string, error)` cache, a codec's
+// `Encode`/`Decode`, a classifier, a loader — every one has its
+// parameter type equal to its first result, and every one is a read or
+// a transformation rather than a write answering what was stored.
+// Twenty-one fixtures reclassified before this guard existed.
+//
+// The qualifier is what separates them. A predeclared type carries no
+// package, so `string` fails here while `x.Value` passes; the answered
+// stored state this detector exists for is a declared type carrying
+// identity and stamps, never a bare builtin. A struct-keyed read
+// returning its own key type would still be claimed, and that shape is
+// genuinely ambiguous from the signature alone.
+//
+// Both halves are needed. Dropping identity would take every reader,
+// which is the failure the [writer] detector's own comment records
+// from the other direction: a permissive rule at a higher priority
+// claimed reads and labelled the key as the written value.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
 	params, returns := shape.GoCallable(n)
 	if !shape.GoHasError(returns) {
@@ -49,8 +62,12 @@ func detectGolang(n sdk.Node) (shape.Match, bool) {
 	if len(values) != 1 || len(results) != 1 {
 		return shape.Match{}, false
 	}
-	written := shape.QName(values[0].Type)
-	if written == "" || written != shape.QName(results[0]) {
+	param := values[0].Type
+	if param == nil || param.Package == "" {
+		return shape.Match{}, false
+	}
+	written := shape.QName(param)
+	if written != shape.QName(results[0]) {
 		return shape.Match{}, false
 	}
 	return shape.Match{ValueType: written}, true
