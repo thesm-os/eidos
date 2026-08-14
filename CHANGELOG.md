@@ -13,6 +13,40 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Fixed
+
+- **A mistyped mixin parameter key is reported instead of stamped.** `+gen:mixin
+  bounded limmit=10` stamped `shape.mixin.bounded.limmit` and said nothing;
+  every consumer pulls declared keys, so the stray one landed in a namespace
+  nobody reads and un-armed exactly one check while the run stayed green.
+
+  A mixin can refuse an unknown key where a contract cannot, and that asymmetry
+  is a property of the vocabularies rather than an oversight: a contract'''s
+  undeclared keys are partner references, a second open vocabulary keyed by
+  role, so it routes what it does not recognise. A mixin has no second reading
+  — every key is either declared or a typo.
+
+- **A mistyped contract name is reported instead of silently skipped.**
+  `+gen:contract cursur role=next` classified nothing and exited zero, while
+  the same typo in a mixin name had always been a positioned diagnostic. A
+  contract name selects a whole law family downstream, so the typo dropped every
+  member of it with the callable still listed as classified.
+
+  `reportUnregisteredMixin`'''s docblock claimed it mirrored the resolver'''s
+  treatment of an unregistered contract. It mirrored nothing, and structurally
+  could not: the name is never stamped, so a pass iterating stamped memberships
+  has nothing to find. Both paths now report their own, and both say why.
+
+- **`run` reports orphaned test outputs.** Layout gives any `_test.go` output
+  the external-test shift, so its import path is `<pkg>_test` — a path no source
+  package declares. The orphan report matched raw against the loaded set, so the
+  lookup missed for every test output and a whole class could never be reported.
+  `prune` already applied the trim; the report now does too.
+
+  Its warning named `eidos prune`, a binary an embedder does not ship. It names
+  the `prune` subcommand instead, which is what an embedder registering
+  `cli.PruneCommand` actually exposes.
+
 ### Breaking
 
 - **A param declares its own kind: `Params` is now `[]shape.Param`.** The

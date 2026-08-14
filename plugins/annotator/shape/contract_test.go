@@ -5,8 +5,10 @@ package shape_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -384,4 +386,64 @@ func assertContracts(t *testing.T, bag *sdk.Bag, want []string) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Contracts = %v, want %v", got, want)
 	}
+}
+
+// TestContract_UnregisteredNameIsReported pins the diagnostic for a
+// contract name this pipeline has none registered for.
+//
+// A contract name selects an entire law family downstream, so a typo
+// drops every member of it while a consumer's output still lists the
+// callable as classified — invisible at every layer that could catch
+// it. The same typo in a mixin name has always been reported; the two
+// vocabularies sat one line apart with opposite treatment.
+func TestContract_UnregisteredNameIsReported(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a misspelled contract name is reported", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn(
+			"Next",
+			&sdk.Directive{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"cursur"},
+				KV:   map[string]string{"role": "next"},
+			},
+		)
+		diags := runAnnotateDiags(t, shape.New(), pkgWithFunction(fn))
+
+		var msg string
+		for _, d := range diags {
+			if d.Severity == diag.Error {
+				msg = d.Message
+			}
+		}
+		if msg == "" {
+			t.Fatal("an unregistered contract name raised nothing")
+		}
+		if !strings.Contains(msg, "cursur") {
+			t.Errorf("message = %q, want it to name the offending contract", msg)
+		}
+		if got := shape.Contracts(fn.Meta()); len(got) != 0 {
+			t.Errorf("stamped %v for a name nothing is registered under", got)
+		}
+	})
+
+	t.Run("a registered contract name raises nothing", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn(
+			"Next",
+			&sdk.Directive{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"cursor"},
+				KV:   map[string]string{"role": "next"},
+			},
+		)
+		spec := shape.Contract{Name: "cursor", Roles: []string{"next", "close"}}
+		diags := runAnnotateDiags(t, shape.New().Contracts(spec), pkgWithFunction(fn))
+		for _, d := range diags {
+			if d.Severity == diag.Error {
+				t.Fatalf("unexpected diagnostic: %s", d.Message)
+			}
+		}
+	})
 }

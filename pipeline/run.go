@@ -160,6 +160,20 @@ func (p *Pipeline) writeManifest(rec *recordingSink, s *store.Store) {
 	}
 }
 
+// sourceImportPath maps an output's import path back to the source
+// package the run loaded.
+//
+// Layout gives any output whose filename ends `_test.go` the external
+// test shift, appending `_test` to its package and import path — a
+// path no source package ever declares. Matching an output against the
+// loaded set without undoing that shift misses every test output, so
+// the whole class becomes unreportable rather than some of it.
+//
+// The prune subcommand applies the same trim for the same reason.
+func sourceImportPath(ip string) string {
+	return strings.TrimSuffix(ip, "_test")
+}
+
 // orphanCap bounds how many paths the orphan warning names before it
 // summarises the rest. A run that stops emitting a whole tier produces
 // one per node, and a diagnostic longer than the output it describes
@@ -197,7 +211,7 @@ func (p *Pipeline) reportOrphans(prev, current *manifest.Manifest) {
 		if _, still := produced[o.Target]; still {
 			continue
 		}
-		if _, loaded := scope[o.Target.ImportPath]; !loaded {
+		if _, loaded := scope[sourceImportPath(o.Target.ImportPath)]; !loaded {
 			continue
 		}
 		orphans = append(orphans, filepath.Join(o.Target.Dir, o.Target.Filename))
@@ -214,7 +228,8 @@ func (p *Pipeline) reportOrphans(prev, current *manifest.Manifest) {
 		suffix = fmt.Sprintf(" and %d more", len(orphans)-orphanCap)
 	}
 	p.diag.For("pipeline").Warnf(position.Pos{},
-		"%d output(s) from a previous run are no longer produced and remain on disk: %s%s — run `eidos prune` to remove them",
+		"%d output(s) from a previous run are no longer produced and remain on disk: %s%s"+
+			" — run the `prune` subcommand to remove them",
 		len(orphans), strings.Join(named, ", "), suffix)
 }
 

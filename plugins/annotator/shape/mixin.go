@@ -6,6 +6,7 @@ package shape
 import (
 	"maps"
 	"slices"
+	"strings"
 
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -166,7 +167,8 @@ func (p *Plugin) applyMixins(
 			params = nil
 		}
 		for _, name := range d.Args {
-			if _, registered := p.mixins[name]; !registered {
+			spec, registered := p.mixins[name]
+			if !registered {
 				// Report and skip this name only — an unregistered
 				// name must not discard the rest of the line.
 				//
@@ -178,8 +180,13 @@ func (p *Plugin) applyMixins(
 				reportUnregisteredMixin(host, name, sink)
 				continue
 			}
+			accepted := paramSet(ParamKeys(spec.Params))
 			for k, v := range params {
 				if v == "" {
+					continue
+				}
+				if _, declared := accepted[k]; !declared {
+					reportUnknownMixinParam(host, spec, k, sink)
 					continue
 				}
 				MixinParamKey(name, k).Set(bag, v, mixinStampedBy)
@@ -190,12 +197,15 @@ func (p *Plugin) applyMixins(
 }
 
 // reportUnregisteredMixin emits the diagnostic for a mixin name
-// this pipeline has no [Mixin] registered for. Mirrors the
-// resolver's treatment of an unregistered contract: a name nobody
-// can interpret is an authoring mistake, not a silent no-op.
+// this pipeline has no [Mixin] registered for: a name nobody can
+// interpret is an authoring mistake, not a silent no-op.
 //
-// The name is not stamped, so downstream consumers never observe a
-// mixin the pipeline cannot describe.
+// Reported here and not by the resolver, and the reason is structural
+// rather than a division of labour. The name is not stamped, so a
+// resolver iterating stamped attachments has nothing to iterate — the
+// only pass that can see an unregistered name is the one that
+// declined to stamp it. [reportUnregisteredContract] carries the same
+// argument for the same reason.
 func reportUnregisteredMixin(host sdk.Node, name string, sink *sdk.PluginSink) {
 	sink.Errorf(host.Pos(),
 		"shape.mixin: %q is not registered with this pipeline. Check the spelling, "+
@@ -250,4 +260,32 @@ func Mixins(bag *sdk.Bag) []string {
 	}
 	out, _ := MetaMixins.Get(bag)
 	return out
+}
+
+// reportUnknownMixinParam emits the diagnostic for a KV key the named
+// mixin does not declare, and declines to stamp it.
+//
+// A mixin can refuse an unknown key where a [Contract] cannot, and the
+// asymmetry is a property of the two vocabularies rather than an
+// oversight in one. A contract's undeclared keys are partner
+// references — a second, open vocabulary keyed by role — so it routes
+// what it does not recognise instead of rejecting it. A mixin has no
+// such second reading: every key is either declared or a typo.
+//
+// Silence here was the worse half of that asymmetry. Every parameter
+// is a claim something downstream binds against, so a misspelled key
+// stamps into a namespace nobody reads and un-arms exactly one check
+// while the run stays green — which is the failure a classifier must
+// not have, because its output is a promise about what was verified.
+func reportUnknownMixinParam(host sdk.Node, spec Mixin, key string, sink *sdk.PluginSink) {
+	accepted := ParamKeys(spec.Params)
+	if len(accepted) == 0 {
+		sink.Errorf(host.Pos(),
+			"shape.mixin %q: %q is not a parameter it accepts; this mixin takes none",
+			spec.Name, key)
+		return
+	}
+	sink.Errorf(host.Pos(),
+		"shape.mixin %q: %q is not a parameter it accepts. Declared: %s",
+		spec.Name, key, strings.Join(accepted, ", "))
 }

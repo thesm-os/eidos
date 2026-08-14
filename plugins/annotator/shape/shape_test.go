@@ -576,6 +576,24 @@ func runAnnotateAgainst(t *testing.T, p *shape.Plugin, s *sdk.Store) {
 	}
 }
 
+// runAnnotateDiags runs p over a package holding fn and returns every
+// diagnostic raised, for tests asserting that an authoring mistake is
+// reported rather than only that it stamped nothing.
+func runAnnotateDiags(t *testing.T, p *shape.Plugin, pkg *sdk.Package) []sdk.Diag {
+	t.Helper()
+	s := store.New()
+	if err := s.Nodes().AddPackage(pkg); err != nil {
+		t.Fatalf("AddPackage: %v", err)
+	}
+	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
+	sink := diag.New()
+	ctx := &sdk.AnnotatorContext{Store: s, Reader: store.NewReader(s), Diag: sink}
+	if err := p.Annotate(ctx); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	return sink.Diagnostics()
+}
+
 // newAnnotatorContext returns a context wrapping s with a fresh
 // reader and an empty diagnostic sink.
 func newAnnotatorContext(t *testing.T, s *sdk.Store) *sdk.AnnotatorContext {

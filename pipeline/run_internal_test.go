@@ -832,6 +832,36 @@ func TestReportOrphans(t *testing.T) {
 		}
 	})
 
+	t.Run("a test output is reported despite the external-test shift", func(t *testing.T) {
+		t.Parallel()
+		// Layout appends `_test` to a `_test.go` output's import path,
+		// and no source package declares that path. Matching without
+		// undoing the shift misses every test output, so the whole
+		// class goes unreportable rather than some of it.
+		p, d := pipeWith("example.com/x")
+		p.reportOrphans(
+			manifestOf(out("a.gen_test.go", "example.com/x_test")),
+			manifestOf(),
+		)
+		if got := warned(d); !strings.Contains(got, "a.gen_test.go") {
+			t.Fatalf("warning = %q, want the test output named", got)
+		}
+	})
+
+	t.Run("a test output whose source package is out of scope is not reported", func(t *testing.T) {
+		t.Parallel()
+		// The trim must not widen the scope check into matching
+		// anything: a narrow run still reports only what it loaded.
+		p, d := pipeWith("example.com/x")
+		p.reportOrphans(
+			manifestOf(out("other.gen_test.go", "example.com/elsewhere_test")),
+			manifestOf(),
+		)
+		if got := warned(d); got != "" {
+			t.Fatalf("warned %q for an out-of-scope test package", got)
+		}
+	})
+
 	t.Run("a still-produced output raises nothing", func(t *testing.T) {
 		t.Parallel()
 		p, d := pipeWith("example.com/x")

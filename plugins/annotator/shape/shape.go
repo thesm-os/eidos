@@ -406,7 +406,7 @@ func (p *Plugin) handle(
 	front string,
 ) {
 	sink := ctx.Diag.For(PluginName)
-	p.applyContracts(bag, dirs)
+	p.applyContracts(n, bag, dirs, sink)
 	p.applyMixins(n, bag, dirs, sink)
 
 	if IsStamped(bag) {

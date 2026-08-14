@@ -115,7 +115,7 @@ func TestMixin_DirectiveStamping(t *testing.T) {
 		assertMixins(t, fn.Meta(), []string{"atomic"})
 	})
 
-	t.Run("unknown mixin name is silently skipped", func(t *testing.T) {
+	t.Run("unknown mixin name stamps nothing", func(t *testing.T) {
 		t.Parallel()
 		fn := mixinFn(
 			"X",
@@ -723,5 +723,68 @@ func TestMixin_SkippedEntryDoesNotStopTheCascade(t *testing.T) {
 				}
 			}
 		}
+	})
+}
+
+// TestMixin_UnknownParamIsReported pins the diagnostic for a KV key
+// the mixin does not declare.
+//
+// Every mixin parameter is a claim something downstream binds against,
+// so a misspelled key stamps into a namespace nobody reads and
+// un-arms exactly one check while the run stays green. A classifier
+// whose parameters can be misspelled into silence cannot promise what
+// its output says it promises.
+func TestMixin_UnknownParamIsReported(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a misspelled key is reported and not stamped", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn(
+			"Charge",
+			&sdk.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"rate-limited"},
+				KV:   map[string]string{"limmit": "100"},
+			},
+		)
+		diags := runAnnotateDiags(t, shape.New().Mixins(rateLimitedMixin()), pkgWithFunction(fn))
+
+		var msg string
+		for _, d := range diags {
+			if d.Severity == diag.Error {
+				msg = d.Message
+			}
+		}
+		if msg == "" {
+			t.Fatal("a key the mixin does not declare raised nothing")
+		}
+		if !strings.Contains(msg, "limmit") {
+			t.Errorf("message = %q, want it to name the offending key", msg)
+		}
+		if !strings.Contains(msg, "limit") {
+			t.Errorf("message = %q, want it to list the keys the mixin accepts", msg)
+		}
+		if got, ok := shape.MixinParamKey("rate-limited", "limmit").Get(fn.Meta()); ok {
+			t.Errorf("stamped the undeclared key as %q", got)
+		}
+	})
+
+	t.Run("a declared key still stamps", func(t *testing.T) {
+		t.Parallel()
+		fn := mixinFn(
+			"Charge",
+			&sdk.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"rate-limited"},
+				KV:   map[string]string{"limit": "100"},
+			},
+		)
+		diags := runAnnotateDiags(t, shape.New().Mixins(rateLimitedMixin()), pkgWithFunction(fn))
+		for _, d := range diags {
+			if d.Severity == diag.Error {
+				t.Fatalf("unexpected diagnostic: %s", d.Message)
+			}
+		}
+		assertMeta(t, fn.Meta(), shape.MixinParamKey("rate-limited", "limit"), "100")
 	})
 }

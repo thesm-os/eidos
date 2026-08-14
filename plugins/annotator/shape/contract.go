@@ -163,7 +163,9 @@ const contractStampedBy = PluginName + ".contract"
 // malformed positional, etc.) at Build time; this pass concerns
 // itself only with meta stamping for callables whose directives
 // already passed parse-time validation.
-func (p *Plugin) applyContracts(bag *sdk.Bag, dirs []*sdk.Directive) {
+func (p *Plugin) applyContracts(
+	host sdk.Node, bag *sdk.Bag, dirs []*sdk.Directive, sink *sdk.PluginSink,
+) {
 	for _, d := range dirs {
 		// The negated guard is defence-in-depth: the schema denies
 		// that form, so it cannot arrive from parsed source.
@@ -176,6 +178,7 @@ func (p *Plugin) applyContracts(bag *sdk.Bag, dirs []*sdk.Directive) {
 		}
 		spec, registered := p.contracts[name]
 		if !registered {
+			reportUnregisteredContract(host, name, sink)
 			continue
 		}
 		role := d.KV["role"]
@@ -250,4 +253,25 @@ func Contracts(bag *sdk.Bag) []string {
 	}
 	out, _ := MetaContracts.Get(bag)
 	return out
+}
+
+// reportUnregisteredContract emits the diagnostic for a contract name
+// this pipeline has no [Contract] registered for.
+//
+// A contract name selects an entire law family downstream, so a
+// mistyped one drops every member of it while a consumer's output
+// still lists the callable as classified. Skipping it silently made
+// the two vocabularies disagree one line apart: the same typo in a
+// mixin name has always been reported.
+//
+// Reported here rather than by the resolver, which cannot see it: the
+// name is not stamped, so a pass iterating stamped memberships has
+// nothing to find. The only pass that can report an unregistered name
+// is the one that declined to stamp it.
+func reportUnregisteredContract(host sdk.Node, name string, sink *sdk.PluginSink) {
+	sink.Errorf(host.Pos(),
+		"shape.contract: %q is not registered with this pipeline. Check the "+
+			"spelling or register the contract; an unregistered name classifies "+
+			"nothing, so every law selected by it is silently dropped",
+		name)
 }
