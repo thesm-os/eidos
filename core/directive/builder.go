@@ -57,9 +57,23 @@ func (b *SchemaBuilder) RequiredKeys(keys ...string) *SchemaBuilder {
 }
 
 // AllowedKeys restricts the permitted KV keys when set. Subsequent
-// calls append; an empty AllowedKeys list accepts any key.
+// calls append; an empty AllowedKeys list accepts any key. A
+// directive that accepts none says so with [SchemaBuilder.DenyKeys],
+// since calling this with no arguments cannot be told from never
+// calling it.
 func (b *SchemaBuilder) AllowedKeys(keys ...string) *SchemaBuilder {
 	b.s.AllowedKeys = append(b.s.AllowedKeys, keys...)
+	return b
+}
+
+// DenyKeys rejects every KV pair on the directive.
+//
+// For a directive whose contract is that it takes no arguments. Such a
+// schema could not previously state it: an empty AllowedKeys means
+// unrestricted, so a stray key parsed, validated and stamped nothing,
+// and an author who wrote one believed it had an effect.
+func (b *SchemaBuilder) DenyKeys() *SchemaBuilder {
+	b.s.DenyKeys = true
 	return b
 }
 

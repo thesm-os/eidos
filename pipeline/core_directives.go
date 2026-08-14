@@ -144,15 +144,17 @@ func coreDirectives() []directive.Schema {
 	return []directive.Schema{
 		directive.NewSchema(OutDirective).
 			Describe(
-				"Routing override for emit entities anchored to this source node. " +
-					"Positional path (filename or relative dir + filename) is required; " +
-					"optional `plugin=<name>` scopes the override to one plugin's output, " +
-					"and optional `pkg=<name>` pins the rendered package clause. CLI -o " +
-					"and -p override this directive in turn. Per-directive `out=` / `pkg=` " +
-					"keys on any plugin's own directive serve the same role with the " +
+				"Routing override for emit entities anchored to this source node. "+
+					"Positional path (filename or relative dir + filename) is required; "+
+					"optional `plugin=<name>` scopes the override to one plugin's output, "+
+					"optional `tag=<name>` scopes it to one of that plugin's outputs, "+
+					"and optional `pkg=<name>` pins the rendered package clause. CLI -o "+
+					"and -p override this directive in turn. Per-directive `out=` / `pkg=` "+
+					"keys on any plugin's own directive serve the same role with the "+
 					"emitter as natural anchor.",
 			).
 			Positional("filename").
+			AllowedKeys("plugin", "tag", "pkg").
 			DenyNegation().
 			Build(),
 		directive.NewSchema(ValueDirective).
@@ -166,6 +168,7 @@ func coreDirectives() []directive.Schema {
 					"re-registering per-plugin variants.",
 			).
 			Positional("override").
+			DenyKeys().
 			DenyNegation().
 			Build(),
 	}

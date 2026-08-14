@@ -163,6 +163,56 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects any key when the schema denies keys", func(t *testing.T) {
+		t.Parallel()
+		// A directive whose contract is "takes no arguments" could not
+		// state it: an empty AllowedKeys means unrestricted, so a stray
+		// key parsed, validated, stamped nothing, and the author
+		// believed it had an effect.
+		r := directive.NewRegistry()
+		assertNoError(t, r.Register(directive.NewSchema("mock").DenyKeys().Build()), "register")
+		d := &directive.Directive{
+			Name: "mock",
+			KV:   map[string]string{"pkg": "mine"},
+			Pos:  position.At("a.go", 1, 1),
+		}
+		sink, plugin := newSinkAndPlugin()
+		if directive.Validate([]*directive.Directive{d}, "interface", r, plugin) {
+			t.Fatalf("Validate should fail on a key a key-denying schema received")
+		}
+		if !errorContaining(sink, "accepts no keys") {
+			t.Fatalf("missing expected diagnostic; got %+v", sink.Diagnostics())
+		}
+	})
+
+	t.Run("accepts a key-denying directive carrying no keys", func(t *testing.T) {
+		t.Parallel()
+		r := directive.NewRegistry()
+		assertNoError(t, r.Register(directive.NewSchema("mock").DenyKeys().Build()), "register")
+		d := &directive.Directive{Name: "mock", Pos: position.At("a.go", 1, 1)}
+		sink, plugin := newSinkAndPlugin()
+		if !directive.Validate([]*directive.Directive{d}, "interface", r, plugin) {
+			t.Fatalf("Validate should pass; got %+v", sink.Diagnostics())
+		}
+	})
+
+	t.Run("a schema declaring neither still accepts any key", func(t *testing.T) {
+		t.Parallel()
+		// The zero value must keep meaning what it means today, or
+		// every existing schema changes behaviour on upgrade.
+		r := directive.NewRegistry()
+		assertNoError(t, r.Register(directive.NewSchema("mock").Build()), "register")
+		d := &directive.Directive{
+			Name: "mock",
+			KV:   map[string]string{"anything": "goes"},
+			Pos:  position.At("a.go", 1, 1),
+		}
+		sink, plugin := newSinkAndPlugin()
+		if !directive.Validate([]*directive.Directive{d}, "interface", r, plugin) {
+			t.Fatalf("Validate should pass; got %+v", sink.Diagnostics())
+		}
+	})
+
 	t.Run("rejects a missing required positional", func(t *testing.T) {
 		t.Parallel()
 		r := directive.NewRegistry()

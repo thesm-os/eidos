@@ -186,3 +186,53 @@ func (*openGen) Generate(*plugin.GeneratorContext) error { return nil }
 func (g *openGen) Directives() []directive.Schema {
 	return []directive.Schema{directive.NewSchema(directive.Name(g.name)).Build()}
 }
+
+// TestCoreDirectives_KeyDiscipline pins each core directive to the
+// keys it actually reads.
+//
+// Neither declared any, so a schema with an empty AllowedKeys accepted
+// every key: a misspelled `plugn=` on an out directive parsed,
+// validated and routed nothing, and the author believed the override
+// had scope. The value directive reads no keys at all and could not
+// say so until a schema could deny them outright.
+func TestCoreDirectives_KeyDiscipline(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T) *pipeline.Pipeline {
+		t.Helper()
+		p, err := pipeline.New().
+			WithFrontend(&stubFE{name: "fe"}).
+			WithBackend(&stubBE{name: "be"}).
+			WithSink(sink.NewMemory()).
+			Build()
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		return p
+	}
+
+	t.Run("out declares every key layout reads", func(t *testing.T) {
+		t.Parallel()
+		schema, ok := build(t).DirectiveRegistry().Lookup(pipeline.OutDirective)
+		if !ok {
+			t.Fatal("OutDirective missing from the core set")
+		}
+		for _, key := range []string{"plugin", "tag", "pkg"} {
+			if !slices.Contains(schema.AllowedKeys, key) {
+				t.Errorf("AllowedKeys = %v, missing %q which layout consults",
+					schema.AllowedKeys, key)
+			}
+		}
+	})
+
+	t.Run("value denies keys outright", func(t *testing.T) {
+		t.Parallel()
+		schema, ok := build(t).DirectiveRegistry().Lookup(pipeline.ValueDirective)
+		if !ok {
+			t.Fatal("ValueDirective missing from the core set")
+		}
+		if !schema.DenyKeys {
+			t.Fatal("ValueDirective reads no keys; an empty AllowedKeys accepts every one")
+		}
+	})
+}

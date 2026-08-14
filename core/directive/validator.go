@@ -108,7 +108,13 @@ func checkKeys(d *Directive, s Schema, sink *diag.PluginSink) bool {
 			ok = false
 		}
 	}
-	if len(s.AllowedKeys) > 0 {
+	switch {
+	case s.DenyKeys:
+		for key := range d.KV {
+			sink.Errorf(d.Pos, "directive %q accepts no keys; %q was given", d.Name, key)
+			ok = false
+		}
+	case len(s.AllowedKeys) > 0:
 		for key := range d.KV {
 			if !slices.Contains(s.AllowedKeys, key) {
 				sink.Errorf(d.Pos, "directive %q does not accept key %q (allowed: %v)", d.Name, key, s.AllowedKeys)

@@ -13,7 +13,24 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Added
+
+- **`DenyKeys()` on a directive schema.** A directive whose contract is that it
+  takes no arguments could not say so: an empty `AllowedKeys` means
+  unrestricted, so `AllowedKeys()` with no arguments was indistinguishable from
+  never calling it, and the only way to reject a stray key was to enumerate one
+  the directive did not want.
+
+  A flag rather than a shape of `AllowedKeys`, so the zero value keeps meaning
+  what it means today and no existing schema changes behaviour.
+
 ### Fixed
+
+- **The two core directives declare the keys they read.** Neither did, so a
+  misspelled `plugn=` on `+gen:out` parsed, validated and routed nothing while
+  the author believed the override had scope. `out` now declares `plugin`,
+  `tag` and `pkg` — the three layout consults, one of which its own description
+  omitted — and `value`, which reads none, denies keys outright.
 
 - **A mistyped mixin parameter key is reported instead of stamped.** `+gen:mixin
   bounded limmit=10` stamped `shape.mixin.bounded.limmit` and said nothing;

@@ -36,8 +36,20 @@ type Schema struct {
 
 	// AllowedKeys, when non-empty, restricts which KV keys are
 	// permitted. An empty AllowedKeys accepts any keys (still
-	// subject to RequiredKeys).
+	// subject to RequiredKeys) — see [Schema.DenyKeys] for the
+	// directive that accepts none.
 	AllowedKeys []string
+
+	// DenyKeys rejects every KV pair, for a directive whose whole
+	// contract is that it takes no arguments.
+	//
+	// A separate flag rather than a shape of [Schema.AllowedKeys],
+	// because an empty list already means unrestricted: a directive
+	// accepting no keys and one accepting any are indistinguishable
+	// otherwise, and the only way to reject a stray key would be to
+	// enumerate a key the directive does not want. Keeping the zero
+	// value's meaning also leaves every existing schema unchanged.
+	DenyKeys bool
 
 	// PositionalArgs describes positional argument slots in order.
 	PositionalArgs []PositionalArg
