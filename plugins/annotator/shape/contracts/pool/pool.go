@@ -10,14 +10,21 @@ const Name = "pool"
 
 // Roles enumerates the contract's role vocabulary.
 //
+// `stats` names the accounting observation beside the cycle it
+// accounts for, and is optional: a pool without one is still a pool,
+// and a law reading the numbers simply does not bind. It stays out of
+// [Contract.Required] for that reason, while the validator's
+// one-per-role rule still applies — two accounting methods would leave
+// a reader of the numbers with no way to choose.
+//
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"get", "put"}
+var Roles = []string{"get", "put", "stats"}
 
 // Contract returns the [shape.Contract] this package contributes.
 // The contract requires both `get` and `put` partners on the
 // host (Get side) declaration, and ships a [shape.ContractValidator]
 // that flags pool instances where either side is missing after
-// resolver back-stamping.
+// resolver back-stamping. `stats` is not required — see [Roles].
 func Contract() shape.Contract {
 	return shape.Contract{
 		Name:     Name,

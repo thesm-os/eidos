@@ -156,3 +156,53 @@ func TestContract_ValidatorFlagsDuplicateGet(t *testing.T) {
 	diags := contracttest.RunPipeline(t, pool.Contract(), pkg)
 	contracttest.AssertContainsDiag(t, diags, sdk.SeverityError, "exactly one get")
 }
+
+// TestContract_StatsRole covers the optional accounting partner.
+//
+// A pool without one is still a pool, so the role must resolve when
+// given and raise nothing when absent — the binding it enables reads
+// numbers from a method the resolver qualified, rather than from a
+// closure hand-wired against a name nothing validated.
+func TestContract_StatsRole(t *testing.T) {
+	t.Parallel()
+
+	getWith := func(partners map[string]string) *sdk.Function {
+		return &sdk.Function{
+			Name: "Get", Package: "x",
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
+					contracttest.HostDirective(pool.Name, "get", partners),
+				},
+			},
+		}
+	}
+	pkgOf := func(host *sdk.Function, extra ...*sdk.Function) *sdk.Package {
+		fns := append([]*sdk.Function{host, {Name: "Put", Package: "x"}}, extra...)
+		return &sdk.Package{Name: "x", Path: "x", Functions: fns}
+	}
+
+	t.Run("a declared stats partner is qualified and back-stamped", func(t *testing.T) {
+		t.Parallel()
+		host := getWith(map[string]string{"put": "Put", "stats": "Stats"})
+		stats := &sdk.Function{Name: "Stats", Package: "x"}
+		diags := contracttest.RunPipeline(t, pool.Contract(), pkgOf(host, stats))
+		contracttest.AssertNoErrorDiag(t, diags)
+
+		contracttest.AssertPartner(t, host.Meta(), pool.Name, "stats", "x.Stats")
+		contracttest.AssertRole(t, stats.Meta(), pool.Name, "stats")
+	})
+
+	t.Run("an absent stats partner is not an error", func(t *testing.T) {
+		t.Parallel()
+		diags := contracttest.RunPipeline(t, pool.Contract(),
+			pkgOf(getWith(map[string]string{"put": "Put"})))
+		contracttest.AssertNoErrorDiag(t, diags)
+	})
+
+	t.Run("a stats partner naming nothing in scope is reported", func(t *testing.T) {
+		t.Parallel()
+		host := getWith(map[string]string{"put": "Put", "stats": "Absent"})
+		diags := contracttest.RunPipeline(t, pool.Contract(), pkgOf(host))
+		contracttest.AssertContainsDiag(t, diags, sdk.SeverityError, "not found in scope")
+	})
+}

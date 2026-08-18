@@ -15,6 +15,15 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **An optional `stats` role on the `pool` contract**, naming the accounting
+  observation beside the cycle it accounts for. Not required — a pool without
+  one is still a pool, and a law reading the numbers simply does not bind. What
+  it buys is a balance or leak check reading from a method the resolver
+  qualified and back-stamped, rather than from a closure hand-wired against a
+  name nothing validated.
+
+### Added
+
 - **`DenyKeys()` on a directive schema.** A directive whose contract is that it
   takes no arguments could not say so: an empty `AllowedKeys` means
   unrestricted, so `AllowedKeys()` with no arguments was indistinguishable from
