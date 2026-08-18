@@ -21,6 +21,7 @@ package contracttest
 import (
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,6 +51,28 @@ func AssertIdentity(t *testing.T, c shape.Contract, wantName string, wantRoles [
 	}
 	if !reflect.DeepEqual(c.Roles, wantRoles) {
 		t.Fatalf("Contract().Roles = %v, want %v", c.Roles, wantRoles)
+	}
+	assertParamRoles(t, c)
+}
+
+// assertParamRoles fails when a [shape.Param.Role] names a role the
+// contract does not declare.
+//
+// A mis-scoped role is silent in production: the param simply never
+// applies, so its key routes as a partner reference and the directive
+// that meant to set it reports nothing. There is no registration-time
+// seam to catch it — [shape.Plugin.Contracts] is a map write — so the
+// check lives in the identity test every contract package already
+// calls, which puts the contract author's typo in the contract
+// author's own test.
+func assertParamRoles(t *testing.T, c shape.Contract) {
+	t.Helper()
+	for _, p := range c.Params {
+		if p.Role == "" || slices.Contains(c.Roles, p.Role) {
+			continue
+		}
+		t.Errorf("Contract().Params[%q].Role = %q, which is not in Roles %v",
+			p.Key, p.Role, c.Roles)
 	}
 }
 

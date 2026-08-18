@@ -43,6 +43,25 @@ func AssertIdentity(t *testing.T, m shape.Mixin, wantName string, wantParams []s
 	if !reflect.DeepEqual(m.Params, wantParams) {
 		t.Fatalf("Mixin().Params = %v, want %v", m.Params, wantParams)
 	}
+	assertNoParamRoles(t, m)
+}
+
+// assertNoParamRoles fails when a mixin param carries a
+// [shape.Param.Role].
+//
+// The field is a contract concept: a mixin has no role vocabulary, so
+// a scoped mixin param can never match and the key it names would
+// silently stop being accepted. Rejected rather than ignored, because
+// ignoring it is the exact silence the field was added to remove.
+func assertNoParamRoles(t *testing.T, m shape.Mixin) {
+	t.Helper()
+	for _, p := range m.Params {
+		if p.Role == "" {
+			continue
+		}
+		t.Errorf("Mixin().Params[%q].Role = %q; mixins have no roles, so a "+
+			"scoped param never applies", p.Key, p.Role)
+	}
 }
 
 // HostDirective builds a `+gen:mixin <name> [<param>=<value>]...`

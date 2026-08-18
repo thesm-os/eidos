@@ -378,26 +378,33 @@ func (r *Resolver) resolveOne(
 		}
 		r.resolvePartner(host, bag, hostQName, role, partnerRole, scope, spec, sink)
 	}
-	r.resolveContractVars(host, bag, spec, sink)
+	r.resolveContractVars(host, bag, role, spec, sink)
 	r.flagUnknownPartnerRoles(host, bag, spec, sink)
 }
 
-// resolveContractVars rewrites every declared [KindVar]
-// value on host from a raw name to the qualified name of the
-// package-level var it names.
+// resolveContractVars rewrites every declared param value on host
+// from a raw name to the qualified name of what it names, through
+// whichever scope the param's [ParamKind] selects.
 //
 // Separate from the partner loop above because the scope differs: a
 // partner is a callable reached through the host's own scope, and a
-// var is reached through the package — the same for a method host as
-// for a function one, since a sentinel is declared beside the type
-// rather than on it.
+// param may want the package (a sentinel is declared beside the type
+// rather than on it) or the type the host answers.
+//
+// Scoped by role through [ParamsForRole], the same predicate the
+// stamping pass routes with. Filtering here is not merely defensive:
+// a key declared for two roles with two kinds would otherwise resolve
+// through whichever scope came first in declaration order, and the
+// contract that needs role-scoped params at all is exactly the one
+// where that ordering is invisible to its author.
 func (r *Resolver) resolveContractVars(
 	host sdk.Node,
 	bag *sdk.Bag,
+	role string,
 	spec Contract,
 	sink *sdk.PluginSink,
 ) {
-	for _, p := range spec.Params {
+	for _, p := range ParamsForRole(spec.Params, role) {
 		resolveIn := r.scopeFor(p.Kind, host, nil)
 		if resolveIn == nil {
 			continue

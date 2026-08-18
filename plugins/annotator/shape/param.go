@@ -89,6 +89,48 @@ type Param struct {
 	// The zero value is [KindOpaque], so a param needing no
 	// resolution may leave it unset.
 	Kind ParamKind
+
+	// Role scopes the param to directives hosted by that role. The
+	// zero value applies it to every role, which is what a param
+	// declared before this field existed means.
+	//
+	// The field exists because one key can carry two meanings in one
+	// contract, chosen by the role hosting the directive. A cursor's
+	// `next` is a role on the standalone arm — a sibling callable
+	// beside Close — and a member of the handle on the producer arm,
+	// where Scan answers a Cursor whose Next lives on the returned
+	// type. Without the scope the two collide: the key is either
+	// always a param, which breaks the standalone arm's partner
+	// reference, or never one, which reports a correct producer
+	// directive as naming a partner that is not in scope.
+	//
+	// Meaningless on a [Mixin], which has no role vocabulary. The
+	// mixin test helper rejects a non-empty value rather than
+	// ignoring it, because a scope that silently never applies is
+	// the failure mode this field was added to remove.
+	Role string
+}
+
+// ParamsForRole returns the params that apply to a directive hosted
+// by role, in declaration order.
+//
+// The single home for "which params apply". Two passes need the
+// answer — the stamping pass deciding whether a KV key is a param or
+// a partner reference, and the resolver choosing a scope for it — and
+// a contract whose key means different things under different roles
+// is exactly the case where two implementations of the predicate
+// would agree only until someone declared the disagreement.
+//
+// An empty role matches only the unscoped params: a directive with no
+// role stamps nothing role-specific, so nothing role-scoped applies.
+func ParamsForRole(params []Param, role string) []Param {
+	var out []Param
+	for _, p := range params {
+		if p.Role == "" || p.Role == role {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ParamKeys returns the declared keys in declaration order.

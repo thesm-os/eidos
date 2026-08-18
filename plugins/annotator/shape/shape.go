@@ -308,9 +308,11 @@ func directives() []sdk.DirectiveSchema {
 				"Declares the annotated callable's membership in a named "+
 					"contract. Positional `name` carries the contract name; "+
 					"mandatory `role=<role>` names this callable's role within "+
-					"the contract; every other KV pair names a partner role and "+
-					"the sibling callable filling it (resolved by the refinement "+
-					"resolver into a qualified name). The negated form is "+
+					"the contract. Every other KV pair is read as a parameter "+
+					"when the contract declares that key for this role, and as "+
+					"a partner role plus the sibling callable filling it "+
+					"otherwise; both are resolved to qualified names by the "+
+					"refinement resolver. The negated form is "+
 					"rejected: a membership exists only where one is declared, "+
 					"so deleting the line is the suppression.",
 			).

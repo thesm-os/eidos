@@ -86,6 +86,20 @@ type ContractMember struct {
 	// this host (the Required check, when configured, surfaces
 	// the omission separately).
 	Partners map[string]string
+
+	// Params maps the contract's declared KV keys to their stamped
+	// values for this host — qualified names for the resolvable
+	// kinds, raw strings for [KindOpaque]. Absent keys are omitted
+	// rather than present-and-empty, so a validator tests presence
+	// with the comma-ok form.
+	//
+	// [Contract.Required] covers partner roles only. A contract
+	// demanding a param — the keys a [Param.Role] scopes to one arm
+	// are the case — enforces it from [Contract.Validate], and
+	// snapshotting here is what lets that hook read the directive
+	// without reaching back through [Node.Meta] to re-walk the bag
+	// this member already summarises. Mirrors [MixinAttachment.Params].
+	Params map[string]string
 }
 
 // ContractViolation is one invariant breach reported by a
@@ -132,12 +146,15 @@ func ContractPartnerKey(contract, role string) sdk.Key[string] {
 	)
 }
 
-// ContractParamKey returns the typed meta key carrying an opaque
-// directive parameter value — stamped at
+// ContractParamKey returns the typed meta key carrying a directive
+// parameter value — stamped at
 // `shape.contract.<contract>.param.<key>`. Used for KV pairs
-// declared in [Contract.Params] (non-callable values like field
-// names or literals). The refinement resolver does not touch
-// param values.
+// declared in [Contract.Params].
+//
+// The stamped value is the raw string for a [KindOpaque] key and a
+// qualified name once the refinement resolver has rewritten a
+// resolvable one, so a consumer running after the refinement bucket
+// reads qualified names for every kind but [KindOpaque].
 func ContractParamKey(contract, key string) sdk.Key[string] {
 	return sdk.EnsureKey(
 		"shape.contract."+contract+".param."+key,
@@ -186,7 +203,10 @@ func (p *Plugin) applyContracts(
 			continue
 		}
 		ContractRoleKey(name).Set(bag, role, contractStampedBy)
-		params := paramSet(ParamKeys(spec.Params))
+		// Role-scoped: a key declared for another role is not a param
+		// here, so it falls through to the partner branch and keeps
+		// whatever meaning it has under this role.
+		params := paramSet(ParamKeys(ParamsForRole(spec.Params, role)))
 		for k, v := range d.KV {
 			if k == "role" || v == "" {
 				continue

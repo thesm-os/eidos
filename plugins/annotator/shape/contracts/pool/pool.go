@@ -3,7 +3,11 @@
 
 package pool
 
-import "go.thesmos.sh/eidos/plugins/annotator/shape"
+import (
+	"fmt"
+
+	"go.thesmos.sh/eidos/plugins/annotator/shape"
+)
 
 // Name is the canonical contract name this package stamps.
 const Name = "pool"
@@ -47,33 +51,12 @@ func validate(members map[string][]shape.ContractMember) []shape.ContractViolati
 		}
 		for _, m := range members[role][1:] {
 			out = append(out, shape.ContractViolation{
-				Host:    m.Host,
-				Message: "pool requires exactly one " + role + "; got " + plural(got),
+				Host: m.Host,
+				Message: fmt.Sprintf(
+					"pool requires exactly one %s; got %d callables", role, got,
+				),
 			})
 		}
 	}
 	return out
-}
-
-// plural renders n as a short "<n> callables" / "1 callable"
-// string for the diagnostic body.
-func plural(n int) string {
-	if n == 1 {
-		return "1 callable"
-	}
-	return itoa(n) + " callables"
-}
-
-// itoa is the stdlib-allergic-free conversion used by [plural].
-// Inlined to keep this contract self-contained.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := []byte{}
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }

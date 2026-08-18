@@ -214,11 +214,15 @@ func (*Validator) checkRequired(
 }
 
 // accumulate records host as a member of (spec.Name, role) in
-// the per-contract member set, snapshotting the host's partner
-// stamps into a [ContractMember] so [Contract.Validate] can read
-// the pairings directly. Roles are deduplicated by host pointer
-// so the same callable joining a contract twice (via self-stamp
-// + back-stamp) appears once per role.
+// the per-contract member set, snapshotting the host's partner and
+// param stamps into a [ContractMember] so [Contract.Validate] can
+// read both directly. Roles are deduplicated by host pointer so the
+// same callable joining a contract twice (via self-stamp +
+// back-stamp) appears once per role.
+//
+// Params are snapshotted role-scoped, matching what the stamping
+// pass actually wrote: a key belonging to another role's arm is a
+// partner reference here, and already appears under partners.
 func (v *Validator) accumulate(spec Contract, role string, host sdk.Node, bag *sdk.Bag) {
 	byRole, ok := v.members[spec.Name]
 	if !ok {
@@ -239,7 +243,15 @@ func (v *Validator) accumulate(spec Contract, role string, host sdk.Node, bag *s
 			partners[partnerRole] = v
 		}
 	}
-	byRole[role] = append(byRole[role], ContractMember{Host: host, Partners: partners})
+	params := make(map[string]string)
+	for _, p := range ParamsForRole(spec.Params, role) {
+		if v, ok := ContractParamKey(spec.Name, p.Key).Get(bag); ok && v != "" {
+			params[p.Key] = v
+		}
+	}
+	byRole[role] = append(byRole[role], ContractMember{
+		Host: host, Partners: partners, Params: params,
+	})
 }
 
 // accumulateMixin records host's attachment to spec, snapshotting

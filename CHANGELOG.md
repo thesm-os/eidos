@@ -15,6 +15,34 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **A `Role` on `shape.Param`, and the `open` producer arm it unblocks on the
+  `cursor` contract.** A cursor is now declarable from either side: on its
+  reader, naming siblings as partner roles, or on the factory that answers one,
+  naming the handle's methods as members of the returned type.
+
+  The two arms want the same words. `next` and `close` are partner roles on the
+  reader arm and members of the produced handle on the factory arm, and a key
+  could previously carry only one meaning per contract — so the natural
+  spelling reported a correct directive as naming callables that were not in
+  scope. `Role` scopes a param to the directives hosted by one role, which is
+  the smallest thing that lets one key mean two things without a second
+  vocabulary to say which.
+
+  `open` requires `next=`. On the reader arm the reader is the host, so it
+  cannot be missing; on the factory arm `next=` is the only thing naming what to
+  read, and without it a callable classified as a cursor producer gives every
+  law selecting the contract nothing to call.
+
+- **`Params` on `shape.ContractMember`**, mirroring `MixinAttachment.Params`.
+  A `Contract.Validate` hook could read a member's partners from the snapshot
+  but had to reach back through `Host.Meta()` for its params — the re-walk the
+  snapshot exists to avoid. `Contract.Required` still covers partner roles only;
+  a contract demanding a param enforces it from `Validate`.
+
+  Both are struct-field additions: consumers naming fields are unaffected,
+  consumers using positional composite literals for `Param` or `ContractMember`
+  are not.
+
 - **An optional `stats` role on the `pool` contract**, naming the accounting
   observation beside the cycle it accounts for. Not required — a pool without
   one is still a pool, and a law reading the numbers simply does not bind. What

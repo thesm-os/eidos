@@ -589,3 +589,78 @@ func TestResolverConformance(t *testing.T) {
 	t.Parallel()
 	plugintest.RunSuite(t, shape.New().Resolver())
 }
+
+// TestResolver_RoleScopedParams covers [shape.ParamsForRole] on the
+// resolution side — the half the stamping pass cannot cover.
+//
+// The fixture is a contract declaring one key under two roles with two
+// kinds, which no catalog contract does yet. Without the scope the
+// resolver visits both entries in declaration order and resolves the
+// key through the wrong scope first, reporting a correct directive
+// before the right entry rescues the stamp. That the stamp still lands
+// is why the bug would be a diagnostic-only failure — loud to a
+// consumer, invisible to a test that only checks the stamp.
+func TestResolver_RoleScopedParams(t *testing.T) {
+	t.Parallel()
+
+	const paramRef = "ref"
+	dual := shape.Contract{
+		Name:  "dual",
+		Roles: []string{"produce", "hold"},
+		Params: []shape.Param{
+			{Key: paramRef, Kind: shape.KindMember, Role: "produce"},
+			{Key: paramRef, Kind: shape.KindVar, Role: "hold"},
+		},
+	}
+
+	build := func() (*sdk.Method, *sdk.Package) {
+		hold := &sdk.Method{
+			Name: "Hold",
+			Returns: sdk.AnonReturns(&sdk.TypeRef{
+				TypeKind: sdk.TypeRefPointer,
+				Elem:     &sdk.TypeRef{Name: "Handle", Package: "x"},
+			}),
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
+					contractDirective("dual", "hold", map[string]string{paramRef: "ErrGone"}),
+				},
+			},
+		}
+		owner := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{hold}}
+		hold.Owner = owner
+		// Loaded, and carrying a method — so the member scope is
+		// non-nil and genuinely misses ErrGone rather than declining.
+		handle := &sdk.Struct{
+			Name: "Handle", Package: "x",
+			Methods: []*sdk.Method{{Name: "Ping"}},
+		}
+		handle.Methods[0].Owner = handle
+		pkg := &sdk.Package{
+			Name: "x", Path: "x",
+			Structs:   []*sdk.Struct{owner, handle},
+			Variables: []*sdk.Variable{{Name: "ErrGone", Package: "x"}},
+		}
+		return hold, pkg
+	}
+
+	t.Run("the hosting role picks the scope", func(t *testing.T) {
+		t.Parallel()
+		hold, pkg := build()
+		runWithResolver(t, dual, pkg)
+
+		got, _ := shape.ContractParamKey("dual", paramRef).Get(hold.Meta())
+		if got != "x.ErrGone" {
+			t.Fatalf("param.ref = %q, want x.ErrGone via the var scope", got)
+		}
+	})
+
+	t.Run("the other role's entry reports nothing", func(t *testing.T) {
+		t.Parallel()
+		_, pkg := build()
+		for _, d := range runWithResolverDiags(t, dual, pkg) {
+			if d.Severity == sdk.SeverityError {
+				t.Fatalf("unexpected error diagnostic: %s", d.Message)
+			}
+		}
+	})
+}

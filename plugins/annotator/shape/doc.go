@@ -106,11 +106,15 @@
 //     raw name as authored, then the [Resolver] rewrites it to a
 //     qualified name. Consumers running after the refinement
 //     bucket see qualified names.
-//   - `shape.contract.<name>.param.<key>` — string; an opaque
-//     directive argument that names no callable, for keys declared
-//     in [Contract.Params] (`cas version=Version`,
-//     `rate-limit limit=100`). Stamped verbatim and never rewritten
-//     — the resolver deliberately leaves param values alone.
+//   - `shape.contract.<name>.param.<key>` — string; a directive
+//     argument for a key declared in [Contract.Params] (`cas
+//     version=Version`, `rate-limit limit=100`). Whether the value
+//     is rewritten depends on the key's [ParamKind]: a [KindOpaque]
+//     value stays verbatim, while the resolvable kinds are rewritten
+//     to qualified names in the refinement bucket exactly as a
+//     partner is. A key carrying a [Param.Role] is a param only on
+//     directives hosted by that role; elsewhere the same key is read
+//     as a partner reference.
 //
 // The [Resolver] also writes these keys in the reverse direction.
 // When it resolves a partner reference, it back-stamps the partner
