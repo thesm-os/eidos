@@ -75,6 +75,7 @@ import (
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/monotonicwrites"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/nilsafe"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/noduplicates"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/notfound"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/orderafter"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/overmatch"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/partition"
@@ -151,6 +152,7 @@ func All() []shape.Mixin {
 		lifecycleafterclose.Mixin(),
 		monotonic.Mixin(),
 		noduplicates.Mixin(),
+		notfound.Mixin(),
 		pointintime.Mixin(),
 		readyourwrites.Mixin(),
 		scheduled.Mixin(),

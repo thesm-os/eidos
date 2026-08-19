@@ -27,6 +27,13 @@ const ParamRead = "read"
 //
 // A sentinel is a package-level var, so it resolves through the var
 // scope rather than the callable one — see [shape.KindVar].
+//
+// Expiry-specific, not the read's general miss sentinel — that is the
+// `notfound` mixin's, declared on the read itself. The two usually
+// coincide, and a consumer deriving the expiry law should read this
+// key first and fall back to the read's declared miss sentinel when
+// absent. Declare both only when a lapsed read reports differently
+// from a missing one.
 const ParamNotFound = "notfound"
 
 // Params enumerates the KV parameter names this mixin accepts.

@@ -12,6 +12,12 @@
 // or passes vacuously depending on which side of the boundary zero
 // lands.
 //
+// `notfound=` is the lapsed read's sentinel specifically. When it is
+// absent, a consumer falls back to the miss sentinel the read declares
+// for itself via the `notfound` mixin — the two usually coincide, and
+// naming one here is only necessary when expiry reports differently
+// from plain absence.
+//
 // Distinct from the timeout mixin, which is about a callable returning
 // promptly when its context expires. That is a deadline on an
 // operation; this is a lifetime on stored data.

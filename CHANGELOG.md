@@ -15,6 +15,25 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **A `notfound` mixin — the reader's own miss sentinel** (#41). Every sentinel
+  in the vocabulary was scoped to a condition another shape owns — expiry,
+  deletion, rollback, close — so a plain reader could not say what a draw of an
+  absent key reports, and a consumer deriving a miss check had to assume the
+  opposite: that it answers the zero value. The only workaround was stamping
+  `ttl` on an interface with no expiry semantics, misclassifying it for every
+  other consumer of the stamp.
+
+  `//+gen:mixin notfound sentinel=ErrNotFound` on the read declares it. The
+  sentinel is required — a bare stamp could only lower to "some error came
+  back", which passes against every implementation — and resolves through the
+  var scope like every other.
+
+  The condition-scoped sentinels stay. They name different facts that usually
+  coincide: `ttl notfound=` is now documented as the lapsed read's sentinel
+  specifically, with consumers falling back to the read's declared miss
+  sentinel when it is absent. A store whose expired reads report differently
+  from its missing ones declares both.
+
 - **A `Role` on `shape.Param`, and the `open` producer arm it unblocks on the
   `cursor` contract.** A cursor is now declarable from either side: on its
   reader, naming siblings as partner roles, or on the factory that answers one,
