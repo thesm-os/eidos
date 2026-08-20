@@ -20,10 +20,13 @@ const Name = "scope"
 const ParamName = "name"
 
 // ParamAxis is the KV key naming the parameter of the annotated
-// callable that carries the scope — the same job `axis=` does on
-// the partition mixin. Naming it is what lets a check vary the
-// scope while holding everything else fixed; without it the
-// isolation half of the claim licenses nothing.
+// callable that carries the scope.
+//
+// Validated documentation, not a check-enabler: the checkable form
+// of the boundary claim is partition's, which names an observer
+// beside the axis. The pointer is still validated against the
+// host's parameter list, because a pointer that is wrong in
+// documentation misleads exactly as long as one in a check would.
 const ParamAxis = "axis"
 
 // Params enumerates the KV parameter names this mixin accepts.
@@ -46,12 +49,10 @@ func Mixin() shape.Mixin {
 // validateAxis reports an axis that does not name a parameter of the
 // annotated callable.
 //
-// Partition's reasoning, verbatim: a misspelled axis stamps like any
-// other opaque value, so without this the generated check varies
-// nothing and passes against every implementation — the silent shape
-// the axis exists to prevent. Absence is not reported; the bare form
-// classifies and a consumer without an axis declines the isolation
-// check.
+// A misspelled axis stamps like any other opaque value and points a
+// reader — human or tooling — at a parameter that is not there.
+// Absence is not reported: name= alone classifies, and an axis is
+// only owed where an author wants the carrier named.
 func validateAxis(attachments []shape.MixinAttachment) []shape.MixinViolation {
 	var out []shape.MixinViolation
 	for _, attached := range attachments {

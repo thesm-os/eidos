@@ -36,7 +36,15 @@
 // naming no parameter of the callable, or none of its partner, is
 // reported by this mixin's validator.
 //
+// This is the checkable form of the scope boundary claim; the
+// [scope] mixin is its naming form, carrying what no check needs
+// and this mixin deliberately lacks — which discipline the axis
+// implements (request, session, tenant). A callable wanting both
+// the name and the check stamps both.
+//
 // The recognised directive is:
 //
 //	//+gen:mixin partition read=Read axis=partition
+//
+// [scope]: go.thesmos.sh/eidos/plugins/annotator/shape/mixins/scope
 package partition

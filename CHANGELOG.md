@@ -36,6 +36,13 @@ omitted unless they change what a caller can rely on.
   `partition`'s is. Both optional: the bare forms still classify, and a
   consumer without the parameter declines the law rather than guessing it.
 
+  Amended by #46 before release: `scope` is a documentation stamp, not a
+  checkable claim. Varying the axis alone writes twice without observing
+  either scope — the check that cannot fail, which `partition`'s own docblock
+  rules out — so `partition` is the checkable form of the boundary claim and
+  `scope` its naming form; the two compose on a callable wanting both. The
+  axis stays as validated documentation.
+
   `errors` gains no parameter, deliberately: a condition-to-sentinel mapping
   in one KV value would be an encoded graph the resolver cannot check. Its
   docblock now says it owes documentation, not a check — the per-condition

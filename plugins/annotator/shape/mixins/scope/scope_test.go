@@ -37,9 +37,9 @@ func TestMixin(t *testing.T) {
 	})
 }
 
-// TestMixin_Axis covers the axis param: partition's reasoning on this
-// mixin, since a misspelled axis stamps like any other opaque value
-// and the check derived from it varies nothing.
+// TestMixin_Axis covers the axis param: validated documentation, so
+// a misspelled pointer is reported instead of stamping a parameter
+// name that is not there.
 func TestMixin_Axis(t *testing.T) {
 	t.Parallel()
 
@@ -88,8 +88,8 @@ func TestMixin_Axis(t *testing.T) {
 
 	t.Run("the bare form passes", func(t *testing.T) {
 		t.Parallel()
-		// name= alone classifies; the isolation check is declined
-		// rather than derived from a guessed parameter.
+		// name= alone classifies; an axis is only owed where the
+		// author wants the carrier named.
 		if diags := mixintest.RunWithValidator(t, scope.Mixin(), build("")); hasError(diags) {
 			t.Fatalf("unexpected error diagnostics: %+v", diags)
 		}
