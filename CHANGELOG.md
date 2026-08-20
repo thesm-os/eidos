@@ -15,6 +15,57 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`lang/golang` samples `time.Duration` without a resolver** (#42). A named
+  standard-library type refused a sample even where a literal is plainly
+  writable, because the resolver answers declarations the run loaded and the
+  standard library is never among them. A curated table now answers for
+  `time.Duration` — `time.Duration(42)` / `time.Duration(7)`, conversion-
+  rendered exactly as a loaded defined type is, with the `Ref` that registers
+  the import. `time.Time` stays out until a corpus needs it: its writable
+  values are constructor calls, and `Sample` has no verbatim-expression form
+  to carry one. The string-form `SampleFor` still refuses table entries, by
+  its own documented contract — a table sample needs an import a string
+  cannot register.
+
+- **`attempts=` on `retrysucceeds` and `axis=` on `scope`** (#43). Both were
+  relationship claims with no parameter a consumer could read. The bound is
+  part of what a retrysucceeds author asserts — the first attempts-1 calls may
+  fail, the attempts-th must succeed — and is validated as an integer of at
+  least 2, one attempt being no retry. `scope`'s axis names the parameter
+  carrying the scope, validated against the host's parameter list exactly as
+  `partition`'s is. Both optional: the bare forms still classify, and a
+  consumer without the parameter declines the law rather than guessing it.
+
+  `errors` gains no parameter, deliberately: a condition-to-sentinel mapping
+  in one KV value would be an encoded graph the resolver cannot check. Its
+  docblock now says it owes documentation, not a check — the per-condition
+  mixins are the route.
+
+- **An `accumulates` mixin** (#44) — the second position on the effect axis,
+  beside `idempotent`: repeated invocations compound, and a subject that
+  coalesced them would be wrong. Param-less, because an accumulation observed
+  at any N of calls proves the claim; the count is the check's choice where
+  retrysucceeds' bound is the author's assertion. The two docblocks
+  cross-reference so the pair reads as an axis rather than a claim and its
+  negation.
+
+- **An optional `reader` role on `batch-writer`** (#45). `mode=all-or-nothing`
+  is an assertion about state after a failure, and nothing named how to read
+  "nothing behind" — the only writer contract without the pairing persister
+  and upserter require. A role rather than a param because the role form
+  back-stamps: a consumer holding the reader finds the batch-writer it
+  confirms. Optional on pool's `stats` precedent — a best-effort writer never
+  needs it, and an undeclared reader turns the mode into a claim a consumer
+  declines to check rather than assumes.
+
+- **The two catalog aggregators are pinned against the tree.** A mixin or
+  contract package left out of `All()` compiled, passed its own tests, and
+  was silently absent from every pipeline built on the full catalog. Both
+  aggregators now carry a test that every shipped sub-package is registered —
+  found by mutation, not by luck, and the contracts guard surfaced
+  `writethroughcache`'s deliberate `cache` naming as a recorded alias while
+  it was at it.
+
 - **A `notfound` mixin — the reader's own miss sentinel** (#41). Every sentinel
   in the vocabulary was scoped to a condition another shape owns — expiry,
   deletion, rollback, close — so a plain reader could not say what a draw of an

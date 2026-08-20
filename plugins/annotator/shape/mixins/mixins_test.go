@@ -4,6 +4,7 @@
 package mixins_test
 
 import (
+	"os"
 	"sort"
 	"testing"
 
@@ -54,5 +55,38 @@ func TestAll_FreshSlice(t *testing.T) {
 	first[0].Name = "_mutated_"
 	if second := mixins.All(); second[0].Name == "_mutated_" {
 		t.Fatalf("All() returned a shared slice; mutating first[0].Name leaked into the next call")
+	}
+}
+
+// TestAll_CoversEveryShippedPackage pins the catalog against the
+// directory: every mixin sub-package must appear in [mixins.All].
+//
+// Nothing else can catch the omission. A package left out of the
+// aggregator still compiles, passes its own tests, and is absent from
+// every pipeline built on the full catalog — where its directive is
+// then reported as an unregistered name. The registration is a line
+// in a hand-maintained list, and this is the check that the list and
+// the tree agree.
+//
+// Relies on mixin names matching their directory names, which every
+// shipped mixin observes; a future mixin whose name legitimately
+// differs extends the mapping below rather than weakening the test.
+func TestAll_CoversEveryShippedPackage(t *testing.T) {
+	t.Parallel()
+	registered := make(map[string]struct{})
+	for _, m := range mixins.All() {
+		registered[m.Name] = struct{}{}
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "internal" {
+			continue
+		}
+		if _, ok := registered[e.Name()]; !ok {
+			t.Errorf("package %q is shipped but not registered in mixins.All()", e.Name())
+		}
 	}
 }

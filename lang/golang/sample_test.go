@@ -467,3 +467,62 @@ func TestSampleRefusal_Depth(t *testing.T) {
 		}
 	})
 }
+
+// TestSampleRefFor_StdlibTable covers the curated table for named
+// standard-library types, which the resolver can never answer for
+// because the run never loads them.
+func TestSampleRefFor_StdlibTable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a duration samples without a resolver", func(t *testing.T) {
+		t.Parallel()
+		// The motivating call: scheduled.At(ctx, after time.Duration)
+		// lost its whole derived family to RefusedNoResolver.
+		s, a := golang.SampleRefFor(namedTypeRef("time", "Duration"), "after", nil)
+		if !s.OK() || !a.OK() {
+			t.Fatalf("refused: sample=%+v alternate=%+v", s, a)
+		}
+		if s.Text != "42" || a.Text != "7" {
+			t.Fatalf("texts = %q/%q, want 42/7", s.Text, a.Text)
+		}
+		if s.Composite {
+			t.Fatal("Composite = true, want a conversion: time.Duration(42), not time.Duration{42}")
+		}
+	})
+
+	t.Run("the sample carries the ref that registers the import", func(t *testing.T) {
+		t.Parallel()
+		// Text alone would land an unqualified name in a file that
+		// never imported time; the consumer's backend registers
+		// imports only through rendered references.
+		s, _ := golang.SampleRefFor(namedTypeRef("time", "Duration"), "after", nil)
+		if s.Ref == nil {
+			t.Fatal("Ref = nil, want the time.Duration reference")
+		}
+	})
+
+	t.Run("a stdlib type outside the table still refuses", func(t *testing.T) {
+		t.Parallel()
+		// time.Time stays out until a corpus needs it: its writable
+		// values are constructor calls, and Sample has no
+		// verbatim-expression form to carry one.
+		s, _ := golang.SampleRefFor(namedTypeRef("time", "Time"), "at", nil)
+		if s.OK() {
+			t.Fatalf("derived %q for time.Time, which the table deliberately omits", s.Text)
+		}
+		if s.Refusal != golang.RefusedNoResolver {
+			t.Fatalf("Refusal = %d, want RefusedNoResolver, the pre-table answer", s.Refusal)
+		}
+	})
+
+	t.Run("the string form still refuses a table entry", func(t *testing.T) {
+		t.Parallel()
+		// SampleFor keeps only what a string can spell, and a table
+		// sample carries a Ref by construction — the import is the
+		// point. Pinned so the table cannot silently widen the
+		// string surface past its documented contract.
+		if s, _ := golang.SampleFor(namedTypeRef("time", "Duration"), "after", nil); s != "" {
+			t.Fatalf("SampleFor = %q, want empty: the sample needs an import a string cannot register", s)
+		}
+	})
+}

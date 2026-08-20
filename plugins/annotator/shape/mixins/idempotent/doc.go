@@ -14,6 +14,13 @@
 // detection appends `"idempotent"` to the callable's
 // [shape.MetaMixins] list.
 //
+// One of two positions on the effect axis — [accumulates] is the
+// other, for a callable whose repeated invocations compound. Declare
+// a position rather than negating this one: absence already means
+// "not claimed", and only a stamped position is a contract.
+//
+// [accumulates]: go.thesmos.sh/eidos/plugins/annotator/shape/mixins/accumulates
+//
 // Consumers register the [Mixin] alongside other mixins when
 // constructing the umbrella plugin:
 //

@@ -176,6 +176,9 @@ func sampleRefFor(
 		// literal to write, whatever the resolver holds.
 		return refused(RefusedNoLiteral)
 	}
+	if s, a, ok := stdlibSample(t); ok {
+		return s, a
+	}
 	if r == nil {
 		return refused(RefusedNoResolver)
 	}
@@ -191,6 +194,48 @@ func sampleRefFor(
 	default:
 		return refused(RefusedNoLiteral)
 	}
+}
+
+// stdlibSamples holds the sample pair for named standard-library
+// types, keyed by import path and name.
+//
+// The resolver answers declarations the run loaded, and the standard
+// library is never among them, so a named stdlib type refused here
+// even when a literal is plainly writable. Sampling by underlying
+// kind cannot close that: the underlying kind lives in the
+// declaration the resolver cannot reach. A curated entry is the only
+// thing that can answer, so each one is a value a person asserted
+// reads sensibly in a generated fixture — extended when a corpus
+// asks, not swept from a list of known kinds.
+//
+// `time.Time` is deliberately absent. Its only writable values are
+// constructor calls, and [Sample] renders `Ref(Text)` or `Ref{Text}`
+// — there is no verbatim-expression form, and inventing one before a
+// corpus needs it would be the speculation this table exists to
+// avoid.
+//
+//nolint:gochecknoglobals // package-curated literal table
+var stdlibSamples = map[[2]string][2]string{
+	{"time", "Duration"}: {"42", "7"},
+}
+
+// stdlibSample answers for a named type in [stdlibSamples],
+// conversion-rendered exactly as [definedSample] renders a loaded
+// defined type: `time.Duration(42)` beside `Weekday(42)`. The Ref is
+// what registers the import — text alone would land an unqualified
+// name in a file that never imported the package.
+//
+// Consulted before the resolver gate rather than as a fallback, so a
+// nil-resolver caller gets the literal too; nothing can shadow a
+// standard-library import path, so the order is unobservable beyond
+// that.
+func stdlibSample(t *node.TypeRef) (sample, alternate Sample, ok bool) {
+	pair, found := stdlibSamples[[2]string{t.Package, t.Name}]
+	if !found {
+		return Sample{}, Sample{}, false
+	}
+	ref := FromNode(t)
+	return Sample{Ref: ref, Text: pair[0]}, Sample{Ref: ref, Text: pair[1]}, true
 }
 
 // definedSample renders a defined type's sample as a conversion of its

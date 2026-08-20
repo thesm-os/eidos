@@ -4,7 +4,9 @@
 package contracts_test
 
 import (
+	"os"
 	"sort"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts"
@@ -64,4 +66,47 @@ func TestAll_FreshSlice(t *testing.T) {
 		t.Fatalf("All() returned a shared slice; mutating first[0].Name leaked into the next call")
 	}
 	_ = original
+}
+
+// TestAll_CoversEveryShippedPackage pins the catalog against the
+// directory: every contract sub-package must appear in
+// [contracts.All].
+//
+// Nothing else can catch the omission — a package left out of the
+// aggregator compiles, passes its own tests, and is absent from every
+// pipeline built on the full catalog, where its directive is then
+// reported as an unregistered name. The mixins aggregator carries the
+// same guard.
+//
+// Contract names may hyphenate where directories cannot
+// (`batch-writer` in `batchwriter/`), so names are compared with
+// hyphens stripped. One package deliberately diverges further:
+// `writethroughcache` registers the contract `cache` — the package
+// names the pairing, the directive names the thing declared — and
+// the consumer's corpus stamps it under that name. A future
+// divergence extends the map below, so it is a recorded decision
+// rather than drift.
+func TestAll_CoversEveryShippedPackage(t *testing.T) {
+	t.Parallel()
+	aliases := map[string]string{"writethroughcache": "cache"}
+	registered := make(map[string]struct{})
+	for _, c := range contracts.All() {
+		registered[strings.ReplaceAll(c.Name, "-", "")] = struct{}{}
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "internal" {
+			continue
+		}
+		want := e.Name()
+		if alias, ok := aliases[want]; ok {
+			want = alias
+		}
+		if _, ok := registered[want]; !ok {
+			t.Errorf("package %q is shipped but not registered in contracts.All()", e.Name())
+		}
+	}
 }

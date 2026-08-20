@@ -48,6 +48,7 @@ import (
 	"slices"
 
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/accumulates"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/associative"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/atomic"
 	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins/bounded"
@@ -113,6 +114,7 @@ import (
 // affecting future invocations.
 func All() []shape.Mixin {
 	out := []shape.Mixin{
+		accumulates.Mixin(),
 		atomic.Mixin(),
 		associative.Mixin(),
 		causal.Mixin(),

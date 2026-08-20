@@ -6,7 +6,14 @@
 // mode. The `mode` param is opaque (typically `all-or-nothing`
 // or `best-effort`); the resolver leaves the value unchanged.
 //
-// The recognised directive is:
+// `all-or-nothing` is an assertion about state after a failure —
+// one bad record leaves nothing behind — and checking it needs a
+// way to read "nothing behind". The optional `reader` role names
+// it. Without one the mode is a claim a consumer declines to
+// check, recorded as such rather than assumed.
 //
-//	//+gen:contract batch-writer role=writer mode=all-or-nothing
+// The recognised directives are:
+//
+//	//+gen:contract batch-writer role=writer mode=all-or-nothing reader=Get
+//	//+gen:contract batch-writer role=writer mode=best-effort
 package batchwriter
