@@ -223,6 +223,7 @@ func (s *renderState) coreFuncMap() template.FuncMap {
 		"renderReceiver":         s.renderReceiver,
 		"renderReturns":          s.renderReturns,
 		"renderExpr":             s.renderExpr,
+		"renderSample":           s.renderSample,
 		"renderStmt":             s.renderStmt,
 		"renderStructFields":     s.renderStructFields,
 		"renderStructEmbeds":     s.renderStructEmbeds,

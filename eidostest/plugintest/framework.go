@@ -739,6 +739,7 @@ var reservedFuncNames = []string{
 	"renderParams",
 	"renderReceiver",
 	"renderReturns",
+	"renderSample",
 	"renderStmt",
 	"renderStructEmbeds",
 	"renderStructFields",

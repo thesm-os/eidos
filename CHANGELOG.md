@@ -13,6 +13,22 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Added
+
+- **A `renderSample` template function on the Go backend** (#50). Every
+  consumer hand-wrote the same four-arm dispatch — expression, bare text,
+  composite, conversion — and when `Sample` gained its fourth arm, one of
+  three downstream copies was missed and shipped `foo(, )`. The rule for
+  which arm applies is a property of `Sample`, so it now lives beside
+  `renderExpr` in the reserved funcmap: a template writes
+  `{{ renderSample .Sample }}` and the next arm is the backend's problem.
+
+  A sample carrying nothing errors — naming its refusal — rather than
+  rendering empty, at the consumer's request: empty output is exactly how
+  the missed arm failed, three files from the sample that was empty.
+  `SampleRefusal` gained a `String()` for that message and for any consumer
+  explaining a declined check.
+
 ### Fixed
 
 - **Composite samples no longer interpolate an expression-form inner as empty

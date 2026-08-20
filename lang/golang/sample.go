@@ -101,6 +101,27 @@ const (
 	RefusedNoLiteral
 )
 
+// String names the refusal for diagnostics and error text. The
+// backend's renderSample embeds it when asked to render a sample
+// that carries nothing, and a consumer explaining a declined check
+// wants the word rather than the ordinal.
+func (r SampleRefusal) String() string {
+	switch r {
+	case RefusedNone:
+		return "none"
+	case RefusedNoResolver:
+		return "no-resolver"
+	case RefusedDepth:
+		return "depth"
+	case RefusedUnresolved:
+		return "unresolved"
+	case RefusedNoLiteral:
+		return "no-literal"
+	default:
+		return "refusal(?)"
+	}
+}
+
 // Incomplete reports whether the refusal describes the input rather
 // than the type.
 //

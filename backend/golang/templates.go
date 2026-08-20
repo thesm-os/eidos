@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"go.thesmos.sh/eidos/emit"
+	langgo "go.thesmos.sh/eidos/lang/golang"
 )
 
 // templatesFS embeds the backend's core template files. Plugin-
@@ -55,6 +56,7 @@ var parsePlaceholders = func() map[string]any {
 		"renderReceiver":         func(*emit.Method) (string, error) { return "", errPlaceholderInvoked },
 		"renderReturns":          func([]*emit.Return) (string, error) { return "", errPlaceholderInvoked },
 		"renderExpr":             func(*emit.Expr) (string, error) { return "", errPlaceholderInvoked },
+		"renderSample":           func(langgo.Sample) (string, error) { return "", errPlaceholderInvoked },
 		"renderStmt":             func(*emit.Stmt) (string, error) { return "", errPlaceholderInvoked },
 		"renderStructFields":     func(*emit.Struct) (string, error) { return "", errPlaceholderInvoked },
 		"renderStructEmbeds":     func(*emit.Struct) (string, error) { return "", errPlaceholderInvoked },
