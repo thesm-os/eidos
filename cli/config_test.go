@@ -121,8 +121,7 @@ verbose: true
 	t.Run("missing file returns ConfigError", func(t *testing.T) {
 		t.Parallel()
 		_, err := cli.LoadConfig(filepath.Join(t.TempDir(), "missing.yaml"))
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *ConfigError; got %T %v", err, err)
 		}
 	})
@@ -135,8 +134,7 @@ verbose: true
 			t.Fatalf("write fixture: %v", err)
 		}
 		_, err := cli.LoadConfig(path)
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *ConfigError; got %T %v", err, err)
 		}
 	})
@@ -149,8 +147,7 @@ verbose: true
 			t.Fatalf("write fixture: %v", err)
 		}
 		_, err := cli.LoadConfig(path)
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *ConfigError; got %T %v", err, err)
 		}
 	})
@@ -163,8 +160,7 @@ verbose: true
 			t.Fatalf("write fixture: %v", err)
 		}
 		_, err := cli.LoadConfig(path)
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *ConfigError; got %T %v", err, err)
 		}
 	})
@@ -233,8 +229,7 @@ func TestLoadConfig_ValidationFailures(t *testing.T) {
 			t.Fatalf("write fixture: %v", err)
 		}
 		_, err := cli.LoadConfig(path)
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *ConfigError; got %T %v", err, err)
 		}
 	})
@@ -248,8 +243,7 @@ func TestLoadConfig_ValidationFailures(t *testing.T) {
 			t.Fatalf("write fixture: %v", err)
 		}
 		_, err := cli.LoadConfig(path)
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *ConfigError; got %T %v", err, err)
 		}
 	})
@@ -407,8 +401,7 @@ app:
 		t.Parallel()
 		cfg := &extendedConfig{Config: *cli.DefaultConfig()}
 		err := cli.LoadConfigInto(filepath.Join(t.TempDir(), "nope.yaml"), cfg)
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *cli.ConfigError; got %T (%v)", err, err)
 		}
 	})
@@ -422,8 +415,7 @@ app:
 		}
 		cfg := &extendedConfig{Config: *cli.DefaultConfig()}
 		err := cli.LoadConfigInto(path, cfg)
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *cli.ConfigError; got %T (%v)", err, err)
 		}
 	})

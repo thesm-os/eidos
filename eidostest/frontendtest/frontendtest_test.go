@@ -144,8 +144,7 @@ func runHarnessSubprocess(t *testing.T, sourceDir string) string {
 	if err == nil {
 		t.Fatalf("frontendtest.Run accepted SourceDir %q; expected the harness to fail the test:\n%s", sourceDir, out)
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
 		t.Fatalf("running %s: %v:\n%s", os.Args[0], err, out)
 	}
 	return string(out)

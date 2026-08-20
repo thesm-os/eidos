@@ -127,8 +127,7 @@ func TestConfigError(t *testing.T) {
 	t.Run("Is detects ConfigError via errors.Is", func(t *testing.T) {
 		t.Parallel()
 		wrapped := errors.Join(&cli.ConfigError{Reason: "x"}, errors.New("other"))
-		var ce *cli.ConfigError
-		if !errors.As(wrapped, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](wrapped); !ok {
 			t.Fatalf("errors.As should find the embedded ConfigError")
 		}
 	})

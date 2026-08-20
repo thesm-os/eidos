@@ -264,5 +264,6 @@ checks:
       - chore
       - perf
       - build
+      - style
       - revert
     max_subject_length: 80

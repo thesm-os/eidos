@@ -80,7 +80,8 @@ func TestGoSource_TypeExpressions(t *testing.T) {
 			name: "a function type with several returns",
 			ref: storefixture.Func(
 				[]*node.TypeRef{storefixture.Named("string")},
-				[]*node.TypeRef{storefixture.Named("int"), storefixture.Named("error")}),
+				[]*node.TypeRef{storefixture.Named("int"), storefixture.Named("error")},
+			),
 			want: "X func(string) (int, error)",
 		},
 		{
@@ -183,7 +184,8 @@ func TestGoSource_TypeParameters(t *testing.T) {
 			Struct("Box", func(s *storefixture.StructBuilder) {
 				s.TypeParam("T", storefixture.Constraint(
 					storefixture.Named("comparable"),
-					storefixture.PkgNamed("fmt", "Stringer")))
+					storefixture.PkgNamed("fmt", "Stringer"),
+				))
 			}), "type Box[T interface { comparable fmt.Stringer }] struct")
 	})
 

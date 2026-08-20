@@ -20,8 +20,7 @@ func TestNewEnv_RequiresBrand(t *testing.T) {
 	t.Run("empty brand returns a *ConfigError", func(t *testing.T) {
 		t.Parallel()
 		_, err := cli.NewEnv("")
-		var ce *cli.ConfigError
-		if !errors.As(err, &ce) {
+		if _, ok := errors.AsType[*cli.ConfigError](err); !ok {
 			t.Fatalf("expected *ConfigError; got %T %v", err, err)
 		}
 	})

@@ -180,7 +180,8 @@ func TestSampleRefFor_SliceAndMap(t *testing.T) {
 	t.Run("a map whose value derives nothing yields nothing", func(t *testing.T) {
 		t.Parallel()
 		s, _ := golang.SampleRefFor(
-			mapRef(builtinRef("string"), namedTypeRef("example.com/y", "Absent")), "v", nil)
+			mapRef(builtinRef("string"), namedTypeRef("example.com/y", "Absent")), "v", nil,
+		)
 		if s.OK() {
 			t.Fatalf("derived %q for a map whose value has no sample", s.Text)
 		}
@@ -189,7 +190,8 @@ func TestSampleRefFor_SliceAndMap(t *testing.T) {
 	t.Run("a map whose key derives nothing yields nothing", func(t *testing.T) {
 		t.Parallel()
 		s, _ := golang.SampleRefFor(
-			mapRef(namedTypeRef("example.com/y", "Absent"), builtinRef("int")), "k", nil)
+			mapRef(namedTypeRef("example.com/y", "Absent"), builtinRef("int")), "k", nil,
+		)
 		if s.OK() {
 			t.Fatalf("derived %q for a map whose key has no sample", s.Text)
 		}
@@ -347,7 +349,8 @@ func TestSampleRefusal_Propagates(t *testing.T) {
 	t.Run("a slice reports its element's reason", func(t *testing.T) {
 		t.Parallel()
 		s, _ := golang.SampleRefFor(
-			sliceRef(namedTypeRef("x", "Absent")), "v", mapResolver{})
+			sliceRef(namedTypeRef("x", "Absent")), "v", mapResolver{},
+		)
 		if s.Refusal != golang.RefusedUnresolved {
 			t.Errorf("Refusal = %d, want the element's RefusedUnresolved", s.Refusal)
 		}
@@ -356,7 +359,8 @@ func TestSampleRefusal_Propagates(t *testing.T) {
 	t.Run("a map reports its value's reason", func(t *testing.T) {
 		t.Parallel()
 		s, _ := golang.SampleRefFor(
-			mapRef(builtinRef("string"), namedTypeRef("x", "Absent")), "v", mapResolver{})
+			mapRef(builtinRef("string"), namedTypeRef("x", "Absent")), "v", mapResolver{},
+		)
 		if s.Refusal != golang.RefusedUnresolved {
 			t.Errorf("Refusal = %d, want the value's RefusedUnresolved", s.Refusal)
 		}

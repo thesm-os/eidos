@@ -538,7 +538,8 @@ func TestGenerate_DeclinesAGenericConstraint(t *testing.T) {
 				// `interface{ error }` are one shape in the model, and
 				// only the frontend holds what separates them.
 				langgo.MetaIsConstraintInterface.Set(
-					i.Node().EnsureMeta(), true, "golang")
+					i.Node().EnsureMeta(), true, "golang",
+				)
 			}).
 			Build()
 	}

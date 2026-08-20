@@ -54,13 +54,15 @@ func projectionFixture() *storefixture.Builder {
 			})
 			s.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
 			s.Field("Meta", storefixture.Map(
-				storefixture.Named("string"), storefixture.Named("any")), nil)
+				storefixture.Named("string"), storefixture.Named("any"),
+			), nil)
 			// Both channel directions, one with a cross-package element,
 			// so the round trip covers the direction spelling and the
 			// element's own import registration in the same build.
 			s.Field("Events", storefixture.RecvChan(storefixture.Named("Status")), nil)
 			s.Field("Ticks", storefixture.SendChan(
-				storefixture.PkgNamed("time", "Time")), nil)
+				storefixture.PkgNamed("time", "Time"),
+			), nil)
 			s.Method("Validate", func(m *storefixture.MethodBuilder) {
 				m.ReceiverName("u")
 				m.Param("ctx", storefixture.PkgNamed("context", "Context"))
@@ -502,7 +504,8 @@ func TestBuilder_GoSource_Refuses(t *testing.T) {
 			storefixture.New().Struct("User", func(s *storefixture.StructBuilder) {
 				s.Method("M", func(m *storefixture.MethodBuilder) {
 					m.Receiver(storefixture.Pointer(
-						storefixture.PkgNamed("example.com/test", "Other")))
+						storefixture.PkgNamed("example.com/test", "Other"),
+					))
 				})
 			}).GoSource()
 		})

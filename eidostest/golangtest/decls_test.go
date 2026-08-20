@@ -361,7 +361,8 @@ func TestDeclEdges(t *testing.T) {
 					"type (\n\t// Reader reads.\n\tReader interface{ io.Closer }\n)\n\n" +
 					"type Alias = string\n\n" +
 					"// Do is documented on the func.\nfunc Do() {}\n\n" +
-					"func External()\n"),
+					"func External()\n",
+			),
 		})
 	}
 

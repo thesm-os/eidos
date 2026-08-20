@@ -174,7 +174,8 @@ func TestPendingFilters(t *testing.T) {
 		v := store.New().Emit()
 		origin := &node.Struct{Name: "User"}
 		err := v.AppendOriginSlot(
-			origin, "top", &sdk.EmitStruct{Name: "UserStub"}, sdk.EmitProvenance{})
+			origin, "top", &sdk.EmitStruct{Name: "UserStub"}, sdk.EmitProvenance{},
+		)
 		if err != nil {
 			t.Fatalf("AppendOriginSlot: %v", err)
 		}

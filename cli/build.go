@@ -75,9 +75,9 @@ func buildPipeline(
 		return nil, err
 	}
 	b.WithSink(s)
-	if c := buildCache(env, cfg, override); c != nil {
-		b.WithCache(c)
-	}
+	// Unconditional by buildCache's own contract: the disabled path
+	// answers a NoneCache, never nil.
+	b.WithCache(buildCache(env, cfg, override))
 	if cfg.Directives.Prefix != "" {
 		b.WithDirectivePrefix(cfg.Directives.Prefix)
 	}

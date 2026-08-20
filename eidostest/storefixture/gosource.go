@@ -292,7 +292,8 @@ func (p *goPrinter) decls() string {
 // otherwise use, the projection emits an unused import — the compile
 // error the pruning exists to prevent, reintroduced by the fix for it.
 var literalPattern = regexp.MustCompile(
-	"`[^`]*`" + `|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|//[^\n]*|/\*(?s:.*?)\*/`)
+	"`[^`]*`" + `|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|//[^\n]*|/\*(?s:.*?)\*/`,
+)
 
 // qualifierPattern matches an identifier that begins a selector chain:
 // one not preceded by a dot or a word character. The leading-dot

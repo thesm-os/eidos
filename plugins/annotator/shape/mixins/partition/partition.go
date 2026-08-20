@@ -92,7 +92,8 @@ func validateAxis(attachments []shape.MixinAttachment) []shape.MixinViolation {
 			out = append(out, shape.MixinViolation{
 				Host: attached.Host,
 				Message: fmt.Sprintf(
-					"%s=%q names no parameter of the annotated callable", ParamAxis, axis),
+					"%s=%q names no parameter of the annotated callable", ParamAxis, axis,
+				),
 			})
 			continue
 		}
@@ -105,7 +106,8 @@ func validateAxis(attachments []shape.MixinAttachment) []shape.MixinViolation {
 			Host: attached.Host,
 			Message: fmt.Sprintf(
 				"%s=%q names no parameter of %s=%q, so a check cannot carry one partition across the pair",
-				ParamAxis, axis, ParamRead, read),
+				ParamAxis, axis, ParamRead, read,
+			),
 		})
 	}
 	return out

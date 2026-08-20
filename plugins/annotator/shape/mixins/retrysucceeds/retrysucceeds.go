@@ -66,7 +66,8 @@ func validate(attachments []shape.MixinAttachment) []shape.MixinViolation {
 			Host: attached.Host,
 			Message: fmt.Sprintf(
 				"%s=%q must be an integer of at least 2: one attempt is no retry",
-				ParamAttempts, raw),
+				ParamAttempts, raw,
+			),
 		})
 	}
 	return out
