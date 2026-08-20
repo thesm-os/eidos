@@ -381,8 +381,22 @@ func definedSample(
 		// report a fixable run as a settled fact.
 		return refused(inner.Refusal)
 	}
+	if inner.Expr != nil {
+		// The conversion the text path spells as `Weekday(42)`, built
+		// as a call because the argument is an expression. Before this
+		// arm existed the pair below wrapped an empty Text in a Ref —
+		// a sample that was not OK and carried RefusedNone, the
+		// "nothing was attempted" state, as its only explanation.
+		return Sample{Expr: convertExpr(t, inner)}, Sample{Expr: convertExpr(t, innerAlt)}
+	}
 	ref := FromNode(t)
 	return Sample{Ref: ref, Text: inner.Text}, Sample{Ref: ref, Text: innerAlt.Text}
+}
+
+// convertExpr wraps an expression-form sample in a conversion to the
+// defined type — `Stamp(time.Unix(42, 0))`, spelled as a call.
+func convertExpr(t *node.TypeRef, inner Sample) *emit.Expr {
+	return &emit.Expr{ExprKind: emit.ExprCall, Callee: typeExpr(t), Args: []*emit.Expr{inner.Expr}}
 }
 
 // structSample renders a struct's sample as a composite literal
@@ -411,6 +425,14 @@ func structSample(
 				incomplete = inner.Refusal
 			}
 			continue
+		}
+		if inner.Expr != nil {
+			// The field is writable but not as text, so the whole
+			// literal moves to the expression form — skipping it
+			// instead would refuse a struct whose only exported
+			// field is a time.Time, a capability #47 just added.
+			return Sample{Expr: keyedComposite(ref, f.Name, inner)},
+				Sample{Expr: keyedComposite(ref, f.Name, innerAlt)}
 		}
 		return Sample{Ref: ref, Text: "{" + f.Name + ": " + inner.Text + "}", Composite: true},
 			Sample{Ref: ref, Text: "{" + f.Name + ": " + innerAlt.Text + "}", Composite: true}
@@ -484,6 +506,30 @@ func ZeroRefFor(t *node.TypeRef, r Resolver) (Sample, bool) {
 // and `[]T{x}` are different claims and only the second is a sample:
 // a check built from an empty literal passes against an
 // implementation that reads no element at all.
+// partExpr renders one successful inner sample as an expression part
+// for a composite built through [emit].
+//
+// A text-form inner becomes verbatim text, matching what the
+// text-composing path does with it today: inside a composite literal
+// an untyped constant needs no conversion and no import, which is why
+// text composition worked at all. An expression-form inner is already
+// the part.
+func partExpr(s Sample) *emit.Expr {
+	if s.Expr != nil {
+		return s.Expr
+	}
+	return &emit.Expr{ExprKind: emit.ExprRaw, RawText: s.Text}
+}
+
+// typeExpr spells t as an expression callee — `pkg.Name` with the
+// import registered, or the bare identifier for a local type.
+func typeExpr(t *node.TypeRef) *emit.Expr {
+	if t.Package == "" {
+		return &emit.Expr{ExprKind: emit.ExprIdent, Name: t.Name}
+	}
+	return &emit.Expr{ExprKind: emit.ExprExternal, Pkg: t.Package, Name: t.Name}
+}
+
 func sliceSample(
 	t *node.TypeRef, fieldName string, r Resolver, depth int,
 ) (sample, alternate Sample) {
@@ -492,8 +538,19 @@ func sliceSample(
 		return refused(inner.Refusal)
 	}
 	ref := FromNode(t)
+	if inner.Expr != nil {
+		return Sample{Expr: elemComposite(ref, inner)}, Sample{Expr: elemComposite(ref, innerAlt)}
+	}
 	return Sample{Ref: ref, Text: "{" + inner.Text + "}", Composite: true},
 		Sample{Ref: ref, Text: "{" + innerAlt.Text + "}", Composite: true}
+}
+
+// elemComposite builds the one-element composite literal for a slice
+// or array whose element sample is expression-form — `[]time.Time{
+// time.Unix(42, 0)}`. The whole sample rides [Sample.Expr], because a
+// text with an expression-shaped hole in it is how #48 happened.
+func elemComposite(ref emit.Ref, elem Sample) *emit.Expr {
+	return &emit.Expr{ExprKind: emit.ExprComposite, AsType: ref, Args: []*emit.Expr{partExpr(elem)}}
 }
 
 // mapSample derives a one-entry literal per half, differing in the
@@ -516,13 +573,37 @@ func mapSample(
 	if !keySample.OK() {
 		return refused(keySample.Refusal)
 	}
+	if keySample.Expr != nil {
+		// A keyed composite carries its keys as rendered text, so an
+		// expression-form key has nowhere to live. No corpus has
+		// asked for a map keyed by one; refusing names the gap where
+		// composing would quietly reintroduce the text-with-a-hole.
+		return refused(RefusedNoLiteral)
+	}
 	valSample, _ := sampleRefFor(MapValue(t), fieldName, r, depth-1)
 	if !valSample.OK() {
 		return refused(valSample.Refusal)
 	}
 	ref := FromNode(t)
+	if valSample.Expr != nil {
+		return Sample{Expr: keyedComposite(ref, keySample.Text, valSample)},
+			Sample{Expr: keyedComposite(ref, keyAlt.Text, valSample)}
+	}
 	return Sample{Ref: ref, Text: "{" + keySample.Text + ": " + valSample.Text + "}", Composite: true},
 		Sample{Ref: ref, Text: "{" + keyAlt.Text + ": " + valSample.Text + "}", Composite: true}
+}
+
+// keyedComposite builds the one-entry keyed composite for a map or
+// struct whose value sample is expression-form. The key is rendered
+// text either way — a map key came from the text path, a struct key
+// is a field name.
+func keyedComposite(ref emit.Ref, key string, val Sample) *emit.Expr {
+	return &emit.Expr{
+		ExprKind: emit.ExprCompositeKeyed,
+		AsType:   ref,
+		Keys:     []string{key},
+		Args:     []*emit.Expr{partExpr(val)},
+	}
 }
 
 // arraySample renders an array's sample as a composite literal holding
@@ -536,6 +617,9 @@ func arraySample(
 		return refused(inner.Refusal)
 	}
 	ref := FromNode(t)
+	if inner.Expr != nil {
+		return Sample{Expr: elemComposite(ref, inner)}, Sample{Expr: elemComposite(ref, innerAlt)}
+	}
 	return Sample{Ref: ref, Text: "{" + inner.Text + "}", Composite: true},
 		Sample{Ref: ref, Text: "{" + innerAlt.Text + "}", Composite: true}
 }

@@ -13,6 +13,28 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Fixed
+
+- **Composite samples no longer interpolate an expression-form inner as empty
+  text** (#48). Five arms — slice, map, array, defined type, struct — composed
+  `inner.Text` after an `OK()` gate that, since #47, also passes text-less
+  expression samples, rendering `{CreatedAt: }` for a struct whose first
+  samplable field is a `time.Time`. Each arm now moves the whole literal to
+  the expression form when an inner carries one: a struct composes a keyed
+  composite, a slice or array an element composite, a defined type a
+  conversion call. Text-form inners compose exactly as before.
+
+  Skipping expression-form fields was the cheaper fix and was rejected as a
+  capability loss: a struct whose only exported field is a timestamp would
+  have gone back to refusing, and the field is plainly writable.
+
+  One named limit: a map whose *key* samples as an expression refuses, since
+  a keyed composite carries its keys as rendered text. No corpus has one.
+
+  The defined-type arm also stops leaking `RefusedNone`: before this fix it
+  wrapped the empty text in a Ref, producing a sample that was not OK and
+  carried "nothing was attempted" as its only explanation.
+
 ### Added
 
 - **`Sample` carries expressions, so func and channel parameters sample**

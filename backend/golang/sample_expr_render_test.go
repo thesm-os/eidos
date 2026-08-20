@@ -85,3 +85,64 @@ func TestRenderExpr_SampleExprPayloads(t *testing.T) {
 		}
 	})
 }
+
+// auditResolver answers the #48 repro struct — the corpus fixture
+// whose whole-struct sample rendered `{CreatedAt: }` when the first
+// samplable field carried an expression instead of text.
+type auditResolver struct{}
+
+func (auditResolver) Resolve(t *node.TypeRef) (node.Node, bool) {
+	if t == nil || t.Name != "Audit" {
+		return nil, false
+	}
+	return &node.Struct{
+		Name: "Audit", Package: "example.com/audit",
+		Fields: []*node.Field{
+			{Name: "CreatedAt", Type: &node.TypeRef{
+				TypeKind: node.TypeRefNamed, Package: "time", Name: "Time",
+			}},
+			{Name: "CreatedBy", Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}},
+		},
+	}, true
+}
+
+// TestRenderExpr_CompositeSamplePayloads renders the #48 shapes end
+// to end: the failure was only visible at format.Source, which is
+// exactly the layer the lang-side structure tests cannot reach.
+func TestRenderExpr_CompositeSamplePayloads(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a struct with a timestamp field renders whole", func(t *testing.T) {
+		t.Parallel()
+		s, _ := langgo.SampleRefFor(&node.TypeRef{
+			TypeKind: node.TypeRefNamed, Package: "example.com/audit", Name: "Audit",
+		}, "a", auditResolver{})
+		if s.Expr == nil {
+			t.Fatalf("sampler refused: %+v", s)
+		}
+		body := renderVariableInit(t, s.Expr)
+		if !strings.Contains(body, "audit.Audit{CreatedAt: time.Unix(42, 0)}") {
+			t.Fatalf("rendered body should hold the composed literal; got:\n%s", body)
+		}
+		for _, imp := range []string{`"example.com/audit"`, `"time"`} {
+			if !strings.Contains(body, imp) {
+				t.Fatalf("import %s should be registered; got:\n%s", imp, body)
+			}
+		}
+	})
+
+	t.Run("a slice of timestamps renders whole", func(t *testing.T) {
+		t.Parallel()
+		s, _ := langgo.SampleRefFor(&node.TypeRef{
+			TypeKind: node.TypeRefSlice,
+			Elem:     &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "time", Name: "Time"},
+		}, "ts", nil)
+		if s.Expr == nil {
+			t.Fatalf("sampler refused: %+v", s)
+		}
+		body := renderVariableInit(t, s.Expr)
+		if !strings.Contains(body, "[]time.Time{time.Unix(42, 0)}") {
+			t.Fatalf("rendered body should hold the composed slice; got:\n%s", body)
+		}
+	})
+}

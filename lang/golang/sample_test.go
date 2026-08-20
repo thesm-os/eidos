@@ -717,3 +717,119 @@ func TestSample_OKWidening(t *testing.T) {
 		t.Fatal("empty Sample reports OK")
 	}
 }
+
+// timeRef is the table entry every composite subtest embeds — the
+// corpus type that exposed #48, sampled expression-form since #47.
+func timeRef() *node.TypeRef { return namedTypeRef("time", "Time") }
+
+// TestSampleRefFor_ExprInComposites covers #48: every arm that
+// composes an inner sample into a literal consumed inner.Text after
+// an OK() gate that, since #47, also passes text-less expression
+// samples — rendering `{CreatedAt: }`. The composite now moves to the
+// expression form when an inner does.
+func TestSampleRefFor_ExprInComposites(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a struct whose field samples as an expression composes it", func(t *testing.T) {
+		t.Parallel()
+		// The repro from the issue: Audit{CreatedAt time.Time,
+		// CreatedBy string}, sampled whole, first field wins.
+		r := mapResolver{"example.com/audit.Audit": &node.Struct{
+			Name: "Audit", Package: "example.com/audit",
+			Fields: []*node.Field{
+				{Name: "CreatedAt", Type: timeRef()},
+				{Name: "CreatedBy", Type: builtinRef("string")},
+			},
+		}}
+		s, a := golang.SampleRefFor(namedTypeRef("example.com/audit", "Audit"), "A", r)
+		if !s.OK() || s.Expr == nil {
+			t.Fatalf("refused: %+v", s)
+		}
+		keyed := s.Expr.ExprKind == emit.ExprCompositeKeyed &&
+			len(s.Expr.Keys) == 1 && s.Expr.Keys[0] == "CreatedAt"
+		if !keyed {
+			t.Fatalf("Expr = %+v, want a keyed composite setting CreatedAt", s.Expr)
+		}
+		if s.Text != "" {
+			t.Fatalf("Text = %q beside an Expr; the pair must not mix", s.Text)
+		}
+		if a.Expr == nil || s.Expr == a.Expr {
+			t.Fatal("alternate missing or aliased")
+		}
+	})
+
+	t.Run("a struct whose only exported field is a timestamp still samples", func(t *testing.T) {
+		t.Parallel()
+		// The capability the skip fix would have lost, named in the
+		// issue as the reason the cheap way out is not equivalent.
+		r := mapResolver{"example.com/audit.Stamped": &node.Struct{
+			Name: "Stamped", Package: "example.com/audit",
+			Fields: []*node.Field{{Name: "At", Type: timeRef()}},
+		}}
+		s, _ := golang.SampleRefFor(namedTypeRef("example.com/audit", "Stamped"), "S", r)
+		if !s.OK() {
+			t.Fatalf("refused a struct whose only field is writable: %+v", s)
+		}
+	})
+
+	t.Run("a slice of timestamps composes the element", func(t *testing.T) {
+		t.Parallel()
+		s, a := golang.SampleRefFor(sliceRef(timeRef()), "ts", nil)
+		if !s.OK() || s.Expr == nil || s.Expr.ExprKind != emit.ExprComposite {
+			t.Fatalf("want an unkeyed composite, got %+v", s)
+		}
+		distinct := len(s.Expr.Args) == 1 && len(a.Expr.Args) == 1 &&
+			s.Expr.Args[0].Args[0].RawText != a.Expr.Args[0].Args[0].RawText
+		if !distinct {
+			t.Fatal("sample and alternate elements must stay distinct")
+		}
+	})
+
+	t.Run("an array of timestamps composes the element", func(t *testing.T) {
+		t.Parallel()
+		arr := &node.TypeRef{TypeKind: node.TypeRefArray, Elem: timeRef(), ArrayLen: 2}
+		s, _ := golang.SampleRefFor(arr, "ts", nil)
+		if !s.OK() || s.Expr == nil || s.Expr.ExprKind != emit.ExprComposite {
+			t.Fatalf("want an unkeyed composite, got %+v", s)
+		}
+	})
+
+	t.Run("a map with a timestamp value keys the pair by text", func(t *testing.T) {
+		t.Parallel()
+		s, a := golang.SampleRefFor(mapRef(builtinRef("string"), timeRef()), "m", nil)
+		if !s.OK() || s.Expr == nil || s.Expr.ExprKind != emit.ExprCompositeKeyed {
+			t.Fatalf("want a keyed composite, got %+v", s)
+		}
+		if s.Expr.Keys[0] == a.Expr.Keys[0] {
+			t.Fatal("the pair must differ in the key, as the text path does")
+		}
+	})
+
+	t.Run("a map with a timestamp key refuses", func(t *testing.T) {
+		t.Parallel()
+		// A keyed composite carries keys as rendered text, so an
+		// expression key has nowhere to live; refusing names the gap.
+		s, _ := golang.SampleRefFor(mapRef(timeRef(), builtinRef("int")), "m", nil)
+		if s.OK() {
+			t.Fatalf("derived %+v for an expression-keyed map", s)
+		}
+	})
+
+	t.Run("a defined type over a timestamp converts the expression", func(t *testing.T) {
+		t.Parallel()
+		// Before this arm existed the pair wrapped an empty Text in a
+		// Ref: a sample that was not OK and whose Refusal was
+		// RefusedNone — the "nothing was attempted" state — as its
+		// only explanation.
+		r := mapResolver{"example.com/audit.Stamp": &node.Alias{
+			Name: "Stamp", Package: "example.com/audit", Target: timeRef(),
+		}}
+		s, _ := golang.SampleRefFor(namedTypeRef("example.com/audit", "Stamp"), "at", r)
+		if !s.OK() || s.Expr == nil || s.Expr.ExprKind != emit.ExprCall {
+			t.Fatalf("want a conversion call, got %+v", s)
+		}
+		if s.Expr.Callee == nil || s.Expr.Callee.Name != "Stamp" {
+			t.Fatalf("conversion callee = %+v, want the defined type", s.Expr.Callee)
+		}
+	})
+}
