@@ -548,7 +548,10 @@ func TestSampleRefFor_StdlibTable(t *testing.T) {
 		// point. Pinned so the table cannot silently widen the
 		// string surface past its documented contract.
 		if s, _ := golang.SampleFor(namedTypeRef("time", "Duration"), "after", nil); s != "" {
-			t.Fatalf("SampleFor = %q, want empty: the sample needs an import a string cannot register", s)
+			t.Fatalf(
+				"SampleFor = %q, want empty: the sample needs an import a string cannot register",
+				s,
+			)
 		}
 	})
 }
@@ -830,6 +833,93 @@ func TestSampleRefFor_ExprInComposites(t *testing.T) {
 		}
 		if s.Expr.Callee == nil || s.Expr.Callee.Name != "Stamp" {
 			t.Fatalf("conversion callee = %+v, want the defined type", s.Expr.Callee)
+		}
+	})
+}
+
+// TestSampleRefFor_StructFormInners covers #49: the two positions
+// where Go denies composite-literal type elision, which the text
+// path composed into anyway. Verified against go vet in the issue —
+// `Outer{In: {X: 42}}` and `Rec({X: 42})` are both "missing type in
+// composite literal".
+func TestSampleRefFor_StructFormInners(t *testing.T) {
+	t.Parallel()
+
+	innerStruct := &node.Struct{
+		Name: "Inner", Package: "example.com/geo",
+		Fields: []*node.Field{{Name: "X", Type: builtinRef("int")}},
+	}
+
+	t.Run("a struct-typed field moves the literal to the expression form", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{
+			"example.com/geo.Outer": &node.Struct{
+				Name: "Outer", Package: "example.com/geo",
+				Fields: []*node.Field{
+					{Name: "In", Type: namedTypeRef("example.com/geo", "Inner")},
+				},
+			},
+			"example.com/geo.Inner": innerStruct,
+		}
+		s, a := golang.SampleRefFor(namedTypeRef("example.com/geo", "Outer"), "O", r)
+		if !s.OK() || s.Expr == nil {
+			t.Fatalf("refused or text-composed: %+v", s)
+		}
+		if s.Expr.ExprKind != emit.ExprCompositeKeyed || s.Expr.Keys[0] != "In" {
+			t.Fatalf("Expr = %+v, want a keyed composite setting In", s.Expr)
+		}
+		part := s.Expr.Args[0]
+		if part.ExprKind != emit.ExprComposite || part.AsType == nil {
+			t.Fatalf("field part = %+v, want the inner composite carrying its own type", part)
+		}
+		if raw := part.Args[0].RawText; raw != "X: 42" {
+			t.Fatalf("inner body = %q, want the braces stripped for the renderer to resupply", raw)
+		}
+		if aRaw := a.Expr.Args[0].Args[0].RawText; aRaw == part.Args[0].RawText {
+			t.Fatal("alternate shares the sample's inner body; the pair must stay distinct")
+		}
+	})
+
+	t.Run("a defined type over a struct keeps the composite form", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{
+			"example.com/geo.Rec": &node.Alias{
+				Name:    "Rec",
+				Package: "example.com/geo",
+				Target:  namedTypeRef("example.com/geo", "Inner"),
+			},
+			"example.com/geo.Inner": innerStruct,
+		}
+		s, _ := golang.SampleRefFor(namedTypeRef("example.com/geo", "Rec"), "R", r)
+		if !s.OK() {
+			t.Fatalf("refused: %+v", s)
+		}
+		if !s.Composite {
+			t.Fatalf("Composite dropped: %+v renders the conversion form Rec({X: 42})", s)
+		}
+	})
+
+	t.Run("a defined type over a slice keeps the composite form", func(t *testing.T) {
+		t.Parallel()
+		r := mapResolver{"example.com/geo.List": &node.Alias{
+			Name: "List", Package: "example.com/geo", Target: sliceRef(builtinRef("int")),
+		}}
+		s, _ := golang.SampleRefFor(namedTypeRef("example.com/geo", "List"), "L", r)
+		if !s.OK() || !s.Composite {
+			t.Fatalf("want a composite List{...} sample, got %+v", s)
+		}
+	})
+
+	t.Run("a defined type over a scalar still converts", func(t *testing.T) {
+		t.Parallel()
+		// The pre-existing behaviour the flag propagation must not
+		// disturb: Weekday(42) is a conversion, not a composite.
+		r := mapResolver{"example.com/cfg.Weekday": &node.Alias{
+			Name: "Weekday", Package: "example.com/cfg", Target: builtinRef("int"),
+		}}
+		s, _ := golang.SampleRefFor(namedTypeRef("example.com/cfg", "Weekday"), "d", r)
+		if !s.OK() || s.Composite {
+			t.Fatalf("want a conversion-form sample, got %+v", s)
 		}
 	})
 }

@@ -146,3 +146,66 @@ func TestRenderExpr_CompositeSamplePayloads(t *testing.T) {
 		}
 	})
 }
+
+// nestedResolver answers the #49 shapes: a struct whose only field
+// is another struct, and a defined type over that struct.
+type nestedResolver struct{}
+
+func (nestedResolver) Resolve(t *node.TypeRef) (node.Node, bool) {
+	inner := &node.Struct{
+		Name: "Inner", Package: "example.com/geo",
+		Fields: []*node.Field{
+			{Name: "X", Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"}},
+		},
+	}
+	switch {
+	case t == nil:
+		return nil, false
+	case t.Name == "Inner":
+		return inner, true
+	case t.Name == "Outer":
+		return &node.Struct{
+			Name: "Outer", Package: "example.com/geo",
+			Fields: []*node.Field{
+				{Name: "In", Type: &node.TypeRef{
+					TypeKind: node.TypeRefNamed, Package: "example.com/geo", Name: "Inner",
+				}},
+			},
+		}, true
+	case t.Name == "Rec":
+		return &node.Alias{
+			Name: "Rec", Package: "example.com/geo",
+			Target: &node.TypeRef{
+				TypeKind: node.TypeRefNamed,
+				Package:  "example.com/geo",
+				Name:     "Inner",
+			},
+		}, true
+	default:
+		return nil, false
+	}
+}
+
+// TestRenderExpr_StructFormInnerPayloads renders the #49 shapes end
+// to end and re-parses the result, because the defect was only ever
+// visible to format.Source: the composed text was well-formed as
+// text and illegal as Go.
+func TestRenderExpr_StructFormInnerPayloads(t *testing.T) {
+	t.Parallel()
+
+	geoRef := func(name string) *node.TypeRef {
+		return &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "example.com/geo", Name: name}
+	}
+
+	t.Run("a struct-typed field renders with the inner type spelled", func(t *testing.T) {
+		t.Parallel()
+		s, _ := langgo.SampleRefFor(geoRef("Outer"), "o", nestedResolver{})
+		if s.Expr == nil {
+			t.Fatalf("sampler refused or text-composed: %+v", s)
+		}
+		body := renderVariableInit(t, s.Expr)
+		if !strings.Contains(body, "geo.Outer{In: geo.Inner{X: 42}}") {
+			t.Fatalf("rendered body should spell the inner type; got:\n%s", body)
+		}
+	})
+}

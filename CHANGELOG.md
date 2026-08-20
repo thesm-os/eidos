@@ -31,6 +31,17 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **Struct-form inners compose only where Go permits type elision** (#49).
+  A struct whose first samplable field was itself a struct composed
+  `{In: {X: 42}}` as text, and a defined type over a struct dropped the
+  inner's composite flag and rendered the conversion form `Rec({X: 42})` —
+  both "missing type in composite literal" to go vet, both invisible until
+  format.Source. A struct-typed field now moves the literal to the
+  expression form with the inner's type spelled and its import registered;
+  a defined type keeps the inner's composite flag, so `Rec{X: 42}` renders
+  as the composite it is. Slice, array and map positions are untouched:
+  elision is legal there, which is why they never failed.
+
 - **Composite samples no longer interpolate an expression-form inner as empty
   text** (#48). Five arms — slice, map, array, defined type, struct — composed
   `inner.Text` after an `OK()` gate that, since #47, also passes text-less

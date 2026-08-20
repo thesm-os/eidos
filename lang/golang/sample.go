@@ -5,6 +5,7 @@ package golang
 
 import (
 	"strconv"
+	"strings"
 
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/node"
@@ -411,7 +412,13 @@ func definedSample(
 		return Sample{Expr: convertExpr(t, inner)}, Sample{Expr: convertExpr(t, innerAlt)}
 	}
 	ref := FromNode(t)
-	return Sample{Ref: ref, Text: inner.Text}, Sample{Ref: ref, Text: innerAlt.Text}
+	// The inner's Composite rides along: a defined type over a struct
+	// or collection is written `Rec{X: 42}`, and dropping the flag
+	// rendered the conversion form `Rec({X: 42})` — an untyped
+	// composite in a position Go denies elision to. The defined
+	// type's own ref replaces the target's, which is the conversion.
+	return Sample{Ref: ref, Text: inner.Text, Composite: inner.Composite},
+		Sample{Ref: ref, Text: innerAlt.Text, Composite: innerAlt.Composite}
 }
 
 // convertExpr wraps an expression-form sample in a conversion to the
@@ -447,11 +454,15 @@ func structSample(
 			}
 			continue
 		}
-		if inner.Expr != nil {
-			// The field is writable but not as text, so the whole
-			// literal moves to the expression form — skipping it
-			// instead would refuse a struct whose only exported
-			// field is a time.Time, a capability #47 just added.
+		if inner.Expr != nil || (inner.Ref != nil && inner.Composite) {
+			// The field is writable but not as text. An expression
+			// inner has no text at all; a composite inner has text
+			// that is only legal where Go permits type elision, and
+			// a struct field value is not such a place — composed as
+			// text, a struct-typed field renders `{In: {X: 42}}`
+			// and fails at format.Source. Skipping either would
+			// refuse a struct whose only exported field is
+			// writable.
 			return Sample{Expr: keyedComposite(ref, f.Name, inner)},
 				Sample{Expr: keyedComposite(ref, f.Name, innerAlt)}
 		}
@@ -530,16 +541,33 @@ func ZeroRefFor(t *node.TypeRef, r Resolver) (Sample, bool) {
 // partExpr renders one successful inner sample as an expression part
 // for a composite built through [emit].
 //
-// A text-form inner becomes verbatim text, matching what the
+// A bare text inner becomes verbatim text, matching what the
 // text-composing path does with it today: inside a composite literal
 // an untyped constant needs no conversion and no import, which is why
 // text composition worked at all. An expression-form inner is already
-// the part.
+// the part. A composite inner is rebuilt around its own Ref, because
+// the position that routes one here is the position Go denies type
+// elision to — see the callers.
 func partExpr(s Sample) *emit.Expr {
 	if s.Expr != nil {
 		return s.Expr
 	}
+	if s.Ref != nil && s.Composite {
+		return &emit.Expr{
+			ExprKind: emit.ExprComposite,
+			AsType:   s.Ref,
+			Args:     []*emit.Expr{{ExprKind: emit.ExprRaw, RawText: trimBraces(s.Text)}},
+		}
+	}
 	return &emit.Expr{ExprKind: emit.ExprRaw, RawText: s.Text}
+}
+
+// trimBraces strips the outer braces a composite sample's Text always
+// carries — every composing arm builds "{...}" — so the body can ride
+// as the argument of an [emit.ExprComposite], whose renderer supplies
+// the braces around it.
+func trimBraces(text string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(text, "{"), "}")
 }
 
 // typeExpr spells t as an expression callee — `pkg.Name` with the

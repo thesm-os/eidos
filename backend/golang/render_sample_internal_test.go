@@ -77,6 +77,30 @@ func TestRenderSample(t *testing.T) {
 		assertImported(t, st, "time")
 	})
 
+	t.Run("a defined type over a struct renders the composite form", func(t *testing.T) {
+		t.Parallel()
+		// #49's second half: the flag propagation in definedSample is
+		// what makes this the composite `geo.Rec{X: 42}` rather than
+		// the conversion `geo.Rec({X: 42})`, which go vet rejects as
+		// a missing type in a composite literal.
+		inner := &node.Struct{
+			Name: "Inner", Package: "example.com/geo",
+			Fields: []*node.Field{{Name: "X", Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"}}},
+		}
+		rec := &node.Alias{
+			Name: "Rec", Package: "example.com/geo",
+			Target: &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "example.com/geo", Name: "Inner"},
+		}
+		r := tableResolver{"example.com/geo.Rec": rec, "example.com/geo.Inner": inner}
+		s, _ := langgo.SampleRefFor(&node.TypeRef{
+			TypeKind: node.TypeRefNamed, Package: "example.com/geo", Name: "Rec",
+		}, "r", r)
+		got, err := sampleState().renderSample(s)
+		if err != nil || got != "geo.Rec{X: 42}" {
+			t.Fatalf("= %q, %v; want geo.Rec{X: 42}, not the conversion form", got, err)
+		}
+	})
+
 	t.Run("a sample carrying nothing errors instead of rendering empty", func(t *testing.T) {
 		t.Parallel()
 		// The consumer's request, verbatim: empty output is how a
@@ -92,6 +116,18 @@ func TestRenderSample(t *testing.T) {
 			t.Fatalf("error %q should name the refusal", err)
 		}
 	})
+}
+
+// tableResolver answers from a fixed table, mirroring the lang-side
+// test fixture of the same shape.
+type tableResolver map[string]node.Node
+
+func (r tableResolver) Resolve(t *node.TypeRef) (node.Node, bool) {
+	if t == nil {
+		return nil, false
+	}
+	n, ok := r[langgo.QName(t)]
+	return n, ok
 }
 
 // assertImported fails when path was not registered on the state's
