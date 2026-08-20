@@ -137,7 +137,9 @@ func spellableAsString(t *node.TypeRef) bool {
 // One walk rather than two. Every type this can answer for,
 // [SampleRefFor] answers with a nil Ref — and every type it answers
 // with a Ref is one a string cannot spell, because the Ref is exactly
-// the import that would have to be registered.
+// the import that would have to be registered. An [Sample.Expr]
+// sample needs no clause of its own: its Text is empty by
+// construction, so it flows out as the same empty-string refusal.
 func sampleFor(t *node.TypeRef, fieldName string, r Resolver, depth int) (sample, alternate string) {
 	s, a := sampleRefFor(t, fieldName, r, depth)
 	if s.Ref != nil || a.Ref != nil {

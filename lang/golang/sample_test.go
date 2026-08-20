@@ -6,6 +6,7 @@ package golang_test
 import (
 	"testing"
 
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
@@ -505,14 +506,35 @@ func TestSampleRefFor_StdlibTable(t *testing.T) {
 		}
 	})
 
+	t.Run("a timestamp samples as a constructor call", func(t *testing.T) {
+		t.Parallel()
+		// The entry #42 deferred, landed with the mechanism it was
+		// waiting for: a constructor call has no conversion form, so
+		// it rides Sample.Expr rather than the Ref-and-Text pair.
+		s, a := golang.SampleRefFor(namedTypeRef("time", "Time"), "at", nil)
+		if !s.OK() || s.Expr == nil {
+			t.Fatalf("refused: %+v", s)
+		}
+		if s.Text != "" || s.Ref != nil {
+			t.Fatalf("Text/Ref = %q/%v, want empty: Expr is the whole sample", s.Text, s.Ref)
+		}
+		isUnixCall := s.Expr.ExprKind == emit.ExprCall && s.Expr.Callee != nil &&
+			s.Expr.Callee.Pkg == "time" && s.Expr.Callee.Name == "Unix"
+		if !isUnixCall {
+			t.Fatalf("Expr = %+v, want a time.Unix call", s.Expr)
+		}
+		distinct := len(s.Expr.Args) > 0 && len(a.Expr.Args) > 0 &&
+			s.Expr.Args[0].RawText != a.Expr.Args[0].RawText
+		if !distinct {
+			t.Fatalf("sample and alternate share a seconds argument; want distinct values")
+		}
+	})
+
 	t.Run("a stdlib type outside the table still refuses", func(t *testing.T) {
 		t.Parallel()
-		// time.Time stays out until a corpus needs it: its writable
-		// values are constructor calls, and Sample has no
-		// verbatim-expression form to carry one.
-		s, _ := golang.SampleRefFor(namedTypeRef("time", "Time"), "at", nil)
+		s, _ := golang.SampleRefFor(namedTypeRef("time", "Month"), "m", nil)
 		if s.OK() {
-			t.Fatalf("derived %q for time.Time, which the table deliberately omits", s.Text)
+			t.Fatalf("derived %q for time.Month, which the table omits", s.Text)
 		}
 		if s.Refusal != golang.RefusedNoResolver {
 			t.Fatalf("Refusal = %d, want RefusedNoResolver, the pre-table answer", s.Refusal)
@@ -529,4 +551,169 @@ func TestSampleRefFor_StdlibTable(t *testing.T) {
 			t.Fatalf("SampleFor = %q, want empty: the sample needs an import a string cannot register", s)
 		}
 	})
+}
+
+// funcRef builds a func-kind TypeRef from parameter and return type
+// refs — the shape frontend/golang's funcTypeRef produces.
+func funcRef(params, returns []*node.TypeRef) *node.TypeRef {
+	return &node.TypeRef{
+		TypeKind:    node.TypeRefFunc,
+		FuncParams:  params,
+		FuncReturns: returns,
+	}
+}
+
+// chanRef builds a channel TypeRef exactly as the frontend models
+// one: a named `go`.`chan` ref with the element as the single type
+// argument and the direction stamped as meta.
+func chanRef(elem *node.TypeRef, dir golang.ChanDirection) *node.TypeRef {
+	r := &node.TypeRef{
+		TypeKind: node.TypeRefNamed,
+		Package:  "go",
+		Name:     "chan",
+		TypeArgs: []*node.TypeRef{elem},
+	}
+	golang.MetaIsChannel.Set(r.EnsureMeta(), true, "test")
+	golang.MetaChanDir.Set(r.EnsureMeta(), string(dir), "test")
+	return r
+}
+
+// TestSampleRefFor_FuncValues covers the func arm: the no-op literal
+// is the one value a caller can pass that asserts nothing.
+func TestSampleRefFor_FuncValues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a hook without results samples as an empty literal", func(t *testing.T) {
+		t.Parallel()
+		// The corpus shape: OnEvent(fn func(event string)).
+		s, _ := golang.SampleRefFor(funcRef([]*node.TypeRef{builtinRef("string")}, nil), "fn", nil)
+		if !s.OK() || s.Expr == nil {
+			t.Fatalf("refused: %+v", s)
+		}
+		if s.Expr.ExprKind != emit.ExprFuncLit {
+			t.Fatalf("ExprKind = %v, want a func literal", s.Expr.ExprKind)
+		}
+		if len(s.Expr.FuncParams) != 1 || len(s.Expr.FuncBody) != 0 {
+			t.Fatalf("params/body = %d/%d, want 1 anonymous param and an empty body",
+				len(s.Expr.FuncParams), len(s.Expr.FuncBody))
+		}
+	})
+
+	t.Run("results are declared vars returned, not derived zeros", func(t *testing.T) {
+		t.Parallel()
+		// The corpus shape: Run(ctx, body func(Tx) error). `var r0
+		// error; return r0` compiles for every result type with
+		// nothing but the type's reference, so no zero literal is
+		// derived and no refusal can propagate from one — a func
+		// answering an unloaded type still samples.
+		ref := funcRef(
+			[]*node.TypeRef{namedTypeRef("example.com/db", "Tx")},
+			[]*node.TypeRef{builtinRef("error"), namedTypeRef("example.com/y", "Absent")},
+		)
+		s, _ := golang.SampleRefFor(ref, "body", nil)
+		if !s.OK() || s.Expr == nil {
+			t.Fatalf("refused: %+v", s)
+		}
+		body := s.Expr.FuncBody
+		if len(body) != 3 {
+			t.Fatalf("body has %d statements, want two declarations and a return", len(body))
+		}
+		declared := body[0].StmtKind == emit.StmtVar && body[1].StmtKind == emit.StmtVar &&
+			body[2].StmtKind == emit.StmtReturn
+		if !declared {
+			t.Fatalf("body kinds = %v/%v/%v, want var/var/return",
+				body[0].StmtKind, body[1].StmtKind, body[2].StmtKind)
+		}
+		if len(body[2].Returns) != 2 {
+			t.Fatalf("return carries %d values, want both declared vars", len(body[2].Returns))
+		}
+	})
+
+	t.Run("the alternate is an independent build", func(t *testing.T) {
+		t.Parallel()
+		// Funcs compare only to nil, so the pair cannot differ
+		// observably — but a consumer mutating one must not reach
+		// the other through a shared node.
+		s, a := golang.SampleRefFor(funcRef(nil, nil), "fn", nil)
+		if s.Expr == nil || a.Expr == nil || s.Expr == a.Expr {
+			t.Fatalf("sample and alternate share the expression node")
+		}
+	})
+
+	t.Run("the string form refuses a func sample", func(t *testing.T) {
+		t.Parallel()
+		if s, _ := golang.SampleFor(funcRef(nil, nil), "fn", nil); s != "" {
+			t.Fatalf("SampleFor = %q, want empty: an expression is not a string", s)
+		}
+	})
+}
+
+// TestSampleRefFor_ChannelValues covers the chan arm, which lives in
+// the named section: a channel arrives as `go`.`chan` with the
+// frontend's stamp, never as a kind of its own, and left alone would
+// die at the resolver like any unloaded name.
+func TestSampleRefFor_ChannelValues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a receive channel samples as a bidirectional make", func(t *testing.T) {
+		t.Parallel()
+		// The corpus shape: Subscribe(ctx) (<-chan Value, error).
+		// make is not legal on a directional channel; a `chan T`
+		// assigns to both directional forms.
+		recv := chanRef(namedTypeRef("example.com/bus", "Value"), golang.ChanRecv)
+		s, _ := golang.SampleRefFor(recv, "ch", nil)
+		if !s.OK() || s.Expr == nil {
+			t.Fatalf("refused: %+v", s)
+		}
+		if s.Expr.ExprKind != emit.ExprMake || s.Expr.AsType == nil {
+			t.Fatalf("Expr = %+v, want a make of the channel type", s.Expr)
+		}
+		made, ok := s.Expr.AsType.Origin().(*node.TypeRef)
+		if !ok {
+			t.Fatal("made type carries no origin TypeRef")
+		}
+		if golang.ChanDir(made) != golang.ChanBoth {
+			t.Fatalf("made channel direction = %q, want both", golang.ChanDir(made))
+		}
+		if elem := golang.ChanElem(made); elem == nil || elem.Name != "Value" {
+			t.Fatalf("made channel element = %+v, want the Value ref", elem)
+		}
+	})
+
+	t.Run("a channel without an element refuses", func(t *testing.T) {
+		t.Parallel()
+		// Defensive: the frontend always records the element, so a
+		// bare go.chan is a hand-built fixture — refusing beats
+		// emitting make() of nothing.
+		bare := &node.TypeRef{TypeKind: node.TypeRefNamed, Package: "go", Name: "chan"}
+		golang.MetaIsChannel.Set(bare.EnsureMeta(), true, "test")
+		s, _ := golang.SampleRefFor(bare, "ch", nil)
+		if s.OK() {
+			t.Fatal("derived a sample for a channel with no element")
+		}
+	})
+
+	t.Run("the alternate is an independent build", func(t *testing.T) {
+		t.Parallel()
+		// Channels compare by identity: two makes are two channels,
+		// and the shared-node hazard is the same as the func arm's.
+		both := chanRef(builtinRef("int"), golang.ChanBoth)
+		s, a := golang.SampleRefFor(both, "ch", nil)
+		if s.Expr == nil || a.Expr == nil || s.Expr == a.Expr {
+			t.Fatalf("sample and alternate share the expression node")
+		}
+	})
+}
+
+// TestSample_OKWidening pins that an Expr sample is OK — the half
+// the consumer's evidence gate reads. A predicate beside OK() would
+// drift; widening is the point.
+func TestSample_OKWidening(t *testing.T) {
+	t.Parallel()
+	if (golang.Sample{Expr: &emit.Expr{ExprKind: emit.ExprFuncLit}}).OK() == false {
+		t.Fatal("Sample with Expr reports !OK; the evidence gate would withhold a written defect")
+	}
+	if (golang.Sample{}).OK() {
+		t.Fatal("empty Sample reports OK")
+	}
 }

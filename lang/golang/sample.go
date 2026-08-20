@@ -4,6 +4,8 @@
 package golang
 
 import (
+	"strconv"
+
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/node"
 )
@@ -39,6 +41,15 @@ type Sample struct {
 	// which is the caller's signal to omit the check rather than write
 	// one that cannot fail.
 	Text string
+
+	// Expr carries a sample no Ref-and-Text pair can spell — a func
+	// literal whose signature names several types, a make with the
+	// type embedded mid-expression, a constructor call. When non-nil
+	// it is the whole sample: Ref and Text are empty, and a consumer
+	// renders it through the backend's expression path, which
+	// registers every embedded reference's import exactly as it does
+	// for a slot-contributed expression.
+	Expr *emit.Expr
 
 	// Composite selects the syntax: `Ref{Text}` when true, `Ref(Text)`
 	// when false. A conversion and a composite literal are not
@@ -106,7 +117,7 @@ func (r SampleRefusal) Incomplete() bool {
 // The check a caller makes before emitting: a sample that derived
 // nothing must produce no assertion, because an assertion against an
 // undefined value passes whatever the subject does.
-func (s Sample) OK() bool { return s.Text != "" }
+func (s Sample) OK() bool { return s.Text != "" || s.Expr != nil }
 
 // literalSample returns a sample needing no type beside it.
 func literalSample(text string) Sample { return Sample{Text: text} }
@@ -171,10 +182,22 @@ func sampleRefFor(
 	if t.IsMap() {
 		return mapSample(t, fieldName, r, depth)
 	}
+	if t.IsFunc() {
+		return funcSample(t)
+	}
 	if t.TypeKind != node.TypeRefNamed {
-		// A kind with no arm above — a func or channel type — has no
-		// literal to write, whatever the resolver holds.
+		// A kind with no arm above — a type parameter or an anonymous
+		// struct or interface — has no value to write, whatever the
+		// resolver holds.
 		return refused(RefusedNoLiteral)
+	}
+	if IsChannel(t) {
+		// A channel arrives as a named ref with the frontend's own
+		// stamp on it, never as a kind of its own, so it is caught
+		// here rather than beside the func arm — left to fall
+		// through, the resolver would refuse `go.chan` as it refuses
+		// any type the run never loaded.
+		return chanSample(t)
 	}
 	if s, a, ok := stdlibSample(t); ok {
 		return s, a
@@ -196,46 +219,149 @@ func sampleRefFor(
 	}
 }
 
-// stdlibSamples holds the sample pair for named standard-library
+// stdlibSamples holds the sample builder for named standard-library
 // types, keyed by import path and name.
 //
 // The resolver answers declarations the run loaded, and the standard
 // library is never among them, so a named stdlib type refused here
-// even when a literal is plainly writable. Sampling by underlying
+// even when a value is plainly writable. Sampling by underlying
 // kind cannot close that: the underlying kind lives in the
 // declaration the resolver cannot reach. A curated entry is the only
 // thing that can answer, so each one is a value a person asserted
 // reads sensibly in a generated fixture — extended when a corpus
 // asks, not swept from a list of known kinds.
 //
-// `time.Time` is deliberately absent. Its only writable values are
-// constructor calls, and [Sample] renders `Ref(Text)` or `Ref{Text}`
-// — there is no verbatim-expression form, and inventing one before a
-// corpus needs it would be the speculation this table exists to
-// avoid.
+// pkgTime is the import path the curated entries live under.
 //
-//nolint:gochecknoglobals // package-curated literal table
-var stdlibSamples = map[[2]string][2]string{
-	{"time", "Duration"}: {"42", "7"},
+//nolint:gochecknoglobals // package-curated sample table
+const pkgTime = "time"
+
+//nolint:gochecknoglobals // package-curated sample table
+var stdlibSamples = map[[2]string]func(t *node.TypeRef) (sample, alternate Sample){
+	{pkgTime, "Duration"}: durationSample,
+	{pkgTime, "Time"}:     timeSample,
 }
 
-// stdlibSample answers for a named type in [stdlibSamples],
-// conversion-rendered exactly as [definedSample] renders a loaded
-// defined type: `time.Duration(42)` beside `Weekday(42)`. The Ref is
-// what registers the import — text alone would land an unqualified
-// name in a file that never imported the package.
+// stdlibSample answers for a named type in [stdlibSamples].
 //
 // Consulted before the resolver gate rather than as a fallback, so a
-// nil-resolver caller gets the literal too; nothing can shadow a
+// nil-resolver caller gets the value too; nothing can shadow a
 // standard-library import path, so the order is unobservable beyond
 // that.
 func stdlibSample(t *node.TypeRef) (sample, alternate Sample, ok bool) {
-	pair, found := stdlibSamples[[2]string{t.Package, t.Name}]
+	build, found := stdlibSamples[[2]string{t.Package, t.Name}]
 	if !found {
 		return Sample{}, Sample{}, false
 	}
+	sample, alternate = build(t)
+	return sample, alternate, true
+}
+
+// durationSample renders conversion-form, exactly as [definedSample]
+// renders a loaded defined type: `time.Duration(42)` beside
+// `Weekday(42)`. The Ref is what registers the import — text alone
+// would land an unqualified name in a file that never imported the
+// package.
+func durationSample(t *node.TypeRef) (sample, alternate Sample) {
 	ref := FromNode(t)
-	return Sample{Ref: ref, Text: pair[0]}, Sample{Ref: ref, Text: pair[1]}, true
+	return Sample{Ref: ref, Text: "42"}, Sample{Ref: ref, Text: "7"}
+}
+
+// timeSample answers `time.Unix(42, 0)` beside `time.Unix(7, 0)` —
+// distinct, comparable, and deterministic.
+//
+// A constructor call, which is why the entry waited for
+// [Sample.Expr]: a timestamp has no conversion form, its zero is the
+// year 1, and the call embeds a symbol reference mid-expression that
+// a Ref-and-Text pair cannot carry.
+func timeSample(*node.TypeRef) (sample, alternate Sample) {
+	return Sample{Expr: timeUnix(42)}, Sample{Expr: timeUnix(7)}
+}
+
+// timeUnix builds the `time.Unix(sec, 0)` call. [emit.ExprExternal]
+// is what registers the `time` import when the backend renders it.
+func timeUnix(sec int64) *emit.Expr {
+	return &emit.Expr{
+		ExprKind: emit.ExprCall,
+		Callee:   &emit.Expr{ExprKind: emit.ExprExternal, Pkg: pkgTime, Name: "Unix"},
+		Args:     []*emit.Expr{emit.NewLiteralInt(sec), emit.NewLiteralInt(0)},
+	}
+}
+
+// sampleStampedBy attributes the meta stamps this package writes onto
+// refs it constructs itself.
+const sampleStampedBy = "lang/golang.sample"
+
+// funcSample answers a func type with the no-op literal — the one
+// value a caller can pass that asserts nothing, which is what a
+// generated fixture wants from a parameter it has no opinion about.
+//
+// Results are answered by declaring a var per result and returning
+// them: `var r0 error` compiles for every result type with nothing
+// but the type's reference, so no zero literal is derived and no
+// refusal can propagate from one. Parameters stay anonymous — a
+// literal referencing none of them needs no names.
+//
+// The frontend records a func type's parameter types only, not
+// whether the last is variadic, so a `func(...T)` parameter samples
+// as `func([]T)` and the generated file's compile is the loud
+// failure — the same place an unloaded handle's member fails.
+//
+// The alternate is built independently rather than aliased: two
+// evaluations are two distinct values, funcs compare only to nil, and
+// a consumer mutating one must not reach the other.
+func funcSample(t *node.TypeRef) (sample, alternate Sample) {
+	build := func() *emit.Expr {
+		lit := &emit.Expr{ExprKind: emit.ExprFuncLit}
+		for _, param := range t.FuncParams {
+			lit.FuncParams = append(lit.FuncParams, &emit.Param{Type: FromNode(param)})
+		}
+		if len(t.FuncReturns) == 0 {
+			return lit
+		}
+		ret := &emit.Stmt{StmtKind: emit.StmtReturn}
+		for i, res := range t.FuncReturns {
+			lit.FuncReturns = append(lit.FuncReturns, FromNode(res))
+			name := "r" + strconv.Itoa(i)
+			lit.FuncBody = append(lit.FuncBody, &emit.Stmt{
+				StmtKind: emit.StmtVar, DeclName: name, DeclType: FromNode(res),
+			})
+			ret.Returns = append(ret.Returns, &emit.Expr{ExprKind: emit.ExprIdent, Name: name})
+		}
+		lit.FuncBody = append(lit.FuncBody, ret)
+		return lit
+	}
+	return Sample{Expr: build()}, Sample{Expr: build()}
+}
+
+// chanSample answers a channel type with `make(chan T)`.
+//
+// Bidirectional regardless of the parameter's spelled direction,
+// because `make` is not legal on a directional channel and a
+// `chan T` assigns to both `<-chan T` and `chan<- T`. The made ref
+// is constructed fresh rather than reusing t, whose direction stamp
+// would render the directional form.
+//
+// The alternate is an independent build for the same reason as
+// [funcSample]'s: channels compare by identity, and two makes are
+// two channels.
+func chanSample(t *node.TypeRef) (sample, alternate Sample) {
+	elem := ChanElem(t)
+	if elem == nil {
+		return refused(RefusedNoLiteral)
+	}
+	build := func() *emit.Expr {
+		made := &node.TypeRef{
+			TypeKind: node.TypeRefNamed,
+			Package:  "go",
+			Name:     "chan",
+			TypeArgs: []*node.TypeRef{elem},
+		}
+		MetaIsChannel.Set(made.EnsureMeta(), true, sampleStampedBy)
+		MetaChanDir.Set(made.EnsureMeta(), string(ChanBoth), sampleStampedBy)
+		return &emit.Expr{ExprKind: emit.ExprMake, AsType: FromNode(made)}
+	}
+	return Sample{Expr: build()}, Sample{Expr: build()}
 }
 
 // definedSample renders a defined type's sample as a conversion of its

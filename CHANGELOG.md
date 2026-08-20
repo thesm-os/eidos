@@ -15,17 +15,43 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`Sample` carries expressions, so func and channel parameters sample**
+  (#47). A `Sample` rendered `Ref(Text)` or `Ref{Text}` and nothing else, so
+  a func type — whose signature names several types, each needing its own
+  import — and a channel — whose type sits mid-expression in `make` — could
+  only refuse, and every check on such a parameter was withheld. `Sample.Expr`
+  carries an `emit` expression the backend renders through the same path as
+  any slot expression, registering every embedded reference's import.
+
+  A func samples as the no-op literal — the one value a caller can pass that
+  asserts nothing. Results are declared vars returned (`var r0 error; return
+  r0`), which compiles for every result type on nothing but its reference, so
+  no zero literal is derived and no refusal propagates from one. A channel
+  samples as `make(chan T)`, bidirectional regardless of the parameter's
+  spelled direction, caught in the named arm where the frontend's `go.chan`
+  modelling routes it. `OK()` widens to count an expression as a sample —
+  consumers gating evidence on it get the answer they asked for — and the
+  string-form `SampleFor` still refuses, since a string cannot register an
+  import.
+
+  Alternates are independent builds of the same expression: funcs compare
+  only to nil and channels by identity, so the pair stays distinct everywhere
+  distinctness is observable, and no consumer reaches the sample's node
+  through the alternate.
+
 - **`lang/golang` samples `time.Duration` without a resolver** (#42). A named
   standard-library type refused a sample even where a literal is plainly
   writable, because the resolver answers declarations the run loaded and the
   standard library is never among them. A curated table now answers for
   `time.Duration` — `time.Duration(42)` / `time.Duration(7)`, conversion-
   rendered exactly as a loaded defined type is, with the `Ref` that registers
-  the import. `time.Time` stays out until a corpus needs it: its writable
-  values are constructor calls, and `Sample` has no verbatim-expression form
-  to carry one. The string-form `SampleFor` still refuses table entries, by
+  the import. The string-form `SampleFor` still refuses table entries, by
   its own documented contract — a table sample needs an import a string
   cannot register.
+
+  Amended by #47 before release: the `time.Time` deferral this entry
+  originally recorded is lifted — `Sample` gained the expression form it was
+  waiting for, and the entry lands as `time.Unix(42, 0)`.
 
 - **`attempts=` on `retrysucceeds` and `axis=` on `scope`** (#43). Both were
   relationship claims with no parameter a consumer could read. The bound is
