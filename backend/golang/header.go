@@ -247,11 +247,40 @@ func contributingPluginSet(entities []emit.Node) map[string]bool {
 // collectContributors walks n's own SetBy + any slot provenances
 // attached to n into out. Method-bearing hosts (Struct, Interface,
 // Alias) recurse into their methods so slot contributions stamped
-// inside method bodies flow up.
+// inside method bodies flow up, and every slot item is walked in
+// turn so a host sitting inside another host's slot contributes its
+// own attributions.
+//
+// The slot-item recursion is what reaches a plugin-defined emit
+// kind. Only the built-in kinds have a store bucket, so
+// [store.EmitView.RebuildByTarget] never indexes a custom node and
+// the backend never receives one directly — it arrives as an item in
+// some [emit.File]'s slot. Reading that slot's own ProvenanceList
+// attributes whoever appended the node, and stops there: a plugin
+// contributing into the *node's* slots wrote a third of the file and
+// appeared nowhere, because nothing ever asked the node what it
+// carried.
 func collectContributors(n emit.Node, out map[string]bool) {
+	collectContributorsSeen(n, out, map[emit.Node]struct{}{})
+}
+
+// collectContributorsSeen is [collectContributors] with the
+// cycle guard threaded through.
+//
+// A slot item may reference a host already on the walk — a slot's
+// Owner points back at the host that exposes it, and nothing stops a
+// plugin appending a node that reaches one. The set is cheap
+// insurance against a header render that never returns; the
+// method-only walk this replaced could not cycle, and the item walk
+// can.
+func collectContributorsSeen(n emit.Node, out map[string]bool, seen map[emit.Node]struct{}) {
 	if n == nil {
 		return
 	}
+	if _, walked := seen[n]; walked {
+		return
+	}
+	seen[n] = struct{}{}
 	if name := strings.TrimSpace(n.SetBy()); name != "" {
 		out[name] = true
 	}
@@ -262,20 +291,23 @@ func collectContributors(n emit.Node, out map[string]bool) {
 					out[name] = true
 				}
 			}
+			for _, item := range slot.Items {
+				collectContributorsSeen(item, out, seen)
+			}
 		}
 	}
 	switch host := n.(type) {
 	case *emit.Struct:
 		for _, m := range host.Methods {
-			collectContributors(m, out)
+			collectContributorsSeen(m, out, seen)
 		}
 	case *emit.Interface:
 		for _, m := range host.Methods {
-			collectContributors(m, out)
+			collectContributorsSeen(m, out, seen)
 		}
 	case *emit.Alias:
 		for _, m := range host.Methods {
-			collectContributors(m, out)
+			collectContributorsSeen(m, out, seen)
 		}
 	}
 }
@@ -284,6 +316,12 @@ func collectContributors(n emit.Node, out map[string]bool) {
 // slotMap embedded by every emit host. The interface is satisfied
 // implicitly by Package / File / Struct / Interface / Method /
 // Function / Field / Enum.
+//
+// [emit.BaseEmit] does not embed slotMap, so a plugin-defined emit
+// kind satisfies this only by declaring SlotsByName itself. One that
+// does gets its slot contributors attributed like any built-in
+// host's; one that does not is attributed by whoever appended it and
+// no further.
 type slotEnumerator interface {
 	SlotsByName() map[string]*emit.Slot
 }

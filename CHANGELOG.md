@@ -15,6 +15,24 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **The `Plugins:` header names a plugin that only contributes into another
+  node's slots** (#52). Header attribution read each host's slot provenance
+  but never walked the slot's items, so it stopped at whoever appended a node
+  and never asked the node what it carried. A plugin-defined emit kind has no
+  store bucket — `RebuildByTarget` indexes the built-in kinds only — so it
+  reaches the backend as an item in an `emit.File` slot, which is exactly the
+  step the walk skipped. A tier writing a third of every generated file
+  appeared in none of their headers.
+
+  The walk now recurses into slot items, guarded against cycles: a slot's
+  `Owner` points back at its host, and the method-only walk this replaced
+  could not loop where an item walk can. A plugin-defined kind is reached
+  when it declares `SlotsByName` — `emit.BaseEmit` does not embed the slot
+  map, so that declaration is what opts a custom node into having its own
+  contributors attributed.
+
+### Fixed
+
 - **The stale-output warning and `prune` both check the disk before claiming a
   file is there** (#51). `reportOrphans` said outputs "remain on disk" having
   stat'd nothing, so a run reported files the author had already deleted — 141

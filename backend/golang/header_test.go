@@ -233,6 +233,35 @@ func TestHeader_Plugins(t *testing.T) {
 		}
 	})
 
+	t.Run("a plugin contributing only into a slot item appears", func(t *testing.T) {
+		t.Parallel()
+		// The reported shape: `suite` emits the host, `model`
+		// contributes into that host's own slots and emits nothing of
+		// its own. It wrote a third of the file and named itself
+		// nowhere in the header.
+		ctx, mem, d := newBackendContext(t)
+		ctx.Plugins = []plugin.Plugin{
+			stubPluginVersion{name: "suite", version: "1.24.0"},
+			stubPluginVersion{name: "model", version: "1.0.0"},
+		}
+		target := emit.Target{Dir: "x", Filename: "x.go", Package: "x"}
+		host := emitStructWithFields("x", "X", target, fieldSpec{name: "F", builtin: "int"})
+		host.SetByName = "suite"
+		contract := &emit.Struct{Name: "Contract", Package: "x"}
+		if err := host.Slot("body").Append(contract, emit.Provenance{SetBy: "suite"}); err != nil {
+			t.Fatalf("append contract: %v", err)
+		}
+		row := &emit.Struct{Name: "Row", Package: "x"}
+		if err := contract.Slot("rows").Append(row, emit.Provenance{SetBy: "model"}); err != nil {
+			t.Fatalf("append row: %v", err)
+		}
+		addEmitPackage(t, ctx, emitPackage("x", host))
+		body := assertRenderSucceeds(t, ctx, mem, d, target)
+		if !strings.Contains(string(body), "// Plugins:   suite 1.24.0, model 1.0.0\n") {
+			t.Fatalf("slot-item contributor missing from the header; got:\n%s", body)
+		}
+	})
+
 	t.Run("plugin without Versioned renders Name only", func(t *testing.T) {
 		t.Parallel()
 		ctx, mem, d := newBackendContext(t)
