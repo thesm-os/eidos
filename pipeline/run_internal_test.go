@@ -5,6 +5,8 @@ package pipeline
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -675,14 +677,14 @@ func TestMergeManifestPreservingOutOfScope(t *testing.T) {
 		for _, o := range outs {
 			cur.Add(o)
 		}
-		return mergeManifestPreservingOutOfScope(prev, cur)
+		return (&Pipeline{}).mergeManifestPreservingOutOfScope(prev, cur)
 	}
 
 	t.Run("a nil previous manifest yields the current one unchanged", func(t *testing.T) {
 		t.Parallel()
 		cur := manifest.New("run-cur")
 		cur.Add(baseManifestOutput())
-		if got := mergeManifestPreservingOutOfScope(nil, cur); got != cur {
+		if got := (&Pipeline{}).mergeManifestPreservingOutOfScope(nil, cur); got != cur {
 			t.Fatalf("nil prev must pass the current manifest through")
 		}
 	})
@@ -733,9 +735,59 @@ func TestMergeManifestPreservingOutOfScope(t *testing.T) {
 		prev.Add(at("other", "kept.go", "p", "i", "other-pid"))
 		cur := manifest.New("run-cur")
 		cur.Add(at("d", "f.go", "p", "i", "x"))
-		m := mergeManifestPreservingOutOfScope(prev, cur)
+		m := (&Pipeline{}).mergeManifestPreservingOutOfScope(prev, cur)
 		if len(m.Outputs) != 2 {
 			t.Fatalf("out-of-scope entry dropped; got %d outputs", len(m.Outputs))
+		}
+	})
+
+	t.Run("drops an in-scope entry whose file is gone", func(t *testing.T) {
+		t.Parallel()
+		// Convergence: the entry names nothing on disk and the run
+		// loaded its package, so no future prune or warning can say
+		// anything useful about it. Keeping it is how a manifest
+		// accumulates unclearable claims.
+		p := rootedPipe(t, "example.com/x")
+		prev := manifest.New("run-prev")
+		prev.Add(at("gen", "gone.go", "p", "example.com/x", "pid"))
+		m := p.mergeManifestPreservingOutOfScope(prev, manifest.New("run-cur"))
+		if len(m.Outputs) != 0 {
+			t.Fatalf("absent in-scope entry kept; got %+v", m.Outputs)
+		}
+	})
+
+	t.Run("keeps an in-scope entry whose file is still there", func(t *testing.T) {
+		t.Parallel()
+		// The half that must not converge: the manifest is how prune
+		// finds a file to delete, so dropping a live orphan makes it
+		// permanently unprunable.
+		p := rootedPipe(t, "example.com/x")
+		root, _ := p.outputRoot()
+		if err := os.MkdirAll(filepath.Join(root, "gen"), 0o750); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "gen", "live.go"), []byte("x"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		prev := manifest.New("run-prev")
+		prev.Add(at("gen", "live.go", "p", "example.com/x", "pid"))
+		m := p.mergeManifestPreservingOutOfScope(prev, manifest.New("run-cur"))
+		if len(m.Outputs) != 1 {
+			t.Fatal("live orphan dropped; prune could never find it again")
+		}
+	})
+
+	t.Run("keeps an out-of-scope entry whose file is gone", func(t *testing.T) {
+		t.Parallel()
+		// The run never loaded that package, so it cannot tell "no
+		// longer produced" from "not produced by this invocation" —
+		// the same reason the pipeline does not delete.
+		p := rootedPipe(t, "example.com/x")
+		prev := manifest.New("run-prev")
+		prev.Add(at("gen", "gone.go", "p", "example.com/elsewhere", "pid"))
+		m := p.mergeManifestPreservingOutOfScope(prev, manifest.New("run-cur"))
+		if len(m.Outputs) != 1 {
+			t.Fatalf("out-of-scope entry dropped; got %+v", m.Outputs)
 		}
 	})
 
@@ -747,7 +799,7 @@ func TestMergeManifestPreservingOutOfScope(t *testing.T) {
 		prev.Add(stale)
 		cur := manifest.New("run-cur")
 		cur.Add(at("d", "f.go", "p", "i", "x"))
-		m := mergeManifestPreservingOutOfScope(prev, cur)
+		m := (&Pipeline{}).mergeManifestPreservingOutOfScope(prev, cur)
 		if len(m.Outputs) != 1 || m.Outputs[0].Hash == "sha256:stale" {
 			t.Fatalf("re-emitted target must replace the previous entry; got %+v", m.Outputs)
 		}
@@ -768,7 +820,12 @@ func TestReportOrphans(t *testing.T) {
 
 	// pipeWith returns a pipeline whose store holds one package, so
 	// ScopeImportPaths reports that import path as loaded.
-	pipeWith := func(importPath string) (*Pipeline, *diag.Sink) {
+	// pipeWith returns a pipeline rooted at a fresh temp dir. The
+	// root is what makes the orphan claim checkable: reportOrphans
+	// names only files it stat'd, so a test asserting a warning has
+	// to put the file on disk — which is the property the warning
+	// lacked when it named 141 files that were already deleted.
+	pipeWith := func(importPath string) (*Pipeline, *diag.Sink, string) {
 		s := store.New()
 		if importPath != "" {
 			if err := s.Nodes().AddPackage(&node.Package{Name: "p", Path: importPath}); err != nil {
@@ -776,9 +833,23 @@ func TestReportOrphans(t *testing.T) {
 			}
 		}
 		d := diag.New()
-		p := &Pipeline{diag: d}
+		root := t.TempDir()
+		p := &Pipeline{diag: d, sink: sink.NewDisk(root)}
 		p.lastStore.Store(s)
-		return p, d
+		return p, d, root
+	}
+	// seed puts an output's file on disk so it counts as an orphan.
+	seed := func(root string, outs ...manifest.Output) {
+		for _, o := range outs {
+			dir := filepath.Join(root, o.Target.Dir)
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			path := filepath.Join(dir, o.Target.Filename)
+			if err := os.WriteFile(path, []byte("package p\n"), 0o600); err != nil {
+				t.Fatalf("seed %s: %v", path, err)
+			}
+		}
 	}
 	out := func(file, importPath string) manifest.Output {
 		o := baseManifestOutput()
@@ -803,7 +874,8 @@ func TestReportOrphans(t *testing.T) {
 
 	t.Run("an output no longer produced is named", func(t *testing.T) {
 		t.Parallel()
-		p, d := pipeWith("example.com/x")
+		p, d, root := pipeWith("example.com/x")
+		seed(root, out("a.gen.go", "example.com/x"), out("b.gen.go", "example.com/x"))
 		p.reportOrphans(
 			manifestOf(out("a.gen.go", "example.com/x"), out("b.gen.go", "example.com/x")),
 			manifestOf(out("a.gen.go", "example.com/x")),
@@ -822,7 +894,7 @@ func TestReportOrphans(t *testing.T) {
 		// The false positive the pipeline must not produce: a narrow
 		// `run ./sub/...` would otherwise call every other package's
 		// output orphaned.
-		p, d := pipeWith("example.com/x")
+		p, d, _ := pipeWith("example.com/x")
 		p.reportOrphans(
 			manifestOf(out("other.gen.go", "example.com/elsewhere")),
 			manifestOf(),
@@ -838,7 +910,8 @@ func TestReportOrphans(t *testing.T) {
 		// and no source package declares that path. Matching without
 		// undoing the shift misses every test output, so the whole
 		// class goes unreportable rather than some of it.
-		p, d := pipeWith("example.com/x")
+		p, d, root := pipeWith("example.com/x")
+		seed(root, out("a.gen_test.go", "example.com/x_test"))
 		p.reportOrphans(
 			manifestOf(out("a.gen_test.go", "example.com/x_test")),
 			manifestOf(),
@@ -852,7 +925,7 @@ func TestReportOrphans(t *testing.T) {
 		t.Parallel()
 		// The trim must not widen the scope check into matching
 		// anything: a narrow run still reports only what it loaded.
-		p, d := pipeWith("example.com/x")
+		p, d, _ := pipeWith("example.com/x")
 		p.reportOrphans(
 			manifestOf(out("other.gen_test.go", "example.com/elsewhere_test")),
 			manifestOf(),
@@ -862,9 +935,43 @@ func TestReportOrphans(t *testing.T) {
 		}
 	})
 
+	t.Run("an output already deleted is not named", func(t *testing.T) {
+		t.Parallel()
+		// The reported bug: the sentence says the files remain on
+		// disk, and nothing looked. A warning naming a file the
+		// reader already deleted is one they cannot act on, so they
+		// stop reading the line the real orphan will appear in.
+		p, d, _ := pipeWith("example.com/x")
+		p.reportOrphans(
+			manifestOf(out("gone.gen.go", "example.com/x")),
+			manifestOf(),
+		)
+		if got := warned(d); got != "" {
+			t.Fatalf("warned %q for a file that is not on disk", got)
+		}
+	})
+
+	t.Run("a sink with no root claims nothing", func(t *testing.T) {
+		t.Parallel()
+		// A memory or stdout sink offers no root to join against, so
+		// every word of the warning would be unverified. Silence is
+		// the honest answer, not a guess at the working directory.
+		st := store.New()
+		if err := st.Nodes().AddPackage(&node.Package{Name: "p", Path: "example.com/x"}); err != nil {
+			t.Fatalf("AddPackage: %v", err)
+		}
+		d := diag.New()
+		p := &Pipeline{diag: d, sink: sink.NewMemory()}
+		p.lastStore.Store(st)
+		p.reportOrphans(manifestOf(out("a.gen.go", "example.com/x")), manifestOf())
+		if got := warned(d); got != "" {
+			t.Fatalf("warned %q with an unrooted sink", got)
+		}
+	})
+
 	t.Run("a still-produced output raises nothing", func(t *testing.T) {
 		t.Parallel()
-		p, d := pipeWith("example.com/x")
+		p, d, _ := pipeWith("example.com/x")
 		p.reportOrphans(
 			manifestOf(out("a.gen.go", "example.com/x")),
 			manifestOf(out("a.gen.go", "example.com/x")),
@@ -876,10 +983,24 @@ func TestReportOrphans(t *testing.T) {
 
 	t.Run("a first run raises nothing", func(t *testing.T) {
 		t.Parallel()
-		p, d := pipeWith("example.com/x")
+		p, d, _ := pipeWith("example.com/x")
 		p.reportOrphans(nil, manifestOf(out("a.gen.go", "example.com/x")))
 		if got := warned(d); got != "" {
 			t.Fatalf("warned %q with no previous manifest", got)
 		}
 	})
+}
+
+// rootedPipe returns a pipeline with a disk sink over a fresh temp
+// dir and one loaded package, so both halves of the convergence
+// rule — scope and disk presence — are exercisable.
+func rootedPipe(t *testing.T, importPath string) *Pipeline {
+	t.Helper()
+	s := store.New()
+	if err := s.Nodes().AddPackage(&node.Package{Name: "p", Path: importPath}); err != nil {
+		t.Fatalf("AddPackage: %v", err)
+	}
+	p := &Pipeline{diag: diag.New(), sink: sink.NewDisk(t.TempDir())}
+	p.lastStore.Store(s)
+	return p
 }

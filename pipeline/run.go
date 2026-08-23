@@ -127,7 +127,10 @@ func (p *Pipeline) Run(ctx context.Context, patterns ...string) error {
 // matches a package the current run did NOT load are preserved
 // verbatim. Without the merge, a `./sub/...` run would shrink the
 // manifest to just `sub/` entries and orphan everything else from
-// prune / drift tracking. See [mergeManifestPreservingOutOfScope].
+// prune / drift tracking. An in-scope entry whose file is gone is
+// dropped, which is what lets the manifest converge instead of
+// accumulating claims nothing can clear. See
+// [Pipeline.mergeManifestPreservingOutOfScope].
 //
 // The write is skipped when the merged manifest matches the prior
 // on disk modulo RunID: the timestamp would otherwise refresh
@@ -146,7 +149,7 @@ func (p *Pipeline) writeManifest(rec *recordingSink, s *store.Store) {
 	defer diag.RecoverAs(p.diag.For("pipeline"), position.Pos{})
 	current := rec.asManifest(time.Now().UTC().Format(time.RFC3339), s, p.pluginNames(), p)
 	prev, _ := manifest.Read(p.manifestPath)
-	merged := mergeManifestPreservingOutOfScope(prev, current)
+	merged := p.mergeManifestPreservingOutOfScope(prev, current)
 	p.lastManifest.Store(merged)
 	p.reportOrphans(prev, current)
 	if p.dryRun {
@@ -180,6 +183,50 @@ func sourceImportPath(ip string) string {
 // is one an operator scrolls past.
 const orphanCap = 5
 
+// rootedSink is a sink whose writes land under a known filesystem
+// root — the only shape whose outputs can be stat'd.
+//
+// [sink.Sink] is one method wide and the pipeline holds it as such,
+// so a memory or stdout sink offers no root and no disk to consult.
+// Asking the sink rather than joining against [Pipeline.sourceRoot]
+// is the difference between a fact and a coincidence: the two agree
+// for a CLI run from the module root and part company the moment a
+// sink is rooted anywhere else, and the consequence of guessing is
+// a manifest entry dropped for a file that is still there.
+type rootedSink interface {
+	Root() string
+}
+
+// outputRoot returns the filesystem root this run's outputs land
+// under, and whether the sink offered one.
+func (p *Pipeline) outputRoot() (string, bool) {
+	rooted, ok := p.sink.(rootedSink)
+	if !ok {
+		return "", false
+	}
+	root := rooted.Root()
+	if root == "" {
+		return "", false
+	}
+	return root, true
+}
+
+// onDisk reports whether the output o claims is present under root.
+//
+// An absolute Dir bypasses the root, matching how the disk sink
+// resolves the same target. A stat error other than not-exist is
+// read as present: the file may well be there and unreadable, and
+// treating that as absence would drop a manifest entry for an
+// output prune could still act on.
+func onDisk(root string, o manifest.Output) bool {
+	path := filepath.Join(o.Target.Dir, o.Target.Filename)
+	if !filepath.IsAbs(o.Target.Dir) {
+		path = filepath.Join(root, path)
+	}
+	_, err := os.Stat(path)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
 // reportOrphans warns when a previous run wrote outputs this one no
 // longer produces.
 //
@@ -194,12 +241,25 @@ const orphanCap = 5
 // narrow `run ./sub/...` from reporting every other package as
 // orphaned. Same rule the prune subcommand applies for the same
 // reason.
+//
+// Every named path is stat'd first. The sentence claims the files
+// remain on disk, and claiming it without looking produced a warning
+// naming 141 files that were already deleted — a line a reader
+// cannot act on trains them past the line, which costs exactly when
+// a real orphan appears in it.
 func (p *Pipeline) reportOrphans(prev, current *manifest.Manifest) {
 	if prev == nil {
 		return
 	}
 	scope := p.ScopeImportPaths()
 	if len(scope) == 0 {
+		return
+	}
+	root, rooted := p.outputRoot()
+	if !rooted {
+		// Nothing to stat against, so every word of the warning
+		// below would be unverified. A sink with no root wrote no
+		// files this run and can say nothing about a previous one's.
 		return
 	}
 	produced := make(map[emit.Target]struct{}, len(current.Outputs))
@@ -212,6 +272,13 @@ func (p *Pipeline) reportOrphans(prev, current *manifest.Manifest) {
 			continue
 		}
 		if _, loaded := scope[sourceImportPath(o.Target.ImportPath)]; !loaded {
+			continue
+		}
+		if !onDisk(root, o) {
+			// Claimed by the manifest and already gone. The merge
+			// drops it, so this run is the last one that could have
+			// mentioned it — and there is nothing for a reader to do
+			// about a file that is not there.
 			continue
 		}
 		orphans = append(orphans, filepath.Join(o.Target.Dir, o.Target.Filename))
@@ -278,12 +345,14 @@ func (p *Pipeline) ScopeImportPaths() map[string]struct{} {
 // (Dir, Filename, Package, ImportPath, PipelineID) for a total
 // ordering — keeps the on-disk JSON byte-stable across runs even
 // when several pipelines coexist in one manifest.
-func mergeManifestPreservingOutOfScope(
+func (p *Pipeline) mergeManifestPreservingOutOfScope(
 	prev, current *manifest.Manifest,
 ) *manifest.Manifest {
 	if prev == nil {
 		return current
 	}
+	root, rooted := p.outputRoot()
+	scope := p.ScopeImportPaths()
 	merged := manifest.New(current.RunID)
 	merged.Brand = current.Brand
 	type key struct {
@@ -296,6 +365,9 @@ func mergeManifestPreservingOutOfScope(
 	}
 	for _, o := range prev.Outputs {
 		if _, replaced := currentKeys[key{o.Target, o.PipelineID}]; replaced {
+			continue
+		}
+		if p.converged(root, rooted, scope, o) {
 			continue
 		}
 		merged.Add(o)
@@ -319,6 +391,33 @@ func mergeManifestPreservingOutOfScope(
 		return cmp.Compare(a.PipelineID, b.PipelineID)
 	})
 	return merged
+}
+
+// converged reports whether a prior output should leave the manifest
+// because there is nothing left to say about it: the run loaded its
+// package, did not produce it, and its file is gone.
+//
+// The disk check is the load-bearing half. An entry dropped while
+// its file is still there becomes untracked garbage — the manifest
+// is how prune knows what to delete, so forgetting a live orphan
+// makes it permanently unprunable. Absence is the only state where
+// dropping costs nothing, and it is the state that otherwise
+// accumulates forever.
+//
+// Out-of-scope entries are never dropped: the run cannot distinguish
+// "no longer produced" from "not produced by this invocation" for a
+// package it never loaded, which is the same reason the pipeline
+// does not delete.
+func (*Pipeline) converged(
+	root string, rooted bool, scope map[string]struct{}, o manifest.Output,
+) bool {
+	if !rooted || len(scope) == 0 {
+		return false
+	}
+	if _, loaded := scope[sourceImportPath(o.Target.ImportPath)]; !loaded {
+		return false
+	}
+	return !onDisk(root, o)
 }
 
 // manifestContentEqual reports whether prev and current describe the

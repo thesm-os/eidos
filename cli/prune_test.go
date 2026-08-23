@@ -410,3 +410,68 @@ func TestPruneCommand_DeletedSources(t *testing.T) {
 		}
 	})
 }
+
+// TestPruneCommand_AlreadyGone covers a manifest entry whose file is
+// not on disk — the case both modes previously called a deletion.
+//
+// The manifest entry still clears, which is the half that always
+// worked and is why a real prune converges a manifest a dry run
+// never can.
+func TestPruneCommand_AlreadyGone(t *testing.T) {
+	t.Parallel()
+
+	target := emit.Target{
+		Dir: "out", Filename: "gone.go", Package: "x", ImportPath: pruneScopePath,
+	}
+	plugins := []plugin.Plugin{
+		pruneScopedFrontend(),
+		stubBackend{name: "be", lang: "stub"},
+	}
+
+	t.Run("dry run reports it as gone rather than as a would-delete", func(t *testing.T) {
+		t.Parallel()
+		env, stdout, _ := freshEnv(t, "eidos")
+		writePrevManifest(t, env, derivePruneTestPipelineID(t, env, plugins), target)
+		cmd := &cli.PruneCommand{Config: cli.PruneConfig{Plugins: plugins, DryRun: true}}
+		if code := cmd.Execute(t.Context(), env); code != cli.ExitOK {
+			t.Fatalf("Execute = %d, want ExitOK", code)
+		}
+		out := stdout.String()
+		if strings.Contains(out, "would delete:") {
+			t.Fatalf("claimed a deletion for an absent file; got %q", out)
+		}
+		if !strings.Contains(out, "already gone:") {
+			t.Fatalf("expected an `already gone:` line; got %q", out)
+		}
+		if !strings.Contains(out, "0 would-delete, 1 already gone") {
+			t.Fatalf("summary should separate the counts; got %q", out)
+		}
+	})
+
+	t.Run("real prune converges the entry and claims no deletion", func(t *testing.T) {
+		t.Parallel()
+		// A real prune runs the pipeline against the disk sink, whose
+		// root lets the manifest merge drop an in-scope entry with no
+		// file behind it — so prune finds nothing left to do and says
+		// so. The end state is what matters: the claim is gone, which
+		// is the convergence a dry run can preview but never perform.
+		env, stdout, _ := freshEnv(t, "eidos")
+		writePrevManifest(t, env, derivePruneTestPipelineID(t, env, plugins), target)
+		cmd := &cli.PruneCommand{Config: cli.PruneConfig{Plugins: plugins}}
+		if code := cmd.Execute(t.Context(), env); code != cli.ExitOK {
+			t.Fatalf("Execute = %d, want ExitOK", code)
+		}
+		if out := stdout.String(); strings.Contains(out, "deleted: ") {
+			t.Fatalf("claimed a deletion for an absent file; got %q", out)
+		}
+		m, err := manifest.Read(env.ManifestPath())
+		if err != nil {
+			t.Fatalf("read manifest: %v", err)
+		}
+		for _, o := range m.Outputs {
+			if o.Target == target {
+				t.Fatal("manifest still claims a file that is not on disk")
+			}
+		}
+	})
+}

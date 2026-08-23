@@ -13,6 +13,29 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Fixed
+
+- **The stale-output warning and `prune` both check the disk before claiming a
+  file is there** (#51). `reportOrphans` said outputs "remain on disk" having
+  stat'd nothing, so a run reported files the author had already deleted — 141
+  of them in one consumer's corpus, on the last line of every run. `prune`
+  called the same absent files `would delete:` in dry-run and `deleted:` for
+  real, counting both as deletions. Absent entries now report `already gone:`
+  and carry their own count, and the warning names only files it looked for.
+
+  The pipeline asks its sink for a root rather than assuming the working
+  directory. `sink.Sink` is one method wide, so a memory or stdout sink offers
+  none — and there the warning is suppressed rather than guessed at, because
+  joining against a coincidental root is how a manifest entry gets dropped for
+  a file that is still there.
+
+- **The manifest converges instead of accumulating claims** (#51). The merge
+  preserved every prior entry unconditionally, though its own docblock claimed
+  it kept only those whose package the run did not load. An in-scope entry
+  with no file behind it is now dropped, so repeated runs settle. Dropping is
+  gated on verified absence: the manifest is how `prune` finds a file to
+  delete, so forgetting a live orphan would make it permanently unprunable.
+
 ### Added
 
 - **A `renderSample` template function on the Go backend** (#50). Every
