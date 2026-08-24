@@ -429,16 +429,53 @@ func composeFile(ctx *plugin.BackendContext, entities []emit.Node, body []byte) 
 
 // packageDocsFor returns the doc-comment lines rendered above the
 // `package <Name>` clause of target's output file. The source is
-// the [emit.Package] entity whose name matches target.Package; its
-// DocLines apply to every file in that package. Returns nil when
-// no matching package carries DocLines — [renderDocs] renders the
-// empty slice as the empty string, so the absent package doc
-// introduces no whitespace.
+// the [emit.Package] entity whose name matches target.Package.
+//
+// Exactly one file per package carries them. Go allows one package
+// comment; a package emitting N files used to get N copies, which
+// compiles and passes vet while leaving godoc to take whichever file
+// sorts first. The copies are identical, so the rendered
+// documentation was never wrong — but a file that declares a package
+// comment it does not own is wrong in the source, and the count grew
+// with every generator added to the pipeline.
+//
+// Returns nil for the other files and when no matching package
+// carries DocLines — [renderDocs] renders the empty slice as the
+// empty string, so an absent package doc introduces no whitespace.
 func packageDocsFor(ctx *plugin.BackendContext, target emit.Target) []string {
-	if pkg, ok := ctx.Store.Emit().Packages().ByQName(target.Package); ok {
-		return pkg.DocLines
+	pkg, ok := ctx.Store.Emit().Packages().ByQName(target.Package)
+	if !ok || len(pkg.DocLines) == 0 {
+		return nil
 	}
-	return nil
+	if !bearsPackageDoc(ctx, target) {
+		return nil
+	}
+	return pkg.DocLines
+}
+
+// bearsPackageDoc reports whether target is the one file in its
+// package that carries the package comment — the lowest Filename
+// among the targets sharing its directory and package name.
+//
+// Keyed on both, because a directory holds two packages whenever an
+// external test package sits beside its subject: `foo` and
+// `foo_test` each own a package comment, and grouping on the
+// directory alone would silence one of them.
+//
+// Lowest filename rather than any other deterministic pick: a single
+// comment is found wherever it sits, so the choice is free, and the
+// lowest is the one godoc already reported when the copies made it
+// choose. Rendered output therefore changes by subtraction only.
+func bearsPackageDoc(ctx *plugin.BackendContext, target emit.Target) bool {
+	for _, t := range ctx.Store.Emit().ByTarget().Keys() {
+		if t.Dir != target.Dir || t.Package != target.Package {
+			continue
+		}
+		if t.Filename < target.Filename {
+			return false
+		}
+	}
+	return true
 }
 
 // renderFile produces the raw rendered body for one Target. The

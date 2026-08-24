@@ -15,6 +15,21 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **The package doc renders into one file per package, not every file** (#53).
+  Go allows one package comment; a package emitting N files got N copies. It
+  compiles and `go vet` is silent, so nothing downstream caught a generated
+  file declaring a package comment it does not own — 131 packages in one
+  consumer's corpus.
+
+  The lowest-named file in each package carries it. A single comment is found
+  wherever it sits, so the choice is free; the lowest is the one godoc already
+  reported when the duplicates forced it to choose, which keeps rendered
+  documentation byte-identical and makes this a subtraction. Grouping is by
+  directory *and* package name, because an external test package sits in its
+  subject's directory and owns a package comment of its own.
+
+### Fixed
+
 - **The `Plugins:` header names a plugin that only contributes into another
   node's slots** (#52). Header attribution read each host's slot provenance
   but never walked the slot's items, so it stopped at whoever appended a node

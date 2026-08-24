@@ -364,6 +364,58 @@ func TestBackend_Golden(t *testing.T) {
 		pipelinetest.MatchesGoldenBytes(t, body, goldenPath(t, "package_with_docs.go.golden"))
 	})
 
+	t.Run("package docs land in exactly one file of a multi-file package", func(t *testing.T) {
+		t.Parallel()
+		// Go allows one package comment. A package emitting N files
+		// used to get N copies: it compiles, vet is silent, and godoc
+		// takes whichever file sorts first — so nothing downstream
+		// catches a file declaring a package comment it does not own.
+		ctx, mem, d := newBackendContext(t)
+		first := emit.Target{Dir: "users", Filename: "a_builder.go", Package: "users"}
+		last := emit.Target{Dir: "users", Filename: "z_suite.go", Package: "users"}
+		docs := []string{"Package users models the canonical user record."}
+		addEmitPackage(t, ctx, &emit.Package{
+			BaseEmit: emit.BaseEmit{DocLines: docs},
+			Name:     "users", Path: "users",
+			Structs: []*emit.Struct{
+				{Name: "Builder", Package: "users", Target: first},
+				{Name: "Suite", Package: "users", Target: last},
+			},
+		})
+		firstBody := assertRenderSucceeds(t, ctx, mem, d, first)
+		lastBody := assertRenderSucceeds(t, ctx, mem, d, last)
+		if !strings.Contains(string(firstBody), docs[0]) {
+			t.Fatalf("the lowest-named file should carry the package doc; got:\n%s", firstBody)
+		}
+		if strings.Contains(string(lastBody), docs[0]) {
+			t.Fatalf("a second copy of the package doc was rendered; got:\n%s", lastBody)
+		}
+	})
+
+	t.Run("an external test package keeps its own doc beside its subject", func(t *testing.T) {
+		t.Parallel()
+		// One directory, two packages: `users` and `users_test` each
+		// own a package comment. Grouping on the directory alone
+		// would silence whichever sorted second.
+		ctx, mem, d := newBackendContext(t)
+		subject := emit.Target{Dir: "users", Filename: "a_user.go", Package: "users"}
+		external := emit.Target{Dir: "users", Filename: "z_user_test.go", Package: "users_test"}
+		addEmitPackage(t, ctx, &emit.Package{
+			BaseEmit: emit.BaseEmit{DocLines: []string{"Package users is the subject."}},
+			Name:     "users", Path: "users",
+			Structs: []*emit.Struct{{Name: "User", Package: "users", Target: subject}},
+		})
+		addEmitPackage(t, ctx, &emit.Package{
+			BaseEmit: emit.BaseEmit{DocLines: []string{"Package users_test exercises the subject."}},
+			Name:     "users_test", Path: "users_test",
+			Structs: []*emit.Struct{{Name: "Case", Package: "users_test", Target: external}},
+		})
+		body := assertRenderSucceeds(t, ctx, mem, d, external)
+		if !strings.Contains(string(body), "Package users_test exercises the subject.") {
+			t.Fatalf("the external test package lost its own doc; got:\n%s", body)
+		}
+	})
+
 	t.Run("struct_with_field_annotations — field docs, tags, line comments", func(t *testing.T) {
 		t.Parallel()
 		ctx, mem, d := newBackendContext(t)
