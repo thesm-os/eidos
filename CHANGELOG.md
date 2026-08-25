@@ -13,6 +13,26 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Added
+
+- **A `shape/ids` package re-exporting every catalog name.** One import for
+  the words a consumer would otherwise spell as string literals — 22 detector,
+  26 contract and 58 mixin names, each declared as its own package's `Name`
+  rather than a copy, so a rename in the catalog is a compile error instead of
+  a literal that quietly stopped matching.
+
+  The constants are untyped, so they still pass to the string-taking key
+  constructors without a conversion; the `Name` type earns its place on
+  `Detectors()`, `Contracts()` and `Mixins()`, which return the registered set
+  sorted. A test pins all three against `detectors.All()`, `contracts.All()`
+  and `mixins.All()` — a re-export that can fall behind is worse than the
+  literals it replaces, because a constant looks verified.
+
+  The three families are prefixed because they share a namespace by accident:
+  `pure` is both a detector and a mixin. Names are not package names either —
+  `batch-writer` and `rate-limit` hyphenate, and the write-through-cache
+  contract registers as plain `cache`.
+
 ### Fixed
 
 - **The package doc renders into one file per package, not every file** (#53).
