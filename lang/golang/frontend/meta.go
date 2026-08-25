@@ -19,22 +19,19 @@ import (
 //
 // MetaFrontend is the one exception to the `go.*` namespace: it
 // carries the bare name `frontend` because it is a cross-frontend
-// convention. Multiple frontends declare the same key
-// independently (each through [meta.EnsureKey] to avoid
-// init-order coupling), and every produced [node.Package] carries
-// the marker with the producing frontend's plugin name as value.
+// convention, and it is re-exported from [node] rather than declared
+// here — one key every frontend writes and every bridge reads has one
+// home, below all of them.
 var (
-	// MetaFrontend stamps the producing frontend's plugin name on
-	// every [node.Package] entry the Go frontend emits. The value
-	// is the string `"golang"` for Go-derived packages; the
-	// protobuf frontend stamps the matching `"protobuf"` on its
-	// packages. Bridge annotators (protogo and future language
-	// pairs) and the cross-namespace audit step filter their walks
-	// by reading this stamp.
-	MetaFrontend = meta.EnsureKey(
-		"frontend",
-		meta.StringParser,
-	) //nolint:gochecknoglobals // cross-frontend registry-singleton key
+	// MetaFrontend re-exports [node.MetaFrontend] — the marker every
+	// frontend stamps on the packages it produces, naming the language
+	// it parsed.
+	//
+	// One declaration, in the package a [node.Package] comes from.
+	// Every frontend spelled the name itself before, each relying on
+	// the tolerant constructor to land on one singleton — which held
+	// only while all of them kept spelling it the same way.
+	MetaFrontend = node.MetaFrontend //nolint:gochecknoglobals // re-exported registry singleton
 
 	// The `go.*` keys moved to [lang/golang] so every Go-speaking
 	// consumer can import the declaration instead of re-declaring

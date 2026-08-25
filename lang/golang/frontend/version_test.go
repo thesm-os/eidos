@@ -16,7 +16,7 @@ import (
 // stampingSurfaceDigest pins the set of metadata keys this frontend
 // declares. Update it in the same commit that bumps FrontendVersion,
 // never on its own.
-const stampingSurfaceDigest = "ae06f50771b3a05ffc8d178b98febc5dbf9e365a0596025222abbad89cf69f97"
+const stampingSurfaceDigest = "4d4707c00e874379d0c94b484559782282a8a38a814224ba518cf6a51d9f92e1"
 
 // TestFrontendVersion_TracksStampingSurface fails when the set of
 // metadata keys this frontend stamps changes without FrontendVersion
@@ -52,12 +52,14 @@ const stampingSurfaceDigest = "ae06f50771b3a05ffc8d178b98febc5dbf9e365a059602522
 func TestFrontendVersion_TracksStampingSurface(t *testing.T) {
 	t.Parallel()
 
-	// Both directories: the `go.*` vocabulary this frontend stamps
-	// is declared in lang/golang so every Go-speaking consumer can
-	// import it, and docaudit sees only literal declarations — so
-	// scanning this package alone would report the one key still
-	// declared here and leave the guard blind to the nineteen it
-	// actually stamps.
+	// Both directories, though this one now declares nothing. The
+	// `go.*` vocabulary this frontend stamps is declared in lang/golang
+	// so every Go-speaking consumer can import it, and the
+	// cross-frontend marker moved to node for the same reason — so
+	// scanning this package alone would find no key at all and leave
+	// the guard blind to every one it actually stamps. The call stays
+	// so a key declared here again is picked up rather than silently
+	// unguarded.
 	keys, err := docaudit.MetaKeys(packageSourceDir(t))
 	if err != nil {
 		t.Fatalf("collecting declared meta keys: %v", err)

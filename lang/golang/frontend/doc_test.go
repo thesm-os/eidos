@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"testing"
 
-	"go.thesmos.sh/eidos/docaudit"
 	"go.thesmos.sh/eidos/lang/golang/frontend"
 )
 
@@ -32,21 +31,18 @@ func TestPackageDoc(t *testing.T) {
 	})
 }
 
-// TestDocAuditCoversEveryMetaKey pins that every meta key the Go
-// frontend constructs from a literal string is mentioned in the
-// package's doc.go, so a new key cannot land in code without an
-// entry in the doc.go catalog.
+// No doc audit here. This package declares no meta key from a
+// literal: the `go.*` vocabulary lives in lang/golang and is audited
+// there, the cross-frontend marker lives in node and is audited there,
+// and the per-struct-tag keys are composed from a tag name read at
+// runtime — [frontend.MetaTagPrefix] concatenated in stamp_helpers.go
+// — so no literal reaches the audit at all. Those are documented by
+// namespace in the catalog, and that entry is unenforced; review is
+// the only thing holding it to the code.
 //
-// The per-struct-tag keys are the one gap the audit cannot close:
-// [frontend.MetaTagPrefix] is concatenated with a tag name read at
-// runtime, so the [meta.EnsureKey] call in stamp_helpers.go carries
-// no literal for the audit to extract. Those keys are documented by
-// namespace in the catalog instead, and that entry is unenforced —
-// review is the only thing holding it to the code.
-func TestDocAuditCoversEveryMetaKey(t *testing.T) {
-	t.Parallel()
-	docaudit.AssertEveryMetaKeyDocumented(t, packageSourceDir(t))
-}
+// An audit over a package that declares nothing does not pass, it
+// reports itself mis-wired — which is the right behaviour and the
+// reason this is a comment rather than a call.
 
 // packageSourceDir returns the absolute path of the directory the
 // test file lives in.

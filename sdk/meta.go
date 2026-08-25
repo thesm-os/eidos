@@ -3,7 +3,10 @@
 
 package sdk
 
-import "go.thesmos.sh/eidos/core/meta"
+import (
+	"go.thesmos.sh/eidos/core/meta"
+	"go.thesmos.sh/eidos/node"
+)
 
 // The metadata surface — how an annotator states a fact about a
 // declaration and how a generator reads it back.
@@ -173,19 +176,18 @@ var (
 // MetaFrontend is the key every frontend stamps on the packages it
 // produces, naming the language it parsed — `"golang"`, `"protobuf"`.
 //
-// Declared here because a meta key is interned by name, and a
-// consumer that re-declares it by string forfeits the compile-time
-// link to everyone else reading it. Five packages had done exactly
-// that before this existed, each spelling `"frontend"` itself: the
-// key resolved to one singleton by luck of the shared literal, and a
-// rename in any one of them would have produced a second key that
-// reads empty from every writer.
+// Re-exported from [node.MetaFrontend] rather than declared here. A
+// meta key is interned by name, so a package re-declaring it by string
+// forfeits the compile-time link to everyone else using it — and this
+// façade cannot be the one declaration, because a frontend sits below
+// it and cannot import it. The three that stamp the key were spelling
+// it themselves for exactly that reason.
 //
 // Read it through [LanguageOf] rather than directly, so no caller has
 // to decide separately what an unstamped package means.
 //
-//nolint:gochecknoglobals // meta key registration, immutable after init.
-var MetaFrontend = EnsureKey("frontend", StringParser)
+//nolint:gochecknoglobals // re-exported meta key registration.
+var MetaFrontend = node.MetaFrontend
 
 // LanguageOf returns the language pkg's declarations were written in,
 // or empty when nothing stamped one.

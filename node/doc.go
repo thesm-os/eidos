@@ -13,6 +13,13 @@
 //   - [meta.Bag] on every node carries typed extension metadata —
 //     frontend stamps <lang>.*, shape detectors stamp shape.*,
 //     plugins stamp their own namespaces.
+//   - frontend — the one meta key this package declares, on every
+//     [Package]: the name of the frontend that produced it, and so of
+//     the language its declarations were written in. Declared here
+//     because every frontend writes it and every bridge reads it, and
+//     a key is interned by name — so each of them spelling the string
+//     itself, as all three did, holds only while they keep agreeing.
+//     See [MetaFrontend] and [FrontendOf].
 //   - [directive.Directive] values are parsed from source comments
 //     and attached per node; the directive package's validator
 //     enforces schemas against them.

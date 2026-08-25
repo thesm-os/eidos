@@ -15,7 +15,7 @@ import (
 // stampingSurfaceDigest pins the set of metadata keys this frontend
 // declares. Update it in the same commit that bumps FrontendVersion,
 // never on its own.
-const stampingSurfaceDigest = "36e2ab6253bfa341404f884a17ce69d769e1117272518d9980163728d17dd4c4"
+const stampingSurfaceDigest = "99d044db3cf0b4744a35ed12cdd7498cdb546911d639e6ee26ecbd1a689ad5de"
 
 // TestFrontendVersion_TracksStampingSurface fails when the set of
 // metadata keys this frontend stamps changes without FrontendVersion

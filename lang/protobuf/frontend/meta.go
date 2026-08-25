@@ -37,19 +37,15 @@ import (
 // so each option full-name resolves to a single canonical
 // [meta.Key] across the run.
 var (
-	// MetaFrontend stamps the producing frontend's plugin name on
-	// every [node.Package] entry the frontend emits. The value is
-	// the string `"protobuf"` for proto-derived packages; the Go
-	// frontend stamps the matching `"golang"` on its packages. The
-	// marker is the cross-frontend scope mechanism: bridge
-	// annotators filter their walk to packages carrying the
-	// expected marker value, and the cross-namespace audit
-	// assertion proves no `<lang>.*` meta leaks onto sources from
-	// other frontends.
-	MetaFrontend = meta.EnsureKey(
-		"frontend",
-		meta.StringParser,
-	) //nolint:gochecknoglobals // cross-frontend registry-singleton key
+	// MetaFrontend re-exports [node.MetaFrontend] — the marker every
+	// frontend stamps on the packages it produces, naming the language
+	// it parsed.
+	//
+	// One declaration, in the package a [node.Package] comes from.
+	// Every frontend spelled the name itself before, each relying on
+	// the tolerant constructor to land on one singleton — which held
+	// only while all of them kept spelling it the same way.
+	MetaFrontend = node.MetaFrontend //nolint:gochecknoglobals // re-exported registry singleton
 
 	// MetaFieldNumber stamps the proto tag number on every
 	// [node.Field] derived from a proto field.
