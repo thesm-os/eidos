@@ -48,9 +48,16 @@ type (
 	// key off, via [StructHook] or a store query.
 	Struct = node.Struct
 
-	// Interface is a method-set declaration. Reached through
-	// [InterfaceHook]; note that a constraint-only interface is
-	// also an Interface — [IsConstraint] separates the two.
+	// Interface is a contract a type satisfies without being
+	// instantiable. Reached through [InterfaceHook]; note that a
+	// constraint-only interface is also an Interface —
+	// [IsConstraint] separates the two.
+	//
+	// Whether it declares methods, fields or both is the source
+	// language's business: a Go interface is a method set, a
+	// TypeScript one is a structural type that usually declares only
+	// fields. A generator reading interfaces across languages walks
+	// both slices.
 	Interface = node.Interface
 
 	// Method is a method declared on a [Struct], an [Interface],
@@ -254,3 +261,13 @@ type (
 //
 //nolint:gochecknoglobals // alias re-export of a stable helper.
 var NodeWalk = node.Walk
+
+// Companion re-exports [node.Companion] — the nullary function of a
+// given name returning a given type, or nil where none is.
+//
+// The convention a generator reaches for when a value can be seeded
+// from source the consumer already wrote: `UserDefaults()` beside
+// `User`. The caller composes the identifier through the language,
+// and gets back the declaration so it spells the reference its own
+// output needs.
+var Companion = node.Companion

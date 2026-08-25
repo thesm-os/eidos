@@ -258,3 +258,56 @@ func TestIsExportedName(t *testing.T) {
 		})
 	}
 }
+
+// Companion finds the seed function beside a type, and refuses one
+// that only shares its name.
+func TestCompanion(t *testing.T) {
+	t.Parallel()
+
+	user := func(name, pkg string, params []*node.Param, returns []*node.Return) *node.Function {
+		return &node.Function{Name: name, Package: pkg, Params: params, Returns: returns}
+	}
+	returnsUser := []*node.Return{{Type: &node.TypeRef{Name: "User"}}}
+
+	t.Run("finds the conventional name in the same package", func(t *testing.T) {
+		t.Parallel()
+		funcs := []*node.Function{user("UserDefaults", "example.com/app", nil, returnsUser)}
+		got := node.Companion(funcs, "example.com/app", "UserDefaults", "User")
+		if got == nil || got.Name != "UserDefaults" || got.Package != "example.com/app" {
+			t.Fatalf("Companion = %#v, want the declaration beside the type", got)
+		}
+	})
+
+	t.Run("refuses one that takes arguments", func(t *testing.T) {
+		t.Parallel()
+		params := []*node.Param{{Name: "seed", Type: &node.TypeRef{Name: "int"}}}
+		funcs := []*node.Function{user("UserDefaults", "example.com/app", params, returnsUser)}
+		if got := node.Companion(funcs, "example.com/app", "UserDefaults", "User"); got != nil {
+			t.Error("calling a colliding function emits a constructor that does not compile")
+		}
+	})
+
+	t.Run("refuses one returning another type", func(t *testing.T) {
+		t.Parallel()
+		other := []*node.Return{{Type: &node.TypeRef{Name: "Config"}}}
+		funcs := []*node.Function{user("UserDefaults", "example.com/app", nil, other)}
+		if got := node.Companion(funcs, "example.com/app", "UserDefaults", "User"); got != nil {
+			t.Error("a seed has to produce the type it seeds")
+		}
+	})
+
+	t.Run("ignores a same-named function in another package", func(t *testing.T) {
+		t.Parallel()
+		funcs := []*node.Function{user("UserDefaults", "example.com/other", nil, returnsUser)}
+		if got := node.Companion(funcs, "example.com/app", "UserDefaults", "User"); got != nil {
+			t.Error("the convention is beside the type, not anywhere in the run")
+		}
+	})
+
+	t.Run("an unnamed type has no companion", func(t *testing.T) {
+		t.Parallel()
+		if got := node.Companion(nil, "example.com/app", "", "User"); got != nil {
+			t.Error("a suffix alone names nothing")
+		}
+	})
+}

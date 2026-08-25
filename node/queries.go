@@ -121,3 +121,41 @@ func LocalName(qualified string) string {
 	}
 	return qualified
 }
+
+// Companion returns the nullary function named name in pkg returning
+// returns, or nil where none is — or where the one found is a
+// different function that happens to collide.
+//
+// The convention a generator reaches for when a value can be seeded
+// from source the consumer already wrote: `UserDefaults()` beside
+// `User`. The caller passes the identifier already composed, because
+// joining a type name to a convention word is a spelling rule the
+// language owns — a concatenation here would write one language's
+// answer into every caller.
+//
+// The signature is checked rather than only the name. A `UserDefaults`
+// taking arguments, or returning something else, is a different
+// function, and calling it emits a file the consumer cannot compile —
+// a failure attributed to the generator rather than to the collision.
+//
+// Returns the declaration rather than a reference to it, so this
+// package needs nothing from the emit model and the caller spells the
+// reference its own output requires.
+func Companion(funcs []*Function, pkg, name, returns string) *Function {
+	if name == "" || returns == "" {
+		return nil
+	}
+	for _, fn := range funcs {
+		if fn == nil || fn.Name != name || fn.Package != pkg {
+			continue
+		}
+		if len(fn.Params) != 0 || len(fn.Returns) != 1 {
+			return nil
+		}
+		if r := fn.Returns[0].Type; r == nil || r.Name != returns {
+			return nil
+		}
+		return fn
+	}
+	return nil
+}

@@ -39,13 +39,7 @@ import (
 // `store.Reader.Resolve` is that index, so a plugin passes the reader
 // it was handed and writes no adapter: `SampleFor(t, name,
 // ctx.Reader)`. Every function here taking a Resolver accepts it.
-type Resolver interface {
-	// Resolve returns the declaration a type reference names, and
-	// whether the run loaded one. A type from a package the run
-	// never read reports false, which is a smaller answer rather
-	// than a wrong one.
-	Resolve(t *node.TypeRef) (node.Node, bool)
-}
+type Resolver = node.Resolver
 
 // maxResolveDepth bounds the walk through named types.
 //
