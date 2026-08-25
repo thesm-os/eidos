@@ -4,6 +4,7 @@
 package emit_test
 
 import (
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/emit"
@@ -126,6 +127,109 @@ func TestInterface_Slots(t *testing.T) {
 		}
 		if m1 == e1 || m1 == c1 || e1 == c1 {
 			t.Fatalf("slots must be distinct instances")
+		}
+	})
+}
+
+func TestInterface_Fields(t *testing.T) {
+	t.Parallel()
+
+	// An interface carrying data members: what a generator emitting
+	// TypeScript produces, and why emit.Interface mirrors
+	// node.Interface's field list.
+	withFields := func() *emit.Interface {
+		return &emit.Interface{
+			Name:    "User",
+			Package: "users",
+			Fields: []*emit.Field{
+				{Name: "id", Type: emit.Builtin("string")},
+				{Name: "age", Type: emit.Builtin("number")},
+			},
+			Methods: []*emit.Method{{Name: "greet"}},
+		}
+	}
+
+	t.Run("FieldByName returns the matching field", func(t *testing.T) {
+		t.Parallel()
+		got := withFields().FieldByName("age")
+		if got == nil || got.Name != "age" {
+			t.Fatalf("FieldByName mismatch: %+v", got)
+		}
+	})
+
+	t.Run("FieldByName returns nil for an unknown name", func(t *testing.T) {
+		t.Parallel()
+		if got := withFields().FieldByName("missing"); got != nil {
+			t.Fatalf("FieldByName(unknown) = %+v, want nil", got)
+		}
+	})
+
+	t.Run("FieldByName returns nil on a method-set interface", func(t *testing.T) {
+		t.Parallel()
+		if got := makeInterface().FieldByName("anything"); got != nil {
+			t.Fatalf("FieldByName = %+v, want nil", got)
+		}
+	})
+
+	t.Run("FieldsWith returns matches in declaration order", func(t *testing.T) {
+		t.Parallel()
+		i := &emit.Interface{Fields: []*emit.Field{
+			{Name: "id"}, {Name: "name"}, {Name: "id2"},
+		}}
+		got := i.FieldsWith(func(f *emit.Field) bool {
+			return strings.HasPrefix(f.Name, "id")
+		})
+		if len(got) != 2 || got[0].Name != "id" || got[1].Name != "id2" {
+			t.Fatalf("FieldsWith = %+v, want id then id2", got)
+		}
+	})
+
+	t.Run("FieldsWith returns empty when nothing matches", func(t *testing.T) {
+		t.Parallel()
+		got := withFields().FieldsWith(func(*emit.Field) bool { return false })
+		if len(got) != 0 {
+			t.Fatalf("FieldsWith(never) = %+v, want empty", got)
+		}
+	})
+}
+
+func TestInterface_FieldsSlot(t *testing.T) {
+	t.Parallel()
+
+	t.Run("is idempotent and distinct from the other slots", func(t *testing.T) {
+		t.Parallel()
+		i := makeInterface()
+		f1, f2 := i.FieldsSlot(), i.FieldsSlot()
+		if f1 != f2 {
+			t.Fatal("FieldsSlot lookups should be idempotent")
+		}
+		if f1 == i.MethodsSlot() || f1 == i.EmbedsSlot() {
+			t.Fatal("the fields slot must be distinct from methods and embeds")
+		}
+	})
+
+	t.Run("carries the Field element kind", func(t *testing.T) {
+		t.Parallel()
+		// The kind is a property of the slot NAME, so the typed
+		// accessor and Slot("fields") must agree — otherwise which
+		// constraint survives depends on which plugin ran first.
+		i := makeInterface()
+		if err := i.FieldsSlot().Append(&emit.Field{Name: "id"}, emit.Provenance{SetBy: "t"}); err != nil {
+			t.Fatalf("appending a Field to the fields slot: %v", err)
+		}
+		if err := i.FieldsSlot().Append(&emit.Method{Name: "m"}, emit.Provenance{SetBy: "t"}); err == nil {
+			t.Fatal("the fields slot accepted a Method")
+		}
+	})
+
+	t.Run("Slot(fields) resolves to the same constrained slot", func(t *testing.T) {
+		t.Parallel()
+		i := makeInterface()
+		if i.Slot("fields") != i.FieldsSlot() {
+			t.Fatal("Slot(\"fields\") and FieldsSlot disagree")
+		}
+		if err := i.Slot("fields").Append(&emit.Method{Name: "m"}, emit.Provenance{SetBy: "t"}); err == nil {
+			t.Fatal("Slot(\"fields\") is unconstrained where FieldsSlot is not")
 		}
 	})
 }

@@ -75,6 +75,15 @@ func TestRewireOwners(t *testing.T) {
 		if got := i.Embeds[0].Owner; got != i {
 			t.Fatalf("interface embed Owner not wired: got %+v", got)
 		}
+		// A nil field Owner after a cache round trip looks correct
+		// until something walks upward, which is why this is asserted
+		// rather than left to the struct case to imply.
+		if got := i.Fields[0].Owner; got != i {
+			t.Fatalf("interface field Owner not wired: got %+v", got)
+		}
+		if i.Fields[0].Type == nil {
+			t.Fatal("interface field type lost in the round trip")
+		}
 
 		fn := roundtrip.Functions[0]
 		if got := fn.Params[0].Owner; got != fn {

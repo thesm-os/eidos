@@ -109,16 +109,44 @@ func TestWalk_StructDescent(t *testing.T) {
 func TestWalk_InterfaceDescent(t *testing.T) {
 	t.Parallel()
 
-	t.Run("visits TypeParams, Methods, Embeds", func(t *testing.T) {
+	t.Run("visits TypeParams, Fields, Methods, Embeds", func(t *testing.T) {
 		t.Parallel()
 		i := &node.Interface{
 			TypeParams: []*node.TypeParam{{Name: "T"}},
+			Fields:     []*node.Field{{Name: "id", Type: namedRef("", "string")}},
 			Methods:    []*node.Method{{Name: "Get"}},
 			Embeds:     []*node.Embed{{Type: namedRef("", "Base")}},
 		}
 		got := recordWalk(i)
 		want := []kind.Kind{
-			node.KindInterface, node.KindTypeParam, node.KindMethod, node.KindEmbed, node.KindTypeRef,
+			node.KindInterface,
+			node.KindTypeParam,
+			node.KindField, node.KindTypeRef,
+			node.KindMethod,
+			node.KindEmbed, node.KindTypeRef,
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("visit order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("a field-only interface is walked in full", func(t *testing.T) {
+		t.Parallel()
+		// The TypeScript shape: an interface whose whole content is
+		// data. A walk that skipped Fields would visit the declaration
+		// and nothing inside it, which reads as an empty interface.
+		i := &node.Interface{
+			Name: "User",
+			Fields: []*node.Field{
+				{Name: "id", Type: namedRef("", "string")},
+				{Name: "age", Type: namedRef("", "number")},
+			},
+		}
+		got := recordWalk(i)
+		want := []kind.Kind{
+			node.KindInterface,
+			node.KindField, node.KindTypeRef,
+			node.KindField, node.KindTypeRef,
 		}
 		if !slices.Equal(got, want) {
 			t.Fatalf("visit order = %v, want %v", got, want)

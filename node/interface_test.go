@@ -4,6 +4,7 @@
 package node_test
 
 import (
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/node"
@@ -97,6 +98,93 @@ func TestInterface_IsGeneric(t *testing.T) {
 		t.Parallel()
 		if makeInterface().IsGeneric() {
 			t.Fatalf("non-generic interface should report IsGeneric false")
+		}
+	})
+}
+
+func TestInterface_FieldByName(t *testing.T) {
+	t.Parallel()
+
+	// An interface with data members: the shape a TypeScript
+	// interface takes, and the reason [node.Interface] carries a
+	// field list at all.
+	withFields := func() *node.Interface {
+		return &node.Interface{
+			Name:    "User",
+			Package: "./users",
+			Fields: []*node.Field{
+				{Name: "id", Type: &node.TypeRef{Name: "string"}},
+				{Name: "age", Type: &node.TypeRef{Name: "number"}},
+			},
+			Methods: []*node.Method{{Name: "greet"}},
+		}
+	}
+
+	t.Run("returns the matching field", func(t *testing.T) {
+		t.Parallel()
+		got := withFields().FieldByName("age")
+		if got == nil || got.Name != "age" {
+			t.Fatalf("FieldByName mismatch: %+v", got)
+		}
+	})
+
+	t.Run("returns nil for an unknown name", func(t *testing.T) {
+		t.Parallel()
+		if got := withFields().FieldByName("missing"); got != nil {
+			t.Fatalf("FieldByName(unknown) = %+v, want nil", got)
+		}
+	})
+
+	t.Run("returns nil when the interface declares no fields", func(t *testing.T) {
+		t.Parallel()
+		// A Go interface is a method set, so this is the common case
+		// for every language whose interfaces carry no data.
+		if got := makeInterface().FieldByName("anything"); got != nil {
+			t.Fatalf("FieldByName on a method-set interface = %+v, want nil", got)
+		}
+	})
+
+	t.Run("does not confuse a field with a method of the same name", func(t *testing.T) {
+		t.Parallel()
+		i := &node.Interface{
+			Fields:  []*node.Field{{Name: "value"}},
+			Methods: []*node.Method{{Name: "value"}},
+		}
+		if f := i.FieldByName("value"); f == nil {
+			t.Fatal("FieldByName did not find the field")
+		}
+		if m := i.MethodByName("value"); m == nil {
+			t.Fatal("MethodByName did not find the method")
+		}
+	})
+}
+
+func TestInterface_FieldsWith(t *testing.T) {
+	t.Parallel()
+
+	i := &node.Interface{
+		Fields: []*node.Field{
+			{Name: "id"},
+			{Name: "name"},
+			{Name: "id2"},
+		},
+	}
+
+	t.Run("returns matching fields in declaration order", func(t *testing.T) {
+		t.Parallel()
+		got := i.FieldsWith(func(f *node.Field) bool {
+			return strings.HasPrefix(f.Name, "id")
+		})
+		if len(got) != 2 || got[0].Name != "id" || got[1].Name != "id2" {
+			t.Fatalf("FieldsWith = %+v, want id then id2", got)
+		}
+	})
+
+	t.Run("returns an empty slice when nothing matches", func(t *testing.T) {
+		t.Parallel()
+		got := i.FieldsWith(func(*node.Field) bool { return false })
+		if len(got) != 0 {
+			t.Fatalf("FieldsWith(never) = %+v, want empty", got)
 		}
 	})
 }

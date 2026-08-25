@@ -15,20 +15,45 @@ import (
 // positional inserts via [emit.Slot.InsertBefore] /
 // [emit.Slot.InsertAfter].
 //
-// host must be a *[emit.Struct]; other kinds return
-// [ErrUnsupportedHost]. The wrapped slot append surfaces
+// host may be a *[emit.Struct] or a *[emit.Interface]; other kinds
+// return [ErrUnsupportedHost]. The wrapped slot append surfaces
 // [emit.ErrSlotElementType] when f.Kind() doesn't match the slot's
 // declared element kind.
+//
+// An Interface accepts fields because in some languages that is what
+// an interface mostly declares — a TypeScript interface is a
+// structural type, not a method set.
 func (c *Context) AppendField(host emit.Node, f *emit.Field, id ...string) error {
 	if err := nilCheck(host, "field"); err != nil {
 		return err
 	}
-	owner, ok := host.(*emit.Struct)
-	if !ok {
-		return fmt.Errorf("%w: AppendField expects *emit.Struct, got %T", ErrUnsupportedHost, host)
+	owner, slot, err := fieldHost(host, "AppendField")
+	if err != nil {
+		return err
 	}
 	f.Owner = owner
-	return owner.FieldsSlot().Append(f, c.Provenance(id...))
+	return slot.Append(f, c.Provenance(id...))
+}
+
+// fieldHost resolves a field-slot host to its owner and slot.
+//
+// Shared by [Context.AppendField] and [Context.InsertField] so the
+// set of kinds that accept a field is stated once; the two disagreeing
+// would let a plugin append where it cannot insert.
+func fieldHost(host emit.Node, op string) (emit.Node, *emit.Slot, error) {
+	switch owner := host.(type) {
+	case *emit.Struct:
+		slot := owner.FieldsSlot()
+		return owner, slot, nil
+	case *emit.Interface:
+		slot := owner.FieldsSlot()
+		return owner, slot, nil
+	default:
+		return nil, nil, fmt.Errorf(
+			"%w: %s expects *emit.Struct or *emit.Interface, got %T",
+			ErrUnsupportedHost, op, host,
+		)
+	}
 }
 
 // AppendMethod appends m to host's "methods" slot, stamping
@@ -219,20 +244,20 @@ func (c *Context) AppendImport(file *emit.File, imp *emit.Import, id ...string) 
 
 // InsertField places f at the supplied [InsertPos] in host's fields
 // slot, stamping provenance with the Context's plugin identifier.
-// host must be a *[emit.Struct]; other kinds return
-// [ErrUnsupportedHost]. The dedicated [Context.AppendField] is the
-// common case; use InsertField for [Before] / [After] / [Prepend]
+// host may be a *[emit.Struct] or a *[emit.Interface]; other kinds
+// return [ErrUnsupportedHost]. The dedicated [Context.AppendField] is
+// the common case; use InsertField for [Before] / [After] / [Prepend]
 // positional intents.
 func (c *Context) InsertField(host emit.Node, f *emit.Field, pos InsertPos, id ...string) error {
 	if err := nilCheck(host, "field"); err != nil {
 		return err
 	}
-	owner, ok := host.(*emit.Struct)
-	if !ok {
-		return fmt.Errorf("%w: InsertField expects *emit.Struct, got %T", ErrUnsupportedHost, host)
+	owner, slot, err := fieldHost(host, "InsertField")
+	if err != nil {
+		return err
 	}
 	f.Owner = owner
-	return applyInsert(owner.FieldsSlot(), f, c.Provenance(id...), pos)
+	return applyInsert(slot, f, c.Provenance(id...), pos)
 }
 
 // InsertMethod places m at the supplied [InsertPos] in host's

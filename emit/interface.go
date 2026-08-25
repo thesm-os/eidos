@@ -12,9 +12,16 @@ import (
 // [contract.Owner] — fails to build if either accessor drifts.
 var _ contract.Owner = (*Interface)(nil)
 
-// Interface is a method-set type emit. Methods declared inside an
-// interface have a nil [Method.Receiver] — the receiver is implicit
-// in the interface contract.
+// Interface is a contract a type satisfies without being
+// instantiable. Methods declared inside an interface have a nil
+// [Method.Receiver] — the receiver is implicit in the interface
+// contract.
+//
+// Mirrors [node.Interface], including its Fields: what separates an
+// Interface from a [Struct] is instantiability, not which members it
+// may declare. A generator emitting a TypeScript interface populates
+// Fields and usually no Methods at all; one emitting a Go interface
+// does the reverse.
 type Interface struct {
 	BaseEmit
 
@@ -24,6 +31,10 @@ type Interface struct {
 	// Package is the package name the rendered file declares.
 	// Empty for anonymous interface types.
 	Package string `json:"package,omitempty"`
+
+	// Fields are the interface's declared data members in source
+	// order. Empty for a language whose interfaces are method sets.
+	Fields []*Field `json:"fields,omitempty"`
 
 	// Methods are the interface's declared method signatures in
 	// source order. Each Method has a nil Receiver.
@@ -63,6 +74,10 @@ func (i *Interface) OwnerName() string { return i.Name }
 // [Interface.QName].
 func (i *Interface) OwnerQName() string { return i.QName() }
 
+// FieldsSlot returns the "fields" slot for cross-cutting field
+// injection.
+func (i *Interface) FieldsSlot() *Slot { return i.Slot(slotFields) }
+
 // MethodsSlot returns the "methods" slot for cross-cutting method
 // injection.
 func (i *Interface) MethodsSlot() *Slot { return i.Slot(slotMethods) }
@@ -78,6 +93,28 @@ func (i *Interface) Slot(name string) *Slot { return i.slot(i, name, interfaceSl
 // IsGeneric reports whether the interface declares generic type
 // parameters.
 func (i *Interface) IsGeneric() bool { return len(i.TypeParams) > 0 }
+
+// FieldByName returns the field with the given name, or nil when no
+// such field exists.
+func (i *Interface) FieldByName(name string) *Field {
+	for _, f := range i.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// FieldsWith returns fields matching pred in declaration order.
+func (i *Interface) FieldsWith(pred func(*Field) bool) []*Field {
+	out := make([]*Field, 0, len(i.Fields))
+	for _, f := range i.Fields {
+		if pred(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
 
 // MethodByName returns the method with the given name, or nil when
 // no such method exists.
@@ -113,6 +150,8 @@ func (i *Interface) MethodsWith(pred func(*Method) bool) []*Method {
 // permissive path was reachable by accident.
 func interfaceSlotKind(name string) kind.Kind {
 	switch name {
+	case slotFields:
+		return KindField
 	case slotMethods:
 		return KindMethod
 	case slotEmbeds:

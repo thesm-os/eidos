@@ -172,17 +172,37 @@ func TestWalk_StructDescent(t *testing.T) {
 func TestWalk_InterfaceDescent(t *testing.T) {
 	t.Parallel()
 
-	t.Run("visits TypeParams, Methods, Embeds", func(t *testing.T) {
+	t.Run("visits TypeParams, Fields, Methods, Embeds", func(t *testing.T) {
 		t.Parallel()
 		i := &emit.Interface{
 			TypeParams: []*emit.TypeParam{{Name: "T"}},
+			Fields:     []*emit.Field{{Name: "id", Type: builtinRef("string")}},
 			Methods:    []*emit.Method{{Name: "Get"}},
 			Embeds:     []*emit.Embed{{Type: builtinRef("Base")}},
 		}
 		got := recordWalk(i)
 		want := []kind.Kind{
 			emit.KindInterface, emit.KindTypeParam,
+			emit.KindField, emit.KindBuiltinRef,
 			emit.KindMethod, emit.KindEmbed, emit.KindBuiltinRef,
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("visit order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("a field-only interface is walked in full", func(t *testing.T) {
+		t.Parallel()
+		// A walk that skipped Fields would visit the declaration and
+		// nothing inside it, which reads as an empty interface — the
+		// shape a TypeScript-emitting generator produces most often.
+		i := &emit.Interface{
+			Name:   "User",
+			Fields: []*emit.Field{{Name: "id", Type: builtinRef("string")}},
+		}
+		got := recordWalk(i)
+		want := []kind.Kind{
+			emit.KindInterface, emit.KindField, emit.KindBuiltinRef,
 		}
 		if !slices.Equal(got, want) {
 			t.Fatalf("visit order = %v, want %v", got, want)

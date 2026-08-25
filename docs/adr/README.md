@@ -17,7 +17,7 @@ evidence of what was true at the time.
 | [0005](0005-own-templates-per-backend-and-plugin.md) | Own templates per backend and per plugin | Accepted |
 | [0006](0006-one-backend-per-pipeline-run.md) | Target one backend per pipeline run | Accepted |
 | [0007](0007-group-language-support-by-language.md) | Group language support by language, one module apiece | Accepted |
-| [0008](0008-map-typescript-interfaces-to-node-struct.md) | Map TypeScript interfaces to node.Struct | Proposed |
+| [0008](0008-map-typescript-interfaces-to-node-interface.md) | Give node.Interface a field list | Accepted |
 | [0009](0009-register-the-language-funcmap-once.md) | Register a language's funcmap once, in its backend | Accepted |
 
 ## Writing one

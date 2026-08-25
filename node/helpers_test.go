@@ -138,6 +138,10 @@ func makeRichPackage() *node.Package {
 		Name:       "Repo",
 		Package:    pkg.Path,
 		TypeParams: []*node.TypeParam{{Name: "U", Constraint: constraintFrom(namedRef("fmt", "Stringer"))}},
+		// A data member alongside the method set. Interfaces in some
+		// languages are mostly this, and the field's Owner is rebuilt
+		// by its own arm in RewireOwners.
+		Fields: []*node.Field{{Name: "id", Type: namedRef("", "string")}},
 		Methods: []*node.Method{{
 			Name:    "Get",
 			Returns: node.AnonReturns(namedRef(pkg.Path, "User"), namedRef("", "error")),

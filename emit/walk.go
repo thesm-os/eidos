@@ -207,6 +207,9 @@ func walkInterface(i *Interface, v Visitor) {
 	for _, tp := range i.TypeParams {
 		Walk(tp, v)
 	}
+	for _, f := range i.Fields {
+		Walk(f, v)
+	}
 	for _, m := range i.Methods {
 		Walk(m, v)
 	}

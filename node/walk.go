@@ -34,7 +34,7 @@ func (f VisitorFunc) Visit(n Node) Visitor { return f(n) }
 //   - [Package]: visits Structs, Interfaces, Functions, Variables,
 //     Constants, Enums, Aliases in source order.
 //   - [Struct]: visits TypeParams, Fields, Embeds, Methods.
-//   - [Interface]: visits TypeParams, Methods, Embeds.
+//   - [Interface]: visits TypeParams, Fields, Methods, Embeds.
 //   - [Method] / [Function]: visits TypeParams, Params, Returns.
 //   - [Field]: visits the Field's Type.
 //   - [Param]: visits the Param's Type.
@@ -175,6 +175,9 @@ func walkStruct(s *Struct, v Visitor) {
 func walkInterface(i *Interface, v Visitor) {
 	for _, tp := range i.TypeParams {
 		Walk(tp, v)
+	}
+	for _, f := range i.Fields {
+		Walk(f, v)
 	}
 	for _, m := range i.Methods {
 		Walk(m, v)

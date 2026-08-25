@@ -81,6 +81,10 @@ func rewireInterface(i *Interface) {
 		tp.Owner = i
 		rewireConstraint(tp.Constraint)
 	}
+	for _, f := range i.Fields {
+		f.Owner = i
+		rewireTypeRef(f.Type)
+	}
 	for _, m := range i.Methods {
 		m.Owner = i
 		rewireMethod(m)

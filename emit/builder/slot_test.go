@@ -61,12 +61,27 @@ func TestAppendField(t *testing.T) {
 		}
 	})
 
-	t.Run("non-struct host returns ErrUnsupportedHost", func(t *testing.T) {
+	t.Run("a host that declares no fields returns ErrUnsupportedHost", func(t *testing.T) {
 		t.Parallel()
+		// An Interface is no longer such a host: in some languages it
+		// declares mostly fields. A Function has no field list in any
+		// of them.
 		c := builder.For("validation").WithTarget(defaultTarget)
-		err := c.AppendField(&emit.Interface{Name: "I"}, &emit.Field{Name: "X", Type: emit.Builtin("int")})
+		err := c.AppendField(&emit.Function{Name: "F"}, &emit.Field{Name: "X", Type: emit.Builtin("int")})
 		if !errors.Is(err, builder.ErrUnsupportedHost) {
 			t.Fatalf("expected ErrUnsupportedHost; got %v", err)
+		}
+	})
+
+	t.Run("an Interface accepts fields", func(t *testing.T) {
+		t.Parallel()
+		c := builder.For("validation").WithTarget(defaultTarget)
+		iface := &emit.Interface{Name: "I"}
+		if err := c.AppendField(iface, &emit.Field{Name: "X", Type: emit.Builtin("string")}); err != nil {
+			t.Fatalf("AppendField on an Interface: %v", err)
+		}
+		if got := len(iface.FieldsSlot().Items); got != 1 {
+			t.Fatalf("interface fields slot = %d, want 1", got)
 		}
 	})
 }
