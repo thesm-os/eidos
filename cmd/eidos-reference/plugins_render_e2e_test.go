@@ -9,6 +9,7 @@ import (
 	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/plugins/annotator/sample"
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/plugins/generator/sentinel"
@@ -394,6 +395,98 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("auth: validation field=%s code=%d width=%d ratio=%v",
 		e.Field, e.Code, e.Width, e.Ratio)
 }
+`
+
+// TestPluginsRender_AuthoredSample pins the one member shape that has
+// no derivable value at all.
+//
+// A language works out what a value looks like from what the type is,
+// and an interface has no literal form — so a member of one is refused
+// a value and every check that needed one is dropped. The check is not
+// wrong, it is absent, which is the quietest way for coverage to go
+// missing.
+//
+// Naming a function restores it, and the restoration has to survive the
+// whole path: the annotator resolves the name, the language prefers the
+// stamp over what it would derive, and the template renders a call
+// nobody wrote by hand. Only compiling and running the result proves
+// all three.
+func TestPluginsRender_AuthoredSample(t *testing.T) {
+	t.Parallel()
+
+	fixture := storefixture.New().
+		Package("shop", "example.com/shop").
+		Interface("Notifier", func(i *storefixture.InterfaceBuilder) {
+			i.Directive(storefixture.Directive(
+				sample.DirectiveName,
+				storefixture.Arg("NewFakeNotifier"),
+				storefixture.KV(sample.AlternateKey, "NewOtherNotifier"),
+			))
+			i.Method("Notify", func(m *storefixture.MethodBuilder) {
+				m.Return(storefixture.Named("error"))
+			})
+		}).
+		Struct("Order", func(s *storefixture.StructBuilder) {
+			s.Directive(storefixture.Directive(builder.DirectiveName))
+			s.Field("ID", storefixture.Named("string"), nil)
+			s.Field("Notify", storefixture.PkgNamed("example.com/shop", "Notifier"), nil)
+		})
+
+	gen := golangtest.Driver(t, backendgolang.New(), fixture.PackageNode(), builder.New()).
+		WithAnnotator(sample.New()).
+		Build().
+		Run("./...")
+
+	out := golangtest.Rendered(t, gen).
+		WithSource(golangtest.GoFile("shop/shop.go", notifierSource))
+
+	t.Run("the generated checks compile and pass", func(t *testing.T) {
+		t.Parallel()
+		out.AssertVets(t)
+		out.AssertTestsPass(t)
+	})
+
+	t.Run("the named function is what the check writes", func(t *testing.T) {
+		t.Parallel()
+		checks := out.Suffixed(t, builder.GoTestSuffix)
+		// Derived, the member has no value and its setter is never
+		// exercised — so this call appearing at all is the assertion.
+		checks.AssertContains(t, "NewFakeNotifier()")
+		// The second value keeps the replacing check from passing
+		// vacuously, and it is authored too.
+		checks.AssertContains(t, "NewOtherNotifier()")
+	})
+}
+
+// notifierSource is the hand-written package the checks drive. The two
+// constructors are what the directive names; without them the
+// generated file would reference functions nothing declares.
+const notifierSource = `package shop
+
+// Notifier has no literal form, which is the whole reason its values
+// have to be named rather than derived.
+type Notifier interface {
+	Notify() error
+}
+
+// Order carries one of them, so its builder has a setter whose check
+// needs a value.
+type Order struct {
+	ID     string
+	Notify Notifier
+}
+
+type fakeNotifier struct{ name string }
+
+func (fakeNotifier) Notify() error { return nil }
+
+// NewFakeNotifier is the value the directive names.
+func NewFakeNotifier() Notifier { return fakeNotifier{name: "fake"} }
+
+// NewOtherNotifier is the second, which must differ from the first or
+// the check asserting the setter replaced something would pass against
+// a setter that did nothing.
+func NewOtherNotifier() Notifier { return fakeNotifier{name: "other"} }
 `
 
 // TestPluginsRender_InheritedErrorContract pins the idiom the declared

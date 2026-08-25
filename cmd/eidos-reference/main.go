@@ -43,6 +43,8 @@ import (
 	frontendgolang "go.thesmos.sh/eidos/lang/golang/frontend"
 	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/plugin"
+	"go.thesmos.sh/eidos/plugins/annotator/defaults"
+	"go.thesmos.sh/eidos/plugins/annotator/sample"
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/plugins/generator/sentinel"
@@ -165,6 +167,12 @@ func defaultPlugins() []plugin.Plugin {
 
 		// Annotators — stamp typed metadata before generation.
 		shapewriter.New(),
+		// The two that answer what a value is: one per member, one per
+		// type. Both are read by the language rather than by a
+		// generator, so registering them changes what every generator
+		// sees rather than adding an output of their own.
+		defaults.New(),
+		sample.New(),
 
 		// Generators (foundation bucket) — emit baseline output
 		// other generators may compose against.

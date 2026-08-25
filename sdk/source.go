@@ -102,6 +102,38 @@ type Sample = emit.Sample
 // not be derived.
 type SampleRefusal = emit.SampleRefusal
 
+// The meta keys an authored sample value is stamped under,
+// re-exported so the annotator that writes them need not import the
+// emit package to name them.
+//
+// Read by the language rather than by a generator: [SourceRules]
+// prefers an authored value over the one it would derive, so a
+// consumer asking for a sample gets it without knowing these exist.
+//
+//nolint:gochecknoglobals // re-exported meta key registrations.
+var (
+	MetaSample           = emit.MetaSample
+	MetaSamplePackage    = emit.MetaSamplePackage
+	MetaAlternate        = emit.MetaAlternate
+	MetaAlternatePackage = emit.MetaAlternatePackage
+)
+
+// The accessors over those keys, re-exported for a plugin that reads
+// back what it stamped.
+//
+// A generator has no reason to call these: the language prefers an
+// authored value over the one it derives, so asking for a sample is
+// how a consumer gets one. They are here for the annotator's own
+// tests, and for a plugin that reports on what a declaration carries.
+//
+//nolint:gochecknoglobals // re-exported function values.
+var (
+	AuthoredSample      = emit.AuthoredSample
+	AuthoredAlternate   = emit.AuthoredAlternate
+	AuthoredSampleOf    = emit.AuthoredSampleOf
+	AuthoredAlternateOf = emit.AuthoredAlternateOf
+)
+
 // The refusal reasons, re-exported so a plugin reading one need not
 // import the emit package to name it.
 const (

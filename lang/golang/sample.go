@@ -140,6 +140,18 @@ func sampleRefFor(
 	if !found {
 		return refused(RefusedUnresolved)
 	}
+	s, a := declaredSample(t, target, fieldName, r, depth)
+	return authoredOver(target, s, a)
+}
+
+// declaredSample derives a value pair from what the declaration is.
+//
+// An interface reaches the default arm and is refused, which is the
+// honest answer: it has no literal form, so nothing derivable can be
+// written for it. That is the case [authoredOver] exists to answer.
+func declaredSample(
+	t *node.TypeRef, target node.Node, fieldName string, r Resolver, depth int,
+) (sample, alternate Sample) {
 	switch decl := target.(type) {
 	case *node.Alias:
 		return definedSample(t, decl, fieldName, r, depth)
@@ -148,6 +160,29 @@ func sampleRefFor(
 	default:
 		return refused(RefusedNoLiteral)
 	}
+}
+
+// authoredOver replaces each derived value with the one an author
+// named for the declaration, where they named one.
+//
+// Read here rather than by each consumer of [SampleRefFor]. What a
+// value of a type looks like is a question the language answers, and a
+// stamp every asker has to remember to prefer is one that two of them
+// will forget — leaving a check written against a derivation the
+// author declared was wrong.
+//
+// Each half is replaced independently, because a type may need one and
+// not the other: a derived first value is often fine where the second
+// has to differ from it in a way the derivation cannot know.
+func authoredOver(target node.Node, sample, alternate Sample) (Sample, Sample) {
+	bag := target.Meta()
+	if authored, ok := emit.AuthoredSampleOf(bag); ok {
+		sample = authored
+	}
+	if authored, ok := emit.AuthoredAlternateOf(bag); ok {
+		alternate = authored
+	}
+	return sample, alternate
 }
 
 // stdlibSamples holds the sample builder for named standard-library
