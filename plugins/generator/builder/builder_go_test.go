@@ -8,7 +8,6 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/plugins/annotator/defaults"
 	builderplugin "go.thesmos.sh/eidos/plugins/generator/builder"
@@ -45,7 +44,6 @@ func projectBoth(
 			configure(sb)
 		})
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 
 	// The defaults annotator runs first, exactly as a pipeline orders
 	// it: the builder reads a stamp rather than the directive, so a
@@ -275,7 +273,6 @@ func TestPublishesItsTypeName(t *testing.T) {
 			sb.Field("Title", gofixture.Named("string"), nil)
 		})
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 	if err := builderplugin.New().Generate(&sdk.GeneratorContext{
 		Store: s, Reader: store.NewReader(s), Diag: diag.Capture(),
 	}); err != nil {
@@ -341,7 +338,6 @@ func TestSetterNameCollisionIsRefused(t *testing.T) {
 			sb.Field("DataString", gofixture.Named("string"), nil)
 		})
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 	d := diag.Capture()
 	if err := builderplugin.New().Generate(&sdk.GeneratorContext{
 		Store: s, Reader: store.NewReader(s), Diag: d,
@@ -413,7 +409,6 @@ func TestEmptyDeclarationIsReported(t *testing.T) {
 			sb.Directive(gofixture.Directive(builderplugin.DirectiveName))
 		})
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 	d := diag.Capture()
 	if err := builderplugin.New().Generate(&sdk.GeneratorContext{
 		Store: s, Reader: store.NewReader(s), Diag: d,
@@ -468,7 +463,6 @@ func TestConformance_Golang(t *testing.T) {
 							sb.Field("Author", gofixture.Pointer(gofixture.Named("string")), nil)
 						})
 					s := b.Build()
-					sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 					return s
 				},
 			},

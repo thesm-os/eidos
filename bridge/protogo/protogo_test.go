@@ -78,8 +78,11 @@ func TestConformance(t *testing.T) {
 // build populates the package.
 func protoStore(t *testing.T, build func(*gofixture.Builder)) *store.Store {
 	t.Helper()
-	b := gofixture.New().Package("pb", "example.com/pb")
-	frontend.MetaFrontend.Set(b.PackageNode().EnsureMeta(), frontend.FrontendName, "test")
+	// Declared with the Go builder because its grammar spells these
+	// declarations most easily, but the package is protobuf's and must
+	// not claim otherwise — the bridge reads the marker to decide
+	// whether it applies at all.
+	b := gofixture.New().Package("pb", "example.com/pb").Language(frontend.FrontendName)
 	if build != nil {
 		build(b)
 	}

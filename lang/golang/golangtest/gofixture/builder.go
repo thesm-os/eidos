@@ -9,9 +9,15 @@ import (
 
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/position"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
 )
+
+// markerAuthority is the provenance recorded beside the frontend
+// marker [Builder.Build] stamps. A fixture is not a frontend, and a
+// reader auditing where a stamp came from should be able to tell.
+const markerAuthority = "gofixture"
 
 // defaultPackageName is the package name applied to a [Builder] that
 // never calls [Builder.Package].
@@ -86,13 +92,21 @@ func retargetPos(p *position.Pos, oldPkg, newPkg, declName string) {
 // fall out of scope.
 type Builder struct {
 	pkg *node.Package
+
+	// lang is the frontend marker [Builder.Build] stamps, and unmarked
+	// suppresses it. Two fields rather than one sentinel, because
+	// "stamp nothing" is a deliberate choice a test makes and the empty
+	// string is what an unset field holds — telling them apart is the
+	// whole reason the marker was missing to begin with.
+	lang     string
+	unmarked bool
 }
 
 // New returns a Builder seeded with an empty package whose Name is
 // "test" and whose Path is "example.com/test". Call [Builder.Package]
 // to override either value.
 func New() *Builder {
-	return &Builder{pkg: &node.Package{
+	return &Builder{lang: golang.Language, pkg: &node.Package{
 		Name: defaultPackageName,
 		Path: defaultPackagePath,
 	}}
@@ -359,10 +373,38 @@ func (b *Builder) PackageNode() *node.Package { return b.pkg }
 // easier to debug than a returned error swallowed silently. Tests
 // catch the panic through the standard testing.T flow.
 func (b *Builder) Build() *store.Store {
+	if !b.unmarked && b.lang != "" {
+		node.MetaFrontend.Set(b.pkg.EnsureMeta(), b.lang, markerAuthority)
+	}
 	s := store.New()
 	if err := s.Nodes().AddPackage(b.pkg); err != nil {
 		// Test-only fixture; misuse-on-construction surfaces as a panic.
 		panic(fmt.Errorf("gofixture: build failed: %w", err)) //nolint:forbidigo
 	}
 	return s
+}
+
+// Language overrides the frontend marker stamped on the built package.
+//
+// For a test whose subject is a graph some other frontend produced —
+// the protobuf bridge is the case — where the declarations are still
+// most easily spelled with this builder but the package must not claim
+// to be Go.
+func (b *Builder) Language(name string) *Builder {
+	b.lang = name
+	return b
+}
+
+// Unmarked suppresses the frontend marker, producing the graph a
+// package nothing claimed would have.
+//
+// For a test whose subject IS that path: every plugin dispatching per
+// package treats an unmarked one as not its business and skips it
+// without a diagnostic, deliberately, so that fixtures and bridges do
+// not drown a run in warnings. A test asserting that behaviour needs a
+// package with no marker, and after [Builder.Build] started stamping
+// one there is no other way to build it.
+func (b *Builder) Unmarked() *Builder {
+	b.unmarked = true
+	return b
 }

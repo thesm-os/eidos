@@ -8,7 +8,6 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	sentinelplugin "go.thesmos.sh/eidos/plugins/generator/sentinel"
 	"go.thesmos.sh/eidos/sdk"
@@ -32,7 +31,6 @@ func annotated(t *testing.T, fn func(*gofixture.Builder)) *sdk.Store {
 	fn(b)
 	b.Directive(gofixture.Directive(sentinelplugin.DirectiveName))
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 	return s
 }
 
@@ -262,7 +260,6 @@ func TestPrefixResolution(t *testing.T) {
 		b.Variable("ErrNotFound", nil)
 		b.Directive(dir)
 		s := b.Build()
-		sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 		return s
 	}
 
@@ -313,7 +310,6 @@ func TestSelfOverlapIsRefused(t *testing.T) {
 		sentinelplugin.NoOverlapName, gofixture.Arg("example.com/blog"),
 	))
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 
 	tests, d := run(t, s)
 	if len(tests.Neighbours) != 0 {

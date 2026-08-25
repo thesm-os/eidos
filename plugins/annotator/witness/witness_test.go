@@ -9,7 +9,6 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	witnessplugin "go.thesmos.sh/eidos/plugins/annotator/witness"
 	"go.thesmos.sh/eidos/sdk"
@@ -45,7 +44,6 @@ func TestConformance(t *testing.T) {
 						s.TypeParam("T", gofixture.Bound("constraints.Ordered"))
 					})
 					s := b.Build()
-					sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 					return s
 				},
 			},
@@ -60,7 +58,6 @@ func annotated(t *testing.T, fn func(*gofixture.Builder)) (*sdk.Store, *diag.Sin
 	b := gofixture.New().Package("blog", "example.com/blog")
 	fn(b)
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 	d := diag.Capture()
 	if err := witnessplugin.New().Annotate(&sdk.AnnotatorContext{
 		Store: s, Reader: store.NewReader(s), Diag: d,

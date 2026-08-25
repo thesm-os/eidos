@@ -816,7 +816,6 @@ func TestAnnotateReachesEveryMethodCarrier(t *testing.T) {
 
 	s := fixture.Build()
 	pkg := fixture.PackageNode()
-	sdk.MetaFrontend.Set(pkg.EnsureMeta(), golang.Language, "test")
 
 	p := shape.New().Detectors(shape.Detector{
 		Name: "closer",

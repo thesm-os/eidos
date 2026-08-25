@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	enumplugin "go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/sdk"
@@ -37,7 +36,6 @@ func fixture(t *testing.T, underlying string, fn func(*gofixture.EnumBuilder)) *
 			fn(eb)
 		})
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 	return s
 }
 
@@ -306,7 +304,6 @@ func TestDeclaredParserEarnsTheDecoder(t *testing.T) {
 			fb.Return(gofixture.Named("error"))
 		})
 	s := b.Build()
-	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 
 	api, _, _ := run(t, s)
 	if api == nil || !api.Emits(enumplugin.SurfaceDecode) {

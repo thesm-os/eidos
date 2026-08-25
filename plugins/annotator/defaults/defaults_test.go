@@ -31,11 +31,15 @@ func run(t *testing.T, b *gofixture.Builder) (*sdk.Store, []sdk.Diag) {
 
 func runAs(t *testing.T, b *gofixture.Builder, lang string) (*sdk.Store, []sdk.Diag) {
 	t.Helper()
-	s := b.Build()
-	pkg := b.PackageNode()
-	if lang != "" {
-		sdk.MetaFrontend.Set(pkg.EnsureMeta(), lang, "test")
+	// The empty language is what a package nothing claimed looks like,
+	// which is the path one of these cases is about — so it is asked
+	// for rather than left to a fixture that now marks by default.
+	if lang == "" {
+		b.Unmarked()
+	} else {
+		b.Language(lang)
 	}
+	s := b.Build()
 	sink := diag.New()
 	ctx := &sdk.AnnotatorContext{Store: s, Reader: store.NewReader(s), Diag: sink}
 	if err := defaults.New().Annotate(ctx); err != nil {
