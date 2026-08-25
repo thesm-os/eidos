@@ -5,6 +5,7 @@ package ids_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
@@ -111,6 +112,70 @@ func TestIDs_NamesAreNotPackageNames(t *testing.T) {
 // missing returns the elements of want that got does not contain.
 func missing(want, got []ids.Name) []ids.Name {
 	var out []ids.Name
+	for _, w := range want {
+		if !slices.Contains(got, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// params lifts a registered catalog's declared parameter keys into
+// the exported pair form, sorted the way the accessors return them.
+func params[T any](items []T, owner func(T) string, keys func(T) []shape.Param) []ids.Param {
+	var out []ids.Param
+	for _, item := range items {
+		for _, p := range keys(item) {
+			out = append(out, ids.Param{Owner: ids.Name(owner(item)), Key: p.Key})
+		}
+	}
+	slices.SortFunc(out, func(a, b ids.Param) int {
+		if a.Owner != b.Owner {
+			return strings.Compare(string(a.Owner), string(b.Owner))
+		}
+		return strings.Compare(a.Key, b.Key)
+	})
+	return out
+}
+
+// The parameter constants cover exactly what the catalog accepts.
+//
+// The guard the name constants already have, for the other half of a
+// directive. A param key reaches a stamp through
+// [shape.ContractParamKey] or [shape.MixinParamKey], neither of which
+// can tell a key the owner declares from one it has never heard of —
+// so a constant missing here sends a caller back to a literal, and a
+// constant left behind after a key is renamed compiles forever while
+// matching nothing.
+func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
+	t.Parallel()
+
+	t.Run("every contract parameter has an id", func(t *testing.T) {
+		t.Parallel()
+		want := params(contracts.All(),
+			func(c shape.Contract) string { return c.Name },
+			func(c shape.Contract) []shape.Param { return c.Params })
+		if got := ids.ContractParams(); !slices.Equal(got, want) {
+			t.Errorf("ContractParams() has drifted from contracts.All();\n  missing: %v\n  extra: %v",
+				missingParams(want, got), missingParams(got, want))
+		}
+	})
+
+	t.Run("every mixin parameter has an id", func(t *testing.T) {
+		t.Parallel()
+		want := params(mixins.All(),
+			func(m shape.Mixin) string { return m.Name },
+			func(m shape.Mixin) []shape.Param { return m.Params })
+		if got := ids.MixinParams(); !slices.Equal(got, want) {
+			t.Errorf("MixinParams() has drifted from mixins.All();\n  missing: %v\n  extra: %v",
+				missingParams(want, got), missingParams(got, want))
+		}
+	})
+}
+
+// missingParams returns the entries of want that are absent from got.
+func missingParams(want, got []ids.Param) []ids.Param {
+	var out []ids.Param
 	for _, w := range want {
 		if !slices.Contains(got, w) {
 			out = append(out, w)

@@ -4,6 +4,9 @@
 package ids
 
 import (
+	"slices"
+	"strings"
+
 	conAppender "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/appender"
 	conBatchWriter "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/batchwriter"
 	conCAS "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/cas"
@@ -251,6 +254,110 @@ const (
 	MixinXSSSafe                 = mixXSSSafe.Name
 )
 
+// The parameter keys each contract accepts, named
+// `Contract<Name>Param<Key>`.
+//
+// A param key is the other half of what a directive spells: the name
+// picks the contract, and these pick what may be written beside it.
+// A consumer reading a stamp composes the key through
+// [shape.ContractParamKey], which takes both — so a caller with the
+// name constant and a literal for the param has half a compile-time
+// link and half a string that stops matching in silence.
+//
+// Contracts declaring no parameters have no entry. Their whole
+// directive is the role and its partners, and a constant for a key
+// the contract never reads would be a name a caller could write and
+// never see used.
+const (
+	ContractBatchWriterParamMode     = conBatchWriter.ParamMode
+	ContractCASParamMismatch         = conCAS.ParamMismatch
+	ContractCASParamVersion          = conCAS.ParamVersion
+	ContractCodecParamFidelity       = conCodec.ParamFidelity
+	ContractCursorParamClose         = conCursor.ParamClose
+	ContractCursorParamNext          = conCursor.ParamNext
+	ContractCursorParamSentinel      = conCursor.ParamSentinel
+	ContractIfAbsentParamConflict    = conIfAbsent.ParamConflict
+	ContractIfMatchParamPred         = conIfMatch.ParamPred
+	ContractLeaseParamHeld           = conLease.ParamHeld
+	ContractLeaseParamTimeout        = conLease.ParamTimeout
+	ContractPaginationParamCursor    = conPagination.ParamCursor
+	ContractPublisherParamMode       = conPublisher.ParamMode
+	ContractRateLimitParamBurst      = conRateLimit.ParamBurst
+	ContractRateLimitParamRate       = conRateLimit.ParamRate
+	ContractTransactionParamNotFound = conTransaction.ParamNotFound
+	ContractTxParamClosed            = conTx.ParamClosed
+	ContractWatcherParamNext         = conWatcher.ParamNext
+	ContractWatcherParamStop         = conWatcher.ParamStop
+	ContractWorkflowParamTransitions = conWorkflow.ParamTransitions
+)
+
+// The parameter keys each mixin accepts, named
+// `Mixin<Name>Param<Key>`.
+//
+// The mixin half of the same story the contract block above tells:
+// [shape.MixinParamKey] takes the mixin name and the param key, and a
+// caller holding a constant for one and a literal for the other has
+// bought the compile-time link for half the lookup.
+//
+// Mixins declaring no parameters have no entry — most of the catalog,
+// since a mixin is usually a bare assertion.
+const (
+	MixinAtomicParamRead                    = mixAtomic.ParamRead
+	MixinBoundedParamLimit                  = mixBounded.ParamLimit
+	MixinBoundedParamMin                    = mixBounded.ParamMin
+	MixinCausalParamVersion                 = mixCausal.ParamVersion
+	MixinConservativeParamField             = mixConservative.ParamField
+	MixinCRDTMergeParamRead                 = mixCRDTMerge.ParamRead
+	MixinCRDTMergeParamWrite                = mixCRDTMerge.ParamWrite
+	MixinDeleteRemovesParamRead             = mixDeleteRemoves.ParamRead
+	MixinDeleteRemovesParamSentinel         = mixDeleteRemoves.ParamSentinel
+	MixinEventuallyParamSettle              = mixEventually.ParamSettle
+	MixinEventuallyParamSync                = mixEventually.ParamSync
+	MixinHooksParamRegister                 = mixHooks.ParamRegister
+	MixinIndexedParamBy                     = mixIndexed.ParamBy
+	MixinInjectionSafeParamRead             = mixInjectionSafe.ParamRead
+	MixinLeakFreeParamClose                 = mixLeakFree.ParamClose
+	MixinLeakFreeParamOpen                  = mixLeakFree.ParamOpen
+	MixinLifecycleAfterCloseParamClose      = mixLifecycleAfterClose.ParamClose
+	MixinLifecycleAfterCloseParamSentinel   = mixLifecycleAfterClose.ParamSentinel
+	MixinMonotonicReadsParamVersion         = mixMonotonicReads.ParamVersion
+	MixinMonotonicWritesParamVersion        = mixMonotonicWrites.ParamVersion
+	MixinNotFoundParamSentinel              = mixNotFound.ParamSentinel
+	MixinOrderAfterParamFn                  = mixOrderAfter.ParamFn
+	MixinOrderAfterParamUnready             = mixOrderAfter.ParamUnready
+	MixinPartitionParamAxis                 = mixPartition.ParamAxis
+	MixinPartitionParamRead                 = mixPartition.ParamRead
+	MixinPoisonableParamInduce              = mixPoisonable.ParamInduce
+	MixinReadAfterWriteParamWrite           = mixReadAfterWrite.ParamWrite
+	MixinReadYourWritesParamVersion         = mixReadYourWrites.ParamVersion
+	MixinRetrySucceedsParamAttempts         = mixRetrySucceeds.ParamAttempts
+	MixinSampleParamBuilder                 = mixSample.ParamBuilder
+	MixinScheduledParamFired                = mixScheduled.ParamFired
+	MixinScheduledParamSchedule             = mixScheduled.ParamSchedule
+	MixinScopeParamAxis                     = mixScope.ParamAxis
+	MixinScopeParamName                     = mixScope.ParamName
+	MixinSerializableParamRead              = mixSerializable.ParamRead
+	MixinSideEffectParamObserve             = mixSideEffect.ParamObserve
+	MixinSnapshotIsolationParamRead         = mixSnapshotIsolation.ParamRead
+	MixinStickyParamKey                     = mixSticky.ParamKey
+	MixinStreamReflectsMutationsParamDelete = mixStreamReflectsMutations.ParamDelete
+	MixinStreamReflectsMutationsParamMutate = mixStreamReflectsMutations.ParamMutate
+	MixinTamperEvidentParamTamper           = mixTamperEvident.ParamTamper
+	MixinTamperEvidentParamVerify           = mixTamperEvident.ParamVerify
+	MixinTimeoutParamDuration               = mixTimeout.ParamDuration
+	MixinTotalParamDomain                   = mixTotal.ParamDomain
+	MixinTTLParamDuration                   = mixTTL.ParamDuration
+	MixinTTLParamNotFound                   = mixTTL.ParamNotFound
+	MixinTTLParamPut                        = mixTTL.ParamPut
+	MixinTTLParamRead                       = mixTTL.ParamRead
+	MixinValidatesParamFn                   = mixValidates.ParamFn
+	MixinWindowedParamCount                 = mixWindowed.ParamCount
+	MixinWindowedParamIncr                  = mixWindowed.ParamIncr
+	MixinWindowedParamWindow                = mixWindowed.ParamWindow
+	MixinWrappedViaParamFn                  = mixWrappedVia.ParamFn
+	MixinWritesFollowReadsParamVersion      = mixWritesFollowReads.ParamVersion
+)
+
 // Detectors returns every detector name in the shipped catalog,
 // sorted. The returned slice is freshly allocated; callers may
 // mutate it.
@@ -380,4 +487,128 @@ func Mixins() []Name {
 		MixinWritesFollowReads,
 		MixinXSSSafe,
 	}
+}
+
+// Param is one catalog parameter key together with the contract or
+// mixin that accepts it.
+//
+// The pair rather than the key alone, because a key is only meaningful
+// under its owner: `read` means one thing on `partition` and another
+// on `ttl`, and [shape.MixinParamKey] takes both to build the stamp.
+type Param struct {
+	// Owner is the contract or mixin name the key belongs to.
+	Owner Name
+
+	// Key is the word written to the left of the `=` in a directive.
+	Key string
+}
+
+// ContractParams returns every contract parameter key the catalog
+// declares, sorted by owner then key. The returned slice is freshly
+// allocated; callers may mutate it.
+//
+// Sorted at call time rather than by the order written below, because
+// the order that matters is the values' — and a constant's Go
+// identifier is not its value: `ContractCAS` spells `cas` while
+// `ContractBatchWriter` spells `batch-writer`, so a list kept in
+// identifier order is not in the order this promises.
+func ContractParams() []Param {
+	return sortParams([]Param{
+		{ContractBatchWriter, ContractBatchWriterParamMode},
+		{ContractCAS, ContractCASParamMismatch},
+		{ContractCAS, ContractCASParamVersion},
+		{ContractCodec, ContractCodecParamFidelity},
+		{ContractCursor, ContractCursorParamClose},
+		{ContractCursor, ContractCursorParamNext},
+		{ContractCursor, ContractCursorParamSentinel},
+		{ContractIfAbsent, ContractIfAbsentParamConflict},
+		{ContractIfMatch, ContractIfMatchParamPred},
+		{ContractLease, ContractLeaseParamHeld},
+		{ContractLease, ContractLeaseParamTimeout},
+		{ContractPagination, ContractPaginationParamCursor},
+		{ContractPublisher, ContractPublisherParamMode},
+		{ContractRateLimit, ContractRateLimitParamBurst},
+		{ContractRateLimit, ContractRateLimitParamRate},
+		{ContractTransaction, ContractTransactionParamNotFound},
+		{ContractTx, ContractTxParamClosed},
+		{ContractWatcher, ContractWatcherParamNext},
+		{ContractWatcher, ContractWatcherParamStop},
+		{ContractWorkflow, ContractWorkflowParamTransitions},
+	})
+}
+
+// sortParams orders a param list by owner then key.
+//
+// One comparison shared by both accessors, so the order they promise
+// cannot drift between them.
+func sortParams(ps []Param) []Param {
+	slices.SortFunc(ps, func(a, b Param) int {
+		if a.Owner != b.Owner {
+			return strings.Compare(string(a.Owner), string(b.Owner))
+		}
+		return strings.Compare(a.Key, b.Key)
+	})
+	return ps
+}
+
+// MixinParams returns every mixin parameter key the catalog declares,
+// sorted by owner then key. The returned slice is freshly allocated;
+// callers may mutate it.
+func MixinParams() []Param {
+	return sortParams([]Param{
+		{MixinAtomic, MixinAtomicParamRead},
+		{MixinBounded, MixinBoundedParamLimit},
+		{MixinBounded, MixinBoundedParamMin},
+		{MixinCRDTMerge, MixinCRDTMergeParamRead},
+		{MixinCRDTMerge, MixinCRDTMergeParamWrite},
+		{MixinCausal, MixinCausalParamVersion},
+		{MixinConservative, MixinConservativeParamField},
+		{MixinDeleteRemoves, MixinDeleteRemovesParamRead},
+		{MixinDeleteRemoves, MixinDeleteRemovesParamSentinel},
+		{MixinEventually, MixinEventuallyParamSettle},
+		{MixinEventually, MixinEventuallyParamSync},
+		{MixinHooks, MixinHooksParamRegister},
+		{MixinIndexed, MixinIndexedParamBy},
+		{MixinInjectionSafe, MixinInjectionSafeParamRead},
+		{MixinLeakFree, MixinLeakFreeParamClose},
+		{MixinLeakFree, MixinLeakFreeParamOpen},
+		{MixinLifecycleAfterClose, MixinLifecycleAfterCloseParamClose},
+		{MixinLifecycleAfterClose, MixinLifecycleAfterCloseParamSentinel},
+		{MixinMonotonicReads, MixinMonotonicReadsParamVersion},
+		{MixinMonotonicWrites, MixinMonotonicWritesParamVersion},
+		{MixinNotFound, MixinNotFoundParamSentinel},
+		{MixinOrderAfter, MixinOrderAfterParamFn},
+		{MixinOrderAfter, MixinOrderAfterParamUnready},
+		{MixinPartition, MixinPartitionParamAxis},
+		{MixinPartition, MixinPartitionParamRead},
+		{MixinPoisonable, MixinPoisonableParamInduce},
+		{MixinReadAfterWrite, MixinReadAfterWriteParamWrite},
+		{MixinReadYourWrites, MixinReadYourWritesParamVersion},
+		{MixinRetrySucceeds, MixinRetrySucceedsParamAttempts},
+		{MixinSample, MixinSampleParamBuilder},
+		{MixinScheduled, MixinScheduledParamFired},
+		{MixinScheduled, MixinScheduledParamSchedule},
+		{MixinScope, MixinScopeParamAxis},
+		{MixinScope, MixinScopeParamName},
+		{MixinSerializable, MixinSerializableParamRead},
+		{MixinSideEffect, MixinSideEffectParamObserve},
+		{MixinSnapshotIsolation, MixinSnapshotIsolationParamRead},
+		{MixinSticky, MixinStickyParamKey},
+		{MixinStreamReflectsMutations, MixinStreamReflectsMutationsParamDelete},
+		{MixinStreamReflectsMutations, MixinStreamReflectsMutationsParamMutate},
+		{MixinTTL, MixinTTLParamDuration},
+		{MixinTTL, MixinTTLParamNotFound},
+		{MixinTTL, MixinTTLParamPut},
+		{MixinTTL, MixinTTLParamRead},
+		{MixinTamperEvident, MixinTamperEvidentParamTamper},
+		{MixinTamperEvident, MixinTamperEvidentParamVerify},
+		{MixinTimeout, MixinTimeoutParamDuration},
+		{MixinTotal, MixinTotalParamDomain},
+		{MixinValidates, MixinValidatesParamFn},
+		{MixinWindowed, MixinWindowedParamCount},
+		{MixinWindowed, MixinWindowedParamIncr},
+		{MixinWindowed, MixinWindowedParamWindow},
+		{MixinWrappedVia, MixinWrappedViaParamFn},
+		{MixinWritesFollowReads, MixinWritesFollowReadsParamVersion},
+	})
 }

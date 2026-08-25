@@ -27,11 +27,18 @@ const Name = "batch-writer"
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Roles = []string{"writer", "reader"}
 
+// ParamMode is the KV key naming how a partial batch behaves — the
+// word a consumer reads to decide whether a failed entry aborts the
+// rest.
+//
+// Opaque: the vocabulary belongs to whoever generates against it.
+const ParamMode = "mode"
+
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
-	{Key: "mode", Kind: shape.KindOpaque},
+	{Key: ParamMode, Kind: shape.KindOpaque},
 }
 
 // Contract returns the [shape.Contract] this package contributes.

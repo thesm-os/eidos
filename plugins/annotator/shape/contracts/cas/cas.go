@@ -17,6 +17,13 @@ const Name = "cas"
 // without a sentinel declines to state it.
 const ParamMismatch = "mismatch"
 
+// ParamVersion is the KV key naming the field a compare-and-swap
+// compares before it writes.
+//
+// Opaque: the value names a field on the caller's own type, which
+// this package never resolves.
+const ParamVersion = "version"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
@@ -26,7 +33,7 @@ var Roles = []string{"writer"}
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
-	{Key: "version", Kind: shape.KindOpaque},
+	{Key: ParamVersion, Kind: shape.KindOpaque},
 	{Key: ParamMismatch, Kind: shape.KindVar},
 }
 

@@ -13,11 +13,18 @@ const Name = "pagination"
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Roles = []string{"reader"}
 
+// ParamCursor is the KV key naming the field carrying the position a
+// page resumes from.
+//
+// Opaque: the value names a field on the caller's own page type,
+// which this package never resolves.
+const ParamCursor = "cursor"
+
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
-	{Key: "cursor", Kind: shape.KindOpaque},
+	{Key: ParamCursor, Kind: shape.KindOpaque},
 }
 
 // Contract returns the [shape.Contract] this package contributes.

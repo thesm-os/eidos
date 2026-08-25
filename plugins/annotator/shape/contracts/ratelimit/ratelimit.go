@@ -13,12 +13,24 @@ const Name = "rate-limit"
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Roles = []string{"fn"}
 
+// ParamRate is the KV key naming the sustained rate the limiter
+// admits, and ParamBurst the allowance above it a caller may spend at
+// once.
+//
+// Both opaque: a rate is a quantity with a unit this package has no
+// vocabulary for, and reading one would mean fixing that vocabulary
+// for every consumer.
+const (
+	ParamRate  = "rate"
+	ParamBurst = "burst"
+)
+
 // Params enumerates the directive's opaque KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
-	{Key: "rate", Kind: shape.KindOpaque},
-	{Key: "burst", Kind: shape.KindOpaque},
+	{Key: ParamRate, Kind: shape.KindOpaque},
+	{Key: ParamBurst, Kind: shape.KindOpaque},
 }
 
 // Contract returns the [shape.Contract] this package contributes.
