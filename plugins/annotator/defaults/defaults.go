@@ -252,7 +252,7 @@ func (p *Plugin) annotateField(
 	}
 	value, tagged := rules.Tag(f, p.tagKey())
 	if tagged && value != "" {
-		value = p.tagLiteral(ctx, rules, pkg, owner, f, value)
+		value = p.tagLiteral(ctx, rules, pkg, file, owner, f, value)
 		if value == "" {
 			return
 		}
@@ -281,22 +281,25 @@ func (p *Plugin) annotateField(
 // member makes both readings plausible and only one is what was
 // written.
 //
-// Otherwise the type decides, through [sdk.SourceRules.LiteralFor].
-// Go's tag grammar has already consumed one layer of quoting, so the
-// bare text is the right literal for a number and the wrong one for a
-// string — the member's type is what says which.
+// Otherwise the type decides, through [sdk.SourceRules.LiteralFor],
+// which is given the declaring file so a name qualified against an
+// import stays a reference. Go's tag grammar has already consumed one
+// layer of quoting, so the bare text is the right literal for a number
+// and the wrong one for a string — the member's type is what says
+// which, and the file is what says whether the text is a value of that
+// type at all.
 //
 // A value the type cannot admit is reported here, at the declaration.
 // Stamped anyway it reaches the consumer's compiler as an error in
 // generated source, naming a line the author did not write.
 func (p *Plugin) tagLiteral(
 	ctx *sdk.AnnotatorContext, rules sdk.SourceRules, pkg *sdk.Package,
-	owner string, f *sdk.Field, value string,
+	file *sdk.File, owner string, f *sdk.Field, value string,
 ) string {
 	if declaresName(pkg, value) {
 		return value
 	}
-	literal, ok := rules.LiteralFor(f.Type, value, ctx.Reader)
+	literal, ok := rules.LiteralFor(file, f.Type, value, ctx.Reader)
 	if !ok {
 		ctx.Diag.Errorf(f.Pos(),
 			"%s: %s.%s has a %s tag of %q, which is not a value its type admits "+

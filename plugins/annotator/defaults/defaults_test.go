@@ -220,6 +220,75 @@ func TestQualifiedValue(t *testing.T) {
 	})
 }
 
+// A tag on a textual member is read against the file's imports.
+//
+// The two readings of `seed.Region` are both well-formed, and only
+// the import block chooses between them. A textual member is where
+// that matters: the wrong reading stamps eleven characters instead of
+// a constant, and the result compiles — so a generated check compares
+// the built value against itself and passes.
+func TestTagOnTextualMember(t *testing.T) {
+	t.Parallel()
+
+	// The import block has to sit on the file that declared the struct,
+	// not on the package's deduped union: Go scopes a qualifier to the
+	// file that wrote the import, and two files may bind one path to
+	// different names. `t.go` is where the fixture routes a struct
+	// named T by default.
+	tagged := func(imports ...string) *gofixture.Builder {
+		return gofixture.New().
+			File("t.go", func(fb *gofixture.FileBuilder) {
+				for _, path := range imports {
+					fb.Import(path)
+				}
+			}).
+			Struct("T", func(sb *gofixture.StructBuilder) {
+				sb.Field("Region", gofixture.Named("string"), func(f *gofixture.FieldBuilder) {
+					f.Tag("`default:\"seed.Region\"`")
+				})
+				sb.Field("Host", gofixture.Named("string"), func(f *gofixture.FieldBuilder) {
+					f.Tag("`default:\"localhost\"`")
+				})
+			})
+	}
+
+	t.Run("a bound qualifier stamps the reference and its package", func(t *testing.T) {
+		t.Parallel()
+		s, _ := run(t, tagged("example.com/seed"))
+		bag := fieldBag(t, s, "T", "Region")
+		if got := defaults.DefaultOf(bag); got != "Region" {
+			t.Errorf("DefaultOf = %q, want the symbol", got)
+		}
+		if got := defaults.DefaultPackage(bag); got != "example.com/seed" {
+			t.Errorf("DefaultPackage = %q, want the import the qualifier is bound to", got)
+		}
+	})
+
+	t.Run("an unbound qualifier stamps text", func(t *testing.T) {
+		t.Parallel()
+		// Nothing in the spelling says which reading was meant, so the
+		// file having no such import is the whole answer.
+		s, _ := run(t, tagged())
+		bag := fieldBag(t, s, "T", "Region")
+		if got := defaults.DefaultOf(bag); got != `"seed.Region"` {
+			t.Errorf("DefaultOf = %q, want a quoted literal", got)
+		}
+		if got := defaults.DefaultPackage(bag); got != "" {
+			t.Errorf("DefaultPackage = %q, want empty — text imports nothing", got)
+		}
+	})
+
+	t.Run("a bare word stays text beside a bound qualifier", func(t *testing.T) {
+		t.Parallel()
+		// The #59 guard. An identifier grammar accepts `localhost`,
+		// which would seed a symbol nobody declared.
+		s, _ := run(t, tagged("example.com/seed"))
+		if got := defaults.DefaultOf(fieldBag(t, s, "T", "Host")); got != `"localhost"` {
+			t.Errorf("DefaultOf = %q, want a quoted literal", got)
+		}
+	})
+}
+
 // A value the language cannot render is refused where it was written.
 func TestMalformedValueIsReported(t *testing.T) {
 	t.Parallel()

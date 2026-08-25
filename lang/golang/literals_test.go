@@ -330,7 +330,7 @@ func TestLiteralFor(t *testing.T) {
 		// The case that shipped broken: stamped verbatim this names an
 		// identifier, and the consumer's build fails on a symbol
 		// nobody declared.
-		got, ok := golang.LiteralFor(named("string"), "localhost", nil)
+		got, ok := golang.LiteralFor(nil, named("string"), "localhost", nil)
 		if !ok || got != `"localhost"` {
 			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
 		}
@@ -340,7 +340,7 @@ func TestLiteralFor(t *testing.T) {
 		t.Parallel()
 		// An author who wrote the escaped form gets what they wrote,
 		// rather than a second layer of quoting around it.
-		got, ok := golang.LiteralFor(named("string"), `"localhost"`, nil)
+		got, ok := golang.LiteralFor(nil, named("string"), `"localhost"`, nil)
 		if !ok || got != `"localhost"` {
 			t.Errorf("got (%q, %v), want the value unchanged", got, ok)
 		}
@@ -348,7 +348,7 @@ func TestLiteralFor(t *testing.T) {
 
 	t.Run("a numeric member passes a number through", func(t *testing.T) {
 		t.Parallel()
-		got, ok := golang.LiteralFor(named("int"), "8080", nil)
+		got, ok := golang.LiteralFor(nil, named("int"), "8080", nil)
 		if !ok || got != "8080" {
 			t.Errorf("got (%q, %v), want the number unchanged", got, ok)
 		}
@@ -358,7 +358,7 @@ func TestLiteralFor(t *testing.T) {
 		t.Parallel()
 		// Refused rather than quoted: a string is not a value an int
 		// admits, and the caller reports it at the declaration.
-		if _, ok := golang.LiteralFor(named("int"), "localhost!", nil); ok {
+		if _, ok := golang.LiteralFor(nil, named("int"), "localhost!", nil); ok {
 			t.Error("an int member accepted text that is not a number")
 		}
 	})
@@ -368,7 +368,7 @@ func TestLiteralFor(t *testing.T) {
 		// A name is a reference, and the scope it resolves in is not
 		// visible here — so refusing it would reject what an author
 		// legitimately writes.
-		got, ok := golang.LiteralFor(named("int"), "MaxRetries", nil)
+		got, ok := golang.LiteralFor(nil, named("int"), "MaxRetries", nil)
 		if !ok || got != "MaxRetries" {
 			t.Errorf("got (%q, %v), want the identifier unchanged", got, ok)
 		}
@@ -376,10 +376,10 @@ func TestLiteralFor(t *testing.T) {
 
 	t.Run("a bool member takes only true or false", func(t *testing.T) {
 		t.Parallel()
-		if _, ok := golang.LiteralFor(named("bool"), "true", nil); !ok {
+		if _, ok := golang.LiteralFor(nil, named("bool"), "true", nil); !ok {
 			t.Error("a bool member refused true")
 		}
-		if _, ok := golang.LiteralFor(named("bool"), "yes", nil); ok {
+		if _, ok := golang.LiteralFor(nil, named("bool"), "yes", nil); ok {
 			t.Error("a bool member accepted a word that is not a bool")
 		}
 	})
@@ -388,8 +388,107 @@ func TestLiteralFor(t *testing.T) {
 		t.Parallel()
 		// An empty tag is not a declared default, and stamping one
 		// would be indistinguishable from having declared nothing.
-		if _, ok := golang.LiteralFor(named("string"), "", nil); ok {
+		if _, ok := golang.LiteralFor(nil, named("string"), "", nil); ok {
 			t.Error("an empty value was accepted")
+		}
+	})
+}
+
+// TestLiteralFor_QualifiedText covers the one thing that separates a
+// reference from text in a member whose values are text.
+//
+// Both readings of `seed.Region` are well-formed — a constant in
+// another package, and eleven characters — and the spelling does not
+// choose between them. The file's import block does, so these cases
+// differ only in what the file imports.
+func TestLiteralFor_QualifiedText(t *testing.T) {
+	t.Parallel()
+
+	str := &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}
+	importing := func(paths ...string) *node.File {
+		f := &node.File{Name: "config.go"}
+		for _, p := range paths {
+			f.Imports = append(f.Imports, &node.Import{Path: p})
+		}
+		return f
+	}
+
+	t.Run("a bound qualifier is kept as a reference", func(t *testing.T) {
+		t.Parallel()
+		// The regression: quoted, this seeds the eleven characters of
+		// its own spelling. It compiles, so nothing reports it.
+		got, ok := golang.LiteralFor(importing("example.com/seed"), str, "seed.Region", nil)
+		if !ok || got != "seed.Region" {
+			t.Errorf("got (%q, %v), want the reference unchanged", got, ok)
+		}
+	})
+
+	t.Run("an aliased qualifier is kept as a reference", func(t *testing.T) {
+		t.Parallel()
+		f := &node.File{Name: "config.go", Imports: []*node.Import{
+			{Path: "example.com/gen/shopv1", Alias: "pb"},
+		}}
+		got, ok := golang.LiteralFor(f, str, "pb.DefaultRegion", nil)
+		if !ok || got != "pb.DefaultRegion" {
+			t.Errorf("got (%q, %v), want the reference unchanged", got, ok)
+		}
+	})
+
+	t.Run("an unbound qualifier is quoted", func(t *testing.T) {
+		t.Parallel()
+		// A hostname reads exactly like a qualified name. Nothing in
+		// the text separates them, and this file imports no `example`.
+		got, ok := golang.LiteralFor(importing("context"), str, "example.com", nil)
+		if !ok || got != `"example.com"` {
+			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
+		}
+	})
+
+	t.Run("a bare word is quoted however the file imports", func(t *testing.T) {
+		t.Parallel()
+		// #59, which the identifier grammar alone would reopen:
+		// `localhost` is letters and reads as an identifier, so a
+		// check on the spelling accepts it and seeds a symbol nobody
+		// declared. A qualifier is required here for that reason.
+		got, ok := golang.LiteralFor(importing("example.com/seed"), str, "localhost", nil)
+		if !ok || got != `"localhost"` {
+			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
+		}
+	})
+
+	t.Run("a selector chain is quoted", func(t *testing.T) {
+		t.Parallel()
+		// `seed.Region.Name` is not a qualified identifier, and
+		// rendering it as one produces a field access the consumer's
+		// build rejects.
+		got, ok := golang.LiteralFor(importing("example.com/seed"), str, "seed.Region.Name", nil)
+		if !ok || got != `"seed.Region.Name"` {
+			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
+		}
+	})
+
+	t.Run("an escaped value wins over a bound qualifier", func(t *testing.T) {
+		t.Parallel()
+		// The way out for an author whose string value really is
+		// spelled like a reference: write the quotes and they survive.
+		got, ok := golang.LiteralFor(importing("example.com/seed"), str, `"seed.Region"`, nil)
+		if !ok || got != `"seed.Region"` {
+			t.Errorf("got (%q, %v), want the value unchanged", got, ok)
+		}
+	})
+
+	t.Run("a defined textual type resolves like the builtin", func(t *testing.T) {
+		t.Parallel()
+		// isTextual follows a defined type down to what it is defined
+		// as, and the qualifier check has to sit on the same arm — or
+		// a `type Region string` member behaves unlike a string one.
+		r := mapResolver{"example.com/shop.Region": &node.Alias{
+			Name: "Region", Package: "example.com/shop", Target: str,
+		}}
+		defined := namedTypeRef("example.com/shop", "Region")
+		got, ok := golang.LiteralFor(importing("example.com/seed"), defined, "seed.Region", r)
+		if !ok || got != "seed.Region" {
+			t.Errorf("got (%q, %v), want the reference unchanged", got, ok)
 		}
 	})
 }

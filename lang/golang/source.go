@@ -135,9 +135,10 @@ func (Source) SubstituteRef(r emit.Ref, params []*node.TypeParam) emit.Ref {
 	return SubstituteTypeParams(r, by)
 }
 
-// LiteralFor renders text as a Go literal of t.
-func (Source) LiteralFor(t *node.TypeRef, text string, r Resolver) (string, bool) {
-	return LiteralFor(t, text, r)
+// LiteralFor renders text as a Go literal of t, resolving a qualified
+// name against f's import block before treating it as text.
+func (Source) LiteralFor(f *node.File, t *node.TypeRef, text string, r Resolver) (string, bool) {
+	return LiteralFor(f, t, text, r)
 }
 
 // Settable returns the members of s a constructor in another package

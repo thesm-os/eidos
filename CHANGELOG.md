@@ -21,7 +21,9 @@ omitted unless they change what a caller can rely on.
   right literal for a number, a bool or nil, and wrong for a string. It was
   stamped verbatim, so the generated constructor named an identifier nobody
   declared and the consumer's build failed on a line its author never wrote.
-  Reported as [#59](https://github.com/thesm-os/eidos/issues/59).
+  Reported as [#59](https://github.com/thesm-os/eidos/issues/59), with
+  [#60](https://github.com/thesm-os/eidos/issues/60) covering the references
+  the first fix quoted along with everything else.
 
   Three answers now, in order. A name the package declares is a reference, so
   `default:"DefaultHost"` beside a constant of that name keeps meaning the
@@ -29,6 +31,17 @@ omitted unless they change what a caller can rely on.
   `SourceRules.LiteralFor`. A value the type cannot admit — a word in a numeric
   member — is reported at the declaration rather than left for the consumer's
   compiler.
+
+  `LiteralFor` takes the declaring file, because a member whose values are text
+  admits two readings of the same spelling. `default:"seed.Region"` is a
+  constant in a file that imports seed and eleven characters in one that does
+  not, and the import block is the only thing that separates them — a check on
+  the shape of the text would take `localhost` for an identifier and reopen
+  what this fixed. A member whose values are not text asks less: a word is not
+  a number, so a reference is the only reading left, and `default:"time.Second"`
+  on a `time.Duration` needs no import to be read as one. An author whose string
+  value really is spelled like a reference writes `default:"\"seed.Region\""`,
+  and the quotes survive.
 
   The directive form is untouched: an author writing `+gen:default "localhost"`
   writes the quotes, and nothing consumed them.

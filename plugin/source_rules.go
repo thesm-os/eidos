@@ -254,11 +254,18 @@ type TypeRules interface {
 	// text, so quoting it states what the type admits rather than
 	// guessing what was meant.
 	//
+	// The file supplies the scope a qualified name resolves against,
+	// and is what separates a reference from text that reads like one.
+	// A textual member admits both — `seed.Region` is a constant where
+	// the file imports seed and a plain eleven-character value where it
+	// does not — so the language is given the evidence rather than
+	// asked to guess from the spelling.
+	//
 	// False is the caller's signal to report at the declaration. A type
 	// the language cannot reason about passes through untouched, since
 	// a named constant or a conversion cannot be checked without the
 	// scope it resolves in.
-	LiteralFor(t *node.TypeRef, text string, r node.Resolver) (string, bool)
+	LiteralFor(f *node.File, t *node.TypeRef, text string, r node.Resolver) (string, bool)
 
 	// ZeroLiteral returns the language's spelling of a type's zero
 	// value, and whether one could be derived.

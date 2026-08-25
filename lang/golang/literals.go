@@ -237,17 +237,36 @@ type TagEntry struct {
 // report at the declaration rather than let the consumer's compiler
 // find it in generated source.
 //
+// A qualified name whose qualifier f imports is a reference and not
+// text. An author writing `default:"seed.Region"` in a file that
+// imports seed means the constant, and quoting it stamps the eleven
+// characters of its own spelling instead — code that compiles, so
+// nothing reports the substitution. The import block is what decides,
+// rather than the shape of the text: `example.com` reads as a
+// qualified name and is a hostname in a file importing no `example`,
+// and only the file separates them. An author whose string value
+// really is spelled `pkg.Name` writes the escaped form, which is
+// passed through above.
+//
+// The numeric arms ask less, and take a bare identifier on sight. A
+// word is not a value those types admit, so a reference is the only
+// reading left; in a textual member it is one of two, which is why
+// that one wants evidence.
+//
 // A type this cannot reason about passes through untouched, on the
 // same terms as [IsWellFormedLiteral]: a named constant, a conversion
 // and a package-qualified identifier are all things an author writes,
 // and none of them can be checked without the scope they resolve in.
-func LiteralFor(t *node.TypeRef, text string, r Resolver) (string, bool) {
+func LiteralFor(f *node.File, t *node.TypeRef, text string, r Resolver) (string, bool) {
 	if text == "" {
 		return "", false
 	}
 	switch {
 	case isTextual(t, r):
 		if isQuoted(text) {
+			return text, true
+		}
+		if namesBoundSymbol(f, text) {
 			return text, true
 		}
 		return Quote(text), true
@@ -260,6 +279,27 @@ func LiteralFor(t *node.TypeRef, text string, r Resolver) (string, bool) {
 		return text, isNumericText(text) || namesSymbolText(text)
 	}
 	return text, true
+}
+
+// namesBoundSymbol reports whether text names a symbol through a
+// qualifier f's import block binds.
+//
+// A qualifier is required: a bare identifier is what every plain
+// string looks like, so accepting one would quote nothing. A name the
+// declaring package owns is a reference too, and is recognised before
+// this is reached — by the caller, which holds the declarations this
+// does not.
+//
+// Resolution rather than a grammar check, because the two answers
+// differ for text that is well-formed either way. `time.Second` in a
+// file that imports time is the constant; the same eleven characters
+// in a file that does not are eleven characters.
+func namesBoundSymbol(f *node.File, text string) bool {
+	if qualifier, _ := QualifierOf(text); qualifier == "" {
+		return false
+	}
+	_, err := ResolveQualified(f, text, "")
+	return err == nil
 }
 
 // isTextual reports whether t's values are written as quoted text,
