@@ -134,6 +134,76 @@ func TestTestFuncNames(t *testing.T) {
 	})
 }
 
+// TestUnexportedName covers the inverse of [golang.ExportedName], and
+// the two ways of getting it wrong that the obvious spelling has.
+//
+// Visibility in Go is the first rune's case and nothing else, so the
+// operation is that one rune. Converting the whole identifier is a
+// different job with a different answer, and slicing a byte off the
+// front is not the same as taking a rune off it.
+func TestUnexportedName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lowers the leading rune", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.UnexportedName("Store"); got != "store" {
+			t.Errorf("got %q, want store", got)
+		}
+	})
+
+	t.Run("leaves an initialism's remaining runes alone", func(t *testing.T) {
+		t.Parallel()
+		// The difference from naming.Camel, which yields kvStore. This
+		// is the answer that round-trips: ExportedName over it gives
+		// KVStore back, where Pascal over kvStore does too but only
+		// because the initialism table happens to agree — a name the
+		// table does not know would not survive the trip.
+		if got := golang.UnexportedName("KVStore"); got != "kVStore" {
+			t.Errorf("got %q, want kVStore", got)
+		}
+	})
+
+	t.Run("round-trips through ExportedName", func(t *testing.T) {
+		t.Parallel()
+		// What a generator needs when it declares a private helper for
+		// an exported type and has to name the type again.
+		for _, name := range []string{"Store", "KVStore", "HTTPClient", "User"} {
+			if got := golang.ExportedName(golang.UnexportedName(name)); got != name {
+				t.Errorf("ExportedName(UnexportedName(%q)) = %q, want the original", name, got)
+			}
+		}
+	})
+
+	t.Run("takes a rune off the front, not a byte", func(t *testing.T) {
+		t.Parallel()
+		// `ident[:1]` cuts a multi-byte rune in half and produces
+		// something that is not an identifier at all — a failure that
+		// lands in the consumer's build rather than here.
+		got := golang.UnexportedName("Ärger")
+		if got != "ärger" {
+			t.Errorf("got %q, want ärger", got)
+		}
+	})
+
+	t.Run("leaves a name with no lower case unchanged", func(t *testing.T) {
+		t.Parallel()
+		// Already unexported, or from a script with no case. Inventing
+		// a prefix would rename a declaration nobody asked to rename.
+		for _, name := range []string{"store", "_hidden", "日本語"} {
+			if got := golang.UnexportedName(name); got != name {
+				t.Errorf("UnexportedName(%q) = %q, want it unchanged", name, got)
+			}
+		}
+	})
+
+	t.Run("an empty identifier stays empty", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.UnexportedName(""); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+}
+
 func TestExportedName(t *testing.T) {
 	t.Parallel()
 

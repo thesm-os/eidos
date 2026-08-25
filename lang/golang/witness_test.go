@@ -240,7 +240,7 @@ func TestSubstituteSig(t *testing.T) {
 		// A check naming `T` in a parameter position does not compile,
 		// because a Go test function cannot take type parameters.
 		s := golang.SigOf(genericMethod())
-		got := golang.SubstituteSig(s, golang.Witnesses(s.TypeParams))
+		got := golang.SubstituteSig(s, s.TypeParams, golang.Witnesses(s.TypeParams))
 		if b, ok := got.Params[0].Type.(*emit.BuiltinRef); !ok || b.Name != "string" {
 			t.Fatalf("substituted param = %#v", got.Params[0].Type)
 		}
@@ -254,7 +254,7 @@ func TestSubstituteSig(t *testing.T) {
 		// Every use now names a concrete type; a declaration still
 		// carrying the list would declare parameters nothing mentions.
 		s := golang.SigOf(genericMethod())
-		if got := golang.SubstituteSig(s, golang.Witnesses(s.TypeParams)); got.IsGeneric() {
+		if got := golang.SubstituteSig(s, s.TypeParams, golang.Witnesses(s.TypeParams)); got.IsGeneric() {
 			t.Fatalf("a substituted signature must not stay generic")
 		}
 	})
@@ -262,7 +262,7 @@ func TestSubstituteSig(t *testing.T) {
 	t.Run("does not mutate the original", func(t *testing.T) {
 		t.Parallel()
 		s := golang.SigOf(genericMethod())
-		golang.SubstituteSig(s, golang.Witnesses(s.TypeParams))
+		golang.SubstituteSig(s, s.TypeParams, golang.Witnesses(s.TypeParams))
 		if !s.IsGeneric() {
 			t.Fatalf("the original projection was mutated")
 		}
@@ -272,8 +272,39 @@ func TestSubstituteSig(t *testing.T) {
 		t.Parallel()
 		// So the non-generic path allocates nothing.
 		s := golang.SigOf(getMethod())
-		if golang.SubstituteSig(s, nil) != s {
+		if golang.SubstituteSig(s, s.TypeParams, nil) != s {
 			t.Fatalf("a non-generic signature must be returned unchanged")
+		}
+	})
+
+	t.Run("substitutes an owner's parameters through a method", func(t *testing.T) {
+		t.Parallel()
+		// The case a generated double is for, and the one the
+		// signature's own list cannot serve: Go does not permit a
+		// method to declare type parameters, so an interface method's
+		// projection carries an empty list while its body names the
+		// interface's. Binding against `s.TypeParams` answers "nothing
+		// to substitute" for every such method and hands the signature
+		// straight back — a no-op that reads as a rewrite.
+		owner := bounded("any")
+		m := &node.Method{
+			Name:    "Get",
+			Params:  []*node.Param{{Name: "key", Type: &node.TypeRef{TypeKind: node.TypeRefTypeParam, Name: "T"}}},
+			Returns: []*node.Return{{Type: &node.TypeRef{TypeKind: node.TypeRefTypeParam, Name: "T"}}},
+		}
+		s := golang.SigOf(m)
+		if len(s.TypeParams) != 0 {
+			t.Fatalf("fixture carries method-level type parameters, which Go has no syntax for")
+		}
+		if got := golang.SubstituteSig(s, s.TypeParams, golang.Witnesses(owner)); got != s {
+			t.Fatalf("binding against the method's own empty list must change nothing")
+		}
+		got := golang.SubstituteSig(s, owner, golang.Witnesses(owner))
+		if b, ok := got.Params[0].Type.(*emit.BuiltinRef); !ok || b.Name != "string" {
+			t.Fatalf("substituted param = %#v, want the owner's witness", got.Params[0].Type)
+		}
+		if b, ok := got.Returns[0].Type.(*emit.BuiltinRef); !ok || b.Name != "string" {
+			t.Fatalf("substituted return = %#v, want the owner's witness", got.Returns[0].Type)
 		}
 	})
 }
@@ -381,7 +412,7 @@ func TestWitnessEdges(t *testing.T) {
 	t.Run("mismatched witness lengths leave the signature alone", func(t *testing.T) {
 		t.Parallel()
 		s := golang.SigOf(&node.Method{Name: "F", TypeParams: bounded("any", "any")})
-		if golang.SubstituteSig(s, []emit.Ref{emit.Builtin("int")}) != s {
+		if golang.SubstituteSig(s, s.TypeParams, []emit.Ref{emit.Builtin("int")}) != s {
 			t.Fatalf("a partial witness list must not substitute")
 		}
 	})

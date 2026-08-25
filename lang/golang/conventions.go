@@ -6,6 +6,8 @@ package golang
 import (
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"go.thesmos.sh/eidos/core/naming"
 	"go.thesmos.sh/eidos/node"
@@ -156,6 +158,47 @@ func ConstructorName(typeName string) string {
 // `2fast`). Sanitise untrusted input through [SafeIdent] first, and
 // supply a prefix where the source may be digit-leading.
 func ExportedName(ident string) string { return naming.Pascal(ident) }
+
+// UnexportedName lowers an identifier's leading rune, so a generator
+// composing a package-private declaration can spell one.
+//
+// The inverse of [ExportedName] in the only sense Go has: visibility
+// is decided by the first rune's case and by nothing else, so
+// unexporting is that one rune and the rest is left exactly as
+// written.
+//
+// # Not [naming.Camel]
+//
+// Camel converts the whole identifier, initialisms included, so
+// `KVStore` becomes `kvStore`. This yields `kVStore` — uglier, and
+// the only answer that round-trips: a generator that unexports a name
+// to declare a private helper and exports it again to reference the
+// public one needs the two to agree, and Camel followed by Pascal is
+// not the identity. Reach for Camel when the goal is a well-formed
+// lowerCamelCase word; reach for this when the goal is the same name,
+// hidden.
+//
+// Rune-aware, which the obvious spelling is not: `ident[:1]` slices a
+// byte, so an identifier opening on a multi-byte rune comes back with
+// its first character cut in half. The result is not a Go identifier
+// at all, and the failure lands in the consumer's build.
+//
+// A name whose leading rune has no lower case — a digit, an
+// underscore, a character from a caseless script — is returned
+// unchanged. It was already unexported, and inventing a prefix to
+// make it look private would rename a declaration nobody asked to
+// rename.
+func UnexportedName(ident string) string {
+	if ident == "" {
+		return ""
+	}
+	first, width := utf8.DecodeRuneInString(ident)
+	lowered := unicode.ToLower(first)
+	if lowered == first {
+		return ident
+	}
+	return string(lowered) + ident[width:]
+}
 
 // GetterName composes the conventional accessor identifier.
 //

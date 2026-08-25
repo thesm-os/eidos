@@ -14,8 +14,14 @@ reasoning lives in the docblock of whatever the line names.
 
 ## Unreleased
 
+### Breaking
+
+- **`golang.SubstituteSig` takes the type parameters to bind against.** Go has no syntax for a method-level type parameter, so binding against the signature's own list was a guaranteed no-op for every interface method — the one case a generated double needs. Pass `s.TypeParams` for the old behaviour; pass the owner's to rewrite a method at its interface's witnesses.
+
 ### Added
 
+- **`golang.ReportMethodSet` and `golang.Consequence`** report every embed that contributed nothing to a resolved method set and say whether the result is usable, through a narrow `Reporter` port `ctx.Diag` already satisfies.
+- **`golang.UnexportedName`** lowers an identifier's leading rune, completing the pair `ExportedName` opened. Rune-aware, and distinct from `naming.Camel`, which converts the whole identifier and so does not round-trip.
 - **`+gen:witness T=int`** names the concrete type a generic parameter is instantiated at, so a declaration whose constraint no language can reason about still gets checks.
 - **`emit.ExprIndexList`** carries a multi-argument instantiation; two nested `ExprIndex` values spell `Pair[K][V]`, which is a different expression.
 - **`SourceRules.SubstituteParams` and `SubstituteRef`** answer what a type looks like at its witnesses, in the source and projected forms respectively.
@@ -38,6 +44,7 @@ reasoning lives in the docblock of whatever the line names.
 - **A directive value can name a stdlib package** ([#58](https://github.com/thesm-os/eidos/issues/58)). The two notations were told apart by a slash before the last dot, which no single-segment path has; the import block decides now, with the path form as the fallback.
 - **A generic declaration's builder gets checks with bodies in them** ([#57](https://github.com/thesm-os/eidos/issues/57)). The file was emitted for having witnesses and every subtest then dropped for having type parameters, so it compiled, passed, and asserted nothing.
 - **The builder generator's checks compile for a member of any type** ([#54](https://github.com/thesm-os/eidos/issues/54)). Comparison goes through `github.com/google/go-cmp` against a sample bound at the member's type — **a project running this generator takes a go-cmp dependency**.
+- **`stubgen` and `mockgen` no longer emit a double short an embedded method.** Both reported the unresolved embed and generated anyway; the pipeline carries every phase to completion, so the backend rendered the short file to disk with a non-zero exit as the only sign.
 - **The Go assertion dialect emits source that parses whatever it is given.** `assertEqual` composed into an `if` header, so an operand carrying a composite literal produced a file the toolchain rejected before compiling it.
 
 ## v1.15.1 — 2026-08-25

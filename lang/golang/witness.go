@@ -240,21 +240,36 @@ func WitnessBindings(params []*node.TypeParam, witnesses []emit.Ref) map[string]
 	return out
 }
 
-// SubstituteSig returns a copy of s with every type parameter
-// rewritten to its witness.
+// SubstituteSig returns a copy of s with each of params rewritten to
+// the witness at its position.
 //
 // What makes a generic subject reachable from a non-generic entry
 // point: a check naming `T` in a parameter position does not
 // compile, and rewriting the projection is enough where the
 // generated code names types and nothing else.
 //
+// # Why the parameters are supplied
+//
+// They are usually not the signature's own. Go does not permit a
+// method to declare type parameters, so an interface method's `Sig`
+// carries an empty list and the parameters its body names belong to
+// the *interface* — which is the case a generated double is for.
+// Reading `s.TypeParams` therefore answers "nothing to substitute" for
+// every method, and returns the signature untouched while looking like
+// it worked. A caller rewriting a free function passes `s.TypeParams`
+// and gets what it had before.
+//
+// Same shape as [BindTypeArgs] for the same reason: the list a
+// substitution binds against is the caller's to name, because only the
+// caller knows which declaration the body was written inside.
+//
 // Returns s unchanged when there is nothing to substitute, so the
 // non-generic path allocates nothing.
-func SubstituteSig(s *Sig, witnesses []emit.Ref) *Sig {
+func SubstituteSig(s *Sig, params []*node.TypeParam, witnesses []emit.Ref) *Sig {
 	if s == nil {
 		return nil
 	}
-	by := WitnessBindings(s.TypeParams, witnesses)
+	by := WitnessBindings(params, witnesses)
 	if by == nil {
 		return s
 	}
@@ -272,6 +287,8 @@ func SubstituteSig(s *Sig, witnesses []emit.Ref) *Sig {
 	// The parameters are gone from the rewritten signature: every use
 	// of them now names a concrete type, and a declaration still
 	// carrying the list would declare parameters nothing mentions.
+	// Cleared whether or not they came from s — an owner's parameters
+	// are equally out of scope once every use of them is concrete.
 	out.TypeParams = nil
 	return &out
 }
