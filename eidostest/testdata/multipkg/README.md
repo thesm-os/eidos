@@ -56,8 +56,15 @@ qualifiers, and any same-package elision must apply per-element.
 `domain.Product` carries two `+gen:out` directives:
 
 - `+gen:out product_codegen.go` — applies to every plugin that
-  emits decls for Product. repogen / buildergen / registrygen
-  compose into one rendered file.
+  emits decls for Product. repogen and registrygen compose into one
+  rendered file.
+
+  Product is deliberately *not* `+gen:builder`. An unscoped override
+  pinning a filename cannot apply to a plugin emitting more than one
+  file — one name, two outputs — and the pipeline refuses rather than
+  dropping one silently. Builder is exercised on six other types
+  here, so both the multi-output plugin and the unscoped override
+  stay covered.
 - `+gen:out product_mock_test.go plugin=mockgen` — plugin-scoped
   variant that overrides only mockgen's filename. mockgen's
   test-package mode (`package <src>_test`) is incompatible with

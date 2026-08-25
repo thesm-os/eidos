@@ -1,132 +1,223 @@
 // Copyright Thesmos B.V. 2026
 // SPDX-License-Identifier: MIT
 
-// Package builder is the production single-output generator for
-// fluent test builders. Annotating a source struct with
-// `+gen:builder` opts the struct in for a per-source-file
-// builder-companion carrying the type's `<Name>Builder`, its
-// constructors, per-field setters keyed off each field's
-// shape (scalar, slice, map, bytes), [Mutate], [Clone], and
-// [Build] entries.
+// Package builder generates a fluent builder for an annotated type,
+// plus a companion file of checks over it.
 //
-// # Language-agnostic core, language-keyed adapters
+// A composite literal restates every member at every call site, so a
+// member added to the type breaks every literal at once and a reader
+// cannot tell which members a given call actually cares about. A
+// builder inverts that: the constructor supplies the rest, and each
+// call states only what it varies.
 //
-// This file holds the language-neutral plugin core: the
-// directive schema, the [Options] surface, the [Type]
-// emit value, and the [Plugin.Generate] pass that walks
-// annotated source structs and queues one contribution per
-// match. The contribution carries the raw [sdk.Struct], the
-// option-resolved [Type.Suffix], and the verbatim
-// `defaults=` directive value — every classification /
-// identifier-convention / directive-parsing rule is deferred
-// to the active backend's language.
+// # Language-neutral core
 //
-// The Go adapter ships as the sibling `builder_go.go`,
-// owning the output suffix, the embedded template tree, and
-// the one template helper the template consumes. [sdk.Base]
-// answers the declaration methods and keys every one of them
-// to Go, so a second target language is more than an extra
-// adapter file: it needs `builder_<lang>.go`, a
-// `templates/<lang>/...` tree, and Outputs / Templates /
-// TemplateFuncs redeclared on [Plugin] to dispatch across
-// both. Nothing in the neutral core below changes for it.
+// This file names no language. Which setters a member owes follows
+// the shape of its type — sequence, mapping, set, optional — in the
+// vocabulary [sdk.TypeShape] defines, and every question behind that
+// projection is asked through [sdk.SourceRules]: what shape a type
+// has, what a value of it looks like, which members a constructor can
+// set, how an identifier is spelled.
+//
+// Identifiers are composed in the templates, which are per-language
+// by construction. `With`, `Append`, `Entry` and the PascalCase
+// joining them are Go's conventions, and a core that concatenated
+// them would have written one language's answer into a plugin that
+// names none.
+//
+// See the package README for what each shape owes, how seeding
+// composes, what the generated checks assert, and the limits.
 package builder
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
+	"go.thesmos.sh/eidos/plugins/annotator/defaults"
 	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the plugin's stable identifier.
 const Name = "builder"
 
-// Version is the plugin's declared version. It composes into the
-// pipeline's plugin fingerprint, which frontends fold into their cache
-// keys — so bumping it invalidates a warm cache populated when this
-// plugin behaved differently. A plugin that declares no version
-// contributes an empty string and can never invalidate anything, which
-// is a silent staleness bug waiting for its first behavioural change.
-const Version = "1.0.0"
+// Version composes into the pipeline's plugin fingerprint, which
+// frontends fold into their cache keys — so bumping it invalidates a
+// warm cache populated when this plugin emitted something else.
+const Version = "2.0.0"
 
-// Capability is the capability label the plugin advertises so
-// downstream consumers can declare a documentary dependency
-// through their own `Requires` list.
+// Capability is the label the plugin advertises so a downstream
+// consumer can declare a documentary dependency on builder generation.
 const Capability = "builder"
 
-// DirectiveName is the bare directive name (without the `+gen:`
-// or `-gen:` prefix) the plugin reads from each source struct.
+// DirectiveName is the bare directive name, without the `+gen:`
+// prefix, that opts a declaration in.
 const DirectiveName sdk.DirectiveName = "builder"
 
-// DefaultsKey is the directive keyword that pins the explicit
-// defaults factory: `+gen:builder defaults=<value>`. The raw
-// value is threaded into the rendered template; the active
-// language's funcmap parses it according to that language's
-// module-path conventions.
-const DefaultsKey = "defaults"
+// CompanionKey names the seeding function explicitly, for one that
+// does not follow the convention or does not live beside the type:
+//
+//	//+gen:builder defaults=example.com/seed.UserDefaults
+//
+// The full-path notation matters: a companion in another package would
+// otherwise need an import written only for this directive, which does
+// not compile.
+const CompanionKey = "defaults"
 
-// SlotName is the [sdk.EmitFile] slot the plugin appends its
-// rendered [Type] emit values into. `top` renders the
-// content between the package clause and the first core decl
-// — the natural placement for a self-contained method-and-
-// function block. Universal across target languages.
-const SlotName = "top"
+// The keys this plugin's per-language vocabulary is declared under —
+// see [sdk.LanguageSupport.Words] and the language bindings beside
+// this file.
+//
+// Keys rather than values: what word a language uses is that
+// language's business, and a constant here holding `"Builder"` would
+// be one language's idiom spelled into every other language's output.
+// How the word joins the type name is the language's too, composed
+// through [sdk.SourceRules.TypeName].
+const (
+	// WordBuilder names the generated type — `User` gives
+	// `UserBuilder` in a language that concatenates.
+	WordBuilder = "builder"
 
-// KindType is the plugin-defined [sdk.EmitNode.Kind] every
-// [Type] emit value reports. Universal across target
-// languages; the matching template per language lives at
-// `templates/<lang>/builder.type.tmpl`.
-const KindType sdk.Kind = "builder.type"
+	// WordCompanion names the seeding function found beside a type.
+	// A package holding several types gets one companion each, which
+	// is why the identifier carries the type rather than being a bare
+	// word.
+	WordCompanion = "companion"
 
-// DefaultSuffix is the suffix appended to the source struct's
-// name to form the rendered builder identifier
-// (`<Type><Suffix>`) when [Options.Suffix] is unset. The
-// `Builder` naming convention is widely used across target
-// languages; teams that prefer a different convention
-// override via [Options.Suffix].
-const DefaultSuffix = "Builder"
+	// WordFrom names the seeding constructor beside the plain one —
+	// `NewUser` and `NewUserFrom`.
+	WordFrom = "from"
+)
+
+// TestOutputTag is the tag the companion check output advertises.
+//
+// A tag names an output within the plugin's own namespace, which is
+// what a routing override and a per-output directive address. Neutral
+// by nature: it is this plugin's word for the second file, not a
+// spelling any language decides.
+const TestOutputTag = "test"
+
+// SkipTag is the tag key excluding a member from the builder:
+//
+//	Internal string `builder:"-"`
+//
+// For a member a caller should never set but which cannot be hidden —
+// something a neighbouring package reads directly. Any value other
+// than [SkipValue] is rejected, so a typo is reported rather than
+// silently keeping the setter.
+const SkipTag = "builder"
+
+// SkipValue is the only value [SkipTag] accepts.
+const SkipValue = "-"
+
+// FileSlot is the [sdk.EmitFile] slot both outputs land in. `top`
+// renders between the package clause and the first core declaration,
+// which is where a block of whole declarations belongs.
+const FileSlot = "top"
+
+// The slots this plugin hands out on the builder it emits.
+//
+// A slot is reached by name, so the generator handing the region out
+// and the one filling it both spell it — from here, because a
+// misspelling on either side mints a second, unconstrained region
+// under a near-miss name rather than failing.
+const (
+	// SlotSetters is the builder's method block, after the setters
+	// this plugin derives. For a contributor adding one the member
+	// shapes do not model — a setter taking a domain type and filling
+	// several members from it.
+	SlotSetters = "setters"
+
+	// SlotChecks is the check file's function block, after the checks
+	// this plugin derives.
+	//
+	// For a contributor asserting something this plugin cannot see: a
+	// validation generator checking that Build refuses what its rules
+	// forbid, or a domain invariant no member shape implies. Without
+	// it a second generator wanting one check has to emit a whole file
+	// of its own beside this one.
+	SlotChecks = "checks"
+
+	// SlotBuild is inside Build, before the value is returned.
+	//
+	// Where a contribution makes the constructed value *correct*
+	// rather than merely reachable: a normalisation, or a validation
+	// generator's check. A setter slot alone cannot do that — it adds
+	// ways to write a member and no way to constrain what was written.
+	SlotBuild = "build"
+)
+
+// KindType and KindTests are the plugin-defined emit kinds. The
+// backend resolves a template by the kind's string value, so each
+// constant doubles as the name its template defines.
+const (
+	KindType  sdk.Kind = "builder.type"
+	KindTests sdk.Kind = "builder.test"
+)
+
+// MetaType names the builder generated for a declaration, stamped on
+// the declaration itself.
+//
+// The coupling a second generator needs. A fixture or double generator
+// naming `UserBuilder` otherwise re-derives the suffix convention from
+// a literal, and a run that configured [Options.Suffix] leaves it
+// naming a type nothing declares. Reading the stamp costs one lookup
+// and cannot drift.
+//
+//nolint:gochecknoglobals // meta key registration, immutable after init.
+var MetaType = sdk.EnsureKey(Name+".type", sdk.StringParser)
 
 // Options carries the plugin's user-tunable settings.
 type Options struct {
-	// Suffix is appended to the source struct's name to form
-	// the rendered builder's identifier (`<Type><Suffix>`).
-	// Defaults to [DefaultSuffix]. The setting is universal
-	// across target languages.
-	Suffix string `eidos:"suffix,default=Builder"`
+	// Suffix overrides the word the builder's identifier carries
+	// beside the type it builds.
+	//
+	// Unset takes the language's own word — see [WordBuilder]. Set, it
+	// applies to every language, which is what a caller asking for
+	// `Factory` means: the word is theirs, and only the joining stays
+	// the language's.
+	Suffix string `eidos:"suffix"`
+
+	// CompanionWord overrides the word the seeding function's
+	// identifier carries beside the type it seeds.
+	//
+	// For a repository whose seed functions are called something else
+	// — `UserFixture`, `UserSeed`. Unset takes the language's own word;
+	// the lookup composes it the same way the builder's name is
+	// composed, so the two conventions cannot drift apart.
+	CompanionWord string `eidos:"companion-word"`
+
+	// NoTests suppresses the companion check file, leaving the builder
+	// alone.
+	//
+	// For a repository whose generated tests are written by something
+	// else. Off by default: a builder nothing exercises is a
+	// constructor whose setters are asserted by nobody, and the checks
+	// are the cheapest place to notice one that drops what it is
+	// given.
+	NoTests bool `eidos:"no-tests"`
 }
 
-// Plugin is the fluent-builder generator. Zero value is
-// unusable; go through [New] so the embedded [sdk.Holder]
-// binds to the options field.
+// Plugin is the fluent-builder generator. Zero value is unusable; go
+// through [New] so the embedded [sdk.Holder] binds to the options
+// field.
 type Plugin struct {
 	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
 
-// New returns a fresh plugin instance with the options holder
-// bound. The pipeline overlays caller-supplied option values
-// via [Plugin.SetOptions] (promoted from [sdk.Holder]) at
-// Build time.
+// New returns a fresh plugin instance.
 //
-// The foundation bucket runs ahead of the composition and
-// cross-cutting buckets, so a plugin walking the
-// post-generation emit graph finds the builder types this pass
-// queued.
+// The foundation bucket runs ahead of composition and cross-cutting,
+// so a plugin walking the post-generation emit graph finds the
+// builders this pass queued.
 //
-// [Capability] is published so a consumer can declare a
-// documentary dependency on builder generation through its own
-// Requires list. Nothing is required in return: the plugin
-// reads source nodes only and has no upstream plugin
-// dependency.
-//
-// [GoDefaultsExpr] is the plugin's one template helper, and
-// the base registers it under the plugin's name prefix — so
-// the template calls it as `builder_defaultsExpr`. The
-// shape-classification and identifier-convention helpers the
-// same template reaches for are canonical backend entries and
-// stay unprefixed. No backend builtin is replaced; the
-// template renders through the canonical set as it stands.
+// [Capability] is published so a consumer can declare a documentary
+// dependency on builder generation. Nothing is required in return: the
+// plugin reads source declarations and depends on no other plugin
+// having run — including the defaults annotator, whose stamps it reads
+// where they are present and does without where they are not.
 func New() *Plugin {
 	p := &Plugin{Base: sdk.NewPlugin(Name).
 		Version(Version).
@@ -139,128 +230,598 @@ func New() *Plugin {
 	return p
 }
 
-// directives declares the `+gen:builder` / `-gen:builder`
-// schema on source struct types. The optional `defaults=`
-// keyword arg pins the explicit factory function the
-// additional `New<Name>WithDefaults` constructor seeds from;
-// parsing of the value is delegated to the active language's
-// funcmap.
+// directives declares the `+gen:builder` schema.
+//
+// The directive takes no positional argument: a builder exists exactly
+// where one is declared, so deleting the line is the suppression and a
+// negated form would have nothing to act on.
 func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(sdk.NodeKindStruct).
-			AllowedKeys(DefaultsKey).
 			Describe(
-				"Opts the host struct in for fluent-builder generation. " +
-					"`defaults=<value>` adds a `New<Name>WithDefaults` " +
-					"constructor seeded from the named factory; no " +
-					"auto-discovery is performed. A bare name resolves " +
-					"beside the annotated type; a qualified one names " +
-					"another package. The value's parsing convention is " +
-					"defined per target language.",
+				"Generates a fluent builder for the annotated type, plus a " +
+					"companion file checking it. Takes no positional argument. A " +
+					"`<Type>Defaults()` function in the same package seeds the " +
+					"constructor, `defaults=` names one explicitly, and per-member " +
+					"`+gen:default` directives or `default:\"…\"` tags override it. " +
+					"A member opts out with a `builder:\"-\"` tag. The negated form " +
+					"is rejected — a builder exists only where declared, so " +
+					"removing the directive is the suppression.",
 			).
+			AllowedKeys(CompanionKey).
+			On(sdk.NodeKindStruct).
+			DenyNegation().
 			Build(),
 	}
 }
 
-// Type is the plugin-defined emit kind the rendered
-// emit value reports. The matching `builder.type.tmpl`
-// template in each language tree renders it as the full
-// builder surface for one source struct — type declaration,
-// [New<Name>], optional [New<Name>WithDefaults],
-// [New<Name>From], per-field setters, [Mutate], [Clone], and
-// [Build].
+// Field is one member the builder can set.
 //
-// The struct is intentionally minimal: a raw [sdk.Struct]
-// pointer the template walks, an option-derived suffix, and
-// the verbatim `defaults=` directive value. All shape
-// detection and identifier-convention rules live in the
-// active language's funcmap; the data graph carries no
-// language-specific projection.
+// The projection the templates render. Every language-specific
+// question behind it was asked through [sdk.SourceRules], so what
+// reaches a template is the neutral answer and a second language
+// changes nothing in this file.
+type Field struct {
+	// Name is the member identifier, which also names the setter —
+	// `Username` gives `WithUsername`.
+	Name string
+
+	// Type is the member's declared type.
+	Type sdk.Ref
+
+	// Shape is what the type's structure is, in the vocabulary every
+	// language shares. It decides which setters the member owes.
+	Shape sdk.TypeShape
+
+	// Elem is the inner type: a sequence's element, a mapping's value,
+	// an optional's contents. Key is a mapping's or set's key. Both
+	// nil for the shapes with none.
+	Elem sdk.Ref
+	Key  sdk.Ref
+
+	// Default is the member's declared default as source text, empty
+	// when it declared none. It renders straight into the
+	// constructor's literal.
+	Default string
+
+	// DefaultRef qualifies a default naming a symbol in another
+	// package, nil when the default is a plain literal. A rendered file
+	// has to register the import, which only a reference carries.
+	DefaultRef *sdk.Expr
+
+	// DefaultIsZero reports that the declared default is the type's
+	// zero, where no check can tell a constructor that applied it from
+	// one that ignored it.
+	//
+	// Answered by the language during Generate, because the spellings
+	// are its own: `nil` is Go's and `None` is another's.
+	DefaultIsZero bool
+
+	// Sample and Alternate are two distinct values of whatever the
+	// setter takes, empty when the type admits none. Two rather than
+	// one because a check comparing against a single value passes
+	// whenever the subject already held it.
+	Sample    sdk.Sample
+	Alternate sdk.Sample
+}
+
+// Copies reports whether the member owns storage a clone must not
+// share.
+func (f Field) Copies() bool {
+	switch f.Shape {
+	case sdk.ShapeSequence, sdk.ShapeBytes, sdk.ShapeMapping, sdk.ShapeSet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Keyed reports whether the member is addressed by key, which is the
+// two shapes owing an entry setter.
+func (f Field) Keyed() bool {
+	return f.Shape == sdk.ShapeMapping || f.Shape == sdk.ShapeSet
+}
+
+// IsScalar reports the shape owing one plain replacing setter, and
+// the five predicates below report the rest.
+//
+// Methods rather than a comparison in the template, because
+// [sdk.TypeShape] is a named string type and text/template's `eq`
+// compares dynamic types before values — `eq .Shape "sequence"` is
+// false for every member, silently, and every branch falls to the
+// scalar arm.
+func (f Field) IsScalar() bool { return f.Shape == sdk.ShapeScalar }
+
+// IsSequence reports an ordered run of one element type.
+func (f Field) IsSequence() bool { return f.Shape == sdk.ShapeSequence }
+
+// IsBytes reports a sequence the language can also spell as text.
+func (f Field) IsBytes() bool { return f.Shape == sdk.ShapeBytes }
+
+// IsMapping reports a keyed collection carrying a value per key.
+func (f Field) IsMapping() bool { return f.Shape == sdk.ShapeMapping }
+
+// IsSet reports a keyed collection carrying membership only.
+func (f Field) IsSet() bool { return f.Shape == sdk.ShapeSet }
+
+// IsOptional reports a value that may be absent.
+func (f Field) IsOptional() bool { return f.Shape == sdk.ShapeOptional }
+
+// Declared reports whether the member declares a default at all.
+//
+// Whether that default is the type's *zero* — where a check comparing
+// against it asserts `0 == 0` and passes against a constructor that
+// ignored the declaration — is a question about the language's
+// literals, so a template asks it of the language rather than of this
+// value. `nil` is Go's spelling and `None` is another's.
+func (f Field) Declared() bool { return strings.TrimSpace(f.Default) != "" }
+
+// Type is the emit value rendered into the primary output.
 type Type struct {
 	sdk.BaseEmit
 
-	// Source is the raw source [sdk.Struct] the template
-	// walks. The active language's funcmap classifies field
-	// shapes, projects exported fields, and lifts type
-	// parameters / arguments from this single root.
-	Source *sdk.Struct
+	// TypeName is the builder's identifier — `<Source><Suffix>`.
+	TypeName string
 
-	// Suffix is the option-resolved suffix appended to the
-	// source struct's name to form the builder identifier
-	// (`<Source.Name><Suffix>`). Defaults to [DefaultSuffix].
-	Suffix string
+	// SourceName is the type's own identifier, which names the
+	// constructors: `NewUser`, `NewUserFrom`.
+	SourceName string
 
-	// DefaultsArg is the verbatim `defaults=` directive value
-	// or the empty string when the arg is absent. The active
-	// language's funcmap parses the value at render time,
-	// resolving a bare identifier against [Builder.Source]'s
-	// package; malformed values surface as render-time errors.
-	DefaultsArg string
+	// ValueRef qualifies the type the builder constructs. A builder
+	// routed into another package cannot reach it unqualified, and
+	// where the two share a package the backend renders it bare.
+	ValueRef *sdk.Expr
+
+	// TypeParams is the declaration's generic parameter list in
+	// declaration form; TypeArgs is the same list in use position.
+	TypeParams []*sdk.EmitTypeParam
+	TypeArgs   string
+
+	Fields []Field
+
+	// Companion qualifies the seeding function the constructor calls,
+	// nil when the package declares none.
+	Companion *sdk.Expr
+
+	setters, build *sdk.Slot
 }
 
 // Kind returns [KindType].
 func (*Type) Kind() sdk.Kind { return KindType }
 
-// Compile-time confirmation that *Type satisfies
-// [sdk.EmitNode].
-var _ sdk.EmitNode = (*Type)(nil)
+// Seeded reports whether any member declares a default, which decides
+// whether the constructor builds a literal or an empty builder.
+func (t *Type) Seeded() bool {
+	return slices.ContainsFunc(t.Fields, func(f Field) bool { return f.Default != "" })
+}
 
-// Generate walks every source struct the reader exposes and,
-// for each opted-in struct, queues one [Type]
-// contribution against the file the struct lives in. The
-// Layout phase resolves the contribution to a sibling
-// builder file via the standard routing precedence; multiple
-// annotated structs declared in the same source file collate
-// into one rendered output.
+// Setters returns the slot rendered after this plugin's own setters.
+func (t *Type) Setters() *sdk.Slot {
+	if t.setters == nil {
+		t.setters = sdk.NewSlot(SlotSetters, "")
+		t.setters.Owner = t
+	}
+	return t.setters
+}
+
+// Build returns the slot rendered inside Build, before the value is
+// returned.
+func (t *Type) Build() *sdk.Slot {
+	if t.build == nil {
+		t.build = sdk.NewSlot(SlotBuild, "")
+		t.build.Owner = t
+	}
+	return t.build
+}
+
+// Slot satisfies [sdk.SlotHost] so the backend's `slot` helper reaches
+// either region by name. An unknown name yields an empty slot rather
+// than nil, so a template asking for one this kind does not have
+// renders nothing instead of failing.
+func (t *Type) Slot(name string) *sdk.Slot {
+	switch name {
+	case SlotSetters:
+		return t.Setters()
+	case SlotBuild:
+		return t.Build()
+	default:
+		return sdk.NewSlot(name, "")
+	}
+}
+
+var (
+	_ sdk.EmitNode = (*Type)(nil)
+	_ sdk.SlotHost = (*Type)(nil)
+)
+
+// Tests is the emit value rendered into the tagged check output.
 //
-// Source structs without `+gen:builder` are skipped silently.
-// The pass is language-neutral: the contribution carries the
-// raw source struct, the suffix, and the raw directive value;
-// the active backend's template + funcmap pair produce the
-// rendered text.
+// The checks land in the external test package of wherever the builder
+// was routed, so they reach neither the builder nor the type
+// unqualified. The type's package is known during Generate; the
+// builder's is not decided until Layout, which is why this implements
+// [sdk.OutputPackageSetter].
+type Tests struct {
+	sdk.BaseEmit
+
+	TypeName   string
+	SourceName string
+
+	// CtorName and FromName are the builder's two constructor
+	// identifiers, spelled by the language during Generate.
+	//
+	// Carried rather than recomposed, because [Tests.SetOutputPackages]
+	// runs after Layout and holds no language: an identifier built
+	// there would be this file's guess at one language's convention,
+	// which is exactly what the rest of the plugin avoids.
+	CtorName, FromName string
+
+	// CtorRef and FromRef qualify those two constructors. Set during
+	// Generate against the source package as a provisional value, then
+	// corrected once routing resolves — a wrong package is a compile
+	// error naming the symbol, while a bare name silently binds to
+	// whatever else is in scope.
+	CtorRef, FromRef *sdk.Expr
+
+	// ValueRef qualifies the type the builder constructs.
+	ValueRef *sdk.Expr
+
+	TypeParams []*sdk.EmitTypeParam
+	TypeArgs   string
+
+	// Witnesses are the concrete types the checks instantiate at,
+	// empty for a plain declaration and for one whose constraints
+	// admit none — the latter gets a note in place of its checks.
+	Witnesses []sdk.Ref
+
+	Fields []Field
+
+	// Seeded mirrors [Type.Seeded] so the constructor's check asserts
+	// what the constructor does rather than what it usually does.
+	Seeded bool
+
+	// Companion mirrors [Type.Companion]. With one and no declared
+	// defaults the check compares the constructed value against the
+	// companion's own return, which is exact — anything weaker would
+	// pass against a constructor that called something else.
+	Companion *sdk.Expr
+
+	checks *sdk.Slot
+}
+
+// Checks returns the slot rendered after this plugin's own checks.
+func (t *Tests) Checks() *sdk.Slot {
+	if t.checks == nil {
+		t.checks = sdk.NewSlot(SlotChecks, "")
+		t.checks.Owner = t
+	}
+	return t.checks
+}
+
+// Slot satisfies [sdk.SlotHost] so the backend's `slot` helper reaches
+// the region by name. An unknown name yields an empty slot rather than
+// nil, so a template asking for one this kind does not have renders
+// nothing instead of failing.
+func (t *Tests) Slot(name string) *sdk.Slot {
+	if name == SlotChecks {
+		return t.Checks()
+	}
+	return sdk.NewSlot(name, "")
+}
+
+// Kind returns [KindTests].
+func (*Tests) Kind() sdk.Kind { return KindTests }
+
+// Generic reports that the declaration is parameterised, which is
+// where the per-member checks are withheld.
+//
+// A test function cannot take type parameters, so a check naming one
+// in a member position would not compile. The structural checks still
+// run, instantiated at [Tests.Witnesses]; only the per-member setter
+// checks, whose parameter types are the member's own, are dropped.
+func (t *Tests) Generic() bool { return len(t.TypeParams) > 0 }
+
+// Instantiable reports whether the checks can name the types they
+// would run at.
+//
+// False for a parameterised declaration whose constraints admit no
+// witness, which is the one case where no check can be written at all
+// — and where the rendered file carries a note saying so rather than
+// nothing.
+func (t *Tests) Instantiable() bool {
+	return len(t.TypeParams) == 0 || len(t.Witnesses) > 0
+}
+
+// Copies reports whether any member owns storage a clone must not
+// share, which decides whether the independence check is emitted.
+func (t *Tests) Copies() bool { return slices.ContainsFunc(t.Fields, Field.Copies) }
+
+// Seedable returns the members a check can set to a named value.
+//
+// The seed for the round-trip checks, and the reason they assert
+// anything: built with `var seed T` and compared against itself,
+// `From(zero).Build() == zero` passes against a constructor that
+// dropped every member it was given.
+//
+// Scalar shapes only, and the restriction is about what the *setter*
+// accepts rather than what the sample is. A mapping's setter takes a
+// mapping, a sequence's a variadic, a set's one entry at a time — so
+// handing any of them a scalar sample is a type error. Each is driven
+// through the shape it owns by its own per-member check.
+func (t *Tests) Seedable() []Field {
+	if t.Generic() {
+		// A parameterised declaration seeds nothing. A check is an
+		// ordinary function, so it names the declaration at concrete
+		// witnesses — but its members' types are written in terms of
+		// the parameters, and a value of one cannot be spelled without
+		// substituting the witnesses through the whole projection.
+		// Withholding the seed is the honest answer; writing it
+		// produces a file naming a generic type without instantiation.
+		return nil
+	}
+	out := make([]Field, 0, len(t.Fields))
+	for _, f := range t.Fields {
+		if f.Shape == sdk.ShapeScalar && f.Sample.OK() {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// SetOutputPackages repoints the references at wherever Layout routed
+// the builder.
+func (t *Tests) SetOutputPackages(byTag map[string]string) {
+	path, ok := sdk.PrimaryPackage(byTag)
+	if !ok {
+		return
+	}
+	t.CtorRef = sdk.NewExternal(path, t.CtorName)
+	t.FromRef = sdk.NewExternal(path, t.FromName)
+}
+
+var (
+	_ sdk.EmitNode            = (*Tests)(nil)
+	_ sdk.SlotHost            = (*Tests)(nil)
+	_ sdk.OutputPackageSetter = (*Tests)(nil)
+)
+
+// Generate projects every annotated declaration into a builder and
+// the checks over it.
+//
+// Per package, because the language a declaration is read with is a
+// fact about the package that produced it — see [sdk.LanguageOf]. A
+// package written in a language this plugin cannot read is reported
+// once rather than passed over, since every builder in it would
+// otherwise go unemitted with nothing to say why.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name)
-	for s := range ctx.Reader.Structs().All() {
-		if !s.HasPositiveDirective(DirectiveName) {
+	unread := map[string]bool{}
+	for _, pkg := range ctx.Reader.Packages().Slice() {
+		rules, lang, ok := p.SourceOf(pkg)
+		if !ok {
+			p.reportUnread(ctx, pkg, sdk.LanguageOf(pkg), unread)
 			continue
 		}
-		bt := &Type{
-			BaseEmit: sdk.BaseEmit{
-				OriginNode: s,
-				SetByName:  c.SetBy(),
-				SourcePos:  s.Pos(),
-			},
-			Source:      s,
-			Suffix:      p.suffix(),
-			DefaultsArg: defaultsValue(s),
-		}
-		prov := c.Provenance("builder.type." + s.Name)
-		if err := ctx.Store.Emit().AppendOriginSlot(s, SlotName, bt, prov); err != nil {
-			return fmt.Errorf("%s: append slot for %q: %w", Name, s.Name, err)
+		if err := p.generatePackage(ctx, c, pkg, rules, lang); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// suffix returns the configured builder-name suffix, or
-// [DefaultSuffix] when the option binder has not yet applied
-// a caller-supplied value (e.g. unit tests bypassing
-// SetOptions).
-func (p *Plugin) suffix() string {
-	if p.opts.Suffix != "" {
-		return p.opts.Suffix
+// generatePackage queues the outputs for every annotated declaration
+// in one package.
+func (p *Plugin) generatePackage(
+	ctx *sdk.GeneratorContext, c *sdk.Provenance,
+	pkg *sdk.Package, rules sdk.SourceRules, lang string,
+) error {
+	funcs := ctx.Reader.Functions().Slice()
+	for _, s := range pkg.Structs {
+		if !s.HasPositiveDirective(DirectiveName) {
+			continue
+		}
+		fields := fieldsOf(ctx, rules, s)
+		if len(fields) == 0 {
+			ctx.Diag.Errorf(s.Pos(),
+				"%s: %q carries +gen:%s but has no member a builder can set",
+				Name, s.QName(), DirectiveName)
+			continue
+		}
+
+		value := &Type{
+			BaseEmit:   sdk.EmitBase(c, s),
+			TypeName:   rules.TypeName(s.Name, p.word(lang, WordBuilder, p.opts.Suffix)),
+			SourceName: s.Name,
+			ValueRef:   sdk.NewExternal(s.Package, s.Name),
+			TypeParams: rules.TypeParams(s),
+			TypeArgs:   rules.TypeArgs(s),
+			Fields:     fields,
+			Companion:  p.companionOf(ctx, rules, lang, s, funcs),
+		}
+		// Stamped before queueing, so a generator in a later bucket
+		// reading the graph finds the name without re-deriving the
+		// convention — and without knowing which language spelled it.
+		MetaType.Set(s.EnsureMeta(), value.TypeName, Name)
+
+		if err := sdk.QueueEmit(
+			ctx.Store.Emit(), c, FileSlot, s, p.queued(rules, lang, s, value)...,
+		); err != nil {
+			// Wrapped even though the queue names the plugin and the
+			// slot: what it cannot name is which declaration the run was
+			// on, which is the only part a reader needs to find the line.
+			return fmt.Errorf("%s: queue %q: %w", Name, s.Name, err)
+		}
 	}
-	return DefaultSuffix
+	return nil
 }
 
-// defaultsValue returns the raw `defaults=` value on s's
-// directive, or the empty string when the keyword arg is
-// absent. Parsing happens in the active language's funcmap.
-func defaultsValue(s *sdk.Struct) string {
-	d := s.Directive(DirectiveName)
-	if d == nil {
-		return ""
+// queued returns the emit values one declaration contributes.
+func (p *Plugin) queued(
+	rules sdk.SourceRules, lang string, s *sdk.Struct, value *Type,
+) []sdk.EmitNode {
+	if p.opts.NoTests {
+		return []sdk.EmitNode{value}
 	}
-	return d.KV[DefaultsKey]
+	ctor := rules.ConstructorName(s.Name)
+	from := rules.TypeName(ctor, p.word(lang, WordFrom, ""))
+	return []sdk.EmitNode{value, &Tests{
+		BaseEmit:   sdk.EmitBaseTagged(value.BaseEmit, TestOutputTag),
+		TypeName:   value.TypeName,
+		SourceName: s.Name,
+		CtorName:   ctor,
+		FromName:   from,
+		CtorRef:    sdk.NewExternal(s.Package, ctor),
+		FromRef:    sdk.NewExternal(s.Package, from),
+		ValueRef:   sdk.NewExternal(s.Package, s.Name),
+		TypeParams: value.TypeParams,
+		// The witnesses in use position, not the declaration's own
+		// parameter list: a check is an ordinary function and has to
+		// name concrete types where the declaration named parameters.
+		TypeArgs:  rules.WitnessArgs(s.TypeParams),
+		Witnesses: rules.Witnesses(s.TypeParams),
+		Fields:    value.Fields,
+		Seeded:    value.Seeded(),
+		Companion: value.Companion,
+	}}
+}
+
+// fieldsOf projects every member a builder can set.
+//
+// A plain function for the reason [skipped] is: the projection
+// depends on the declaration and the language, not on how the plugin
+// was configured.
+func fieldsOf(
+	ctx *sdk.GeneratorContext, rules sdk.SourceRules, s *sdk.Struct,
+) []Field {
+	members := rules.Settable(s)
+	out := make([]Field, 0, len(members))
+	for _, m := range members {
+		if skipped(ctx, rules, s, m) {
+			continue
+		}
+		f := Field{
+			Name:    m.Name,
+			Type:    m.Type,
+			Default: defaults.DefaultOf(m.Meta),
+		}
+		if pkg := defaults.DefaultPackage(m.Meta); pkg != "" {
+			f.DefaultRef = sdk.NewExternal(pkg, f.Default)
+		}
+		if m.Source != nil {
+			info := rules.TypeOf(m.Source.Type, ctx.Reader)
+			f.Shape, f.Elem, f.Key = info.Shape, info.Elem, info.Key
+			// Sampled from the declared type rather than from the
+			// shape's inner one: the sampler reads declarations, and
+			// what it is handed here is the only form it can walk. It
+			// unwraps what it recognises on the way.
+			f.Sample, f.Alternate = rules.SamplesOf(m.Source.Type, m.Name, ctx.Reader)
+			if zero, ok := rules.ZeroLiteral(m.Source.Type, ctx.Reader); ok {
+				f.DefaultIsZero = f.Declared() && strings.TrimSpace(f.Default) == zero
+			}
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// skipped reports whether the member opted out of a setter.
+//
+// A plain function rather than a method: the answer depends on the
+// member and the language, not on how the plugin was configured, and
+// a receiver it never reads would suggest otherwise.
+func skipped(
+	ctx *sdk.GeneratorContext, rules sdk.SourceRules, s *sdk.Struct, m sdk.Member,
+) bool {
+	if m.Source == nil {
+		return false
+	}
+	raw, ok := rules.Tag(m.Source, SkipTag)
+	if !ok {
+		return false
+	}
+	if raw != SkipValue {
+		ctx.Diag.Errorf(m.Pos,
+			"%s: %s.%s carries %s:%q; the only value that excludes a member is %q",
+			Name, s.Name, m.Name, SkipTag, raw, SkipValue)
+		return false
+	}
+	return true
+}
+
+// companionOf finds the seeding function for s, or nil when none
+// applies.
+//
+// A `defaults=` key names one explicitly, in whichever notations the
+// language accepts — which is what lets a companion live in another
+// package, including one imported only for this directive. Absent the
+// key, the convention applies: a function named for the type and the
+// configured word, beside it.
+//
+// The last declaration wins, matching the per-member directive.
+// [sdk.Node.Directive] is first-wins and answers a different question
+// — whether the directive is there at all — and two tie-break rules
+// for two directives in one repository is a difference nobody can
+// predict from the outside.
+func (p *Plugin) companionOf(
+	ctx *sdk.GeneratorContext, rules sdk.SourceRules, lang string,
+	s *sdk.Struct, funcs []*sdk.Function,
+) *sdk.Expr {
+	dir := sdk.Last(s.Directives(), DirectiveName)
+	if dir == nil || dir.KV[CompanionKey] == "" {
+		word := p.word(lang, WordCompanion, p.opts.CompanionWord)
+		fn := sdk.Companion(funcs, s.Package, rules.TypeName(s.Name, word), s.Name)
+		if fn == nil {
+			return nil
+		}
+		return sdk.NewExternal(fn.Package, fn.Name)
+	}
+	// The qualifier form resolves against the imports of the file that
+	// declared the type, so the file is what the resolver needs.
+	pkgNode, _ := ctx.Reader.PackageAt(s.Package)
+	pkg, symbol, err := rules.ResolveValue(rules.FileOf(pkgNode, s), dir.KV[CompanionKey])
+	if err != nil {
+		ctx.Diag.Errorf(s.Pos(), "%s: %s on %s: %v", Name, CompanionKey, s.Name, err)
+		return nil
+	}
+	if pkg == "" {
+		pkg = s.Package
+	}
+	return sdk.NewExternal(pkg, symbol)
+}
+
+// reportUnread warns once per language this plugin cannot read.
+//
+// An unmarked package is passed over quietly: the marker names the
+// language a package was written in, so its absence means nothing
+// claimed it — a fixture, a bridge, a synthesised graph. Warning about
+// those would put a diagnostic on every unit test that builds a store
+// by hand, which is where the real warning would then go unread.
+func (p *Plugin) reportUnread(
+	ctx *sdk.GeneratorContext, pkg *sdk.Package, lang string, seen map[string]bool,
+) {
+	if lang == "" || seen[lang] {
+		return
+	}
+	seen[lang] = true
+	ctx.Diag.Warnf(pkg.Pos(),
+		"%s: declarations written in %q are not read, so no builder is generated "+
+			"for them; this plugin reads: %v",
+		Name, lang, p.Languages())
+}
+
+// word returns the vocabulary entry to use for a language: the
+// caller's override where one was configured, the language's own word
+// otherwise.
+//
+// The order is the point. A configured word is the caller stating
+// their repository's convention, which holds across languages; the
+// declared one is the language stating its own, which is what a
+// caller who said nothing wants. Neither is this file's to invent —
+// an empty answer means the language declared no word, and the
+// identifier is composed from the type name alone.
+func (p *Plugin) word(lang, key, override string) string {
+	if override != "" {
+		return override
+	}
+	return p.Word(lang, key)
 }

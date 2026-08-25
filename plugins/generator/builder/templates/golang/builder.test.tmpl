@@ -1,0 +1,174 @@
+{{- /* The checks over a generated builder.
+
+       Every assertion goes through the backend's assertion dialect —
+       `assertEqual` and friends — so the generated file depends on
+       nothing but `testing`, and a repository preferring a helper
+       library replaces the dialect rather than these templates.
+
+       One t.Run per asserted behaviour, each parallel, so a failure
+       names the property that broke rather than the function it was
+       written in. */ -}}
+
+{{- define "builder.test" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $b := .TypeName -}}
+{{- $src := .SourceName -}}
+{{- $ta := .TypeArgs -}}
+{{- $ctor := renderExpr .CtorRef -}}
+{{- $from := renderExpr .FromRef -}}
+{{- $v := renderExpr .ValueRef -}}
+{{- if not .Instantiable }}
+// {{ testFuncName $b "" }} is not generated: [{{ $src }}] is parameterised and
+// its constraints admit no concrete type to instantiate at, so there is
+// nothing a check could name. Write one by hand at the types your own code
+// uses.
+{{- else }}
+// {{ testFuncName $b "Construction" }} pins what the constructors produce.
+func {{ testFuncName $b "Construction" }}(t *{{ $T }}) {
+	t.Parallel()
+
+{{ template "builder.test.construction" . }}
+}
+
+// {{ testFuncName $b "Setters" }} pins that each setter writes the member it
+// names, and writes nothing else.
+func {{ testFuncName $b "Setters" }}(t *{{ $T }}) {
+	t.Parallel()
+
+{{ template "builder.test.setters" . }}
+}
+{{- if .Copies }}
+
+// {{ testFuncName $b "Clone" }} pins that a clone can be configured without
+// the original seeing it.
+func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
+	t.Parallel()
+
+{{ template "builder.test.clone" . }}
+}
+{{- end }}
+{{- range (slot . "checks").Items }}
+
+{{ render . }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- /* What the constructors produce.
+
+       Compared member by member rather than as whole values: a struct
+       holding a sequence or a mapping is not comparable in Go, so a
+       whole-value assertion does not compile at all — and where it
+       does, it names the type rather than the member that broke. */ -}}
+{{- define "builder.test.construction" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $ctor := renderExpr .CtorRef -}}
+{{- $from := renderExpr .FromRef -}}
+{{- $v := renderExpr .ValueRef -}}
+{{- $ta := .TypeArgs -}}
+{{- if .Seedable }}
+	t.Run("From round-trips what it was seeded with", func(t *{{ $T }}) {
+		t.Parallel()
+		// Seeded with named values rather than a zero value: a round
+		// trip comparing a zero against itself passes against a builder
+		// that dropped every member it was given.
+		var seed {{ $v }}{{ $ta }}
+{{- range .Seedable }}
+		seed.{{ .Name }} = {{ template "builder.sample" . }}
+{{- end }}
+		got := {{ $from }}{{ $ta }}(seed).Build()
+{{- range .Seedable }}
+		{{ assertEqual "t" (printf "got.%s" .Name) (printf "seed.%s" .Name) "From keeps the member it was given" }}
+{{- end }}
+	})
+{{- end }}
+{{- range .Fields }}{{ if and .Declared (not .DefaultRef) }}
+{{- if not .DefaultIsZero }}
+
+	t.Run("{{ .Name }} carries its declared default", func(t *{{ $T }}) {
+		t.Parallel()
+		{{ assertEqual "t" (printf "%s%s().Build().%s" $ctor $ta .Name) .Default "the constructor applies the declared default" }}
+	})
+{{- end }}
+{{- end }}{{ end }}
+{{- end -}}
+
+{{- /* One check per setter that has a value to write. */ -}}
+{{- define "builder.test.setters" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $ctor := renderExpr .CtorRef -}}
+{{- $ta := .TypeArgs -}}
+{{- $generic := .Generic -}}
+{{- range $f := .Fields }}
+{{- if and $f.Sample.OK (not $generic) }}
+{{- $with := withName $f.Name }}
+	t.Run("{{ $with }} writes {{ $f.Name }}", func(t *{{ $T }}) {
+		t.Parallel()
+{{- if $f.IsSequence }}
+		// Spread, because the replacing setter is variadic: it takes the
+		// elements, and the sample of a sequence type is the whole thing.
+		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}...).Build()
+		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the sequence" }}
+{{- else if $f.Keyed }}
+		// Driven through the replacing setter rather than the entry one:
+		// a sample of a keyed type is the whole collection, and the entry
+		// setter takes a key — which this projection has no sample of.
+		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
+		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the collection" }}
+{{- else if $f.IsBytes }}
+		// Compared by length rather than by value: a byte sequence is a
+		// slice, and Go compares a slice only against nil.
+		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
+		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the sequence" }}
+{{- else if $f.IsOptional }}
+		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
+		{{ assertNotNil "t" (printf "got.%s" $f.Name) "the setter addresses the value it was given" }}
+{{- else }}
+		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
+		{{ assertEqual "t" (printf "got.%s" $f.Name) (printf "%s" (renderSample $f.Sample)) "the setter writes what it was given" }}
+{{- end }}
+	})
+{{ if and $f.IsScalar $f.Alternate.OK }}
+	t.Run("{{ $with }} replaces what was already there", func(t *{{ $T }}) {
+		t.Parallel()
+		// Two distinct values, because the check above cannot tell a
+		// working setter from one that does nothing: if the constructor
+		// already seeded the value being written, asserting it is there
+		// afterwards passes either way. Writing twice and asserting the
+		// second won cannot pass vacuously.
+		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).{{ $with }}({{ template "builder.alternate" $f }}).Build()
+		{{ assertEqual "t" (printf "got.%s" $f.Name) (printf "%s" (renderSample $f.Alternate)) "the later call wins" }}
+	})
+{{ end }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- /* Clone independence, for the members that own storage. */ -}}
+{{- define "builder.test.clone" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $ctor := renderExpr .CtorRef -}}
+{{- $ta := .TypeArgs -}}
+{{- range $f := .Fields }}
+{{- if and $f.Copies $f.Sample.OK }}
+{{- $with := withName $f.Name }}
+	t.Run("{{ $f.Name }} is not shared with a clone", func(t *{{ $T }}) {
+		t.Parallel()
+		original := {{ $ctor }}{{ $ta }}()
+		clone := original.Clone()
+{{- if $f.Keyed }}
+		clone.{{ $with }}({{ template "builder.sample" $f }})
+{{- else if $f.IsSequence }}
+		clone.Append{{ $f.Name }}({{ template "builder.sample" $f }}...)
+{{- else }}
+		clone.{{ $with }}({{ template "builder.sample" $f }})
+{{- end }}
+		{{ assertLen "t" (printf "original.Build().%s" $f.Name) 0 "writing through a clone must not reach the original" }}
+	})
+{{ end }}
+{{- end }}
+{{- end -}}
+
+{{- /* A member's sample value, and its second distinct one. */ -}}
+{{- define "builder.sample" -}}{{ renderSample .Sample }}{{- end -}}
+{{- define "builder.alternate" -}}{{ renderSample .Alternate }}{{- end -}}

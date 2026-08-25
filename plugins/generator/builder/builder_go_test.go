@@ -4,33 +4,352 @@
 package builder_test
 
 import (
-	"errors"
 	"testing"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/plugins/annotator/defaults"
 	builderplugin "go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/sdk"
+	"go.thesmos.sh/eidos/store"
 )
 
-// TestConformance_Golang drives the language-neutral
-// [plugintest.RunGeneratorSuite] against fixtures shaped
-// from Go-frontend conventions — builtin names like "string",
-// "int", "byte"; `[]E` / `map[K]V` composites; pointer
-// elements; generic type parameters. The plugin's
-// [Generate] pass stays neutral but the source nodes the
-// fixture builds are populated with Go-shape primitives, so
-// these fixtures live alongside the Go funcmap that
-// interprets them.
+// The projection these tests assert on is what the seam bought.
 //
-// The conformance suite asserts only panic-safety, source-
-// frozen-ness, and emit-projection determinism. It never
-// looks at the rendered text, so every fixture below would
-// pass against a template emitting a redeclared name or a
-// setter at the wrong arity. Closing that gap needs a
-// backend, which this module may not import; the compiler is
-// put behind the rendered builder end-to-end by the
-// demoproject acceptance test instead.
+// Classification used to happen at render time, inside a template, so
+// the only way to check that a `map[K]struct{}` field owed an entry
+// setter was to render Go and read it — which this module cannot do,
+// since it may not import a backend. Asking the language through
+// [sdk.SourceRules] moved the answer into Go, where a table of
+// declarations against expected shapes is an ordinary test.
+
+// project drives Generate over one annotated struct and returns the
+// builder it queued.
+func project(t *testing.T, configure func(*storefixture.StructBuilder)) *builderplugin.Type {
+	t.Helper()
+	value, _ := projectBoth(t, configure)
+	return value
+}
+
+// projectBoth returns the builder and the checks queued beside it.
+func projectBoth(
+	t *testing.T, configure func(*storefixture.StructBuilder),
+) (*builderplugin.Type, *builderplugin.Tests) {
+	t.Helper()
+	b := storefixture.New().
+		Package("blog", "example.com/blog").
+		Struct("Article", func(sb *storefixture.StructBuilder) {
+			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
+			configure(sb)
+		})
+	s := b.Build()
+	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
+
+	// The defaults annotator runs first, exactly as a pipeline orders
+	// it: the builder reads a stamp rather than the directive, so a
+	// fixture that skipped this step would assert the builder ignores
+	// declared defaults — which it does, when nothing stamped them.
+	d := diag.Capture()
+	if err := defaults.New().Annotate(&sdk.AnnotatorContext{
+		Store: s, Reader: store.NewReader(s), Diag: d,
+	}); err != nil {
+		t.Fatalf("defaults.Annotate: %v", err)
+	}
+	if err := builderplugin.New().Generate(&sdk.GeneratorContext{
+		Store: s, Reader: store.NewReader(s), Diag: d,
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var value *builderplugin.Type
+	var checks *builderplugin.Tests
+	for _, slot := range s.Emit().PendingOriginSlots() {
+		switch item := slot.Item.(type) {
+		case *builderplugin.Type:
+			value = item
+		case *builderplugin.Tests:
+			checks = item
+		}
+	}
+	if value == nil {
+		t.Fatalf("plugin queued no builder; diagnostics: %+v", d.Diagnostics())
+	}
+	return value, checks
+}
+
+// fieldNamed returns the projected member by name.
+func fieldNamed(t *testing.T, value *builderplugin.Type, name string) builderplugin.Field {
+	t.Helper()
+	for _, f := range value.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	t.Fatalf("no member %q in the projection", name)
+	return builderplugin.Field{}
+}
+
+// Each Go spelling reaches the neutral shape that decides its setters.
+func TestProjectionClassifiesGoTypes(t *testing.T) {
+	t.Parallel()
+
+	value := project(t, func(sb *storefixture.StructBuilder) {
+		sb.Field("Title", storefixture.Named("string"), nil)
+		sb.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
+		sb.Field("Body", storefixture.Slice(storefixture.Named("byte")), nil)
+		sb.Field("Meta", storefixture.Map(
+			storefixture.Named("string"), storefixture.Named("int"),
+		), nil)
+		sb.Field("Seen", storefixture.Map(
+			storefixture.Named("string"), storefixture.AnonStruct(nil, nil),
+		), nil)
+		sb.Field("Author", storefixture.Pointer(storefixture.Named("string")), nil)
+	})
+
+	for _, tc := range []struct {
+		member string
+		want   sdk.TypeShape
+		why    string
+	}{
+		{"Title", sdk.ShapeScalar, "a plain value owes one replacing setter"},
+		{"Tags", sdk.ShapeSequence, "a slice owes a variadic setter and an appending one"},
+		{"Body", sdk.ShapeBytes, "a byte slice also owes a string-accepting setter"},
+		{"Meta", sdk.ShapeMapping, "a map owes an entry setter carrying a value"},
+		{"Seen", sdk.ShapeSet, "a map to the empty struct owes an entry setter without one"},
+		{"Author", sdk.ShapeOptional, "a pointer owes a setter that addresses the value"},
+	} {
+		t.Run(tc.member+" is "+string(tc.want), func(t *testing.T) {
+			t.Parallel()
+			if got := fieldNamed(t, value, tc.member).Shape; got != tc.want {
+				t.Errorf("%s classified as %q, want %q — %s", tc.member, got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+// A set is recognised before the map it is made of.
+//
+// The narrower reading has to win: classified as a mapping, a
+// `map[K]struct{}` gets an entry setter asking the caller for the one
+// thing they cannot vary.
+func TestSetIsRecognisedBeforeMapping(t *testing.T) {
+	t.Parallel()
+
+	value := project(t, func(sb *storefixture.StructBuilder) {
+		sb.Field("Seen", storefixture.Map(
+			storefixture.Named("string"), storefixture.AnonStruct(nil, nil),
+		), nil)
+	})
+	f := fieldNamed(t, value, "Seen")
+
+	t.Run("carries a key", func(t *testing.T) {
+		t.Parallel()
+		if f.Key == nil {
+			t.Error("a set is addressed by key, so the key type has to reach the template")
+		}
+	})
+
+	t.Run("carries no element", func(t *testing.T) {
+		t.Parallel()
+		if f.Elem != nil {
+			t.Error("every value in a set is the same one, so there is none worth carrying")
+		}
+	})
+}
+
+// The composite shapes name the inner types their setters take.
+func TestProjectionLiftsInnerTypes(t *testing.T) {
+	t.Parallel()
+
+	value := project(t, func(sb *storefixture.StructBuilder) {
+		sb.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
+		sb.Field("Meta", storefixture.Map(
+			storefixture.Named("string"), storefixture.Named("int"),
+		), nil)
+	})
+
+	t.Run("a sequence names its element", func(t *testing.T) {
+		t.Parallel()
+		if fieldNamed(t, value, "Tags").Elem == nil {
+			t.Error("the variadic setter's parameter type comes from the element")
+		}
+	})
+
+	t.Run("a mapping names both halves", func(t *testing.T) {
+		t.Parallel()
+		f := fieldNamed(t, value, "Meta")
+		if f.Key == nil || f.Elem == nil {
+			t.Errorf("the entry setter takes both; got key=%v elem=%v", f.Key, f.Elem)
+		}
+	})
+}
+
+// A member opts out through the tag, and a mistyped value is refused.
+func TestSkipTag(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the documented value excludes the member", func(t *testing.T) {
+		t.Parallel()
+		value := project(t, func(sb *storefixture.StructBuilder) {
+			sb.Field("Title", storefixture.Named("string"), nil)
+			sb.Field("Internal", storefixture.Named("string"), func(fb *storefixture.FieldBuilder) {
+				fb.Tag("`builder:\"-\"`")
+			})
+		})
+		for _, f := range value.Fields {
+			if f.Name == "Internal" {
+				t.Error("a member tagged out still got a setter")
+			}
+		}
+	})
+
+	t.Run("any other value keeps the member", func(t *testing.T) {
+		t.Parallel()
+		value := project(t, func(sb *storefixture.StructBuilder) {
+			sb.Field("Title", storefixture.Named("string"), func(fb *storefixture.FieldBuilder) {
+				fb.Tag("`builder:\"skip\"`")
+			})
+		})
+		// Reported rather than obeyed: a typo that silently dropped the
+		// setter would leave the author with a builder that cannot set
+		// the member and nothing saying why.
+		if len(value.Fields) != 1 {
+			t.Errorf("got %d members, want the mistyped one kept", len(value.Fields))
+		}
+	})
+}
+
+// A declared default reaches the constructor, and the language decides
+// whether it is the zero.
+func TestDeclaredDefaults(t *testing.T) {
+	t.Parallel()
+
+	withDefault := func(v string) func(*storefixture.StructBuilder) {
+		return func(sb *storefixture.StructBuilder) {
+			sb.Field("Retries", storefixture.Named("int"), func(fb *storefixture.FieldBuilder) {
+				fb.Directive(storefixture.Directive(
+					defaults.DirectiveName, storefixture.Arg(v),
+				))
+			})
+		}
+	}
+
+	t.Run("a declared value seeds the constructor", func(t *testing.T) {
+		t.Parallel()
+		value := project(t, withDefault("5"))
+		if got := fieldNamed(t, value, "Retries").Default; got != "5" {
+			t.Errorf("Default = %q, want the declared 5", got)
+		}
+		if !value.Seeded() {
+			t.Error("a member with a default makes the constructor build a literal")
+		}
+	})
+
+	t.Run("a zero default is marked as one", func(t *testing.T) {
+		t.Parallel()
+		value := project(t, withDefault("0"))
+		if !fieldNamed(t, value, "Retries").DefaultIsZero {
+			t.Error("a check comparing against the zero passes against a constructor " +
+				"that ignored the declaration, which is what the flag withholds")
+		}
+	})
+
+	t.Run("a non-zero default is not", func(t *testing.T) {
+		t.Parallel()
+		value := project(t, withDefault("5"))
+		if fieldNamed(t, value, "Retries").DefaultIsZero {
+			t.Error("5 is not the zero of an int")
+		}
+	})
+}
+
+// The builder's name is stamped where a second generator can read it.
+func TestPublishesItsTypeName(t *testing.T) {
+	t.Parallel()
+
+	b := storefixture.New().
+		Package("blog", "example.com/blog").
+		Struct("Article", func(sb *storefixture.StructBuilder) {
+			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
+			sb.Field("Title", storefixture.Named("string"), nil)
+		})
+	s := b.Build()
+	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
+	if err := builderplugin.New().Generate(&sdk.GeneratorContext{
+		Store: s, Reader: store.NewReader(s), Diag: diag.Capture(),
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	decl, found := store.NewReader(s).Structs().
+		Where(func(x *sdk.Struct) bool { return x.Name == "Article" }).First()
+	if !found {
+		t.Fatal("fixture lost its struct")
+	}
+	got, _ := builderplugin.MetaType.Get(decl.Meta())
+	if got != "ArticleBuilder" {
+		t.Errorf("MetaType = %q, want ArticleBuilder — a downstream generator "+
+			"reads this rather than re-deriving the convention", got)
+	}
+}
+
+// The checks travel with the builder unless asked not to.
+func TestChecksAreEmittedBeside(t *testing.T) {
+	t.Parallel()
+
+	_, checks := projectBoth(t, func(sb *storefixture.StructBuilder) {
+		sb.Field("Title", storefixture.Named("string"), nil)
+	})
+	if checks == nil {
+		t.Fatal("no checks queued; a builder nothing exercises is asserted by nobody")
+	}
+
+	t.Run("the constructors are named by the language", func(t *testing.T) {
+		t.Parallel()
+		if checks.CtorName != "NewArticle" || checks.FromName != "NewArticleFrom" {
+			t.Errorf("got %q and %q, want Go's constructor spelling",
+				checks.CtorName, checks.FromName)
+		}
+	})
+
+	t.Run("a plain declaration is instantiable", func(t *testing.T) {
+		t.Parallel()
+		if !checks.Instantiable() {
+			t.Error("a declaration with no type parameters needs no witness")
+		}
+	})
+}
+
+// A declaration with nothing to set is refused rather than emitted.
+func TestEmptyDeclarationIsReported(t *testing.T) {
+	t.Parallel()
+
+	b := storefixture.New().
+		Package("blog", "example.com/blog").
+		Struct("Empty", func(sb *storefixture.StructBuilder) {
+			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
+		})
+	s := b.Build()
+	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
+	d := diag.Capture()
+	if err := builderplugin.New().Generate(&sdk.GeneratorContext{
+		Store: s, Reader: store.NewReader(s), Diag: d,
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if !d.HasErrors() {
+		t.Error("a builder with no setters configures nothing; emitting the shell " +
+			"would hide a declaration that cannot do what it says")
+	}
+	if len(s.Emit().PendingOriginSlots()) != 0 {
+		t.Error("nothing should be queued for a declaration that was refused")
+	}
+}
+
+// TestConformance_Golang drives the framework suites over
+// Go-shaped fixtures.
 func TestConformance_Golang(t *testing.T) {
 	t.Parallel()
 
@@ -45,228 +364,32 @@ func TestConformance_Golang(t *testing.T) {
 					return storefixture.New().
 						Package("blog", "example.com/blog").
 						Struct("Article", func(sb *storefixture.StructBuilder) {
-							sb.Field("Title", &sdk.TypeRef{Name: "string"}, nil)
+							sb.Field("Title", storefixture.Named("string"), nil)
 						}).
 						Build()
 				},
 			},
 			{
-				Name: "annotated struct with scalar fields",
+				Name: "annotated struct across every shape",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return buildScalarStore(t)
-				},
-			},
-			{
-				Name: "annotated struct with slice, map, and bytes fields",
-				BuildStore: func(t *testing.T) *sdk.Store {
-					t.Helper()
-					return buildCollectionStore(t)
-				},
-			},
-			{
-				Name: "annotated struct with a pointer field",
-				BuildStore: func(t *testing.T) *sdk.Store {
-					t.Helper()
-					return buildPointerStore(t)
-				},
-			},
-			{
-				Name: "annotated generic struct",
-				BuildStore: func(t *testing.T) *sdk.Store {
-					t.Helper()
-					return buildGenericStore(t)
-				},
-			},
-			{
-				Name: "annotated struct with defaults=pkg.Func",
-				BuildStore: func(t *testing.T) *sdk.Store {
-					t.Helper()
-					return buildDefaultsStore(t)
-				},
-			},
-			{
-				Name: "annotated struct with no exported fields",
-				BuildStore: func(t *testing.T) *sdk.Store {
-					t.Helper()
-					return buildUnexportedOnlyStore(t)
+					b := storefixture.New().
+						Package("blog", "example.com/blog").
+						Struct("Article", func(sb *storefixture.StructBuilder) {
+							sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
+							sb.Field("Title", storefixture.Named("string"), nil)
+							sb.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
+							sb.Field("Body", storefixture.Slice(storefixture.Named("byte")), nil)
+							sb.Field("Meta", storefixture.Map(
+								storefixture.Named("string"), storefixture.Named("int"),
+							), nil)
+							sb.Field("Author", storefixture.Pointer(storefixture.Named("string")), nil)
+						})
+					s := b.Build()
+					sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
+					return s
 				},
 			},
 		},
 	)
-}
-
-// TestGoDefaultsExpr pins the builder-specific `defaults=`
-// parser — both accepted forms and every malformed shape that
-// should surface [builder.ErrMalformedDefaults] as a
-// render-time error.
-// Identifier-convention and type-ref-shape helpers used by
-// the same template are tested upstream in the
-// [go.thesmos.sh/eidos/lang/golang] package.
-func TestGoDefaultsExpr(t *testing.T) {
-	t.Parallel()
-
-	t.Run("well-formed value parses into an External call", func(t *testing.T) {
-		t.Parallel()
-		got, err := builderplugin.GoDefaultsExpr("example.com/blog.ArticleDefaults", "example.com/src")
-		if err != nil {
-			t.Fatalf("well-formed value must parse: %v", err)
-		}
-		if got == nil {
-			t.Fatalf("well-formed value must return non-nil expression")
-		}
-		if got.Pkg != "example.com/blog" {
-			t.Fatalf("Pkg = %q, want the qualified path, not the source package", got.Pkg)
-		}
-	})
-
-	t.Run("a bare identifier resolves against the source package", func(t *testing.T) {
-		t.Parallel()
-		// The factory beside the annotated struct is the common
-		// case. Resolving it to a package rather than leaving a
-		// bare identifier is what lets the same directive work
-		// when `out=` / `pkg=` moves the builder elsewhere: the
-		// backend elides the qualifier in the source package and
-		// adds it everywhere else.
-		got, err := builderplugin.GoDefaultsExpr("defaultUser", "example.com/src")
-		if err != nil {
-			t.Fatalf("bare identifier must parse: %v", err)
-		}
-		if got.Pkg != "example.com/src" {
-			t.Fatalf("Pkg = %q, want the source package", got.Pkg)
-		}
-		if got.Name != "defaultUser" {
-			t.Fatalf("Name = %q, want defaultUser", got.Name)
-		}
-	})
-
-	t.Run("malformed values surface ErrMalformedDefaults", func(t *testing.T) {
-		t.Parallel()
-		malformed := []string{
-			"",
-			".leading_dot",
-			"trailing_dot.",
-			// Split-only validation accepted these: the dot is
-			// neither leading nor trailing, so each parsed into a
-			// package and a symbol that are not a package and a
-			// symbol. `3.14` emitted a reference to `14` in `3`.
-			"3.14",
-			"pkg.2ndFunc",
-			"pkg.has-dash",
-			"123",
-			"has space",
-			"pkg.func",
-		}
-		for _, raw := range malformed {
-			t.Run(raw, func(t *testing.T) {
-				t.Parallel()
-				_, err := builderplugin.GoDefaultsExpr(raw, "example.com/src")
-				if !errors.Is(err, builderplugin.ErrMalformedDefaults) {
-					t.Errorf("expected ErrMalformedDefaults for %q; got %v", raw, err)
-				}
-			})
-		}
-	})
-}
-
-// buildScalarStore returns a [sdk.Store] populated with one
-// annotated struct carrying only scalar fields — exercises
-// the default With<Field> branch of the per-field-shape
-// template.
-func buildScalarStore(t *testing.T) *sdk.Store {
-	t.Helper()
-	return storefixture.New().
-		Package("blog", "example.com/blog").
-		Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Title", &sdk.TypeRef{Name: "string"}, nil)
-			sb.Field("Views", &sdk.TypeRef{Name: "int"}, nil)
-			sb.Field("Published", &sdk.TypeRef{Name: "bool"}, nil)
-		}).
-		Build()
-}
-
-// buildCollectionStore returns a [sdk.Store] populated with
-// one annotated struct carrying a slice, a map, and a []byte
-// field — exercises every variadic / entry / string-
-// convenience branch of the rendered builder.
-func buildCollectionStore(t *testing.T) *sdk.Store {
-	t.Helper()
-	return storefixture.New().
-		Package("blog", "example.com/blog").
-		Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Tags", storefixture.Slice(&sdk.TypeRef{Name: "string"}), nil)
-			sb.Field("Metadata", storefixture.Map(
-				&sdk.TypeRef{Name: "string"},
-				&sdk.TypeRef{Name: "string"},
-			), nil)
-			sb.Field("Body", storefixture.Slice(&sdk.TypeRef{Name: "byte"}), nil)
-		}).
-		Build()
-}
-
-// buildPointerStore returns a [sdk.Store] populated with one
-// annotated struct carrying a pointer field — exercises the
-// pointer-passthrough branch of refconv.FromNode.
-func buildPointerStore(t *testing.T) *sdk.Store {
-	t.Helper()
-	return storefixture.New().
-		Package("blog", "example.com/blog").
-		Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Author", storefixture.Pointer(&sdk.TypeRef{Name: "string"}), nil)
-		}).
-		Build()
-}
-
-// buildGenericStore returns a [sdk.Store] populated with one
-// annotated generic struct — exercises the type-parameter
-// decl / args plumbing across builder type, constructors,
-// setters, Mutate, Clone, and Build.
-func buildGenericStore(t *testing.T) *sdk.Store {
-	t.Helper()
-	return storefixture.New().
-		Package("blog", "example.com/blog").
-		Struct("Container", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.TypeParam("T", nil)
-			sb.Field("Item", storefixture.TypeParamRef("T"), nil)
-			sb.Field("Label", &sdk.TypeRef{Name: "string"}, nil)
-		}).
-		Build()
-}
-
-// buildDefaultsStore returns a [sdk.Store] populated with
-// one annotated struct carrying the
-// `defaults=example.com/blog.ArticleDefaults` override —
-// exercises the additional New<Name>WithDefaults constructor
-// branch.
-func buildDefaultsStore(t *testing.T) *sdk.Store {
-	t.Helper()
-	return storefixture.New().
-		Package("blog", "example.com/blog").
-		Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(
-				builderplugin.DirectiveName,
-				storefixture.KV(builderplugin.DefaultsKey, "example.com/blog.ArticleDefaults"),
-			))
-			sb.Field("Title", &sdk.TypeRef{Name: "string"}, nil)
-		}).
-		Build()
-}
-
-// buildUnexportedOnlyStore returns a [sdk.Store] populated
-// with one annotated struct whose only fields are unexported
-// — the builder must render an empty setter set without
-// short-circuiting the type / constructor / Build emission.
-func buildUnexportedOnlyStore(t *testing.T) *sdk.Store {
-	t.Helper()
-	return storefixture.New().
-		Package("blog", "example.com/blog").
-		Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("internal", &sdk.TypeRef{Name: "string"}, nil)
-		}).
-		Build()
 }

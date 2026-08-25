@@ -9,6 +9,7 @@ import (
 	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/plugins/generator/sentinel"
 )
@@ -242,3 +243,79 @@ func (e *ValidationError) Error() string {
 		e.Field, e.Code, e.Width, e.Ratio)
 }
 `
+
+// TestPluginsRender_BuilderShapes pins the setters every member shape
+// owes, and that the checks emitted beside them pass.
+//
+// The builder had no render coverage at all: a deliberately broken
+// template left every test in this repository green, because the emit
+// graph is identical whatever the template does with it. Each shape
+// below reaches a different arm of the setter dispatch, and the arms
+// differ in ways only a compiler notices — a variadic against a
+// slice parameter, an entry setter taking one argument or two, a
+// pointer setter that addresses its argument.
+func TestPluginsRender_BuilderShapes(t *testing.T) {
+	t.Parallel()
+
+	fixture := storefixture.New().
+		Package("shop", "example.com/shop").
+		Struct("Order", func(s *storefixture.StructBuilder) {
+			s.Directive(storefixture.Directive("builder"))
+			s.Field("ID", storefixture.Named("string"), nil)
+			s.Field("Lines", storefixture.Slice(storefixture.Named("string")), nil)
+			s.Field("Payload", storefixture.Slice(storefixture.Named("byte")), nil)
+			s.Field("Totals", storefixture.Map(
+				storefixture.Named("string"), storefixture.Named("int"),
+			), nil)
+			s.Field("Seen", storefixture.Map(
+				storefixture.Named("string"), storefixture.AnonStruct(nil, nil),
+			), nil)
+			s.Field("Note", storefixture.Pointer(storefixture.Named("string")), nil)
+		})
+
+	gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), builder.New()).
+		WithSource(golangtest.GoFile(fixture.GoSource()))
+
+	t.Run("emits Go the consumer can build", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertCompiles(t)
+	})
+
+	t.Run("emits checks that pass", func(t *testing.T) {
+		t.Parallel()
+		// The second output asserts the first one's contract. A check
+		// that compiles proves nothing until it runs — a setter writing
+		// the wrong member compiles perfectly.
+		gen.AssertVets(t)
+		gen.AssertTestsPass(t)
+	})
+
+	t.Run("a byte sequence gets its text-accepting setter", func(t *testing.T) {
+		t.Parallel()
+		// The arm a plain slice cannot reach: `[]byte` owes a second
+		// setter taking a string, and a template treating it as an
+		// ordinary sequence would emit a variadic `...byte` instead.
+		gen.Primary(t).AssertContains(t, "WithPayloadString(s string)")
+	})
+
+	t.Run("a set entry setter asks for no value", func(t *testing.T) {
+		t.Parallel()
+		// Classified as a mapping, this would take a `struct{}` second
+		// argument — asking the caller for the one thing they cannot
+		// vary.
+		gen.Primary(t).AssertContains(t, "WithSeenEntry(k string)")
+	})
+
+	t.Run("a scalar setter is checked against a second value", func(t *testing.T) {
+		t.Parallel()
+		// The check that cannot pass vacuously: setting a member to the
+		// value it already holds proves nothing, so the pair is written
+		// in sequence and the second is asserted to have won.
+		gen.Suffixed(t, "_builder_test.go").AssertContains(t, "replaces what was already there")
+	})
+
+	t.Run("an optional setter addresses its argument", func(t *testing.T) {
+		t.Parallel()
+		gen.Primary(t).AssertContains(t, "b.v.Note = &v")
+	})
+}

@@ -70,8 +70,8 @@ type OrderItem struct {
 // Two directives are stamped:
 //
 //   - The unscoped `+gen:out product_codegen.go` pins the filename
-//     for repogen / buildergen / registrygen — they share the
-//     domain package and compose into one rendered file.
+//     for repogen / registrygen — they share the domain package and
+//     compose into one rendered file.
 //
 //   - The scoped `+gen:out product_mock_test.go plugin=mockgen`
 //     pins mockgen separately because mockgen's test-package
@@ -79,8 +79,15 @@ type OrderItem struct {
 //     trigger the one-file-one-package invariant if it shared
 //     a filename with the domain-package output.
 //
+// No `+gen:builder` here, and the omission is the point. An unscoped
+// override pinning a *filename* cannot apply to a plugin emitting
+// more than one file — there is one name and two outputs, and the
+// pipeline refuses rather than silently dropping one. Builder is
+// exercised on six other types across this fixture; keeping it off
+// the type that carries the unscoped pin is what lets both be
+// covered.
+//
 // +gen:repo
-// +gen:builder
 // +gen:register
 // +gen:out product_codegen.go
 // +gen:out product_mock_test.go plugin=mockgen

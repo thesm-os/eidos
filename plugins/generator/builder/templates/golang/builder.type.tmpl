@@ -1,122 +1,267 @@
+{{- /* The Go spelling of a builder.
+
+       Every identifier is composed here rather than in the plugin's
+       core: `With`, `Append`, `Entry` and the PascalCase joining them
+       are Go's conventions, and a core that concatenated them would
+       have written one language's answer into a file that names none.
+       The shape a member has arrives already classified. */ -}}
+
 {{- define "builder.type" -}}
-{{- $s := .Source }}
-{{- $builderName := printf "%s%s" $s.Name .Suffix }}
-{{- $args := typeArgs $s }}
-{{- $self := selfType $s }}
-// {{ $builderName }} accumulates field values for {{ $s.Name }} and
-// produces the populated value via [{{ $builderName }}.Build]. Start
-// with [New{{ $s.Name }}]{{ if .DefaultsArg }} or [New{{ $s.Name }}WithDefaults]{{ end }}
-// or [New{{ $s.Name }}From], chain With* setters, then call Build.
-type {{ $builderName }}{{ renderTypeParams (typeParams $s) }} struct {
-	v {{ renderType $self }}
+{{- $b := .TypeName -}}
+{{- $src := .SourceName -}}
+{{- $tp := renderTypeParams .TypeParams -}}
+{{- $ta := .TypeArgs -}}
+{{- $v := renderExpr .ValueRef -}}
+// {{ $b }} constructs [{{ $src }}] values.
+//
+// Start with [{{ constructorName $src }}] or [{{ constructorName $src }}From], set
+// what you care about with the With methods, and call [{{ $b }}.Build].
+//
+// The point is what you do not have to write. A composite literal restates
+// every member each time, so a member added to {{ $src }} breaks every literal at
+// once and a reader cannot tell which members a given call site actually cares
+// about. Here the constructor supplies the rest, and each call states only what
+// it varies.
+//
+// Every setter returns the builder, so calls chain. A builder is a value under
+// construction and is not safe for concurrent use; [{{ $b }}.Clone] is how one
+// becomes two.
+type {{ $b }}{{ $tp }} struct {
+	v {{ $v }}{{ $ta }}
 }
 
-// New{{ $s.Name }} creates a builder seeded with zero values.
-func New{{ $s.Name }}{{ renderTypeParams (typeParams $s) }}() *{{ $builderName }}{{ $args }} {
-	return &{{ $builderName }}{{ $args }}{}
-}
-{{ if .DefaultsArg }}
-// New{{ $s.Name }}WithDefaults creates a builder seeded from the
-// directive-pinned defaults factory.
-func New{{ $s.Name }}WithDefaults{{ renderTypeParams (typeParams $s) }}() *{{ $builderName }}{{ $args }} {
-	return &{{ $builderName }}{{ $args }}{v: {{ renderExpr (defaultsExpr .DefaultsArg $s.Package) }}()}
-}
-{{ end }}
-// New{{ $s.Name }}From creates a builder seeded with v. Use when the
-// test starts from a known value rather than zero / defaults — e.g.
-// for round-trip / clone scenarios.
-func New{{ $s.Name }}From{{ renderTypeParams (typeParams $s) }}(v {{ renderType $self }}) *{{ $builderName }}{{ $args }} {
-	return &{{ $builderName }}{{ $args }}{v: v}
-}
-{{ range $f := exportedFields $s }}
-{{- if isSlice $f.Type }}
-// With{{ $f.Name }} replaces the {{ $f.Name }} slice (variadic). The
-// second call overwrites the first — use Append{{ $f.Name }} to extend.
-func (b *{{ $builderName }}{{ $args }}) With{{ $f.Name }}(v ...{{ renderType (elemType $f.Type) }}) *{{ $builderName }}{{ $args }} {
-	b.v.{{ $f.Name }} = v
-	return b
-}
+{{ template "builder.ctor" . }}
 
-// Append{{ $f.Name }} appends to the {{ $f.Name }} slice, preserving
-// any previously-set elements.
-func (b *{{ $builderName }}{{ $args }}) Append{{ $f.Name }}(v ...{{ renderType (elemType $f.Type) }}) *{{ $builderName }}{{ $args }} {
-	b.v.{{ $f.Name }} = append(b.v.{{ $f.Name }}, v...)
-	return b
+// {{ constructorName $src }}From returns a builder seeded with v.
+//
+// For the case where a caller already holds a value and wants one member
+// different — a round trip, a near-copy, a regression fixture built from
+// something a previous step produced.
+func {{ constructorName $src }}From{{ $tp }}(v {{ $v }}{{ $ta }}) *{{ $b }}{{ $ta }} {
+	return &{{ $b }}{{ $ta }}{v: v}
 }
-{{ else if isMap $f.Type }}
-// With{{ $f.Name }} replaces the {{ $f.Name }} map.
-func (b *{{ $builderName }}{{ $args }}) With{{ $f.Name }}(m {{ renderType (fieldType $f) }}) *{{ $builderName }}{{ $args }} {
-	b.v.{{ $f.Name }} = m
-	return b
-}
-
-// With{{ $f.Name }}Entry adds or replaces a single entry. Lazy-inits
-// the map if it's currently nil.
-func (b *{{ $builderName }}{{ $args }}) With{{ $f.Name }}Entry(k {{ renderType (mapKeyType $f.Type) }}, v {{ renderType (mapValType $f.Type) }}) *{{ $builderName }}{{ $args }} {
-	if b.v.{{ $f.Name }} == nil {
-		b.v.{{ $f.Name }} = {{ renderType (fieldType $f) }}{}
-	}
-	b.v.{{ $f.Name }}[k] = v
-	return b
-}
-{{ else if isByteSlice $f.Type }}
-// With{{ $f.Name }} sets the {{ $f.Name }} field.
-func (b *{{ $builderName }}{{ $args }}) With{{ $f.Name }}(v []byte) *{{ $builderName }}{{ $args }} {
-	b.v.{{ $f.Name }} = v
-	return b
-}
-
-// With{{ $f.Name }}String sets {{ $f.Name }} from a string. Convenience
-// for tests that don't want to wrap their literal in []byte(...).
-func (b *{{ $builderName }}{{ $args }}) With{{ $f.Name }}String(s string) *{{ $builderName }}{{ $args }} {
-	b.v.{{ $f.Name }} = []byte(s)
-	return b
-}
-{{ else }}
-// With{{ $f.Name }} sets the {{ $f.Name }} field.
-func (b *{{ $builderName }}{{ $args }}) With{{ $f.Name }}(v {{ renderType (fieldType $f) }}) *{{ $builderName }}{{ $args }} {
-	b.v.{{ $f.Name }} = v
-	return b
-}
-{{ end }}
+{{ template "builder.setters" . }}
+{{- range (slot . "setters").Items }}
+{{ render . }}
 {{- end }}
-// Mutate applies fn to the value under construction. Use for
-// deeply-nested fields or mutations that don't warrant a dedicated
-// setter.
-func (b *{{ $builderName }}{{ $args }}) Mutate(fn func(*{{ renderType $self }})) *{{ $builderName }}{{ $args }} {
+
+// Mutate applies fn to the value under construction.
+//
+// The way out for what the setters do not reach: a member this builder cannot
+// name, a shape it does not model, or a change that touches several members at
+// once and only makes sense as one edit.
+//
+// Prefer a setter where one exists. A setter says which member it writes, and
+// a reader of the call site learns that without following a closure.
+func (b *{{ $b }}{{ $ta }}) Mutate(fn func(*{{ $v }}{{ $ta }})) *{{ $b }}{{ $ta }} {
 	fn(&b.v)
 	return b
 }
 
-// Clone returns a deep copy of the builder. Slice, map, and []byte
-// fields are copied so mutations to the clone don't bleed into the
-// original; scalar and struct-value fields use Go's default copy
-// semantics.
-func (b *{{ $builderName }}{{ $args }}) Clone() *{{ $builderName }}{{ $args }} {
-	out := &{{ $builderName }}{{ $args }}{v: b.v}
-{{- range $f := exportedFields $s }}
-{{- if isSlice $f.Type }}
-	if b.v.{{ $f.Name }} != nil {
-		out.v.{{ $f.Name }} = append([]{{ renderType (elemType $f.Type) }}(nil), b.v.{{ $f.Name }}...)
+{{ template "builder.clone" . }}
+
+// Build returns the constructed [{{ $src }}].
+func (b *{{ $b }}{{ $ta }}) Build() {{ $v }}{{ $ta }} {
+{{- range (slot . "build").Items }}
+	{{ render . }}
+{{- end }}
+	return b.v
+}
+{{- end -}}
+
+{{- /* The constructor, whose body depends on what seeds it: a
+       companion function, the declared defaults, or nothing. */ -}}
+{{- define "builder.ctor" -}}
+{{- $b := .TypeName -}}
+{{- $src := .SourceName -}}
+{{- $tp := renderTypeParams .TypeParams -}}
+{{- $ta := .TypeArgs -}}
+{{- $v := renderExpr .ValueRef -}}
+{{- if .Companion }}
+// {{ constructorName $src }} returns a builder seeded from the package's
+// companion, with any declared per-member default applied over it.
+func {{ constructorName $src }}{{ $tp }}() *{{ $b }}{{ $ta }} {
+	v := {{ renderExpr .Companion }}{{ $ta }}()
+{{- range .Fields }}{{ if .Declared }}
+	v.{{ .Name }} = {{ template "builder.default" . }}
+{{- end }}{{ end }}
+	return &{{ $b }}{{ $ta }}{v: v}
+}
+{{- else if .Seeded }}
+// {{ constructorName $src }} returns a builder seeded with the declared
+// defaults.
+func {{ constructorName $src }}{{ $tp }}() *{{ $b }}{{ $ta }} {
+	return &{{ $b }}{{ $ta }}{v: {{ $v }}{{ $ta }}{
+{{- range .Fields }}{{ if .Declared }}
+		{{ .Name }}: {{ template "builder.default" . }},
+{{- end }}{{ end }}
+	}}
+}
+{{- else }}
+// {{ constructorName $src }} returns a builder holding the zero value.
+func {{ constructorName $src }}{{ $tp }}() *{{ $b }}{{ $ta }} {
+	return &{{ $b }}{{ $ta }}{}
+}
+{{- end }}
+{{- end -}}
+
+{{- /* One declared default. A value naming a symbol elsewhere renders
+       through its reference so the file registers the import; a plain
+       literal renders as the author wrote it. */ -}}
+{{- define "builder.default" -}}
+{{- if .DefaultRef }}{{ renderExpr .DefaultRef }}{{ else }}{{ .Default }}{{ end }}
+{{- end -}}
+
+{{- /* Every member's setters, each dispatched on its shape. */ -}}
+{{- define "builder.setters" -}}
+{{- $b := .TypeName -}}
+{{- $ta := .TypeArgs -}}
+{{- range $f := .Fields }}
+{{- $with := withName $f.Name -}}
+{{- $recv := printf "b *%s%s" $b $ta -}}
+{{- $ret := printf "*%s%s" $b $ta -}}
+{{- if $f.IsSequence }}
+// {{ $with }} replaces {{ $f.Name }}.
+func ({{ $recv }}) {{ $with }}(v ...{{ renderType $f.Elem }}) {{ $ret }} {
+	b.v.{{ $f.Name }} = v
+	return b
+}
+
+// Append{{ $f.Name }} adds to {{ $f.Name }}, keeping what is already there.
+//
+// The counterpart to {{ $with }}, which discards it. Both are offered because
+// a caller extending a seeded default and a caller replacing it want opposite
+// things, and one method cannot mean both.
+func ({{ $recv }}) Append{{ $f.Name }}(v ...{{ renderType $f.Elem }}) {{ $ret }} {
+	b.v.{{ $f.Name }} = append(b.v.{{ $f.Name }}, v...)
+	return b
+}
+{{ else if $f.IsBytes }}
+// {{ $with }} replaces {{ $f.Name }}.
+func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
+	b.v.{{ $f.Name }} = v
+	return b
+}
+
+// {{ $with }}String replaces {{ $f.Name }} with the bytes of s.
+//
+// The conversion is available for this element type and no other, and a caller
+// holding text should not have to write it at every call site.
+func ({{ $recv }}) {{ $with }}String(s string) {{ $ret }} {
+	b.v.{{ $f.Name }} = {{ renderType $f.Type }}(s)
+	return b
+}
+{{ else if $f.IsSet }}
+// {{ $with }} replaces {{ $f.Name }} wholesale.
+func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
+	b.v.{{ $f.Name }} = v
+	return b
+}
+
+// {{ $with }}Entry adds one key to {{ $f.Name }}, allocating on first use.
+//
+// A set entry is a key. Every value in the collection is the same one, so there
+// is nothing for a caller to supply and no parameter for it — a setter asking
+// would be asking for the one thing they cannot vary.
+func ({{ $recv }}) {{ $with }}Entry(k {{ renderType $f.Key }}) {{ $ret }} {
+	if b.v.{{ $f.Name }} == nil {
+		b.v.{{ $f.Name }} = make({{ renderType $f.Type }})
 	}
-{{- else if isMap $f.Type }}
+	b.v.{{ $f.Name }}[k] = struct{}{}
+	return b
+}
+
+// {{ $with }}Entries adds each key to {{ $f.Name }}, keeping those it holds.
+func ({{ $recv }}) {{ $with }}Entries(keys ...{{ renderType $f.Key }}) {{ $ret }} {
+	if b.v.{{ $f.Name }} == nil {
+		b.v.{{ $f.Name }} = make({{ renderType $f.Type }}, len(keys))
+	}
+	for _, k := range keys {
+		b.v.{{ $f.Name }}[k] = struct{}{}
+	}
+	return b
+}
+{{ else if $f.IsMapping }}
+// {{ $with }} replaces {{ $f.Name }} wholesale.
+func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
+	b.v.{{ $f.Name }} = v
+	return b
+}
+
+// {{ $with }}Entry sets one key of {{ $f.Name }}, allocating on first use.
+func ({{ $recv }}) {{ $with }}Entry(k {{ renderType $f.Key }}, v {{ renderType $f.Elem }}) {{ $ret }} {
+	if b.v.{{ $f.Name }} == nil {
+		b.v.{{ $f.Name }} = make({{ renderType $f.Type }})
+	}
+	b.v.{{ $f.Name }}[k] = v
+	return b
+}
+
+// {{ $with }}Entries merges entries into {{ $f.Name }}.
+//
+// Merges rather than replaces: a key already present takes the new value, and
+// keys absent from entries are left alone. Use {{ $with }} to discard what is
+// there.
+func ({{ $recv }}) {{ $with }}Entries(entries {{ renderType $f.Type }}) {{ $ret }} {
+	if b.v.{{ $f.Name }} == nil {
+		b.v.{{ $f.Name }} = make({{ renderType $f.Type }}, len(entries))
+	}
+	for k, v := range entries {
+		b.v.{{ $f.Name }}[k] = v
+	}
+	return b
+}
+{{ else if $f.IsOptional }}
+// {{ $with }} replaces {{ $f.Name }}, taking the value and addressing it, so a
+// caller need not hold a variable to point at.
+//
+// Use [{{ $b }}.Mutate] to clear the member, or to point it at an address that
+// already exists.
+func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Elem }}) {{ $ret }} {
+	b.v.{{ $f.Name }} = &v
+	return b
+}
+{{ else }}
+// {{ $with }} replaces {{ $f.Name }}.
+func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
+	b.v.{{ $f.Name }} = v
+	return b
+}
+{{ end }}
+{{- end }}
+{{- end -}}
+
+{{- /* Clone, copying exactly the members that own storage. */ -}}
+{{- define "builder.clone" -}}
+{{- $b := .TypeName -}}
+{{- $ta := .TypeArgs -}}
+// Clone returns a builder that can be configured without affecting this one.
+//
+// One level deep, and the boundary matters. The sequence, byte-sequence and
+// keyed members are copied, so appending or setting an entry through one clone
+// is not visible through another.
+//
+// What is shared: anything held *inside* those — a struct in a slice that owns
+// a slice of its own — and every optional member, which is what a reference
+// means. Mutating through one of those does reach the original. Use
+// [{{ $b }}.Mutate] to replace such a member outright rather than editing it in
+// place.
+func (b *{{ $b }}{{ $ta }}) Clone() *{{ $b }}{{ $ta }} {
+	out := &{{ $b }}{{ $ta }}{v: b.v}
+{{- range $f := .Fields }}
+{{- if $f.Copies }}
 	if b.v.{{ $f.Name }} != nil {
-		out.v.{{ $f.Name }} = make({{ renderType (fieldType $f) }}, len(b.v.{{ $f.Name }}))
+{{- if $f.Keyed }}
+		out.v.{{ $f.Name }} = make({{ renderType $f.Type }}, len(b.v.{{ $f.Name }}))
 		for k, v := range b.v.{{ $f.Name }} {
 			out.v.{{ $f.Name }}[k] = v
 		}
-	}
-{{- else if isByteSlice $f.Type }}
-	if b.v.{{ $f.Name }} != nil {
-		out.v.{{ $f.Name }} = append([]byte(nil), b.v.{{ $f.Name }}...)
+{{- else }}
+		out.v.{{ $f.Name }} = append({{ renderType $f.Type }}(nil), b.v.{{ $f.Name }}...)
+{{- end }}
 	}
 {{- end }}
 {{- end }}
 	return out
-}
-
-// Build returns the constructed [{{ renderType $self }}].
-func (b *{{ $builderName }}{{ $args }}) Build() {{ renderType $self }} {
-	return b.v
 }
 {{- end -}}
