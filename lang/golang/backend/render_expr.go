@@ -53,6 +53,16 @@ func (s *renderState) renderExpr(e *emit.Expr) (string, error) {
 			return "", err
 		}
 		return recv + "[" + idx + "]", nil
+	case emit.ExprIndexList:
+		recv, err := s.renderExpr(e.Receiver)
+		if err != nil {
+			return "", err
+		}
+		idx, err := s.renderExprList(e.Args)
+		if err != nil {
+			return "", err
+		}
+		return recv + "[" + idx + "]", nil
 	case emit.ExprSlice:
 		return s.renderSliceExpr(e)
 	case emit.ExprBinary:

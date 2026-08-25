@@ -210,6 +210,35 @@ type TypeRules interface {
 	// check can name the types it would run at.
 	Witnesses(params []*node.TypeParam) []emit.Ref
 
+	// SubstituteParams returns t with each of the declaration's type
+	// parameters replaced by the witness [TypeRules.Witnesses] chose
+	// for it, so a caller can ask the questions above about the type a
+	// generated entry point actually sees.
+	//
+	// A primitive rather than a sampling variant, because every
+	// question here is one a caller may need at the witnesses:
+	// [TypeRules.SamplesOf] for a value to write, [TypeRules.TypeOf]
+	// for the shape a member owes setters for, [TypeRules.ZeroLiteral]
+	// for what a default is compared against. Substituting once and
+	// asking the existing questions keeps one answer per question.
+	//
+	// Returns t unchanged where the declaration is not parameterised,
+	// where no witness could be derived, and for the part of a
+	// composite that names no parameter — so a caller substitutes
+	// unconditionally and reads a partial rewrite as what it is.
+	SubstituteParams(t *node.TypeRef, params []*node.TypeParam) *node.TypeRef
+
+	// SubstituteRef is [TypeRules.SubstituteParams] over a projected
+	// reference, for a caller that has already lifted the type and
+	// needs the form a generated entry point names.
+	//
+	// Both halves are needed because the two live at different points:
+	// the node form is what the sampling and shape questions read, and
+	// the projected form is what a template renders. A caller
+	// substituting only one emits a check that writes a concrete value
+	// into a variable declared at a type parameter.
+	SubstituteRef(r emit.Ref, params []*node.TypeParam) emit.Ref
+
 	// WitnessArgs renders the witnesses in use position — `[string,
 	// int]` — or empty when there are none.
 	//

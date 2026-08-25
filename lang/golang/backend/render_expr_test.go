@@ -97,6 +97,25 @@ func TestRenderExpr_Variants(t *testing.T) {
 			want: "arr[0]",
 		},
 		{
+			// Go's instantiation of a two-parameter declaration, which
+			// is one index carrying a list. Nesting two plain indexes
+			// spells `Pair[K][V]` — a different expression that parses,
+			// which is why this is a kind of its own.
+			name: "index list",
+			expr: &emit.Expr{
+				ExprKind: emit.ExprIndexList, Receiver: ident("Pair"),
+				Args: []*emit.Expr{ident("string"), ident("int")},
+			},
+			want: "Pair[string, int]",
+		},
+		{
+			name: "single-index instantiation",
+			expr: &emit.Expr{
+				ExprKind: emit.ExprIndex, Receiver: ident("Box"), IndexExpr: ident("string"),
+			},
+			want: "Box[string]",
+		},
+		{
 			name: "two-index slice",
 			expr: &emit.Expr{
 				ExprKind: emit.ExprSlice, Receiver: ident("arr"),

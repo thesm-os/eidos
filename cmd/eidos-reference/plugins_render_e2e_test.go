@@ -763,3 +763,80 @@ func moduleDir(t *testing.T, module string) string {
 	}
 	return dir
 }
+
+// TestPluginsRender_BuilderGenerics pins that a parameterised
+// declaration gets checks with bodies in them.
+//
+// It shipped a test file whose three functions were empty. The file is
+// emitted on the strength of the declaration having witnesses, and
+// every subtest inside it was then dropped for the declaration having
+// type parameters — so the package read as tested and asserted
+// nothing, which is worse than generating no file at all.
+//
+// Two parameters with different constraints, because the witnesses are
+// positional and pairwise distinct: a projection that crossed them
+// produces something that type-checks and asserts the wrong thing. And
+// one member of a plain type beside them, because the guard dropped
+// even the members that named no parameter.
+func TestPluginsRender_BuilderGenerics(t *testing.T) {
+	t.Parallel()
+
+	fixture := gofixture.New().
+		Package("box", "example.com/box").
+		Struct("Pair", func(s *gofixture.StructBuilder) {
+			s.Directive(gofixture.Directive("builder"))
+			// Embedded rather than spelled: a Go frontend records
+			// comparable as a reference, and a constraint carrying only
+			// a printed form reads as unbounded.
+			s.TypeParam("K", gofixture.Constraint(gofixture.Named("comparable")))
+			s.TypeParam("V", nil)
+			s.Field("Key", gofixture.TypeParamRef("K"), nil)
+			s.Field("Value", gofixture.TypeParamRef("V"), nil)
+			s.Field("Items", gofixture.Slice(gofixture.TypeParamRef("V")), nil)
+			s.Field("Index", gofixture.Map(
+				gofixture.TypeParamRef("K"), gofixture.TypeParamRef("V"),
+			), nil)
+			s.Field("Label", gofixture.Named("string"), nil)
+		})
+
+	gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), builder.New()).
+		WithSource(golangtest.GoFile(fixture.GoSource())).
+		WithRequire(cmpModule, moduleDir(t, cmpModule))
+
+	t.Run("emits Go the consumer can build", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertCompiles(t)
+	})
+
+	t.Run("emits checks that pass", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertVets(t)
+		gen.AssertTestsPass(t)
+	})
+
+	t.Run("a member of a parameterised type is checked", func(t *testing.T) {
+		t.Parallel()
+		// The members the empty file lost. Each is sampled at the
+		// witness its parameter resolved to, which is what a check
+		// instantiating the declaration can write.
+		src := gen.Suffixed(t, builder.GoTestSuffix)
+		src.AssertContains(t, "WithKey writes Key")
+		src.AssertContains(t, "WithValue writes Value")
+	})
+
+	t.Run("a member naming no parameter is checked too", func(t *testing.T) {
+		t.Parallel()
+		// Label is a plain string. It was dropped with the rest, so
+		// even the members that could be tested were not.
+		gen.Suffixed(t, builder.GoTestSuffix).AssertContains(t, "WithLabel writes Label")
+	})
+
+	t.Run("the checks name the declaration at its witnesses", func(t *testing.T) {
+		t.Parallel()
+		// A test function cannot take type parameters, so every entry
+		// point has to spell concrete types. Distinct per position, so
+		// a projection crossing two parameters fails to compile rather
+		// than passing against the wrong one.
+		gen.Suffixed(t, builder.GoTestSuffix).AssertContains(t, "NewPair[string, int]()")
+	})
+}

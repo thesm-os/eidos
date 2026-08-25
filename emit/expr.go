@@ -27,6 +27,16 @@ const (
 	// ExprIndex is an indexing operation ([Expr.Receiver] [
 	// [Expr.IndexExpr] ]).
 	ExprIndex
+	// ExprIndexList is an indexing operation carrying several indexes
+	// ([Expr.Receiver] [ [Expr.Args]... ]) — Go's instantiation of a
+	// declaration taking more than one type parameter, `Pair[K, V]`.
+	//
+	// Distinct from [ExprIndex] rather than a list on it, which is the
+	// same split go/ast makes between IndexExpr and IndexListExpr and
+	// for the same reason: `T[A][B]` and `T[A, B]` both parse, mean
+	// different things, and are one field apart if a single form
+	// carries both.
+	ExprIndexList
 	// ExprSlice is a slice operation ([Expr.Receiver] [
 	// [Expr.Low] : [Expr.High] : [Expr.Max] ]). Any of Low / High /
 	// Max may be nil to denote default bounds.
@@ -242,8 +252,8 @@ type Expr struct {
 
 	// Args holds the positional argument list for [ExprCall] /
 	// [ExprMethodCall], the size/capacity arguments for [ExprMake],
-	// and the element list for [ExprComposite] /
-	// [ExprCompositeKeyed].
+	// the index list for [ExprIndexList], and the element list for
+	// [ExprComposite] / [ExprCompositeKeyed].
 	Args []*Expr
 
 	// Keys holds the parallel-to-Args field-name list for

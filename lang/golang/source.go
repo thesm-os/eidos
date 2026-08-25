@@ -113,6 +113,28 @@ func (Source) SamplesOf(t *node.TypeRef, hint string, r Resolver) (sample, alter
 	return SampleRefFor(t, hint, r)
 }
 
+// SubstituteParams returns t with the declaration's type parameters
+// replaced by their derived witnesses.
+func (Source) SubstituteParams(t *node.TypeRef, params []*node.TypeParam) *node.TypeRef {
+	return SubstituteParamsNode(t, params)
+}
+
+// SubstituteRef returns r with the declaration's type parameters
+// replaced by their derived witnesses.
+func (Source) SubstituteRef(r emit.Ref, params []*node.TypeParam) emit.Ref {
+	witnesses := Witnesses(params)
+	if len(witnesses) == 0 {
+		return r
+	}
+	by := make(map[string]emit.Ref, len(params))
+	for i, p := range params {
+		if p != nil {
+			by[p.Name] = witnesses[i]
+		}
+	}
+	return SubstituteTypeParams(r, by)
+}
+
 // Settable returns the members of s a constructor in another package
 // can set.
 //

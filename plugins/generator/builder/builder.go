@@ -608,14 +608,17 @@ func (t *Tests) Copies() bool { return slices.ContainsFunc(t.Fields, Field.Copie
 // handing any of them a scalar sample is a type error. Each is driven
 // through the shape it owns by its own per-member check.
 func (t *Tests) Seedable() []Field {
-	if t.Generic() {
-		// A parameterised declaration seeds nothing. A check is an
-		// ordinary function, so it names the declaration at concrete
-		// witnesses — but its members' types are written in terms of
-		// the parameters, and a value of one cannot be spelled without
-		// substituting the witnesses through the whole projection.
-		// Withholding the seed is the honest answer; writing it
-		// produces a file naming a generic type without instantiation.
+	if t.Generic() && len(t.Witnesses) == 0 {
+		// A parameterised declaration whose constraints admit no
+		// witness seeds nothing: a check is an ordinary function, so it
+		// names the declaration at concrete types, and there are none
+		// to name. Withholding the seed is the honest answer; writing
+		// it produces a file naming a generic type without
+		// instantiation.
+		//
+		// Where witnesses do exist the members are sampled at them, so
+		// a seed is spellable and this reads like any other
+		// declaration.
 		return nil
 	}
 	out := make([]Field, 0, len(t.Fields))
@@ -741,10 +744,36 @@ func (p *Plugin) queued(rules sdk.SourceRules, s *sdk.Struct, value *Type) []sdk
 		// name concrete types where the declaration named parameters.
 		TypeArgs:  rules.WitnessArgs(s.TypeParams),
 		Witnesses: rules.Witnesses(s.TypeParams),
-		Fields:    value.Fields,
+		Fields:    testFields(rules, s, value.Fields),
 		Seeded:    value.Seeded(),
 		Companion: value.Companion,
 	}}
+}
+
+// testFields returns the members as a check names them: the same
+// projection, with each type substituted at the witnesses the checks
+// instantiate at.
+//
+// A copy rather than a rewrite, because the builder itself keeps the
+// declared spelling — its setters take a `T`, and a check calling one
+// passes a `string`. The two views differ in exactly this, so sharing
+// the slice put a concrete value into a variable the template had
+// declared at a type parameter.
+//
+// Returns the input where nothing is parameterised, so the common case
+// allocates nothing.
+func testFields(rules sdk.SourceRules, s *sdk.Struct, fields []Field) []Field {
+	if len(s.TypeParams) == 0 {
+		return fields
+	}
+	out := make([]Field, len(fields))
+	copy(out, fields)
+	for i := range out {
+		out[i].Type = rules.SubstituteRef(out[i].Type, s.TypeParams)
+		out[i].Elem = rules.SubstituteRef(out[i].Elem, s.TypeParams)
+		out[i].Key = rules.SubstituteRef(out[i].Key, s.TypeParams)
+	}
+	return out
 }
 
 // setterWords is this run's vocabulary for the setters a shape owes.
@@ -818,12 +847,19 @@ func fieldsOf(
 		if m.Source != nil {
 			info := rules.TypeOf(m.Source.Type, ctx.Reader)
 			f.Shape, f.Elem, f.Key = info.Shape, info.Elem, info.Key
-			// Sampled from the declared type rather than from the
-			// shape's inner one: the sampler reads declarations, and
-			// what it is handed here is the only form it can walk. It
-			// unwraps what it recognises on the way.
-			f.Sample, f.Alternate = rules.SamplesOf(m.Source.Type, m.Name, ctx.Reader)
-			if zero, ok := rules.ZeroLiteral(m.Source.Type, ctx.Reader); ok {
+			// Sampled at the witnesses a check instantiates at rather
+			// than at the declared type. A type parameter has no value
+			// to write, so a parameterised member sampled as declared
+			// refuses — and a check dropped for want of a sample is a
+			// test function with an empty body, which passes.
+			//
+			// The declared type is what the sampler walks otherwise:
+			// it reads declarations, and the substitution returns them
+			// unchanged where nothing names a parameter. It unwraps
+			// what it recognises on the way.
+			sampled := rules.SubstituteParams(m.Source.Type, s.TypeParams)
+			f.Sample, f.Alternate = rules.SamplesOf(sampled, m.Name, ctx.Reader)
+			if zero, ok := rules.ZeroLiteral(sampled, ctx.Reader); ok {
 				f.DefaultIsZero = f.Declared() && strings.TrimSpace(f.Default) == zero
 			}
 		}

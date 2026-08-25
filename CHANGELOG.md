@@ -15,6 +15,38 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **A generic declaration's builder gets checks with bodies in them.** The test
+  file was emitted on the strength of the declaration having derivable
+  witnesses, and every subtest inside it was then dropped for the declaration
+  having type parameters — so the file compiled, passed, and asserted nothing.
+  Even members naming no parameter were dropped. Reported as
+  [#57](https://github.com/thesm-os/eidos/issues/57).
+
+  Members are now sampled at the witnesses a check instantiates at, and the
+  test view of the projection carries its types substituted to match — a
+  concrete value written into a variable declared at a type parameter compiles
+  no better than no check at all.
+
+  Two faults underneath it, both invisible while generic members produced
+  nothing. Walking into a generic declaration's body did not bind the
+  reference's type arguments to that declaration's parameters, so a member of
+  type `Filter[T]` sampled a func literal taking the alias's own `T`. And a
+  conversion callee was spelled without its instantiation, naming a generic
+  type the compiler refuses.
+
+### Added
+
+- **`emit.ExprIndexList` carries a multi-argument instantiation.** `Pair[K, V]`
+  is one index holding a list, and nesting two plain `ExprIndex` values spells
+  `Pair[K][V]` — a different expression that parses. The split matches the one
+  go/ast makes between `IndexExpr` and `IndexListExpr`.
+
+- **`SourceRules` answers what a type looks like at its witnesses.**
+  `SubstituteParams` binds a declaration's type parameters in a source type and
+  `SubstituteRef` does the same for a projected one. Both are needed because
+  the two forms are read at different points: the source form by the sampling
+  and shape questions, the projected form by a template.
+
 - **The builder generator's checks compile for a member of any type.** A
   member whose type is a struct produced a `_test.go` that did not parse: the
   check compared against a composite literal written into the header of an

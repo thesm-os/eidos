@@ -143,9 +143,8 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- $T := renderExpr (external "testing" "T") -}}
 {{- $ctor := renderExpr .CtorRef -}}
 {{- $ta := .TypeArgs -}}
-{{- $generic := .Generic -}}
 {{- range $f := .Fields }}
-{{- if and $f.Sample.OK (not $generic) }}
+{{- if $f.Sample.OK }}
 {{- $with := $f.Set }}
 	t.Run("{{ $with }} writes {{ $f.Name }}", func(t *{{ $T }}) {
 		t.Parallel()

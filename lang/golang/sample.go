@@ -340,7 +340,13 @@ func definedSample(
 	if decl.Target == nil {
 		return refused(RefusedUnresolved)
 	}
-	inner, innerAlt := sampleRefFor(decl.Target, fieldName, r, depth-1)
+	// Bound to what the reference wrote before the walk descends. The
+	// alias's body is written in terms of its own parameters, so
+	// `Filter[string]` over `type Filter[T any] func(T) bool` sampled
+	// unbound renders a func literal taking a `T` that names nothing
+	// in the file it lands in.
+	target := BindTypeArgs(decl.Target, decl.TypeParams, t.TypeArgs)
+	inner, innerAlt := sampleRefFor(target, fieldName, r, depth-1)
 	if !inner.OK() {
 		// The underlying type's reason, not this one's: an alias over an
 		// unloaded type is unresolved, and saying "no literal" would
@@ -391,7 +397,12 @@ func structSample(
 		if f == nil || !IsExported(f.Name) {
 			continue
 		}
-		inner, innerAlt := sampleRefFor(f.Type, fieldName, r, depth-1)
+		// Bound for the same reason [definedSample] binds: a generic
+		// struct's field is written in terms of the declaration's
+		// parameters, and the reference is what says which types
+		// those are here.
+		ft := BindTypeArgs(f.Type, decl.TypeParams, t.TypeArgs)
+		inner, innerAlt := sampleRefFor(ft, fieldName, r, depth-1)
 		if !inner.OK() {
 			if incomplete == RefusedNone && inner.Refusal.Incomplete() {
 				incomplete = inner.Refusal
@@ -515,12 +526,37 @@ func trimBraces(text string) string {
 }
 
 // typeExpr spells t as an expression callee — `pkg.Name` with the
-// import registered, or the bare identifier for a local type.
+// import registered, or the bare identifier for a local type, carrying
+// the instantiation where the reference is to a generic declaration.
+//
+// The instantiation is an index expression because that is what Go's
+// own grammar makes it: `Filter[string]` indexes the declaration by
+// its argument, and the parser reads the two forms the same way. A
+// callee spelled without it names a generic type uninstantiated, which
+// the compiler refuses.
 func typeExpr(t *node.TypeRef) *emit.Expr {
-	if t.Package == "" {
-		return &emit.Expr{ExprKind: emit.ExprIdent, Name: t.Name}
+	base := &emit.Expr{ExprKind: emit.ExprIdent, Name: t.Name}
+	if t.Package != "" {
+		base = &emit.Expr{ExprKind: emit.ExprExternal, Pkg: t.Package, Name: t.Name}
 	}
-	return &emit.Expr{ExprKind: emit.ExprExternal, Pkg: t.Package, Name: t.Name}
+	switch len(t.TypeArgs) {
+	case 0:
+		return base
+	case 1:
+		return &emit.Expr{
+			ExprKind: emit.ExprIndex, Receiver: base, IndexExpr: typeExpr(t.TypeArgs[0]),
+		}
+	default:
+		// `T[A, B]` is one index carrying a list, which is why
+		// [emit.ExprIndexList] is a kind of its own: nesting two plain
+		// indexes spells `T[A][B]`, a different expression that
+		// happens to parse.
+		args := make([]*emit.Expr, len(t.TypeArgs))
+		for i, arg := range t.TypeArgs {
+			args[i] = typeExpr(arg)
+		}
+		return &emit.Expr{ExprKind: emit.ExprIndexList, Receiver: base, Args: args}
+	}
 }
 
 func sliceSample(
