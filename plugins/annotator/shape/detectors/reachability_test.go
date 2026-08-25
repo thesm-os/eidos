@@ -185,19 +185,20 @@ func sweepDispatch(all []shape.Detector) (matches, wins map[string]int) {
 
 // nameSpace returns the callable names the sweep probes.
 //
-// Every other axis varies the signature, because every other detector
-// reads only the signature. [closer] is the exception — it separates a
-// teardown from a poison probe by name, the two being identical as
-// shapes — so a sweep holding one name constant could never reach it,
-// and would report its predicate unsatisfiable rather than its pool
-// too narrow.
+// Every other axis varies the signature, because most detectors read
+// only the signature. The name-gated pair are the exception —
+// [closer] separates a teardown from a poison probe, and [deleter] a
+// removal from a write, each pair being identical as shapes — so a
+// sweep holding one name constant could never reach them, and would
+// report their predicates unsatisfiable rather than its pool too
+// narrow.
 //
-// Two entries and no more: one name that detector claims and one it
-// does not, which is the whole discrimination. The pair also keeps
-// [poisonaccessor] reachable, since the claimed name would otherwise
-// take every signature the two share.
+// One entry per gate plus one no gate claims, which is the whole
+// discrimination. The unclaimed name also keeps [poisonaccessor] and
+// [writer] reachable, since a claimed name would otherwise take every
+// signature it shares with them.
 func nameSpace() []string {
-	return []string{"M", "Close"}
+	return []string{"M", "Close", "Delete"}
 }
 
 // TestAll_Reachability pins that every shipped detector both

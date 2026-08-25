@@ -15,6 +15,20 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **A `deleter` detector.** `Delete(ctx, key) error` and `Put(ctx, v) error` are
+  the same signature, so a removal classified as a `writer` — and a law
+  selecting writers derives write-then-read-back, which asserts the reverse of
+  correct behaviour for a delete. The name is the only discrimination
+  available, as it is for `closer`, and this is the second and last detector
+  that reads one.
+
+  The parameter records as `shape.key_type` rather than `shape.value_type`,
+  which is what `writer` recorded when a delete fell through to it: the key it
+  addresses, labelled as the value it stores. `writer`'s docblock claimed a
+  Deleter detector shadowed it since before one existed; that claim is now
+  true, and its companion claims about compare-and-swap and persistence are
+  corrected — both are contracts, not detectors.
+
 - **A `shape/ids` package re-exporting every catalog name.** One import for
   the words a consumer would otherwise spell as string literals — 22 detector,
   26 contract and 58 mixin names, each declared as its own package's `Name`

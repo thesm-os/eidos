@@ -35,6 +35,7 @@ import (
 	detBatchReader "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/batchreader"
 	detCloser "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/closer"
 	detCompositeWriter "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/compositewriter"
+	detDeleter "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/deleter"
 	detLifecycle "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/lifecycle"
 	detLookup "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/lookup"
 	detMultiAggregator "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/multiaggregator"
@@ -132,6 +133,7 @@ const (
 	DetectorBatchReader     = detBatchReader.Name
 	DetectorCloser          = detCloser.Name
 	DetectorCompositeWriter = detCompositeWriter.Name
+	DetectorDeleter         = detDeleter.Name
 	DetectorLifecycle       = detLifecycle.Name
 	DetectorLookup          = detLookup.Name
 	DetectorMultiAggregator = detMultiAggregator.Name
@@ -259,6 +261,7 @@ func Detectors() []Name {
 		DetectorBatchReader,
 		DetectorCloser,
 		DetectorCompositeWriter,
+		DetectorDeleter,
 		DetectorLifecycle,
 		DetectorLookup,
 		DetectorMultiAggregator,

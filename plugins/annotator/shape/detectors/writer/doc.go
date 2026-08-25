@@ -28,8 +28,11 @@
 //
 // Detector ordering matters when multiple shapes share a
 // signature ([shape.New] honours registration order); writer is
-// the canonical fallback for the "value in, error out" pattern
-// and typically registers after more specific detectors
-// (Deleter, CompareAndSwap, Persister) that would otherwise be
-// shadowed.
+// the canonical fallback for the "value in, error out" pattern and
+// registers below [deleter], which claims the same signature under
+// a removal name and would otherwise be shadowed.
+//
+// Compare-and-swap and persistence are contracts rather than
+// detectors — a promise about a pair of callables is declared, not
+// read off one signature — so they do not compete here.
 package writer
