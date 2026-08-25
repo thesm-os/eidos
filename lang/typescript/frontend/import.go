@@ -193,14 +193,23 @@ func firstChildOfKind(n *ts.Node, kind string) *ts.Node {
 }
 
 // stringValue strips the surrounding quotes from a string literal's
-// source text.
+// source text, and passes unquoted text through unchanged.
+//
+// The length guard applies only once the text is known to be quoted.
+// Checking it first rejected every one-character input, which reads as
+// harmless until a `namespace N` — whose name arrives here as a bare
+// identifier — is silently recorded as having no name at all.
 func stringValue(text string) string {
-	if len(text) < 2 {
+	if text == "" {
 		return ""
 	}
-	q := text[0]
-	if q != '\'' && q != '"' && q != '`' {
+	switch text[0] {
+	case '\'', '"', '`':
+		if len(text) < 2 {
+			return ""
+		}
+		return text[1 : len(text)-1]
+	default:
 		return text
 	}
-	return text[1 : len(text)-1]
 }

@@ -121,7 +121,15 @@ func walkDir(dir string, opts Options) ([]string, error) {
 		out = append(out, path)
 		return nil
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// A recursive pattern rooted at a path that is not there is
+		// the same user mistake as one that matches nothing, and the
+		// caller reports it as [ErrNoMatch]. Returning the walk error
+		// instead would give `./absent` and `./absent/...` two
+		// different errors for one typo.
+		return nil, nil
+	case err != nil:
 		return nil, fmt.Errorf("frontend: walk %s: %w", dir, err)
 	}
 	return out, nil

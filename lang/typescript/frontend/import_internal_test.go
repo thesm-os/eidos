@@ -128,12 +128,22 @@ func TestStringValue(t *testing.T) {
 		}
 	})
 
-	t.Run("reports nothing for input too short to be quoted", func(t *testing.T) {
+	t.Run("an unterminated quote yields nothing", func(t *testing.T) {
 		t.Parallel()
-		for _, raw := range []string{"", "'"} {
+		for _, raw := range []string{"", "'", `"`} {
 			if got := stringValue(raw); got != "" {
 				t.Errorf("stringValue(%q) = %q, want empty", raw, got)
 			}
+		}
+	})
+
+	t.Run("a one-character unquoted name survives", func(t *testing.T) {
+		t.Parallel()
+		// `namespace N` arrives here as a bare identifier. A length
+		// guard applied before the quote check swallowed it, and the
+		// namespace was recorded as having no name.
+		if got := stringValue("N"); got != "N" {
+			t.Fatalf("stringValue(N) = %q, want N", got)
 		}
 	})
 }
