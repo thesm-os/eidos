@@ -18,6 +18,6 @@ The provenance trail is queryable in-process: every `meta.Entry`
 carries `(setBy, authority, sourcePos)`; every slot contribution
 carries the contributing plugin's name; every emit entity threads its
 `OriginNode` back to the source-side IR. See
-[`../backend/golang.md`](../backend/golang.md) for the full
+[`../lang/golang/backend.md`](../lang/golang/backend.md) for the full
 envelope contract and the `imp` / `slot` / `provenance` template
 funcmap entries.

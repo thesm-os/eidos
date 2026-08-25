@@ -78,9 +78,9 @@ cache.NewNone() *None                     // disabled
 
 ### Frontend / backend implementations
 
-- `frontend/golang.New()` — Go AST → node graph; populates `go.*`
+- `lang/golang/frontend.New()` — Go AST → node graph; populates `go.*`
   metadata keys (`go.iterValueType`, `go.elementType`, …) consumed
   by downstream annotators.
-- `backend/golang.New()` — renders the emit graph to gofmt-clean Go
+- `lang/golang/backend.New()` — renders the emit graph to gofmt-clean Go
   source through a template-driven pipeline. Contract documented in
-  [`../backend/golang.md`](../backend/golang.md).
+  [`../lang/golang/backend.md`](../lang/golang/backend.md).

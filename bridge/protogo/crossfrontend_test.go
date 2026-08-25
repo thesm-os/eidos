@@ -16,8 +16,8 @@ import (
 	"go.thesmos.sh/eidos/core/directive"
 	m "go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/core/opt"
-	"go.thesmos.sh/eidos/frontend/golang"
-	"go.thesmos.sh/eidos/frontend/protobuf"
+	gofrontend "go.thesmos.sh/eidos/lang/golang/frontend"
+	protofrontend "go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/store"
@@ -43,14 +43,14 @@ func TestCrossFrontend_MarkerScope(t *testing.T) {
 	t.Run("each frontend stamps its own marker; no cross-namespace meta leaks", func(t *testing.T) {
 		t.Parallel()
 		repoRoot := repositoryRoot(t)
-		protoRoot := filepath.Join(repoRoot, "frontend", "protobuf", "testdata", "simple")
+		protoRoot := filepath.Join(repoRoot, "lang", "protobuf", "frontend", "testdata", "simple")
 		s := store.New()
 		d := diag.New()
 		registry := directive.NewRegistry()
 		parser := directive.DefaultParser()
 		nopCache := cache.NewNone()
 
-		pf := protobuf.New()
+		pf := protofrontend.New()
 		if err := pf.SetOptions(opt.New(pf.OptionsSchema(), map[string]string{"dir": protoRoot})); err != nil {
 			t.Fatalf("protobuf SetOptions: %v", err)
 		}
@@ -61,13 +61,13 @@ func TestCrossFrontend_MarkerScope(t *testing.T) {
 			t.Fatalf("protobuf Load: %v", err)
 		}
 
-		gf := golang.New()
+		gf := gofrontend.New()
 		if err := gf.SetOptions(opt.New(gf.OptionsSchema(), map[string]string{"dir": repoRoot})); err != nil {
 			t.Fatalf("golang SetOptions: %v", err)
 		}
 		if err := gf.Load(&plugin.FrontendContext{
 			Store: s, Diag: d, Registry: registry, Parser: parser, Cache: nopCache,
-			Pattern: "go.thesmos.sh/eidos/backend/golang/testdata/pluginfixture",
+			Pattern: "go.thesmos.sh/eidos/lang/golang/backend/testdata/pluginfixture",
 		}); err != nil {
 			t.Fatalf("golang Load: %v", err)
 		}
@@ -81,7 +81,7 @@ func TestCrossFrontend_MarkerScope(t *testing.T) {
 			switch p.Path {
 			case "eidos.protobuf.testdata.simple":
 				protoPkg = p
-			case "go.thesmos.sh/eidos/backend/golang/testdata/pluginfixture":
+			case "go.thesmos.sh/eidos/lang/golang/backend/testdata/pluginfixture":
 				goPkg = p
 			}
 			return true
@@ -93,8 +93,8 @@ func TestCrossFrontend_MarkerScope(t *testing.T) {
 			t.Fatalf("go-derived package missing from store")
 		}
 
-		assertMarker(t, protoPkg, protobuf.FrontendName)
-		assertMarker(t, goPkg, golang.FrontendName)
+		assertMarker(t, protoPkg, protofrontend.FrontendName)
+		assertMarker(t, goPkg, gofrontend.FrontendName)
 		assertNoMetaPrefix(t, protoPkg, "go.", "proto-derived package")
 		assertNoMetaPrefix(t, goPkg, "proto.", "go-derived package")
 	})
@@ -113,14 +113,14 @@ func TestCrossFrontend_BridgeAuditScope(t *testing.T) {
 	t.Run("protogo touches only proto-marker packages, never Go-marker packages", func(t *testing.T) {
 		t.Parallel()
 		repoRoot := repositoryRoot(t)
-		protoRoot := filepath.Join(repoRoot, "frontend", "protobuf", "testdata", "simple")
+		protoRoot := filepath.Join(repoRoot, "lang", "protobuf", "frontend", "testdata", "simple")
 		s := store.New()
 		d := diag.New()
 		registry := directive.NewRegistry()
 		parser := directive.DefaultParser()
 		nopCache := cache.NewNone()
 
-		pf := protobuf.New()
+		pf := protofrontend.New()
 		if err := pf.SetOptions(opt.New(pf.OptionsSchema(), map[string]string{"dir": protoRoot})); err != nil {
 			t.Fatalf("protobuf SetOptions: %v", err)
 		}
@@ -131,13 +131,13 @@ func TestCrossFrontend_BridgeAuditScope(t *testing.T) {
 			t.Fatalf("protobuf Load: %v", err)
 		}
 
-		gf := golang.New()
+		gf := gofrontend.New()
 		if err := gf.SetOptions(opt.New(gf.OptionsSchema(), map[string]string{"dir": repoRoot})); err != nil {
 			t.Fatalf("golang SetOptions: %v", err)
 		}
 		if err := gf.Load(&plugin.FrontendContext{
 			Store: s, Diag: d, Registry: registry, Parser: parser, Cache: nopCache,
-			Pattern: "go.thesmos.sh/eidos/backend/golang/testdata/pluginfixture",
+			Pattern: "go.thesmos.sh/eidos/lang/golang/backend/testdata/pluginfixture",
 		}); err != nil {
 			t.Fatalf("golang Load: %v", err)
 		}
@@ -156,8 +156,8 @@ func TestCrossFrontend_BridgeAuditScope(t *testing.T) {
 
 		var goPkg *node.Package
 		s.Nodes().Packages().Range(func(p *node.Package) bool {
-			marker, _ := protobuf.MetaFrontend.Get(p.Meta())
-			if marker == golang.FrontendName {
+			marker, _ := gofrontend.MetaFrontend.Get(p.Meta())
+			if marker == gofrontend.FrontendName {
 				goPkg = p
 				return false
 			}
@@ -210,7 +210,7 @@ func assertBagNoProtogo(t *testing.T, where string, bag *m.Bag) {
 // with the expected value.
 func assertMarker(t *testing.T, pkg *node.Package, want string) {
 	t.Helper()
-	got, ok := protobuf.MetaFrontend.Get(pkg.Meta())
+	got, ok := gofrontend.MetaFrontend.Get(pkg.Meta())
 	if !ok {
 		t.Fatalf("MetaFrontend missing on package %q", pkg.Path)
 	}

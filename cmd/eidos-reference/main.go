@@ -36,12 +36,12 @@ import (
 	"io"
 	"os"
 
-	"go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/bridge/protogo"
 	"go.thesmos.sh/eidos/cli"
 	"go.thesmos.sh/eidos/core/diag"
-	frontendgolang "go.thesmos.sh/eidos/frontend/golang"
-	"go.thesmos.sh/eidos/frontend/protobuf"
+	"go.thesmos.sh/eidos/lang/golang/backend"
+	frontendgolang "go.thesmos.sh/eidos/lang/golang/frontend"
+	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
@@ -156,7 +156,7 @@ func defaultPlugins() []plugin.Plugin {
 	return []plugin.Plugin{
 		// Frontends — parse input into the source-side store.
 		frontendgolang.New(),
-		protobuf.New(),
+		frontend.New(),
 
 		// Cross-frontend bridge — stamps Go-shape metadata on
 		// proto-loaded packages so downstream Go-flavoured
@@ -198,7 +198,7 @@ func defaultPlugins() []plugin.Plugin {
 		sentinel.New(),
 
 		// Backend — render emit graph to target language.
-		golang.New(),
+		backend.New(),
 	}
 }
 

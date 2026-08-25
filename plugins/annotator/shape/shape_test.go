@@ -6,8 +6,6 @@ package shape_test
 import (
 	"reflect"
 	"testing"
-	"text/template"
-	"unicode"
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
@@ -76,33 +74,24 @@ func TestPlugin_Contract(t *testing.T) {
 		}
 	})
 
-	t.Run("every TemplateFuncs name binds into a Go template", func(t *testing.T) {
+	t.Run("the annotator registers no template helpers", func(t *testing.T) {
 		t.Parallel()
+		// It ships no templates, so it has nothing to register for.
+		// An earlier form handed every plugin its own prefixed copy of
+		// the whole Go vocabulary, which meant this annotator carried
+		// a hundred helpers no template of its own could call — and
+		// two plugins reaching for one name registered it twice.
+		// The backend owns that vocabulary now, in one copy.
 		provider, ok := any(shape.New()).(sdk.TemplateProvider)
 		if !ok {
 			t.Fatalf("shape.New() no longer implements sdk.TemplateProvider")
 		}
-		funcs := provider.TemplateFuncs(langGolang)
-		if len(funcs) == 0 {
-			t.Fatalf("TemplateFuncs(%q) contributed nothing; the bundle this test guards is gone", langGolang)
+		if funcs := provider.TemplateFuncs(langGolang); len(funcs) != 0 {
+			t.Errorf("TemplateFuncs(%q) = %v, want none", langGolang, funcs)
 		}
-		for name := range funcs {
-			if !isTemplateIdent(name) {
-				t.Errorf("TemplateFuncs(%q) contributes %q, which text/template will reject at bind time; "+
-					"the funcmap prefix is derived from the plugin name and must stay identifier-safe",
-					langGolang, name)
-			}
+		if _, ok := provider.Templates(langGolang); ok {
+			t.Errorf("Templates(%q) reported a tree; the annotator ships none", langGolang)
 		}
-		// The loop above names the offender; this binds the whole
-		// bundle the way backend/golang does, so a name text/template
-		// dislikes for a reason the loop does not model still fails
-		// here rather than at the consumer's first render.
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("binding TemplateFuncs(%q) into a template panicked: %v", langGolang, r)
-			}
-		}()
-		template.New("bind").Funcs(funcs)
 	})
 
 	t.Run("Annotate on empty store does not error or panic", func(t *testing.T) {
@@ -772,31 +761,6 @@ func assertStampedBy(t *testing.T, bag *sdk.Bag, k sdk.Key[string], want string)
 // a typo would silently probe a language nothing answers for and
 // turn the assertion into a no-op.
 const langGolang = "golang"
-
-// isTemplateIdent reports whether name is legal as a text/template
-// function name, mirroring the `goodName` rule text/template's
-// [template.Template.Funcs] applies before it panics.
-//
-// The rule matters here because [sdkgo.Base] derives every
-// contributed helper's name by prefixing it with the plugin's own
-// name. A plugin named with a dot — which two of the three plugins
-// this package exports are — would produce keys no template can
-// bind, and the failure surfaces as a panic on the consumer's first
-// Go render rather than anywhere near construction.
-func isTemplateIdent(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i, r := range name {
-		switch {
-		case r == '_', unicode.IsLetter(r):
-		case unicode.IsDigit(r) && i > 0:
-		default:
-			return false
-		}
-	}
-	return true
-}
 
 // TestShapeConformance runs the framework conformance suite over
 // the shape annotator.

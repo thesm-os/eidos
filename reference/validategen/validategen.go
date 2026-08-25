@@ -10,7 +10,6 @@ import (
 	refconv "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -107,7 +106,7 @@ var _ sdk.OutputPackageSetter = (*Entry)(nil)
 // Outputs says where a file lands, templates say how a value renders,
 // and a plugin needs an Output only for decls it owns. The prebody
 // entry needs none — it renders inside handlergen's file.
-type Plugin struct{ *sdkgo.Base }
+type Plugin struct{ *sdk.Base }
 
 // New returns a plugin instance.
 //
@@ -115,7 +114,7 @@ type Plugin struct{ *sdkgo.Base }
 // validators; the embedded tree ships both templates, one per declared
 // emit kind. A generator needs both — an output without a template
 // tree renders nothing, a tree without an output gives Layout no
-// filename to compose — which is why [sdkgo.NewGenerator] takes them
+// filename to compose — which is why [sdkgo.Support] takes them
 // together.
 //
 // The composition bucket places it one after handlergen's foundation
@@ -124,7 +123,8 @@ type Plugin struct{ *sdkgo.Base }
 // in the rendered prebody. Nothing is required: the dependency is on a
 // plugin in another bucket, and Requires resolves only within one.
 func New() *Plugin {
-	return &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, sdk.Output{Suffix: GoSuffix}).
+	return &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorComposition).
 		Provides(Capability).

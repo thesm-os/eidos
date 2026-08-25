@@ -1,14 +1,13 @@
 go 1.26.5
 
 use (
-	./
-	./backend/golang
+	.
 	./bridge/protogo
 	./cli
 	./cmd/eidos-reference
 	./eidostest
-	./frontend/golang
-	./frontend/protobuf
+	./lang/golang
+	./lang/protobuf
 	./plugins
 	./reference
 )

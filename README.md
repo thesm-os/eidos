@@ -97,11 +97,11 @@ import (
     "context"
     "fmt"
 
-    bgolang "go.thesmos.sh/eidos/backend/golang"
+    bgolang "go.thesmos.sh/eidos/lang/golang/backend"
     "go.thesmos.sh/eidos/eidostest/pipelinetest"
     "go.thesmos.sh/eidos/pipeline"
     "go.thesmos.sh/eidos/sdk"
-    sdkgo "go.thesmos.sh/eidos/sdk/golang"
+    sdkgo "go.thesmos.sh/eidos/lang/golang/sdk"
     "go.thesmos.sh/eidos/sink"
 )
 
@@ -110,11 +110,11 @@ import (
 // routing layer composes `<src-basename>_hello.go`; setting Origin
 // on each emitted decl is what lets Layout resolve its directory,
 // package and import path from the source.
-type helloGenerator struct{ *sdkgo.Base }
+type helloGenerator struct{ *sdk.Base }
 
 func newHello() *helloGenerator {
-    return &helloGenerator{Base: sdkgo.NewPlugin("hellogen").
-        Outputs(sdk.Output{Suffix: "_hello.go"}).
+    return &helloGenerator{Base: sdk.NewPlugin("hellogen").
+        For(sdkgo.Builtin(sdk.Output{Suffix: "_hello.go"})).
         Build()}
 }
 
@@ -166,32 +166,40 @@ plugin's declared suffix (`_hello.go`); package and directory come
 from the source struct's package.
 
 For real Go-source input, swap `pipelinetest.FromNodes(...)` for
-`frontend/golang.New()` and pass package patterns to `p.Run`:
+`lang/golang/frontend.New()` and pass package patterns to `p.Run`:
 
 ```go
 p.Run(ctx, "./...")
 ```
 
 Proto-source pipelines register the proto3 frontend at
-`frontend/protobuf` plus the `protogo` bridge annotator at
+`lang/protobuf/frontend` plus the `protogo` bridge annotator at
 `bridge/protogo`; the bridge stamps Go-namespaced translation
 meta on proto-derived nodes so the existing Go backend renders
 compilable Go without learning anything proto-specific:
 
 ```go
+import (
+    gobackend "go.thesmos.sh/eidos/lang/golang/backend"
+    protofrontend "go.thesmos.sh/eidos/lang/protobuf/frontend"
+)
+
 pipeline.New().
-    WithFrontend(protobuf.New()).
+    WithFrontend(protofrontend.New()).
     WithAnnotator(protogo.New()).
-    WithBackend(backend_golang.New()).
+    WithBackend(gobackend.New()).
     Build()
 ```
+
+Both frontends are `package frontend`, so a file registering more
+than one aliases them — as this sample does.
 
 The bridge-annotator pattern generalises to any source-language
 → target-language pair: a future `protorust` / `prototypescript`
 follows the same shape (annotator stamps target-language meta;
 the matching target backend reads it). The framework stays
 language-neutral; per-pair translation lives in the bridge
-plugin alongside the frontend. See `frontend/protobuf/doc.go`
+plugin alongside the frontend. See `lang/protobuf/frontend/doc.go`
 and `bridge/protogo/doc.go` for the per-package contract.
 
 ## Public API surface
@@ -249,14 +257,20 @@ core/                 language-agnostic foundation primitives:
   core/position/        Pos / Range
   core/srcfile/         <src-basename>_<suffix> output-filename convention
 
-lang/golang/          Go-language conventions shared by any plugin that
-                      emits Go, keeping plugin cores language-agnostic
+lang/                 everything eidos knows about a language, one module
+                      per language, adapters beneath their conventions:
+  lang/golang/          Go conventions shared by any plugin that emits Go,
+                        keeping plugin cores language-agnostic
+  lang/golang/frontend/   Go AST → node graph + go.* metadata
+  lang/golang/backend/    Go renderer: templates, funcmap, ImportSet, gofmt
+  lang/golang/sdk/        base a Go-generating plugin embeds
+  lang/protobuf/frontend/ proto3 descriptors → node graph (no backend:
+                          proto is read, never written)
 
-frontend/golang/      Go AST → node graph + go.* metadata
-frontend/protobuf/    proto3 descriptors → node graph
-backend/golang/       Go renderer: templates, funcmap, ImportSet, gofmt
 bridge/protogo/       proto→Go bridge annotator: stamps Go-namespaced
-                      translation meta so the Go backend stays proto-agnostic
+                      translation meta so the Go backend stays
+                      proto-agnostic. Sits outside lang/ because a bridge
+                      belongs to a pair of languages, not to one
 
 plugins/              production plugin set (own module):
   plugins/annotator/shape/  callable-signature classification — detectors,
@@ -281,9 +295,9 @@ eidostest/            test harnesses for downstream authors:
   eidostest/acceptancetest/ in-tree black-box harness over the reference binary
 
 docs/
-  docs/backend/golang.md    Go-backend contract reference (template set,
+  docs/lang/golang/backend.md    Go-backend contract reference (template set,
                             funcmap, envelope, sentinels)
-  docs/frontend/golang.md   Go-frontend contract reference
+  docs/lang/golang/frontend.md   Go-frontend contract reference
   docs/plugin/              plugin-authoring guide (quickstart, recipes,
                             composition, routing, templates, conformance)
 ```

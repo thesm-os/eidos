@@ -30,7 +30,6 @@ import (
 	"embed"
 
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -131,7 +130,7 @@ func (*Trace) Kind() sdk.Kind { return Kind }
 
 // Plugin is the cross-cutting debug-weaver.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -150,8 +149,8 @@ type Plugin struct {
 // …) can order against a known trace entry; nothing upstream is
 // required in turn.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewPlugin(Name).
-		Templates(goTemplates).
+	p := &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorCrossCutting).
 		Provides(Capability).

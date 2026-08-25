@@ -9,7 +9,6 @@ import (
 
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -56,7 +55,7 @@ type Entry struct {
 func (*Entry) Kind() sdk.Kind { return Kind }
 
 // Plugin contributes one recover-and-respond entry into every handler.
-type Plugin struct{ *sdkgo.Base }
+type Plugin struct{ *sdk.Base }
 
 // New returns a plugin instance.
 //
@@ -70,8 +69,8 @@ type Plugin struct{ *sdkgo.Base }
 // bucket. Requires resolves only within a bucket, so the bucket — not
 // a capability — is what orders this plugin against its host.
 func New() *Plugin {
-	return &Plugin{Base: sdkgo.NewPlugin(Name).
-		Templates(goTemplates).
+	return &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorCrossCutting).
 		Provides(Capability).

@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"go/token"
 	"strings"
+	"text/template"
 
 	"go.thesmos.sh/eidos/lang/golang"
+	sdkgo "go.thesmos.sh/eidos/lang/golang/sdk"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -44,6 +46,18 @@ var goTemplatesFS embed.FS
 // phase routes contributions to.
 func GoOutputs() []sdk.Output {
 	return []sdk.Output{{Suffix: GoSuffix}}
+}
+
+// goSupport is everything this plugin declares for Go: the template
+// tree, the output set, and the one helper those templates call.
+//
+// The plugin's core names no language and reads this as a pair, so
+// a second target language is a sibling file and one more For call
+// rather than an edit to what the plugin *is*.
+func goSupport() (string, sdk.LanguageSupport) {
+	lang, s := sdkgo.Support(goTemplatesFS, GoOutputs()...)
+	s.Funcs = template.FuncMap{"defaultsExpr": GoDefaultsExpr}
+	return lang, s
 }
 
 // GoDefaultsExpr parses a `defaults=` value into an

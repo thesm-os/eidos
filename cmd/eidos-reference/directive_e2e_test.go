@@ -12,7 +12,7 @@ import (
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/opt"
-	frontendgolang "go.thesmos.sh/eidos/frontend/golang"
+	frontendgolang "go.thesmos.sh/eidos/lang/golang/frontend"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"

@@ -8,4 +8,4 @@ require (
 	golang.org/x/mod v0.38.0
 )
 
-replace go.thesmos.sh/eidos => ../
+replace go.thesmos.sh/eidos => ..

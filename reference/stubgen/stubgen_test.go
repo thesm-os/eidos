@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/opt"
 	"go.thesmos.sh/eidos/core/position"
@@ -17,6 +16,7 @@ import (
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
 	langgo "go.thesmos.sh/eidos/lang/golang"
+	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/reference/stubgen"
 	"go.thesmos.sh/eidos/sdk"
@@ -117,26 +117,22 @@ func TestTemplates_ShippedForGoOnly(t *testing.T) {
 		}
 	})
 
-	// Every helper the plugin publishes is namespaced.
+	// The plugin publishes no helpers of its own.
 	//
-	// The plugin once returned the shared lang/golang helpers here
-	// under their bare names, which re-registered names the backend
-	// already holds — a Build-time ErrTemplateFuncCollision that kept
-	// stubgen out of any pipeline beside another plugin doing the
-	// same, exactly what happened when the middlewaregen composition
-	// set arrived. The base publishes the same bundle under the
-	// plugin's own prefix, so no name it contributes can collide.
-	t.Run("every published helper carries the plugin's prefix", func(t *testing.T) {
+	// It once returned the shared lang/golang helpers here under their
+	// bare names, which re-registered names the backend already held —
+	// a Build-time ErrTemplateFuncCollision that kept stubgen out of
+	// any pipeline beside another plugin doing the same. That was
+	// answered for a while by giving each plugin its own copy under
+	// its own prefix, so a template called a helper by a name no
+	// declaration contained.
+	//
+	// The backend owns that vocabulary now, in one copy, and a plugin
+	// publishes only helpers it wrote. stubgen wrote none.
+	t.Run("the plugin publishes no helpers of its own", func(t *testing.T) {
 		t.Parallel()
-		got := stubgen.New().TemplateFuncs("golang")
-		if len(got) == 0 {
-			t.Fatalf("TemplateFuncs(golang) is empty; the shared Go bundle is missing")
-		}
-		for name := range got {
-			if !strings.HasPrefix(name, stubgen.Name+"_") {
-				t.Errorf("TemplateFuncs published %q unprefixed; an unnamespaced helper "+
-					"collides with the backend's own at Build", name)
-			}
+		if got := stubgen.New().TemplateFuncs("golang"); len(got) != 0 {
+			t.Errorf("TemplateFuncs(golang) = %v, want none", got)
 		}
 	})
 

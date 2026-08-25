@@ -23,7 +23,7 @@
 //
 // The Go adapter ships as the sibling `builder_go.go`,
 // owning the output suffix, the embedded template tree, and
-// the one template helper the template consumes. [sdkgo.Base]
+// the one template helper the template consumes. [sdk.Base]
 // answers the declaration methods and keys every one of them
 // to Go, so a second target language is more than an extra
 // adapter file: it needs `builder_<lang>.go`, a
@@ -34,10 +34,8 @@ package builder
 
 import (
 	"fmt"
-	"text/template"
 
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -101,7 +99,7 @@ type Options struct {
 // unusable; go through [New] so the embedded [sdk.Holder]
 // binds to the options field.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -130,12 +128,12 @@ type Plugin struct {
 // stay unprefixed. No backend builtin is replaced; the
 // template renders through the canonical set as it stands.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplatesFS, GoOutputs()...).
+	p := &Plugin{Base: sdk.NewPlugin(Name).
 		Version(Version).
 		Priority(sdk.GeneratorFoundation).
 		Provides(Capability).
 		Directives(directives()...).
-		Funcs(template.FuncMap{"defaultsExpr": GoDefaultsExpr}).
+		For(goSupport()).
 		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p

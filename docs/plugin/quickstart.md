@@ -22,7 +22,7 @@ import "go.thesmos.sh/eidos/sdk"
 `sdk` re-exports everything a plugin *names* — the role contracts, the
 source model it reads, the emit model it writes, and the metadata,
 diagnostic and position vocabulary joining them. A Go-generating
-plugin adds `sdk/golang` for the plugin base and `lang/golang` for Go
+plugin adds `lang/golang/sdk` for the plugin base and `lang/golang` for Go
 conventions; an annotator needs neither.
 
 Reach past the façade only for something it deliberately excludes —
@@ -269,5 +269,7 @@ time and duplicates rejected, so one plugin owns a directive and the
 rest read the stamp.
 
 **My plugin emits code.** That is a Generator. Start at
-[recipes.md](recipes.md); if it targets Go, embed `sdkgo.Base` from
-`sdk/golang` rather than answering the declaration methods yourself.
+[recipes.md](recipes.md): embed `sdk.Base` rather than answering the
+declaration methods yourself, and declare one `LanguageSupport`
+bundle per language you target — `lang/golang/sdk.Support` builds
+Go's.

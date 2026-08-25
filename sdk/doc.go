@@ -12,7 +12,7 @@
 //
 //	import (
 //	    "go.thesmos.sh/eidos/sdk"        // contracts + the models
-//	    "go.thesmos.sh/eidos/sdk/golang" // the Go plugin base
+//	    "go.thesmos.sh/eidos/lang/golang/sdk" // the Go plugin base
 //	    "go.thesmos.sh/eidos/lang/golang" // Go conventions + refs
 //	)
 //

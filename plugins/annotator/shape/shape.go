@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // PluginName is the stable identifier the framework uses for the
@@ -169,7 +168,7 @@ type ListStamp struct {
 // recognises, and the framework's "one owner per directive" rule
 // is satisfied by construction.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 
 	detectors []Detector
 	contracts map[string]Contract
@@ -216,10 +215,10 @@ type Plugin struct {
 // because [sdk.CapabilityProvider] is all-or-nothing — declaring a
 // bucket alone fails the pipeline's type assertion and collapses
 // the plugin into the default bucket, discarding the ordering the
-// bucket was declared to express. [sdkgo.Base] answers all three
+// bucket was declared to express. [sdk.Base] answers all three
 // together, which is what makes that failure unreachable.
 func New() *Plugin {
-	return &Plugin{Base: sdkgo.NewPlugin(PluginName).
+	return &Plugin{Base: sdk.NewPlugin(PluginName).
 		Version(Version).
 		Priority(sdk.AnnotatorShape).
 		Directives(directives()...).

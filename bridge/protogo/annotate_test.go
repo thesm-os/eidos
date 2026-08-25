@@ -9,7 +9,7 @@ import (
 	"go.thesmos.sh/eidos/bridge/protogo"
 	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/frontend/protobuf"
+	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
 )
@@ -101,7 +101,7 @@ func TestAnnotate_OptionalWrap(t *testing.T) {
 	t.Run("an optional scalar field is stamped as a pointer", func(t *testing.T) {
 		t.Parallel()
 		f := fieldOf(t, storefixture.Named("string"), func(f *node.Field) {
-			protobuf.MetaFieldOptional.Set(f.EnsureMeta(), true, "test")
+			frontend.MetaFieldOptional.Set(f.EnsureMeta(), true, "test")
 		})
 		if got, _ := protogo.MetaGoType.Get(f.Type.Meta()); got != "*string" {
 			t.Fatalf("go.type = %q, want *string", got)
@@ -218,7 +218,7 @@ func TestAnnotate_PackageMeta(t *testing.T) {
 		s := protoStore(t, nil)
 		pkg := store.NewReader(s).Packages().Slice()[0]
 		if raw != "" {
-			meta.EnsureKey(protobuf.MetaOptionPrefix+"go_package", meta.StringParser).
+			meta.EnsureKey(frontend.MetaOptionPrefix+"go_package", meta.StringParser).
 				Set(pkg.EnsureMeta(), raw, "test")
 		}
 		annotateProto(t, s)
@@ -254,7 +254,7 @@ func TestAnnotate_PackageMeta(t *testing.T) {
 		s := protoStore(t, nil)
 		pkg := store.NewReader(s).Packages().Slice()[0]
 		protogo.MetaGoImport.Set(pkg.EnsureMeta(), "example.com/manual", "manual")
-		meta.EnsureKey(protobuf.MetaOptionPrefix+"go_package", meta.StringParser).
+		meta.EnsureKey(frontend.MetaOptionPrefix+"go_package", meta.StringParser).
 			Set(pkg.EnsureMeta(), "example.com/derived;pb", "test")
 		annotateProto(t, s)
 		if got, _ := protogo.MetaGoImport.Get(pkg.Meta()); got != "example.com/manual" {

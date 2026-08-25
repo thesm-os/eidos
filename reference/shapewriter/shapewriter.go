@@ -6,7 +6,6 @@ package shapewriter
 import (
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier surfaced through
@@ -49,7 +48,7 @@ var MethodQName = sdk.NewKey("shape.writer.method", sdk.StringParser)
 // Plugin is the writer-shape annotator. Construct it with [New] —
 // the embedded base carries the declaration and the zero value has
 // none.
-type Plugin struct{ *sdkgo.Base }
+type Plugin struct{ *sdk.Base }
 
 // New returns a ready-to-register plugin.
 //
@@ -63,7 +62,7 @@ type Plugin struct{ *sdkgo.Base }
 // topo graph — and it names no requirement, having no upstream
 // dependency of its own.
 func New() *Plugin {
-	return &Plugin{Base: sdkgo.NewPlugin(Name).
+	return &Plugin{Base: sdk.NewPlugin(Name).
 		Version(Version).
 		// The shape-detector bucket, so it runs alongside the other
 		// annotators that stamp `shape.*` metadata.
@@ -112,7 +111,7 @@ func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *sdk.Struct) {
 //
 // The rule — `Write([]byte) (int, error)`, non-variadic, either
 // spelling of the byte element — is a fact about Go rather than about
-// this plugin, so it is asked of [golang.IsWriteMethod] rather than
+// this plugin, so it is asked of [sdk.IsWriteMethod] rather than
 // restated here. A plugin that restates it owns a second copy of a
 // language rule and gets to disagree with the first: this one did,
 // and for a while it was the copy that was right.
@@ -128,7 +127,7 @@ func matchSignature(s *sdk.Struct) (*sdk.Method, bool) {
 // methodQName composes the store's canonical method-bucket key for the
 // matched method.
 //
-// Through [golang.MethodQName] rather than a local format string: the
+// Through [sdk.MethodQName] rather than a local format string: the
 // store composes the same key privately, and a plugin matching it by
 // hand stamps a back-link that resolves to nothing the day the
 // separator changes — silently, because nothing validates a meta

@@ -66,7 +66,7 @@ A plugin imports [`sdk`](../../sdk), not the framework's layering:
 ```go
 import (
     "go.thesmos.sh/eidos/sdk"         // contracts + the source and emit models
-    sdkgo "go.thesmos.sh/eidos/sdk/golang" // the Go plugin base
+    sdkgo "go.thesmos.sh/eidos/lang/golang/sdk" // the Go plugin base
     "go.thesmos.sh/eidos/lang/golang" // Go conventions and refs
 )
 ```
@@ -91,11 +91,13 @@ Two spelling rules are worth knowing before you start:
   produces, and a directive scoped to an emit kind matches no source
   node, so the plugin never fires and nothing reports it.
 
-`sdk/golang` supplies `sdkgo.Base`, the embedded base that answers the
-Go declaration methods — outputs, templates, funcmaps — so a generator
-declares its suffixes and template tree once and inherits the rest.
-[`plugins/generator/enum`](../../plugins/generator/enum) is the
-canonical shape.
+`sdk.Base` is the embedded base that answers every declaration method
+— name, version, priority, capabilities, directives, and the
+per-language outputs, templates and funcmaps — so a plugin body holds
+only its behaviour. `lang/golang/sdk` supplies the Go bundle it
+declares those from. [`plugins/generator/enum`](../../plugins/generator/enum)
+is the canonical shape: a language-neutral core plus an `enum_go.go`
+holding everything Go about it.
 
 For what the façade deliberately excludes and why, read
 [its own package doc](../../sdk/doc.go). The short version: anything a

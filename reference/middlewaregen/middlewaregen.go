@@ -8,7 +8,6 @@ import (
 
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -77,7 +76,7 @@ type Options struct {
 // middleware with no handler to wrap is not a partial result, it is a
 // wrong one.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -93,9 +92,10 @@ type Plugin struct {
 // It registers no template helper of its own. The shared Go helpers
 // (fieldType, elemType, typeArgs, …) are already in the bundle [Base]
 // merges under this plugin's prefix, so re-declaring them through
-// [sdkgo.Builder.Funcs] would only shadow them with themselves.
+// [sdk.LanguageSupport.Funcs] would only shadow them with themselves.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, GoOutputs()...).
+	p := &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorFoundation).
 		Provides(Capability).

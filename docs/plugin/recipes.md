@@ -39,7 +39,7 @@ package shapewriter
 import (
     "go.thesmos.sh/eidos/lang/golang"
     "go.thesmos.sh/eidos/sdk"
-    sdkgo "go.thesmos.sh/eidos/sdk/golang"
+    sdkgo "go.thesmos.sh/eidos/lang/golang/sdk"
 )
 
 const (
@@ -52,10 +52,10 @@ const (
 // shapewriter.Detected.Get(s.Meta()).
 var Detected = sdk.NewKey("shape.writer.detected", sdk.BoolParser)
 
-type Plugin struct{ *sdkgo.Base }
+type Plugin struct{ *sdk.Base }
 
 func New() *Plugin {
-    return &Plugin{Base: sdkgo.NewPlugin(Name).
+    return &Plugin{Base: sdk.NewPlugin(Name).
         Version(Version).
         Priority(sdk.AnnotatorShape).
         Directives(
@@ -85,10 +85,15 @@ func (*Plugin) OnStruct(_ *sdk.AnnotatorContext, s *sdk.Struct) {
 
 **Key idioms:**
 
-- `sdkgo.NewPlugin(name)` returns a fluent builder for the embedded
-  `sdkgo.Base`, which answers the declaration methods — version,
-  priority, capabilities, directives, outputs, templates — so the
-  plugin body holds only its behaviour. `Build()` closes it.
+- `sdk.NewPlugin(name)` returns a fluent builder for the embedded
+  `sdk.Base`, which answers the declaration methods — version,
+  priority, capabilities, directives — so the plugin body holds only
+  its behaviour. `Build()` closes it.
+- This annotator declares **no language**. It ships no templates and
+  emits no files, so it is language-agnostic by construction: what it
+  stamps is metadata, and metadata carries no language. A plugin that
+  *does* render declares a `LanguageSupport` bundle per language with
+  `For(...)` — see [templates.md](templates.md).
 - `sdk.Walk(ctx, p)` dispatches to whichever hooks the plugin
   implements: `OnStruct`, `OnInterface`, `OnMethod`, `OnFunction`,
   `BeforeNodes`, `AfterNodes`.
@@ -122,7 +127,7 @@ package repogen
 
 import (
     "go.thesmos.sh/eidos/sdk"
-    sdkgo "go.thesmos.sh/eidos/sdk/golang"
+    sdkgo "go.thesmos.sh/eidos/lang/golang/sdk"
 )
 
 const (
@@ -142,15 +147,20 @@ type Options struct {
 }
 
 type Plugin struct {
-    *sdkgo.Base
+    *sdk.Base
     *sdk.Holder[Options]
     opts Options
 }
 
+// repogen_go.go — it owns a Go file but renders it through the
+// backend's own kind templates, so it ships no tree of its own.
+func goSupport() (string, sdk.LanguageSupport) {
+    return sdkgo.Builtin(sdk.Output{Suffix: FilenameSuffix})
+}
+
 func New() *Plugin {
-    p := &Plugin{Base: sdkgo.NewPlugin(Name).
-        Outputs(sdk.Output{Suffix: FilenameSuffix}).
-        BuiltinTemplates().
+    p := &Plugin{Base: sdk.NewPlugin(Name).
+        For(goSupport()).
         Version(Version).
         Priority(sdk.GeneratorFoundation).
         Provides(Capability).
@@ -711,7 +721,7 @@ registers the ensemble and reads the rendered file.
 into the language-agnostic `node` graph; downstream annotators
 and generators run unchanged.
 
-**Reference:** [`frontend/protobuf`](../../frontend/protobuf) (uses `protocompile` for real proto parsing)
+**Reference:** [`lang/protobuf/frontend`](../../lang/protobuf/frontend) (uses `protocompile` for real proto parsing)
 
 ```go
 package myfrontend
@@ -781,7 +791,7 @@ representative source-directory fixtures.
 **Pattern:** consume the emit graph and write rendered files
 through a `sink.Sink`. Exactly one backend per pipeline.
 
-**Reference:** [`backend/golang`](../../backend/golang)
+**Reference:** [`lang/golang/backend`](../../lang/golang/backend)
 
 ```go
 package mybackend

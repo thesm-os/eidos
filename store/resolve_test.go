@@ -6,7 +6,6 @@ package store_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
 
@@ -15,13 +14,13 @@ func namedRef(pkg, name string) *node.TypeRef {
 	return &node.TypeRef{TypeKind: node.TypeRefNamed, Package: pkg, Name: name}
 }
 
-// TestReader_Resolve pins the store-backed answer to the port
-// `lang/golang` declares.
+// TestReader_Resolve pins the store-backed resolution a generated
+// double depends on.
 //
-// Worth its own test rather than leaving it to the consumers: until
-// this method existed the port had no implementation outside a test
-// double, so nine exported functions in `lang/golang` had never run
-// against a real graph.
+// That this Reader satisfies the port `lang/golang` declares is
+// asserted from that side — see TestResolverPort_Store there. The
+// port is theirs, and testing it from here made the root module
+// depend on a language adapter that already depends on it.
 func TestReader_Resolve(t *testing.T) {
 	t.Parallel()
 
@@ -95,31 +94,6 @@ func TestReader_Resolve(t *testing.T) {
 		}
 		if got, ok := r.FileAt("absent.go"); ok || got != nil {
 			t.Errorf("FileAt of an unloaded path = (%v, %v), want (nil, false)", got, ok)
-		}
-	})
-
-	t.Run("satisfies the lang/golang port against a real graph", func(t *testing.T) {
-		t.Parallel()
-		// The assertion the port existed for and never had: a defined
-		// type resolving through the store to the builtin behind it, so
-		// the zero of `Weekday` is derivable at all. Passed as the
-		// interface to prove the structural match holds at a call site,
-		// not only at a var declaration.
-		r := readerOver(t, &node.Package{
-			Name: "x", Path: pkg,
-			Aliases: []*node.Alias{{
-				Name: "Weekday", Package: pkg,
-				Target: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"},
-			}},
-		})
-		var port golang.Resolver = r
-		got, ok := golang.ZeroRefFor(namedRef(pkg, "Weekday"), port)
-		if !ok || !got.OK() {
-			t.Fatalf("ZeroRefFor through the store resolver returned no answer")
-		}
-		if got.Ref == nil {
-			t.Errorf("the zero of a cross-package type must carry its ref, "+
-				"or the generated file references a type it never imports; got %+v", got)
 		}
 	})
 }

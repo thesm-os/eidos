@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -123,7 +122,7 @@ func (h *Handler) Slot(name string) *sdk.Slot {
 var _ sdk.SlotHost = (*Handler)(nil)
 
 // Plugin emits the handler every other plugin in the ensemble extends.
-type Plugin struct{ *sdkgo.Base }
+type Plugin struct{ *sdk.Base }
 
 // New returns a plugin instance.
 //
@@ -139,7 +138,8 @@ type Plugin struct{ *sdkgo.Base }
 // Provides publishes the label those contributors order against, and
 // nothing is required back — first in the graph depends on no one.
 func New() *Plugin {
-	return &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, sdk.Output{Suffix: GoSuffix}).
+	return &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorFoundation).
 		Provides(Capability).

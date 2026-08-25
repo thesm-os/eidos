@@ -6,7 +6,7 @@ package protogo
 import (
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/opt"
-	"go.thesmos.sh/eidos/frontend/protobuf"
+	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -91,8 +91,8 @@ func (*Plugin) Directives() []sdk.DirectiveSchema { return nil }
 func (*Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 	ps := ctx.Diag.For(Name)
 	for pkg := range ctx.Reader.Packages().All() {
-		marker, ok := protobuf.MetaFrontend.Get(pkg.Meta())
-		if !ok || marker != protobuf.FrontendName {
+		marker, ok := frontend.MetaFrontend.Get(pkg.Meta())
+		if !ok || marker != frontend.FrontendName {
 			continue
 		}
 		annotatePackage(pkg, ps)

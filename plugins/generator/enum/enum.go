@@ -18,7 +18,7 @@
 // against each output. Per-language behaviour — the file
 // suffix and tag pair, the embedded template tree — lives in
 // the sibling `enum_<lang>.go` adapter, which [New] hands to
-// the embedded [sdkgo.Base]. The base answers the declaration
+// the embedded [sdk.Base]. The base answers the declaration
 // methods for Go and reports *not provided* for every other
 // language, so a second target language ships a
 // `templates/<lang>/...` tree, an `enum_<lang>.go` adapter,
@@ -73,7 +73,6 @@ import (
 
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -158,7 +157,7 @@ type Options struct {
 // through [New] so the embedded [sdk.Holder] binds to the
 // options field.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -184,7 +183,8 @@ type Plugin struct {
 // carries — so there is nothing here for a `.tmpl` to call
 // under this plugin's name prefix.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplatesFS, GoOutputs()...).
+	p := &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorFoundation).
 		Provides(Capability).
@@ -290,7 +290,7 @@ type API struct {
 	// FallbackVerb is the printf verb that renders a value of
 	// [API.FallbackConv] faithfully.
 	//
-	// Paired with FallbackConv by [golang.EnumFallback] rather
+	// Paired with FallbackConv by [sdk.EnumFallback] rather
 	// than derived beside it, because the two drift: `%d`
 	// against a set declared over `float64` renders
 	// `%!d(float64=0.5)`, and `go vet` reports it in the

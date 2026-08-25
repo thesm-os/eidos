@@ -27,7 +27,6 @@ import (
 	"errors"
 
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier surfaced through
@@ -93,11 +92,11 @@ type Options struct {
 }
 
 // Plugin is the repository-pattern generator. The zero value is
-// unusable — go through [New] so the embedded [sdkgo.Base] carries
+// unusable — go through [New] so the embedded [sdk.Base] carries
 // the plugin's declarations and the embedded [sdk.Holder] binds to
 // the plugin's options field.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -109,12 +108,12 @@ type Plugin struct {
 // The single declared [sdk.Output] carries [FilenameSuffix] and
 // nothing else, because repogen retains no filename control: the
 // routing layer composes the rest. Only Go is declared, so
-// [sdkgo.Base.Outputs] answers nil for any other backend and Layout
+// [sdk.Base.Outputs] answers nil for any other language and Layout
 // reports a missing provider rather than composing a Go suffix that
 // would not match what was rendered. Another language joins the set
 // when matching templates and its own output declarations land.
 //
-// [sdkgo.Builder.BuiltinTemplates] rather than a template tree: every
+// [sdk.LanguageSupport.Builtin] rather than a template tree: every
 // decl this plugin emits is an interface, a struct or a method, all
 // of which the backend already renders from its own kind templates.
 // The plugin defines no [sdk.Kind] of its own, so a tree would hold
@@ -131,13 +130,12 @@ type Plugin struct {
 // declares no Requires of its own, which is why the bucket rather
 // than a capability is what orders it.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewPlugin(Name).
-		Outputs(sdk.Output{Suffix: FilenameSuffix}).
-		BuiltinTemplates().
+	p := &Plugin{Base: sdk.NewPlugin(Name).
 		Version(Version).
 		Priority(sdk.GeneratorFoundation).
 		Provides(Capability).
 		Directives(directives()...).
+		For(goSupport()).
 		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p

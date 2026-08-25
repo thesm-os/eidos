@@ -9,9 +9,9 @@
 name: eidos
 
 # Module set discovered via go.work — ergon's auto-detection
-# covers the ten-module split (root + backend/golang +
+# covers the ten-module split (root + lang/golang/{backend,frontend} +
 # bridge/protogo + cli + cmd/eidos-reference + eidostest +
-# frontend/{golang,protobuf} + plugins + reference) without
+# lang/protobuf/frontend + plugins + reference) without
 # hand-listing.
 modules: []
 
@@ -138,11 +138,20 @@ checks:
 
   # coverage — `ergon check coverage`
   #
-  # One entry per workspace module, uniform targets. The numbers
-  # state the goal, not what each package happens to measure
-  # today: a module below target fails the gate and the failure
-  # names the functions responsible. Longest-prefix matching means
-  # one module entry covers every package beneath it.
+  # One entry per workspace module, spelled as a directory rather
+  # than a `./...` glob — the same form the mutation layers use,
+  # and matched the same way, by longest prefix. Naming every
+  # module is what stops `.` acting as a catch-all: a new module
+  # with no entry of its own would otherwise inherit the root's
+  # bar silently, which is how a gate goes missing.
+  #
+  # The numbers state the goal, not what each package happens to
+  # measure today: a module below target fails the gate and the
+  # failure names the functions responsible.
+  #
+  # cmd/eidos-reference is absent on purpose — see the exclude
+  # above. TestErgonCoverageLayers pins the set against go.work,
+  # so an unlisted module fails rather than passing unmeasured.
   #
   # Branch gating is on. `require_branch: true` turns each
   # module's gobco branch percentage into a hard failure, and
@@ -150,39 +159,35 @@ checks:
   # separate stage invocation.
   coverage:
     packages:
-      - path: "./..."
+      - path: "."
         line: 99
         branch: 95
         require_branch: true
-      - path: "./backend/golang/..."
-        line: 89
-        branch: 95
-        require_branch: true
-      - path: "./bridge/protogo/..."
+      - path: "./bridge/protogo"
         line: 100
         branch: 95
         require_branch: true
-      - path: "./cli/..."
+      - path: "./cli"
         line: 65
         branch: 95
         require_branch: true
-      - path: "./eidostest/..."
+      - path: "./eidostest"
         line: 89
         branch: 95
         require_branch: true
-      - path: "./frontend/golang/..."
-        line: 97
+      - path: "./lang/golang"
+        line: 95
         branch: 95
         require_branch: true
-      - path: "./frontend/protobuf/..."
+      - path: "./lang/protobuf"
         line: 81
         branch: 95
         require_branch: true
-      - path: "./plugins/..."
+      - path: "./plugins"
         line: 86
         branch: 95
         require_branch: true
-      - path: "./reference/..."
+      - path: "./reference"
         line: 91
         branch: 95
         require_branch: true
@@ -216,9 +221,6 @@ checks:
       - path: "."
         score: 99
         coverage: 99
-      - path: "./backend/golang"
-        score: 99
-        coverage: 99
       - path: "./bridge/protogo"
         score: 99
         coverage: 99
@@ -231,10 +233,10 @@ checks:
       - path: "./eidostest"
         score: 99
         coverage: 99
-      - path: "./frontend/golang"
+      - path: "./lang/golang"
         score: 99
         coverage: 99
-      - path: "./frontend/protobuf"
+      - path: "./lang/protobuf"
         score: 99
         coverage: 99
       - path: "./plugins"

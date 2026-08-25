@@ -148,15 +148,18 @@ linters:
         # a different contract: a detector may bind a language to
         # answer a language-specific question (streamconsumer reads
         # Go's iter.Seq), while nothing here has an equivalent reason.
-        # sdk/golang is excluded for the same reason — being the Go
-        # plugin base is its whole purpose.
+        # The lang tree is excluded wholesale: everything under it is
+        # a language adapter, so the rule it would be asked to obey is
+        # the one it exists to break. Excluding by that fact rather
+        # than by a list of paths is what keeps the rule correct when
+        # an adapter moves.
         #
-        # Tests are excluded deliberately. What this rule protects is
-        # the shipped dependency graph and the ability to swap the
-        # language adapter under an unchanged pipeline; a test pinning
-        # that the store satisfies `lang/golang`'s Resolver port
-        # threatens neither, and moving it elsewhere would separate
-        # the assertion from the implementation it constrains.
+        # Tests are covered too. The one that needed an exemption —
+        # the store pinning that it satisfies `lang/golang`'s Resolver
+        # port — now lives in lang/golang, asserted from the side that
+        # owns the port and already depends on the store. Testing it
+        # from here had made the root module require a language
+        # adapter that requires the root.
         infrastructure:
           list-mode: lax
           files:
@@ -169,8 +172,7 @@ linters:
             - "**/cache/**"
             - "**/sdk/**"
             - "!**/plugins/**"
-            - "!**/sdk/golang/**"
-            - "!**/*_test.go"
+            - "!**/lang/**"
           deny:
             - pkg: go.thesmos.sh/eidos/lang
               desc: "the pipeline and its services stay language-neutral; language conventions belong to the adapter that owns them"

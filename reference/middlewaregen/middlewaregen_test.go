@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
+	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
 	"go.thesmos.sh/eidos/reference/authgen"
 	"go.thesmos.sh/eidos/reference/metricgen"
 	"go.thesmos.sh/eidos/reference/middlewaregen"

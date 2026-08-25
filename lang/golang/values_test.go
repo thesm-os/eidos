@@ -8,6 +8,7 @@ import (
 
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
+	"go.thesmos.sh/eidos/store"
 )
 
 // mapResolver answers from a fixed table, standing in for the
@@ -405,6 +406,71 @@ func TestValuesEdges(t *testing.T) {
 		got := golang.ParseTag(`json:"a\"b" db:"c"`)
 		if got["db"] != "c" {
 			t.Fatalf("ParseTag = %v, want the second entry after an escape", got)
+		}
+	})
+}
+
+// TestResolverPort_Store pins that the store's Reader satisfies the
+// [golang.Resolver] port, against a real graph rather than a double.
+//
+// The assertion lives here rather than beside the Reader because the
+// port is this package's: asserting it from the store made the root
+// module depend on a language adapter that already depends on it,
+// and a module cycle is a poor way to say "these two agree". This
+// direction is the one that already existed.
+//
+// Worth its own test at all because until Reader.Resolve landed the
+// port had no implementation outside a test double, so the exported
+// functions taking one had never run against a loaded package.
+func TestResolverPort_Store(t *testing.T) {
+	t.Parallel()
+
+	const pkg = "example.com/x"
+	namedRef := func(name string) *node.TypeRef {
+		return &node.TypeRef{TypeKind: node.TypeRefNamed, Package: pkg, Name: name}
+	}
+	readerOver := func(t *testing.T, p *node.Package) *store.Reader {
+		t.Helper()
+		s := store.New()
+		if err := s.Nodes().AddPackage(p); err != nil {
+			t.Fatalf("AddPackage: %v", err)
+		}
+		return store.NewReader(s)
+	}
+
+	t.Run("a defined type resolves to the builtin behind it", func(t *testing.T) {
+		t.Parallel()
+		// The assertion the port existed for: the zero of a
+		// cross-package defined type is derivable at all. Passed as
+		// the interface so the structural match is proven at a call
+		// site, not only at a var declaration.
+		r := readerOver(t, &node.Package{
+			Name: "x", Path: pkg,
+			Aliases: []*node.Alias{{
+				Name: "Weekday", Package: pkg,
+				Target: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "int"},
+			}},
+		})
+		var port golang.Resolver = r
+		got, ok := golang.ZeroRefFor(namedRef("Weekday"), port)
+		if !ok || !got.OK() {
+			t.Fatalf("ZeroRefFor through the store resolver returned no answer")
+		}
+		if got.Ref == nil {
+			t.Errorf("the zero of a cross-package type must carry its ref, "+
+				"or the generated file references a type it never imports; got %+v", got)
+		}
+	})
+
+	t.Run("a type the run never loaded reports not found", func(t *testing.T) {
+		t.Parallel()
+		// The refusal half of the port's contract: a narrow run has no
+		// declaration for a cross-package name, and a caller acts on
+		// that by omitting a check rather than writing one against a
+		// type it cannot see.
+		var port golang.Resolver = readerOver(t, &node.Package{Name: "x", Path: pkg})
+		if got, ok := port.Resolve(namedRef("Absent")); ok || got != nil {
+			t.Errorf("Resolve of an unloaded type = (%v, %v), want (nil, false)", got, ok)
 		}
 	})
 }

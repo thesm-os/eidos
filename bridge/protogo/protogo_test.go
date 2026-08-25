@@ -10,7 +10,7 @@ import (
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
-	"go.thesmos.sh/eidos/frontend/protobuf"
+	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/store"
 )
@@ -79,7 +79,7 @@ func TestConformance(t *testing.T) {
 func protoStore(t *testing.T, build func(*storefixture.Builder)) *store.Store {
 	t.Helper()
 	b := storefixture.New().Package("pb", "example.com/pb")
-	protobuf.MetaFrontend.Set(b.PackageNode().EnsureMeta(), protobuf.FrontendName, "test")
+	frontend.MetaFrontend.Set(b.PackageNode().EnsureMeta(), frontend.FrontendName, "test")
 	if build != nil {
 		build(b)
 	}
@@ -151,7 +151,7 @@ func TestAnnotate_WellKnownTypes(t *testing.T) {
 			b.Interface("Clock", func(i *storefixture.InterfaceBuilder) {
 				i.Method("Now", func(m *storefixture.MethodBuilder) {
 					ref := storefixture.Named("Timestamp")
-					protobuf.MetaWellKnown.Set(ref.EnsureMeta(), "Timestamp", "test")
+					frontend.MetaWellKnown.Set(ref.EnsureMeta(), "Timestamp", "test")
 					m.Return(ref)
 				})
 			})

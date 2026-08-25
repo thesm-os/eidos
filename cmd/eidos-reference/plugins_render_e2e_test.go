@@ -6,9 +6,9 @@ package main
 import (
 	"testing"
 
-	backendgolang "go.thesmos.sh/eidos/backend/golang"
 	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/storefixture"
+	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/plugins/generator/sentinel"
 )

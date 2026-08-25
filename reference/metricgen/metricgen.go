@@ -10,7 +10,6 @@ import (
 	"go.thesmos.sh/eidos/reference/authgen"
 	"go.thesmos.sh/eidos/reference/middlewaregen"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -61,7 +60,7 @@ func (*Entry) Kind() sdk.Kind { return Kind }
 // Plugin contributes one metrics entry into every middleware chain.
 //
 // Ordered after authgen, and renders through its own template.
-type Plugin struct{ *sdkgo.Base }
+type Plugin struct{ *sdk.Base }
 
 // New returns a plugin instance.
 //
@@ -74,8 +73,8 @@ type Plugin struct{ *sdkgo.Base }
 // contributor in the topo-sort. Order inside a slot is declared, never
 // arranged by appending last.
 func New() *Plugin {
-	return &Plugin{Base: sdkgo.NewPlugin(Name).
-		Templates(goTemplates).
+	return &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorComposition).
 		Provides(Capability).

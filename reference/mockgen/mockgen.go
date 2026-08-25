@@ -47,7 +47,6 @@ import (
 	refconv "go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier surfaced through
@@ -96,7 +95,7 @@ const TestPackageSuffix = "_test"
 // consumer targeting another backend language gets no output set at
 // all and the Layout phase surfaces a missing-FilenameProvider error
 // rather than a Go suffix that would not match the rendered output.
-// [sdkgo.Base] applies that language gate; the set is exported so a
+// [sdk.Base] applies that language gate; the set is exported so a
 // test or a downstream plugin can name the file this one owns.
 func GoOutputs() []sdk.Output {
 	return []sdk.Output{{Suffix: FilenameSuffix}}
@@ -120,7 +119,7 @@ type Options struct {
 // unusable — go through [New] so the embedded holder binds to the
 // plugin's options field.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -129,7 +128,7 @@ type Plugin struct {
 // The pipeline overlays caller-supplied option values via
 // [Plugin.SetOptions] (promoted from [sdk.Holder]) at Build time.
 //
-// [sdkgo.Builder.BuiltinTemplates] rather than a template tree:
+// [sdk.LanguageSupport.Builtin] rather than a template tree:
 // every decl this plugin emits is a struct, a field or a method, all
 // of which the backend already renders from its own kind templates.
 // The plugin defines no [sdk.Kind] of its own, so a tree would hold
@@ -146,14 +145,13 @@ type Plugin struct {
 // so that declaration carries documentary intent rather than
 // ordering force.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewPlugin(Name).
-		Outputs(GoOutputs()...).
-		BuiltinTemplates().
+	p := &Plugin{Base: sdk.NewPlugin(Name).
 		Version(Version).
 		Priority(sdk.GeneratorComposition).
 		Provides(Capability).
 		Requires(repogen.Capability).
 		Directives(directives()...).
+		For(goSupport()).
 		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
@@ -430,7 +428,7 @@ func (p *Plugin) emitForEmitInterface(pkg *sdk.PackageBuilder, i *sdk.EmitInterf
 
 // emitForSourceInterface emits a Mock struct for a source-side
 // interface, lifting its node-layer types into emit refs through
-// [golang.FromNode] so the generated mock parses against the same
+// [sdk.FromNode] so the generated mock parses against the same
 // signatures the source declares. ifaceRef is the reference the
 // emitted mock uses for the source interface — the plugin always
 // passes [sdk.External]; the renderer qualifies references back
@@ -560,7 +558,7 @@ type emitTypeParamSpec struct {
 
 // emitTypeParamsFromNode lifts a [sdk.TypeParam] slice into the
 // emitTypeParamSpec slice the mock builder consumes. Constraint
-// conversion runs through [golang.ConstraintFromNode] so the
+// conversion runs through [sdk.ConstraintFromNode] so the
 // any-constraint shape collapses to nil for round-tripping through
 // the renderer's IsAny path.
 func emitTypeParamsFromNode(params []*sdk.TypeParam) []emitTypeParamSpec {

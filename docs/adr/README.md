@@ -16,6 +16,8 @@ evidence of what was true at the time.
 | [0004](0004-compose-output-through-slots.md) | Compose generated output through slots, not inheritance | Accepted |
 | [0005](0005-own-templates-per-backend-and-plugin.md) | Own templates per backend and per plugin | Accepted |
 | [0006](0006-one-backend-per-pipeline-run.md) | Target one backend per pipeline run | Accepted |
+| [0007](0007-group-language-support-by-language.md) | Group language support by language, one module apiece | Accepted |
+| [0008](0008-map-typescript-interfaces-to-node-struct.md) | Map TypeScript interfaces to node.Struct | Proposed |
 
 ## Writing one
 

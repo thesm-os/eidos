@@ -8,7 +8,7 @@ import (
 	"go.thesmos.sh/eidos/core/meta"
 	"go.thesmos.sh/eidos/core/naming"
 	"go.thesmos.sh/eidos/core/position"
-	"go.thesmos.sh/eidos/frontend/protobuf"
+	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/node"
 )
 
@@ -74,7 +74,7 @@ func stampFieldType(f *node.Field) {
 	if inner == "" {
 		return
 	}
-	if optional, _ := protobuf.MetaFieldOptional.Get(f.Meta()); optional {
+	if optional, _ := frontend.MetaFieldOptional.Get(f.Meta()); optional {
 		inner = "*" + inner
 	}
 	MetaGoType.Set(f.Type.EnsureMeta(), inner, Name)
@@ -106,7 +106,7 @@ func stampTypeRef(r *node.TypeRef) {
 // the host file's ImportSet without parsing the rendered type
 // string.
 func stampWellKnownImport(r *node.TypeRef) {
-	wk, ok := protobuf.MetaWellKnown.Get(r.Meta())
+	wk, ok := frontend.MetaWellKnown.Get(r.Meta())
 	if !ok {
 		return
 	}
@@ -145,7 +145,7 @@ func composeGoType(r *node.TypeRef) string {
 	if scalar := scalarGoType(r.Name); scalar != "" {
 		return scalar
 	}
-	if wellKnown, ok := protobuf.MetaWellKnown.Get(r.Meta()); ok {
+	if wellKnown, ok := frontend.MetaWellKnown.Get(r.Meta()); ok {
 		if got := wellKnownGoType(wellKnown); got != "" {
 			return got
 		}
@@ -175,7 +175,7 @@ func composeGoType(r *node.TypeRef) string {
 // positioned diag.Warn through ps so users see why their
 // rendered Go output didn't pick up cross-package imports.
 func stampPackageMeta(pkg *node.Package, ps *diag.PluginSink) {
-	goPackageOption := meta.EnsureKey(protobuf.MetaOptionPrefix+"go_package", meta.StringParser)
+	goPackageOption := meta.EnsureKey(frontend.MetaOptionPrefix+"go_package", meta.StringParser)
 	rawOption, optionPresent := goPackageOption.Get(pkg.Meta())
 	if !optionPresent && ps != nil {
 		ps.Warnf(

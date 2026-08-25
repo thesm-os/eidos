@@ -87,7 +87,7 @@ is worse than the override being available.
 ### Negative
 
 - A shared funcmap is a shared namespace. Two plugins registering the
-  same function name collide, which is why `sdk/golang` composes a
+  same function name collide, which is why `lang/golang/sdk` composes a
   per-plugin prefix — a mitigation, not a fix, since a plugin
   registering directly can still collide.
 - An override resolved by capability topology means the winning

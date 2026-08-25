@@ -37,7 +37,6 @@ import (
 	"embed"
 
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -122,7 +121,7 @@ type Options struct {
 // Plugin is the registry-gen generator. Go through [New] so the
 // embedded [sdk.Holder] binds to the plugin's options field.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -149,7 +148,8 @@ type Plugin struct {
 // that does the same — a Build-time funcmap collision on a helper
 // neither of them wrote.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplates, sdk.Output{Suffix: FilenameSuffix}).
+	p := &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorCrossCutting).
 		Provides(Capability).

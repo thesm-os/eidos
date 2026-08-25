@@ -12,85 +12,82 @@ import (
 	"go.thesmos.sh/eidos/node"
 )
 
-// The template-facing surface, and why it is two bundles rather
-// than one.
+// The template-facing surface, and who registers it.
 //
-// [FuncMap] is the canonical set every Go backend merges once. It
-// cannot grow without bound: the backend rejects two plugins
-// registering the same extension name outright, so a name added
-// here is a name no plugin may ever contribute, and a plugin that
-// contributed one before it existed stops building.
+// Every bundle here is merged once, by the Go backend, into the
+// overrideable half of its funcmap. A plugin registers none of them
+// and its templates call them anyway; a plugin that wants a helper
+// of its own registers that one, and one that wants to replace a
+// name here supplies it through TemplateOverrides.
 //
-// [SigFuncMap] is opt-in and prefixed for that reason. A plugin
-// rendering signatures asks for the bundle under its own prefix,
-// two plugins can both have it, and the helpers themselves are
-// shared in Go — which is the coupling that survives a rename.
+// [FuncMap] is the canonical subset. It cannot grow without bound:
+// the backend rejects two plugins registering the same extension
+// name, so a name added here is a name no plugin may contribute, and
+// a plugin that contributed one before it existed stops building.
+//
+// An earlier arrangement handed every plugin its own copy of the
+// optional bundles, under a name derived from the plugin. It meant a
+// template called a helper by a name no declaration contained, and
+// the arrangement existed only because two plugins wanting one
+// helper would otherwise register it twice. Registering once, here,
+// answers that without the rename.
 
-// SigFuncMap returns the signature-rendering helpers under the
-// given prefix, for a plugin to contribute through its own
-// TemplateFuncs implementation.
+// SigFuncMap returns the signature-rendering helpers.
 //
-//	{{ eidosArgs .Sig }}          -> ctx, id
-//	{{ eidosCallFields .Sig }}    -> Ctx: ctx, ID: id
-//	{{ eidosFails .Sig }}         -> _, err
-//
-// Prefixed rather than shared under one name because the backend
-// rejects a duplicate extension registration at Build time: an
-// unprefixed bundle would fail every run in which two plugins
-// wanted it, rather than one output. An empty prefix is accepted
-// for a consumer that has confirmed it is the only claimant.
+//	{{ args .Sig }}          -> ctx, id
+//	{{ callFields .Sig }}    -> Ctx: ctx, ID: id
+//	{{ fails .Sig }}         -> _, err
 //
 // Every entry takes a [Sig]. A template passing a hand-built value
 // is reconstructing the field, local and error-slot conventions the
 // projection owns, which is the duplication this removes.
-func SigFuncMap(prefix string) template.FuncMap {
+func SigFuncMap() template.FuncMap {
 	return template.FuncMap{
-		prefix + "args":        Args,
-		prefix + "paramNames":  ParamNames,
-		prefix + "idents":      Idents,
-		prefix + "identArgs":   IdentArgs,
-		prefix + "blanks":      Blanks,
-		prefix + "callFields":  CallFields,
-		prefix + "locals":      Locals,
-		prefix + "localFields": LocalFields,
-		prefix + "identFields": IdentFields,
-		prefix + "namedFields": NamedFields,
-		prefix + "reads":       Reads,
-		prefix + "fails":       Fails,
+		"args":        Args,
+		"paramNames":  ParamNames,
+		"idents":      Idents,
+		"identArgs":   IdentArgs,
+		"blanks":      Blanks,
+		"callFields":  CallFields,
+		"locals":      Locals,
+		"localFields": LocalFields,
+		"identFields": IdentFields,
+		"namedFields": NamedFields,
+		"reads":       Reads,
+		"fails":       Fails,
 	}
 }
 
-// QueryFuncMap returns the type and signature predicates under the
-// given prefix.
+// QueryFuncMap returns the type and signature predicates.
 //
 // Separate from [SigFuncMap] because the two answer different
-// questions and a template usually wants one of them: a branch on a
-// type's shape needs no rendering helpers, and a rendered argument
-// list needs no predicates. Contributing only what a template uses
-// keeps the funcmap a plugin registers small enough to read.
-func QueryFuncMap(prefix string) template.FuncMap {
+// questions: a branch on a type's shape needs no rendering helpers,
+// and a rendered argument list needs no predicates. The split is for
+// a reader of this file — the backend merges both — and it is what
+// lets a bundle be described in one sentence.
+func QueryFuncMap() template.FuncMap {
 	return template.FuncMap{
-		prefix + "isError":     IsError,
-		prefix + "isContext":   IsContext,
-		prefix + "isBool":      IsBool,
-		prefix + "isString":    IsString,
-		prefix + "isNumeric":   IsNumeric,
-		prefix + "isInteger":   IsInteger,
-		prefix + "isAny":       IsAny,
-		prefix + "nilable":     Nilable,
-		prefix + "keyable":     Keyable,
-		prefix + "pointerElem": PointerElem,
-		prefix + "sliceElem":   SliceElem,
-		prefix + "mapKey":      MapKey,
-		prefix + "mapValue":    MapValue,
-		prefix + "deref":       Deref,
-		prefix + "qname":       QName,
-		prefix + "display":     Display,
-		prefix + "localName":   LocalName,
-		prefix + "zeroLiteral": TemplateZeroLiteral,
-		prefix + "formatVerb":  FormatVerb,
-		prefix + "quote":       Quote,
-		prefix + "sequenceOf":  SequenceOf,
+		"isError":     IsError,
+		"isContext":   IsContext,
+		"isBool":      IsBool,
+		"isString":    IsString,
+		"isNumeric":   IsNumeric,
+		"isInteger":   IsInteger,
+		"isAny":       IsAny,
+		"nilable":     Nilable,
+		"keyable":     Keyable,
+		"pointerElem": PointerElem,
+		"sliceElem":   SliceElem,
+		"mapKey":      MapKey,
+		"mapValue":    MapValue,
+		"deref":       Deref,
+		"qname":       QName,
+		"display":     Display,
+		"localName":   LocalName,
+		"zeroLiteral": TemplateZeroLiteral,
+		"formatVerb":  FormatVerb,
+		"quote":       Quote,
+		"sequenceOf":  SequenceOf,
 	}
 }
 
@@ -99,10 +96,10 @@ func QueryFuncMap(prefix string) template.FuncMap {
 //
 // text/template rejects the `(string, bool)` signature at
 // registration. The flag is dropped rather than travelling as an
-// error because there is no failure here: a name carrying no prefix
-// is returned whole, which is exactly what a template interpolating
-// a subject wants. A caller that needs to *distinguish* the two
-// branches asks [IsSentinelName], which a template can also call.
+// error because there is no failure here: a name that does not
+// follow the sentinel convention has no subject, and the empty
+// string is the honest answer. Compare [TemplateZeroLiteral], where
+// the absent answer is a defect the render must not paper over.
 func TemplateSentinelSubject(ident string) string {
 	subject, _ := SentinelSubject(ident)
 	return subject
@@ -135,54 +132,53 @@ func TemplateZeroLiteral(t *node.TypeRef) (string, error) {
 // the graph resolves it through [ZeroLiteralFor]; a template cannot.
 var ErrNoZeroValue = errors.New("golang: no derivable zero value")
 
-// ConventionFuncMap returns the Go naming conventions under the
-// given prefix.
+// ConventionFuncMap returns the Go naming conventions.
 //
 // Rendering a name is the one thing a template does more often than
 // rendering a type, and getting it wrong is silent: a test function
 // whose name does not open with an upper-case rune after `Test`
 // never runs, and the suite reports one fewer case than the file
 // declares.
-func ConventionFuncMap(prefix string) template.FuncMap {
+func ConventionFuncMap() template.FuncMap {
 	return template.FuncMap{
-		prefix + "testFuncName":      TestFuncName,
-		prefix + "benchmarkFuncName": BenchmarkFuncName,
-		prefix + "exampleFuncName":   ExampleFuncName,
-		prefix + "constructorName":   ConstructorName,
-		prefix + "getterName":        GetterName,
-		prefix + "setterName":        SetterName,
-		prefix + "withName":          WithName,
-		prefix + "sentinelName":      SentinelName,
-		prefix + "sentinelSubject":   TemplateSentinelSubject,
-		prefix + "parseFuncName":     ParseFuncName,
-		prefix + "doc":               Doc,
-		prefix + "deprecatedDoc":     DeprecatedDoc,
+		"testFuncName":      TestFuncName,
+		"benchmarkFuncName": BenchmarkFuncName,
+		"exampleFuncName":   ExampleFuncName,
+		"constructorName":   ConstructorName,
+		"getterName":        GetterName,
+		"setterName":        SetterName,
+		"withName":          WithName,
+		"sentinelName":      SentinelName,
+		"sentinelSubject":   TemplateSentinelSubject,
+		"parseFuncName":     ParseFuncName,
+		"doc":               Doc,
+		"deprecatedDoc":     DeprecatedDoc,
 	}
 }
 
-// AllFuncMap returns every optional bundle under one prefix.
+// AllFuncMap returns every optional bundle.
 //
 // For a plugin whose templates span the lot. Merged here rather
 // than by the caller so a bundle added later reaches every consumer
 // that asked for everything, instead of only those that remember to
 // add the new call.
-func AllFuncMap(prefix string) template.FuncMap {
+func AllFuncMap() template.FuncMap {
 	out := template.FuncMap{}
 	for _, bundle := range []template.FuncMap{
-		SigFuncMap(prefix), QueryFuncMap(prefix), ConventionFuncMap(prefix),
-		EnumFuncMap(prefix), ShapeFuncMap(prefix), EmbedFuncMap(prefix),
-		GenericsFuncMap(prefix),
+		SigFuncMap(), QueryFuncMap(), ConventionFuncMap(),
+		EnumFuncMap(), ShapeFuncMap(), EmbedFuncMap(),
+		GenericsFuncMap(),
 	} {
 		maps.Copy(out, bundle)
 	}
 	return out
 }
 
-// EnumFuncMap returns the enum vocabulary under the given prefix.
+// EnumFuncMap returns the enum vocabulary.
 //
-//	{{ eidosVariantText .Enum .Variant }} -> us-east
-//	{{ eidosZeroVariant .Enum }}          -> the variant at zero, or nil
-//	{{ eidosOutOfRange .Enum }}           -> 4
+//	{{ variantText .Enum .Variant }} -> us-east
+//	{{ zeroVariant .Enum }}          -> the variant at zero, or nil
+//	{{ outOfRange .Enum }}           -> 4
 //
 // The bundle whose absence cost the most. An enum generator reaches
 // for six of these, and without a bundle each one becomes a Go
@@ -191,105 +187,102 @@ func AllFuncMap(prefix string) template.FuncMap {
 // already decided. One that paired the underlying type with a format
 // verb by hand, and drifted from [FormatVerb], printed
 // `%!d(float64=0.5)` in a consumer's repository.
-func EnumFuncMap(prefix string) template.FuncMap {
+func EnumFuncMap() template.FuncMap {
 	return template.FuncMap{
-		prefix + "enumForm":       EnumFormOf,
-		prefix + "enumUnderlying": EnumUnderlying,
-		prefix + "variantText":    VariantText,
-		prefix + "enumTexts":      EnumTexts,
-		prefix + "enumTextLit":    EnumTextLiteral,
-		prefix + "duplicateText":  TemplateDuplicateText,
-		prefix + "zeroVariant":    TemplateZeroVariant,
-		prefix + "outOfRange":     TemplateOutOfRange,
-		prefix + "outOfRangeText": TemplateOutOfRangeText,
-		prefix + "enumMethods":    EnumMethods,
-		prefix + "enumDeclares":   EnumDeclares,
-		prefix + "isIotaDerived":  IsIotaDerived,
+		"enumForm":       EnumFormOf,
+		"enumUnderlying": EnumUnderlying,
+		"variantText":    VariantText,
+		"enumTexts":      EnumTexts,
+		"enumTextLit":    EnumTextLiteral,
+		"duplicateText":  TemplateDuplicateText,
+		"zeroVariant":    TemplateZeroVariant,
+		"outOfRange":     TemplateOutOfRange,
+		"outOfRangeText": TemplateOutOfRangeText,
+		"enumMethods":    EnumMethods,
+		"enumDeclares":   EnumDeclares,
+		"isIotaDerived":  IsIotaDerived,
 	}
 }
 
-// ShapeFuncMap returns the standard-library shape matchers under the
-// given prefix.
+// ShapeFuncMap returns the standard-library shape matchers.
 //
-//	{{ if eidosImplementsStringer .Type }} … {{ end }}
-//	{{ if eidosIsErrorMethod .Method }} … {{ end }}
+//	{{ if implementsStringer .Type }} … {{ end }}
+//	{{ if isErrorMethod .Method }} … {{ end }}
 //
 // Thirty-five predicates over a method or a method set, none of them
 // previously reachable. A template branching on whether a type
 // already declares `String` is the case: without this the plugin
 // answers in Go and parks a bool on an emit value, which is a field
 // carrying a question rather than an answer.
-func ShapeFuncMap(prefix string) template.FuncMap {
+func ShapeFuncMap() template.FuncMap {
 	return template.FuncMap{
-		prefix + "isErrorMethod":       IsErrorMethod,
-		prefix + "isUnwrapMethod":      IsUnwrapMethod,
-		prefix + "isIsMethod":          IsIsMethod,
-		prefix + "isAsMethod":          IsAsMethod,
-		prefix + "isStringMethod":      IsStringMethod,
-		prefix + "isWriteMethod":       IsWriteMethod,
-		prefix + "isReadMethod":        IsReadMethod,
-		prefix + "isCloseMethod":       IsCloseMethod,
-		prefix + "isScanMethod":        IsScanMethod,
-		prefix + "isValuerMethod":      IsValuerMethod,
-		prefix + "isEqualMethod":       IsEqualMethod,
-		prefix + "isCompareMethod":     IsCompareMethod,
-		prefix + "isCloneMethod":       IsCloneMethod,
-		prefix + "isResetMethod":       IsResetMethod,
-		prefix + "isValidateMethod":    IsValidateMethod,
-		prefix + "isLenMethod":         IsLenMethod,
-		prefix + "isLessMethod":        IsLessMethod,
-		prefix + "isSwapMethod":        IsSwapMethod,
-		prefix + "implementsError":     ImplementsError,
-		prefix + "implementsStringer":  ImplementsStringer,
-		prefix + "implementsWriter":    ImplementsWriter,
-		prefix + "implementsReader":    ImplementsReader,
-		prefix + "implementsSorter":    ImplementsSorter,
-		prefix + "isMarshalBinary":     IsMarshalBinary,
-		prefix + "isUnmarshalBinary":   IsUnmarshalBinary,
-		prefix + "isMarshalText":       IsMarshalText,
-		prefix + "isUnmarshalText":     IsUnmarshalText,
-		prefix + "isMarshalJSON":       IsMarshalJSON,
-		prefix + "isUnmarshalJSON":     IsUnmarshalJSON,
-		prefix + "isGobEncode":         IsGobEncode,
-		prefix + "isGobDecode":         IsGobDecode,
-		prefix + "codecs":              Codecs,
-		prefix + "isByteSliceAny":      IsByteSliceAny,
-		prefix + "recommendedReceiver": RecommendedReceiver,
-		prefix + "sameSignature":       SameSignature,
+		"isErrorMethod":       IsErrorMethod,
+		"isUnwrapMethod":      IsUnwrapMethod,
+		"isIsMethod":          IsIsMethod,
+		"isAsMethod":          IsAsMethod,
+		"isStringMethod":      IsStringMethod,
+		"isWriteMethod":       IsWriteMethod,
+		"isReadMethod":        IsReadMethod,
+		"isCloseMethod":       IsCloseMethod,
+		"isScanMethod":        IsScanMethod,
+		"isValuerMethod":      IsValuerMethod,
+		"isEqualMethod":       IsEqualMethod,
+		"isCompareMethod":     IsCompareMethod,
+		"isCloneMethod":       IsCloneMethod,
+		"isResetMethod":       IsResetMethod,
+		"isValidateMethod":    IsValidateMethod,
+		"isLenMethod":         IsLenMethod,
+		"isLessMethod":        IsLessMethod,
+		"isSwapMethod":        IsSwapMethod,
+		"implementsError":     ImplementsError,
+		"implementsStringer":  ImplementsStringer,
+		"implementsWriter":    ImplementsWriter,
+		"implementsReader":    ImplementsReader,
+		"implementsSorter":    ImplementsSorter,
+		"isMarshalBinary":     IsMarshalBinary,
+		"isUnmarshalBinary":   IsUnmarshalBinary,
+		"isMarshalText":       IsMarshalText,
+		"isUnmarshalText":     IsUnmarshalText,
+		"isMarshalJSON":       IsMarshalJSON,
+		"isUnmarshalJSON":     IsUnmarshalJSON,
+		"isGobEncode":         IsGobEncode,
+		"isGobDecode":         IsGobDecode,
+		"codecs":              Codecs,
+		"isByteSliceAny":      IsByteSliceAny,
+		"recommendedReceiver": RecommendedReceiver,
+		"sameSignature":       SameSignature,
 	}
 }
 
-// EmbedFuncMap returns the embedding and satisfaction helpers under
-// the given prefix.
+// EmbedFuncMap returns the embedding and satisfaction helpers.
 //
-//	{{ range eidosPromotedFields .Struct nil }} … {{ end }}
+//	{{ range promotedFields .Struct nil }} … {{ end }}
 //
 // Every entry takes a [Resolver], which a template cannot construct —
 // it is passed the one the plugin was handed, or nil for the
 // first-level answer. That is why these are here rather than folded
 // into [QueryFuncMap]: the resolver argument is the thing a template
 // has to be given, and grouping them says so.
-func EmbedFuncMap(prefix string) template.FuncMap {
+func EmbedFuncMap() template.FuncMap {
 	return template.FuncMap{
-		prefix + "embedIdent":        TemplateEmbedIdent,
-		prefix + "embedTarget":       EmbedTarget,
-		prefix + "fieldSet":          TemplateFieldSet,
-		prefix + "promotedFields":    TemplatePromotedFields,
-		prefix + "exportedFieldSet":  TemplateExportedFieldSet,
-		prefix + "promotedMethods":   TemplatePromotedMethods,
-		prefix + "embedsType":        EmbedsType,
-		prefix + "underlyingOf":      UnderlyingOf,
-		prefix + "comparableDeep":    TemplateComparableDeep,
-		prefix + "satisfies":         TemplateSatisfies,
-		prefix + "receiverIsPointer": ReceiverIsPointerDecl,
+		"embedIdent":        TemplateEmbedIdent,
+		"embedTarget":       EmbedTarget,
+		"fieldSet":          TemplateFieldSet,
+		"promotedFields":    TemplatePromotedFields,
+		"exportedFieldSet":  TemplateExportedFieldSet,
+		"promotedMethods":   TemplatePromotedMethods,
+		"embedsType":        EmbedsType,
+		"underlyingOf":      UnderlyingOf,
+		"comparableDeep":    TemplateComparableDeep,
+		"satisfies":         TemplateSatisfies,
+		"receiverIsPointer": ReceiverIsPointerDecl,
 	}
 }
 
-// GenericsFuncMap returns the type-parameter and witness helpers
-// under the given prefix.
+// GenericsFuncMap returns the type-parameter and witness helpers.
 //
-//	{{ eidosTypeParamNames .TypeParams }} -> K, V
-//	{{ eidosWitnessUse .TypeParams }}     -> [string, int]
+//	{{ typeParamNames .TypeParams }} -> K, V
+//	{{ witnessUse .TypeParams }}     -> [string, int]
 //
 // A generic double's entry point is written at concrete types, and
 // choosing them is what [Witnesses] does. A template appending the
@@ -297,17 +290,17 @@ func EmbedFuncMap(prefix string) template.FuncMap {
 // plugin renders the bracket list in Go and hands over a string,
 // which is the one shape that cannot be checked against the type
 // parameters it was derived from.
-func GenericsFuncMap(prefix string) template.FuncMap {
+func GenericsFuncMap() template.FuncMap {
 	return template.FuncMap{
-		prefix + "typeParamsOf":   TypeParamsOf,
-		prefix + "typeParamDecls": TypeParamDecls,
-		prefix + "typeParamNames": TypeParamNames,
-		prefix + "typeParamRefs":  TypeParamRefs,
-		prefix + "selfRef":        SelfRef,
-		prefix + "witnesses":      Witnesses,
-		prefix + "witnessNames":   WitnessNames,
-		prefix + "witnessUse":     WitnessUse,
-		prefix + "isGeneric":      IsGeneric,
+		"typeParamsOf":   TypeParamsOf,
+		"typeParamDecls": TypeParamDecls,
+		"typeParamNames": TypeParamNames,
+		"typeParamRefs":  TypeParamRefs,
+		"selfRef":        SelfRef,
+		"witnesses":      Witnesses,
+		"witnessNames":   WitnessNames,
+		"witnessUse":     WitnessUse,
+		"isGeneric":      IsGeneric,
 	}
 }
 

@@ -487,7 +487,7 @@ designed for.
 > Runnable as `reference/middlewaregen` (the host) with
 > `reference/authgen`, `reference/metricgen` and
 > `reference/tracegen` (the contributors). The end-to-end
-> assertions live in `reference/middlewaregen/composition_test.go`.
+> assertions live in `reference/middlewaregen/middlewaregen_test.go`.
 
 Standard slots (`prebody`, `postbody`, `methods`, `fields`, …)
 live on the core emit kinds (`Method`, `Struct`, `Function`)

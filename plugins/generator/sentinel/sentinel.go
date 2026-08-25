@@ -64,7 +64,6 @@ import (
 
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -157,7 +156,7 @@ type Options struct{}
 // unusable; go through [New] so the embedded [sdk.Holder]
 // binds to the options field.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -183,7 +182,8 @@ type Plugin struct {
 // Go-convention helpers, all of which ride on the backend's
 // own funcmap surface.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewGenerator(Name, goTemplatesFS, GoOutputs()...).
+	p := &Plugin{Base: sdk.NewPlugin(Name).
+		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorCrossCutting).
 		Provides(Capability).

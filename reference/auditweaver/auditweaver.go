@@ -30,7 +30,6 @@ package auditweaver
 import (
 	"go.thesmos.sh/eidos/reference/debugweaver"
 	"go.thesmos.sh/eidos/sdk"
-	sdkgo "go.thesmos.sh/eidos/sdk/golang"
 )
 
 // Name is the plugin's stable identifier.
@@ -105,7 +104,7 @@ type Options struct {
 // unusable; go through [New] so the embedded holder binds to the
 // options field.
 type Plugin struct {
-	*sdkgo.Base
+	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
@@ -128,7 +127,7 @@ type Plugin struct {
 // contributor first, which is what puts the debug trace above the
 // audit record in the rendered prebody.
 func New() *Plugin {
-	p := &Plugin{Base: sdkgo.NewPlugin(Name).
+	p := &Plugin{Base: sdk.NewPlugin(Name).
 		Version(Version).
 		Priority(sdk.GeneratorCrossCutting).
 		Provides(Capability).

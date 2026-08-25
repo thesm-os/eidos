@@ -46,15 +46,19 @@ seven documents in that directory. In brief:
 
 ## Language layers
 
-Three packages carry `golang` in their path and they are not
-interchangeable — start with the first row if you are unsure which
-one you want.
+Everything eidos knows about a language lives under `lang/<lang>`, one
+module apiece. For Go that is four packages sharing a path, and they
+are not interchangeable — start with the first row if you are unsure
+which one you want.
 
 | Document | Answers |
 |---|---|
-| [lang/golang.md](lang/golang.md) | Go conventions every consumer shares — and which of the three packages you may import |
-| [frontend/golang.md](frontend/golang.md) | How Go source becomes the node graph, and every `go.*` key it stamps |
-| [backend/golang.md](backend/golang.md) | How the emit graph becomes Go files — templates, funcmap, envelope |
+| [lang/golang/README.md](lang/golang/README.md) | Go conventions every consumer shares — and which of the four packages you may import |
+| [lang/golang/frontend.md](lang/golang/frontend.md) | How Go source becomes the node graph, and every `go.*` key it stamps |
+| [lang/golang/backend.md](lang/golang/backend.md) | How the emit graph becomes Go files — templates, funcmap, envelope |
+
+`lang/protobuf` is the second language: a frontend and no backend,
+because proto is read and never written.
 
 ## Elsewhere in the repo
 

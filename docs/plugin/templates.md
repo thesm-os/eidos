@@ -104,27 +104,41 @@ with `ErrReservedTemplatePrefix`.
 
 ## Step 3: ship the template
 
-A Go generator does not answer the template methods itself. It hands
-its embedded tree to `sdkgo.NewGenerator`, and the base answers
-`Templates`, `TemplateFuncs` and `TemplateOverrides` for Go — and
-reports *not provided* for every other language, which is what makes
-Layout report a missing provider rather than composing Go-shaped
-filenames for a non-Go backend.
+A generator does not answer the template methods itself. It declares
+a `LanguageSupport` bundle per language it targets, and `sdk.Base`
+answers `Templates`, `TemplateFuncs` and `TemplateOverrides` from
+whichever bundle matches — reporting *not provided* for a language it
+never declared, which is what makes Layout report a missing provider
+rather than composing Go-shaped filenames for a non-Go backend.
+
+The plugin's core names no language. Its Go binding lives in a
+`_go.go` file beside the embedded tree:
 
 ```go
-//go:embed templates/golang/*.tmpl
-var goTemplates embed.FS
-
+// registrygen.go — the plugin, in any language
 func New() *Plugin {
-    return &Plugin{Base: sdkgo.NewGenerator(
-        Name, goTemplates, sdk.Output{Suffix: FilenameSuffix},
-    ).
+    return &Plugin{Base: sdk.NewPlugin(Name).
         Version(Version).
         Priority(sdk.GeneratorCrossCutting).
         Provides(Capability).
+        For(goSupport()).
         Build()}
 }
 ```
+
+```go
+// registrygen_go.go — everything Go about it
+//go:embed templates/golang/*.tmpl
+var goTemplates embed.FS
+
+func goSupport() (string, sdk.LanguageSupport) {
+    return sdkgo.Support(goTemplates, sdk.Output{Suffix: FilenameSuffix})
+}
+```
+
+Adding a second target language is a sibling `_rust.go`, a
+`templates/rust/` tree, and one more `For` call — not an edit to what
+the plugin *is*.
 
 The backend walks every plugin's tree for `*.tmpl` files, parses each,
 and adds the defined names to the rendering tree. A plugin may ship
@@ -254,35 +268,36 @@ extended / overridden through the other two methods on
 
 ## Funcmap extensions: `Funcs`
 
-Returns funcmap entries the plugin contributes. The backend
-merges every plugin's returned map at Build time; cross-plugin
-name collisions and collisions with a reserved canonical entry
-fail Build with `ErrTemplateFuncCollision`. Collisions with an
-overrideable entry are not caught — the extension wins, with no
-diagnostic — which is the second reason to prefix.
+Funcmap entries the plugin contributes, declared in its language
+bundle and registered under the names given. The backend merges every
+plugin's map at Build time; cross-plugin collisions and collisions
+with a reserved canonical entry fail Build with
+`ErrTemplateFuncCollision`. A collision with an overrideable entry is
+not caught — the extension wins, silently — so name a helper for what
+it does in your plugin's terms.
 
 ```go
-sdkgo.NewGenerator(Name, goTemplates, outputs...).
-    Funcs(template.FuncMap{
-        "myco_camelCase": camelCase,
-        "myco_snakeCase": snakeCase,
-    }).
-    Build()
+func goSupport() (string, sdk.LanguageSupport) {
+    lang, s := sdkgo.Support(goTemplates, GoOutputs()...)
+    s.Funcs = template.FuncMap{"defaultsExpr": GoDefaultsExpr}
+    return lang, s
+}
 ```
 
 **Register nothing unless the plugin owns a helper of its own.** The
-shared `lang/golang.FuncMap()` — `isExported`, `isByteSlice`,
-`selfType`, … — is already merged into the backend's
-overrideable bucket, so plugin templates call it without
-registering anything. Returning it from `TemplateFuncs` adds
-nothing and collides with the next plugin that does the same:
-`ErrTemplateFuncCollision`, on `selfType`, from a plugin that
-never wrote it. registrygen registers none, which is why its builder chain has no `Funcs` call at all.
+whole shared Go vocabulary — `isExported`, `selfType`,
+`promotedMethods`, the enum and shape bundles — is merged once into
+the backend's overrideable bucket, so plugin templates call it
+without registering anything. registrygen declares no `Funcs` at all,
+which is why its bundle is one line.
 
-**Convention**: prefix extension names with your plugin
-identifier (`myco_camelCase`, not `camelCase`) to keep
-cross-plugin collisions rare. Reserved names (the dispatch
-helpers above) are off-limits regardless.
+An earlier form gave every plugin its own copy of that vocabulary
+under a name derived from the plugin, so a template called
+`mygen_promotedMethods` — a name appearing in no declaration. That
+existed only because two plugins wanting one helper would otherwise
+register it twice. Registering once, in the backend, answers it
+without the rename, and a plugin that wants to *replace* one of those
+names uses `Overrides` below.
 
 ## Funcmap overrides: `Overrides`
 
@@ -332,11 +347,15 @@ fail with `ErrReservedFuncName`.
   `renderExpr` against the entity, never embed raw package
   paths.
 
-- **Bare funcmap names without a plugin prefix.** Cross-plugin
-  collisions happen the moment two plugins ship the same name.
-  Prefixing keeps the collision surface small and makes the
-  intent ("I am extending the funcmap with these specific
-  utilities") explicit.
+- **Re-registering a helper the backend already provides.** The
+  shared Go vocabulary is merged once; contributing it again is
+  `ErrTemplateFuncCollision` on a name your plugin never wrote.
+  Reach for `Overrides` when you mean to replace one.
+
+- **A generic funcmap name.** `render` or `format` collides with the
+  next plugin shipping the same idea. A helper named for what it does
+  in your plugin's terms — `defaultsExpr`, not `expr` — keeps the
+  collision surface small without mangling the name a template calls.
 
 - **Re-implementing rendering logic the canonical funcmap
   already provides.** `renderExpr`, `renderType`, `renderStmt`
