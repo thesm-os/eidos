@@ -16,10 +16,13 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Breaking
 
+- **`SourceRules.TypeParams` and `TypeArgs` take the parameter list, not a struct.** Five node kinds carry one and the rendering is identical for all five, so taking a struct answered for one and left every generator over interfaces reaching past the rules into a language package.
+- **The signature projection moved to `emit` as `SigInfo`, `SigParam` and `SigReturn`.** `golang.Sig`, `Param` and `Return` are aliases, so callers are unaffected — except `Sig.ReceiverIdent()`, which is now the field beside `Name` and `Params` rather than the type's one guarded accessor.
 - **`golang.SubstituteSig` takes the type parameters to bind against.** Go has no syntax for a method-level type parameter, so binding against the signature's own list was a guaranteed no-op for every interface method — the one case a generated double needs. Pass `s.TypeParams` for the old behaviour; pass the owner's to rewrite a method at its interface's witnesses.
 
 ### Added
 
+- **`sdk.SigRules`** is an optional rules interface answering `SigOf` and `IsConstraint`, so a generator that doubles a contract asks its declared rules for a signature rather than wrapping its own Source. Found by assertion, like `EnumRules` and `ErrorRules` ([#62](https://github.com/thesm-os/eidos/issues/62)).
 - **`golang.ReportMethodSet` and `golang.Consequence`** report every embed that contributed nothing to a resolved method set and say whether the result is usable, through a narrow `Reporter` port `ctx.Diag` already satisfies.
 - **`golang.UnexportedName`** lowers an identifier's leading rune, completing the pair `ExportedName` opened. Rune-aware, and distinct from `naming.Camel`, which converts the whole identifier and so does not round-trip.
 - **`+gen:witness T=int`** names the concrete type a generic parameter is instantiated at, so a declaration whose constraint no language can reason about still gets checks.
@@ -44,6 +47,7 @@ reasoning lives in the docblock of whatever the line names.
 - **A directive value can name a stdlib package** ([#58](https://github.com/thesm-os/eidos/issues/58)). The two notations were told apart by a slash before the last dot, which no single-segment path has; the import block decides now, with the path form as the fallback.
 - **A generic declaration's builder gets checks with bodies in them** ([#57](https://github.com/thesm-os/eidos/issues/57)). The file was emitted for having witnesses and every subtest then dropped for having type parameters, so it compiled, passed, and asserted nothing.
 - **The builder generator's checks compile for a member of any type** ([#54](https://github.com/thesm-os/eidos/issues/54)). Comparison goes through `github.com/google/go-cmp` against a sample bound at the member's type — **a project running this generator takes a go-cmp dependency**.
+- **The witness annotator stamps interfaces and aliases, not just structs** ([#61](https://github.com/thesm-os/eidos/issues/61)). Its schema admitted all three, so `+gen:witness` on a generic interface validated, stamped nothing, reported nothing, and left every check withheld — which is every witnessable declaration a generator that doubles a contract sees.
 - **`stubgen` and `mockgen` no longer emit a double short an embedded method.** Both reported the unresolved embed and generated anyway; the pipeline carries every phase to completion, so the backend rendered the short file to disk with a non-zero exit as the only sign.
 - **The Go assertion dialect emits source that parses whatever it is given.** `assertEqual` composed into an `if` header, so an operand carrying a composite literal produced a file the toolchain rejected before compiling it.
 

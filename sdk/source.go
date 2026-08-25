@@ -33,6 +33,26 @@ type EnumRules = plugin.EnumRules
 // [EnumRules].
 type ErrorRules = plugin.ErrorRules
 
+// SigRules re-exports [plugin.SigRules] — what a language answers
+// about a callable's signature, for a generator that renders one.
+// Optional and found by assertion, like [EnumRules] and [ErrorRules].
+type SigRules = plugin.SigRules
+
+// SigInfo re-exports [emit.SigInfo], the projection [SigRules.SigOf]
+// answers with.
+//
+// Carried under the emit prefix like every other output-model alias
+// here: a projection built against a source shape never renders, and
+// the two fail silently when confused.
+type SigInfo = emit.SigInfo
+
+// SigParam re-exports [emit.SigParam], one parameter of a [SigInfo].
+type SigParam = emit.SigParam
+
+// SigReturn re-exports [emit.SigReturn], one return slot of a
+// [SigInfo].
+type SigReturn = emit.SigReturn
+
 // EnumForm re-exports [emit.EnumForm] — where a variant's textual
 // form comes from.
 type EnumForm = emit.EnumForm

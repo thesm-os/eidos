@@ -181,11 +181,28 @@ func (Source) Settable(s *node.Struct) []emit.Member {
 	return out
 }
 
-// TypeParams lifts s's generic parameter list into the emit form.
-func (Source) TypeParams(s *node.Struct) []*emit.TypeParam { return TypeParams(s) }
+// TypeParams lifts a generic parameter list into the emit form.
+func (Source) TypeParams(params []*node.TypeParam) []*emit.TypeParam {
+	return TypeParamDecls(params)
+}
 
-// TypeArgs renders s's generic parameter list in use position.
-func (Source) TypeArgs(s *node.Struct) string { return TypeArgs(s) }
+// TypeArgs renders a generic parameter list in use position.
+func (Source) TypeArgs(params []*node.TypeParam) string { return TypeParamNames(params) }
+
+// SigOf lifts one method into the form a generator renders.
+//
+// The receiver identifier is named rather than left to default,
+// because naming it is what makes the collision guard run: the
+// identifier is made unique against the parameters, so an interface
+// declaring `Put(s Session) error` binds its receiver to something
+// else instead of declaring `s` twice in one signature.
+func (Source) SigOf(m *node.Method) *emit.SigInfo {
+	return SigOf(m, WithReceiverIdent(DefaultReceiverIdent))
+}
+
+// IsConstraint reports whether an interface declares a type set
+// rather than a method-set contract, from the frontend's own stamp.
+func (Source) IsConstraint(i *node.Interface) bool { return IsConstraintInterface(i) }
 
 // Witnesses returns one concrete type per parameter, or nil when any
 // carries a constraint that cannot be reasoned about.

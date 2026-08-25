@@ -707,8 +707,8 @@ func (p *Plugin) generatePackage(
 			CtorName:   ctor,
 			FromName:   rules.TypeName(ctor, p.word(lang, WordFrom, "")),
 			ValueRef:   sdk.NewExternal(s.Package, s.Name),
-			TypeParams: rules.TypeParams(s),
-			TypeArgs:   rules.TypeArgs(s),
+			TypeParams: rules.TypeParams(s.TypeParams),
+			TypeArgs:   rules.TypeArgs(s.TypeParams),
 			Fields:     fields,
 			Companion:  p.companionOf(ctx, rules, lang, s, funcs),
 		}

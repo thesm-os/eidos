@@ -92,6 +92,54 @@ type EnumRules interface {
 	EnumOf(e *node.Enum, constants []*node.Constant) emit.EnumInfo
 }
 
+// SigRules is what a language answers about a callable's signature.
+//
+// Optional, on the same terms as [EnumRules] and [ErrorRules]: a
+// language with no method-set contracts does not implement it, and a
+// generator asking finds out by asserting rather than by reading an
+// empty answer back.
+//
+//	sr, ok := rules.(sdk.SigRules)
+//
+// # Why it is not part of the required surface
+//
+// It is asked by one family of generators rather than by all of them.
+// A generator that doubles a contract — a stub, a mock, a conformance
+// harness, a benchmark over an interface — projects every method into
+// rendered form and asks the same three questions doing it. A
+// generator over structs asks none of them.
+//
+// Written per generator, that projection drifts: [emit.SigInfo]'s own
+// documentation records four independent implementations disagreeing
+// about it before it was centralised. This is the doorway that keeps
+// the count at one now that the callers are plugins whose cores name
+// no language — without it each wraps its own declared Source with a
+// near-identical projection, which is the same disagreement one layer
+// up.
+type SigRules interface {
+	// SigOf lifts one method into the form a generator renders: what
+	// a body calls each parameter, which recorded-call field each
+	// return maps to, which slot carries the error, and whether the
+	// source's return names survive.
+	//
+	// The receiver identifier is chosen against the parameter
+	// identifiers, so a method declaring `Put(s Session)` does not
+	// bind its receiver to the `s` already taken.
+	SigOf(m *node.Method) *emit.SigInfo
+
+	// IsConstraint reports whether an interface declares a type set
+	// rather than a method-set contract.
+	//
+	// There is nothing to double in a constraint, and the two are one
+	// shape in the model — `interface{ int | int64 }` and
+	// `interface{ error }` differ only by type information the
+	// frontend holds. So this reads whatever the frontend recorded,
+	// which is the only answer that knows; a generator deciding
+	// structurally reports a term the author never wrote as an embed
+	// the run failed to resolve.
+	IsConstraint(i *node.Interface) bool
+}
+
 // ErrorRules is what a language answers about its error protocol.
 //
 // Optional, for the same reason as [EnumRules]: how a value reports
@@ -194,11 +242,18 @@ type TypeRules interface {
 	// [emit.Sample.OK] rather than comparing against the zero value.
 	SamplesOf(t *node.TypeRef, hint string, r node.Resolver) (sample, alternate emit.Sample)
 
-	// TypeParams lifts a declaration's generic parameter list into the
-	// emit form a backend renders, and TypeArgs the same list in use
-	// position. Both empty for a declaration with no parameters.
-	TypeParams(s *node.Struct) []*emit.TypeParam
-	TypeArgs(s *node.Struct) string
+	// TypeParams lifts a generic parameter list into the emit form a
+	// backend renders, and TypeArgs the same list in use position.
+	// Both empty for a declaration with no parameters.
+	//
+	// The list rather than the declaration, matching
+	// [TypeRules.Witnesses] beside them. Five node kinds carry one and
+	// the rendering is identical for all five, so taking a struct
+	// answered for one and left a generator over interfaces — every
+	// generator that doubles a contract — reaching past these rules
+	// into a language package to lift the same list.
+	TypeParams(params []*node.TypeParam) []*emit.TypeParam
+	TypeArgs(params []*node.TypeParam) string
 
 	// Witnesses returns one concrete type per parameter, or nil when
 	// any parameter carries a constraint that cannot be reasoned

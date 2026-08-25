@@ -312,8 +312,8 @@ func TestSigOfFunc(t *testing.T) {
 		if !s.NamedReturns {
 			t.Fatalf("a function's return named s must be usable")
 		}
-		if s.ReceiverIdent() != "" {
-			t.Fatalf("ReceiverIdent = %q, want empty for a function", s.ReceiverIdent())
+		if s.ReceiverIdent != "" {
+			t.Fatalf("ReceiverIdent = %q, want empty for a function", s.ReceiverIdent)
 		}
 	})
 }
@@ -444,16 +444,19 @@ func TestSigEdges(t *testing.T) {
 
 	t.Run("a method reserves the default receiver", func(t *testing.T) {
 		t.Parallel()
-		if got := golang.SigOf(getMethod()).ReceiverIdent(); got != golang.DefaultReceiverIdent {
+		if got := golang.SigOf(getMethod()).ReceiverIdent; got != golang.DefaultReceiverIdent {
 			t.Fatalf("ReceiverIdent = %q, want %q", got, golang.DefaultReceiverIdent)
 		}
 	})
 
 	t.Run("a nil projection reserves nothing", func(t *testing.T) {
 		t.Parallel()
+		// Taken is the nil-safe reader of the receiver identifier;
+		// the field beside it is unguarded, as Name, Params and
+		// Returns have always been.
 		var s *golang.Sig
-		if s.ReceiverIdent() != "" {
-			t.Fatalf("ReceiverIdent on nil = %q", s.ReceiverIdent())
+		if got := s.Taken(); len(got) != 0 {
+			t.Fatalf("Taken on nil = %v, want nothing reserved", got)
 		}
 	})
 
@@ -501,7 +504,7 @@ func TestWithReceiverFromType(t *testing.T) {
 	t.Run("derives the receiver from the emitted type", func(t *testing.T) {
 		t.Parallel()
 		m := &node.Method{Name: "Get"}
-		got := golang.SigOf(m, golang.WithReceiverFromType("StoreStub")).ReceiverIdent()
+		got := golang.SigOf(m, golang.WithReceiverFromType("StoreStub")).ReceiverIdent
 		if got != "s" {
 			t.Fatalf("ReceiverIdent = %q, want s", got)
 		}
@@ -516,7 +519,7 @@ func TestWithReceiverFromType(t *testing.T) {
 		// where the parameter shadows the receiver.
 		strRef := &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"}
 		m := &node.Method{Name: "Do", Params: []*node.Param{{Name: "s", Type: strRef}}}
-		got := golang.SigOf(m, golang.WithReceiverFromType("StoreStub")).ReceiverIdent()
+		got := golang.SigOf(m, golang.WithReceiverFromType("StoreStub")).ReceiverIdent
 		if got == "s" {
 			t.Fatal("receiver collides with the parameter it shares scope with")
 		}
@@ -531,7 +534,7 @@ func TestWithReceiverFromType(t *testing.T) {
 		got := golang.SigOf(m,
 			golang.WithReceiverIdent("s"),
 			golang.WithReceiverFromType("StoreStub"),
-		).ReceiverIdent()
+		).ReceiverIdent
 		if got == "s" {
 			t.Fatalf("ReceiverIdent = %q; the literal overrode the derived form", got)
 		}

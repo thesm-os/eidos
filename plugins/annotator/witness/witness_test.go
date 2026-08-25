@@ -99,6 +99,97 @@ func bounded(b *gofixture.Builder, opts ...gofixture.DirectiveOption) {
 	})
 }
 
+// TestAnnotateReachesEveryDeclaredKind pins the walk against the
+// schema.
+//
+// A kind the schema admits and the walk skips is the quietest failure
+// this plugin has: the directive validates, nothing is stamped, no
+// diagnostic is raised, and [sdk.SourceRules.Witnesses] falls back to
+// derivation — which answers nil for exactly the constraint an
+// authored witness exists to serve. The author's line is discarded and
+// the run stays green.
+//
+// Interfaces shipped broken for that reason: every fixture exercised a
+// struct, and a generator that doubles a contract sees interfaces
+// exclusively.
+func TestAnnotateReachesEveryDeclaredKind(t *testing.T) {
+	t.Parallel()
+
+	// The constraint matters: derivation answers for `any` and
+	// `comparable`, so a fixture bounded by either passes whether or
+	// not the stamp was ever written.
+	named := func() *sdk.Constraint { return gofixture.Bound("constraints.Ordered") }
+	witness := gofixture.Directive("witness", gofixture.KV("T", "int"))
+
+	kinds := []struct {
+		name   string
+		build  func(*gofixture.Builder)
+		params func(*sdk.Store) []*sdk.TypeParam
+	}{
+		{
+			name: "a struct",
+			build: func(b *gofixture.Builder) {
+				b.Struct("Bag", func(x *gofixture.StructBuilder) {
+					x.Directive(witness)
+					x.TypeParam("T", named())
+				})
+			},
+			params: func(s *sdk.Store) []*sdk.TypeParam {
+				d, _ := store.NewReader(s).Structs().First()
+				return d.TypeParams
+			},
+		},
+		{
+			name: "an interface",
+			build: func(b *gofixture.Builder) {
+				b.Interface("Store", func(x *gofixture.InterfaceBuilder) {
+					x.Directive(witness)
+					x.TypeParam("T", named())
+				})
+			},
+			params: func(s *sdk.Store) []*sdk.TypeParam {
+				d, _ := store.NewReader(s).Interfaces().First()
+				return d.TypeParams
+			},
+		},
+		{
+			name: "an alias",
+			build: func(b *gofixture.Builder) {
+				b.Alias("Pair", func(x *gofixture.AliasBuilder) {
+					x.Directive(witness)
+					x.TypeParam("T", named())
+				})
+			},
+			params: func(s *sdk.Store) []*sdk.TypeParam {
+				d, _ := store.NewReader(s).Aliases().First()
+				return d.TypeParams
+			},
+		},
+	}
+
+	for _, k := range kinds {
+		t.Run("stamps "+k.name, func(t *testing.T) {
+			t.Parallel()
+			s, d := annotated(t, k.build)
+			if len(d.Diagnostics()) != 0 {
+				t.Fatalf("reported %v over a well-formed declaration", d.Diagnostics())
+			}
+			params := k.params(s)
+			if len(params) != 1 {
+				t.Fatalf("fixture lost its type parameter")
+			}
+			ref, ok := sdk.AuthoredWitnessRef(params[0].Meta())
+			if !ok {
+				t.Fatalf("%s naming its witness was not stamped", k.name)
+			}
+			b, builtin := ref.(*sdk.BuiltinRef)
+			if !builtin || b.Name != "int" {
+				t.Errorf("stamped %#v, want the int the directive named", ref)
+			}
+		})
+	}
+}
+
 func TestAnnotate(t *testing.T) {
 	t.Parallel()
 

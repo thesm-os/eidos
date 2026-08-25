@@ -129,6 +129,13 @@ func directives() []sdk.DirectiveSchema {
 //
 // Per package, because the language a declaration is read with is a
 // fact about the package that produced it — see [sdk.LanguageOf].
+//
+// All three kinds the schema admits are walked. A kind declared and
+// not walked is the worst shape this plugin can take: the directive
+// validates, nothing is stamped, no diagnostic is raised, and
+// [sdk.SourceRules.Witnesses] falls back to derivation — which answers
+// nil for exactly the constraints an authored witness exists to serve.
+// The author's line is discarded and the run stays green.
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 	unread := map[string]bool{}
 	for _, pkg := range ctx.Reader.Packages().Slice() {
@@ -145,6 +152,16 @@ func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 		}
 		for _, s := range pkg.Structs {
 			annotate(ctx, rules, rules.FileOf(pkg, s), s.QName(), s.TypeParams, s)
+		}
+		// Interfaces carry the weight here rather than being an
+		// afterthought: a generator that doubles a contract works over
+		// interfaces exclusively, so leaving them out put the whole
+		// authored half of the mechanism out of reach for one.
+		for _, i := range pkg.Interfaces {
+			annotate(ctx, rules, rules.FileOf(pkg, i), i.QName(), i.TypeParams, i)
+		}
+		for _, a := range pkg.Aliases {
+			annotate(ctx, rules, rules.FileOf(pkg, a), a.QName(), a.TypeParams, a)
 		}
 	}
 	return nil

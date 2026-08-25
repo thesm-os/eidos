@@ -86,6 +86,37 @@ func Reads() (string, sdk.LanguageSupport) {
 	return Language, sdk.LanguageSupport{Source: source}
 }
 
+// The method-set reporting a generator over interfaces needs,
+// re-exported for the reason [Language] is: a plugin's Go binding
+// calls it, and without these it reaches past this façade into the
+// language package to do so.
+//
+// Not on [sdk.SourceRules] because the wording is language-side by
+// design — what a short method set costs is a sentence about Go
+// embedding, and a neutral interface would either carry Go's phrasing
+// for every language or make each caller write its own.
+type (
+	// Consequence is the clause a generator's method-set diagnostics
+	// end on: what its output loses when an embed contributes nothing.
+	Consequence = golang.Consequence
+
+	// Reporter is where those diagnostics go. `ctx.Diag` satisfies it.
+	Reporter = golang.Reporter
+)
+
+// ReportMethodSet reports every embed that contributed nothing to a
+// resolved method set and returns whether the result is usable.
+//
+// A caller emitting from a false result writes a double short a
+// method, which does not satisfy the interface it doubles — and the
+// pipeline carries every phase to completion, so the file lands on
+// disk with a non-zero exit as the only sign.
+func ReportMethodSet(
+	r Reporter, set sdk.MethodSetResult, iface *sdk.Interface, plugin string, why Consequence,
+) bool {
+	return golang.ReportMethodSet(r, set, iface, plugin, why)
+}
+
 // source is the Go read-side rules every declaration above carries.
 //
 // Held once as a package value rather than constructed per call: it
@@ -94,3 +125,14 @@ func Reads() (string, sdk.LanguageSupport) {
 //
 //nolint:gochecknoglobals // stateless value, immutable after init.
 var source sdk.SourceRules = golang.Source{}
+
+// The optional rule sets Go answers, asserted here so dropping one is
+// a compile error in this package rather than a generator finding the
+// assertion fail at run time and generating its degraded form.
+//
+//nolint:gochecknoglobals // compile-time assertions, never read.
+var (
+	_ sdk.SigRules   = golang.Source{}
+	_ sdk.EnumRules  = golang.Source{}
+	_ sdk.ErrorRules = golang.Source{}
+)
