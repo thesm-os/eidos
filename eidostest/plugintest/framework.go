@@ -767,6 +767,7 @@ var reservedFuncNames = []string{
 // that side can read the authoritative sets.
 var overrideableFuncNames = []string{
 	"args",
+	"assertDeepEqual",
 	"assertEqual",
 	"assertError",
 	"assertFalse",

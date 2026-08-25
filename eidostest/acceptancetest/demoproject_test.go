@@ -106,6 +106,7 @@ func TestRunOnDemoProject_GeneratedOutputCompiles(t *testing.T) {
 
 	workdir := t.TempDir()
 	acceptancetest.CopyDir(t, demoFixture, workdir)
+	requireCmp(t, workdir)
 
 	runRes := acceptancetest.RunCmd(t, workdir, "run", "./...")
 	if runRes.ExitCode != 0 {

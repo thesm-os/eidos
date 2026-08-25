@@ -67,6 +67,46 @@ func TestAssertComparisons(t *testing.T) {
 	})
 }
 
+// TestAssertDeepEqual covers the form a member `==` cannot serve.
+func TestAssertDeepEqual(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports the diff rather than the two values", func(t *testing.T) {
+		t.Parallel()
+		// Two structs printed with %v are two walls of text with one
+		// field different, which is the reading problem the diff
+		// exists to remove.
+		got := golang.AssertDeepEqual("t", "orderDiff", "got.Cart", "want", "the setter writes it")
+		if !strings.Contains(got, "orderDiff(want, got.Cart)") {
+			t.Errorf("the callee was not applied to the pair, got:\n%s", got)
+		}
+		if strings.Contains(got, "%v") {
+			t.Errorf("a value was printed beside the diff, got:\n%s", got)
+		}
+		parses(t, got)
+	})
+
+	t.Run("names which side is which", func(t *testing.T) {
+		t.Parallel()
+		// A diff with no legend is unreadable: the reader cannot tell
+		// an added line from a removed one.
+		got := golang.AssertDeepEqual("t", "orderDiff", "got.Cart", "want", "the setter writes it")
+		if !strings.Contains(got, "(-want +got)") {
+			t.Errorf("the diff carries no legend, got:\n%s", got)
+		}
+	})
+
+	t.Run("a composite literal in the want position parses", func(t *testing.T) {
+		t.Parallel()
+		// The shape that did not compile before: as an argument the
+		// literal's brace is unambiguous, where in the header of an
+		// `if` it was not.
+		got := golang.AssertDeepEqual("t", "orderDiff", "got.Home",
+			`shop.Address{Street: "x"}`, "the setter writes it")
+		parses(t, got)
+	})
+}
+
 // The condition assertions, and the parenthesising that keeps them
 // honest.
 func TestAssertConditions(t *testing.T) {
@@ -173,7 +213,8 @@ func TestAssertFuncMapMatchesItsNames(t *testing.T) {
 
 	fm := golang.AssertFuncMap()
 	names := []string{
-		golang.FuncAssertEqual, golang.FuncAssertNotEqual,
+		golang.FuncAssertEqual, golang.FuncAssertDeepEqual,
+		golang.FuncAssertNotEqual,
 		golang.FuncAssertTrue, golang.FuncAssertFalse,
 		golang.FuncAssertNil, golang.FuncAssertNotNil,
 		golang.FuncAssertLen, golang.FuncAssertNoError,

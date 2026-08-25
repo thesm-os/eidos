@@ -15,6 +15,35 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **The builder generator's checks compile for a member of any type.** A
+  member whose type is a struct produced a `_test.go` that did not parse: the
+  check compared against a composite literal written into the header of an
+  `if`, where Go cannot tell the literal's brace from the block's. Reported as
+  [#54](https://github.com/thesm-os/eidos/issues/54).
+
+  Two more shapes were broken behind it. A func member did not compile at all,
+  because Go compares a func only against nil. A channel member compiled and
+  then failed, because the sample was written twice and `make` produces a new
+  channel each time.
+
+  Checks now compare structurally through `github.com/google/go-cmp`, and the
+  sample is bound to a variable declared at the member's type before the setter
+  is called. **A project running the builder generator takes a dependency on
+  go-cmp**, which its generated tests import; `go mod tidy` adds it.
+
+  The comparison carries two options, each covering something the default does
+  worse than refuse: an exporter, because cmp panics on an unexported field
+  rather than reporting it, and a func comparer, because cmp reports two
+  non-nil funcs as different even when they are the same func.
+
+### Added
+
+- **`assertDeepEqual` joins the Go assertion dialect.** The structural
+  counterpart to `assertEqual`, for a member `==` cannot serve. It takes its
+  comparison callee as an argument, so the calling template composes the
+  reference through `external` and the import registers on the rendered file.
+  A plugin replacing the dialect overrides it like any other entry.
+
 - **`shape/detectors.All` is now checked against the directory tree.**
   Its two siblings, `contracts.All` and `mixins.All`, have each failed since
   they existed when a shipped sub-package is missing from the list; detectors

@@ -49,15 +49,16 @@ import (
 // second helper nothing calls, and its own templates go on rendering
 // the default.
 const (
-	FuncAssertEqual    = "assertEqual"
-	FuncAssertNotEqual = "assertNotEqual"
-	FuncAssertTrue     = "assertTrue"
-	FuncAssertFalse    = "assertFalse"
-	FuncAssertNil      = "assertNil"
-	FuncAssertNotNil   = "assertNotNil"
-	FuncAssertLen      = "assertLen"
-	FuncAssertNoError  = "assertNoError"
-	FuncAssertError    = "assertError"
+	FuncAssertEqual     = "assertEqual"
+	FuncAssertDeepEqual = "assertDeepEqual"
+	FuncAssertNotEqual  = "assertNotEqual"
+	FuncAssertTrue      = "assertTrue"
+	FuncAssertFalse     = "assertFalse"
+	FuncAssertNil       = "assertNil"
+	FuncAssertNotNil    = "assertNotNil"
+	FuncAssertLen       = "assertLen"
+	FuncAssertNoError   = "assertNoError"
+	FuncAssertError     = "assertError"
 )
 
 // AssertFuncMap returns the assertion dialect.
@@ -73,15 +74,16 @@ const (
 // file that does not import errors.
 func AssertFuncMap() template.FuncMap {
 	return template.FuncMap{
-		FuncAssertEqual:    AssertEqual,
-		FuncAssertNotEqual: AssertNotEqual,
-		FuncAssertTrue:     AssertTrue,
-		FuncAssertFalse:    AssertFalse,
-		FuncAssertNil:      AssertNil,
-		FuncAssertNotNil:   AssertNotNil,
-		FuncAssertLen:      AssertLen,
-		FuncAssertNoError:  AssertNoError,
-		FuncAssertError:    AssertError,
+		FuncAssertEqual:     AssertEqual,
+		FuncAssertDeepEqual: AssertDeepEqual,
+		FuncAssertNotEqual:  AssertNotEqual,
+		FuncAssertTrue:      AssertTrue,
+		FuncAssertFalse:     AssertFalse,
+		FuncAssertNil:       AssertNil,
+		FuncAssertNotNil:    AssertNotNil,
+		FuncAssertLen:       AssertLen,
+		FuncAssertNoError:   AssertNoError,
+		FuncAssertError:     AssertError,
 	}
 }
 
@@ -95,6 +97,37 @@ func AssertFuncMap() template.FuncMap {
 func AssertEqual(t, got, want, msg string) string {
 	return ifThen(cmp(got, "!=", want), reportf(t, methodErrorf, msg, "got %v, want %v", got, want))
 }
+
+// AssertDeepEqual renders the check that got equals want, compared
+// structurally rather than with `==`.
+//
+// The form for a member `==` cannot serve. Go rejects the operator
+// outright on a struct holding a slice or a map, so the equality check
+// a generator would write does not compile — and a composite literal
+// in the header of an `if` does not parse even where the operator is
+// legal, which is how a generated test reached a consumer's build and
+// failed to compile there.
+//
+// diff is the comparison callee, composed by the calling template
+// through `external` so the import registers on the rendered file.
+// Nothing here names a package, for the reason [AssertFuncMap] gives:
+// a helper returning text cannot ask for an import, and one that
+// spelled `cmp.Diff` itself would emit a file that does not import it.
+//
+// The report is the diff rather than the two values. `%v` on a struct
+// prints every member, so a reader comparing two of them by eye is
+// looking for one changed field in two walls of text — which is the
+// problem the diff exists to solve.
+func AssertDeepEqual(t, diff, got, want, msg string) string {
+	return ifThen(cmp(reportVar+" := "+diff+"("+want+", "+got+"); "+reportVar, "!=", `""`),
+		reportf(t, methodErrorf, msg+" (-want +got)", "%s", reportVar))
+}
+
+// reportVar names the local a deep-equality check binds its diff to.
+// Short, because its scope is the two lines of the check; not `d`
+// alone, because a generated check sits inside a consumer's test
+// where a one-letter name is likelier to shadow something.
+const reportVar = "gotDiff"
 
 // AssertNotEqual renders the check that got differs from want.
 //

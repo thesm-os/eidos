@@ -4,11 +4,16 @@
 package main
 
 import (
+	"context"
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
 	"go.thesmos.sh/eidos/lang/golang/golangtest"
 	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
+	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/sample"
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
@@ -438,7 +443,8 @@ func TestPluginsRender_AuthoredSample(t *testing.T) {
 		Run("./...")
 
 	out := golangtest.Rendered(t, gen).
-		WithSource(golangtest.GoFile("shop/shop.go", notifierSource))
+		WithSource(golangtest.GoFile("shop/shop.go", notifierSource)).
+		WithRequire(cmpModule, moduleDir(t, cmpModule))
 
 	t.Run("the generated checks compile and pass", func(t *testing.T) {
 		t.Parallel()
@@ -589,6 +595,16 @@ func TestPluginsRender_BuilderShapes(t *testing.T) {
 
 	fixture := gofixture.New().
 		Package("shop", "example.com/shop").
+		Struct("Address", func(s *gofixture.StructBuilder) {
+			s.Field("Street", gofixture.Named("string"), nil)
+		}).
+		Struct("Basket", func(s *gofixture.StructBuilder) {
+			// A struct `==` rejects outright, because it holds a slice.
+			s.Field("Items", gofixture.Slice(gofixture.Named("string")), nil)
+		}).
+		Interface("Notifier", func(i *gofixture.InterfaceBuilder) {
+			i.Method("Notify", nil)
+		}).
 		Struct("Order", func(s *gofixture.StructBuilder) {
 			s.Directive(gofixture.Directive("builder"))
 			s.Field("ID", gofixture.Named("string"), nil)
@@ -601,10 +617,38 @@ func TestPluginsRender_BuilderShapes(t *testing.T) {
 				gofixture.Named("string"), gofixture.AnonStruct(nil, nil),
 			), nil)
 			s.Field("Note", gofixture.Pointer(gofixture.Named("string")), nil)
+			// Every remaining form a member's type can take. The six
+			// above were the whole fixture, and each of them samples as
+			// a literal with no brace in it — which is why the one shape
+			// whose sample is a composite literal reached a consumer's
+			// build rather than this test.
+			s.Field("Home", gofixture.PkgNamed("example.com/shop", "Address"), nil)
+			s.Field("Cart", gofixture.PkgNamed("example.com/shop", "Basket"), nil)
+			s.Field("Billing", gofixture.Pointer(
+				gofixture.PkgNamed("example.com/shop", "Address"),
+			), nil)
+			s.Field("Shipments", gofixture.Slice(
+				gofixture.PkgNamed("example.com/shop", "Address"),
+			), nil)
+			s.Field("ByRegion", gofixture.Map(
+				gofixture.Named("string"), gofixture.PkgNamed("example.com/shop", "Address"),
+			), nil)
+			s.Field("Grid", gofixture.Array(gofixture.Named("int"), 3), nil)
+			s.Field("Watch", gofixture.PkgNamed("example.com/shop", "Notifier"), nil)
+			s.Field("OnDone", gofixture.Func(
+				[]*node.TypeRef{gofixture.Named("string")},
+				[]*node.TypeRef{gofixture.Named("error")},
+			), nil)
+			s.Field("Events", gofixture.Chan(gofixture.Named("string")), nil)
+			s.Field("Inbox", gofixture.RecvChan(gofixture.Named("string")), nil)
+			s.Field("Outbox", gofixture.SendChan(gofixture.Named("string")), nil)
+			s.Field("Deadline", gofixture.PkgNamed("time", "Duration"), nil)
+			s.Field("Anon", gofixture.AnonStruct(nil, nil), nil)
 		})
 
 	gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), builder.New()).
-		WithSource(golangtest.GoFile(fixture.GoSource()))
+		WithSource(golangtest.GoFile(fixture.GoSource())).
+		WithRequire(cmpModule, moduleDir(t, cmpModule))
 
 	t.Run("emits Go the consumer can build", func(t *testing.T) {
 		t.Parallel()
@@ -648,4 +692,64 @@ func TestPluginsRender_BuilderShapes(t *testing.T) {
 		t.Parallel()
 		gen.Primary(t).AssertContains(t, "b.v.Note = &v")
 	})
+
+	t.Run("every member's check binds its sample first", func(t *testing.T) {
+		t.Parallel()
+		// The composite literal that reached a consumer's build was
+		// written into the header of an `if`, where Go cannot tell its
+		// brace from the block's. Bound to a variable it is an
+		// argument, which parses — and a sample that makes a new value
+		// each time it is evaluated is now evaluated once.
+		src := gen.Suffixed(t, builder.GoTestSuffix)
+		src.AssertContains(t, "var want shop.Address = shop.Address{Street:")
+		src.AssertContains(t, "var want <-chan string = make(chan string)")
+	})
+
+	t.Run("members compare structurally, not with ==", func(t *testing.T) {
+		t.Parallel()
+		// `==` does not compile against Basket, which holds a slice,
+		// and reports a func as uncomparable at all. One diff serves
+		// every member, so no member needs its own arm.
+		src := gen.Suffixed(t, builder.GoTestSuffix)
+		src.AssertContains(t, "orderBuilderDiff(want, got.Cart)")
+		src.AssertContains(t, "orderBuilderDiff(want, got.OnDone)")
+	})
+
+	t.Run("the diff helper handles what cmp refuses by default", func(t *testing.T) {
+		t.Parallel()
+		// Both options earn their place: without the exporter a member
+		// whose type has an unexported field panics inside the
+		// consumer's own suite, and without the comparer a func is
+		// reported different from itself.
+		src := gen.Suffixed(t, builder.GoTestSuffix)
+		src.AssertContains(t, "cmp.Exporter(")
+		src.AssertContains(t, "cmp.Comparer(")
+	})
+}
+
+// cmpModule is the comparison library the builder's generated checks
+// import. Named once because the test both requires it and points the
+// requirement at a directory.
+const cmpModule = "github.com/google/go-cmp"
+
+// moduleDir returns where the go toolchain has module unpacked.
+//
+// The generated module is assembled in a temp directory and built with
+// the proxy off, so a requirement it cannot resolve locally fails the
+// build with a network error rather than a compile one. Asking this
+// module where its own copy lives is what turns that into a replace
+// the sandbox can follow.
+func moduleDir(t *testing.T, module string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Dir}}", module).Output()
+	if err != nil {
+		t.Fatalf("locating %s: %v", module, err)
+	}
+	dir := strings.TrimSpace(string(out))
+	if dir == "" {
+		t.Fatalf("%s reports no directory; is it in this module's requirements?", module)
+	}
+	return dir
 }

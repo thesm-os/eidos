@@ -119,6 +119,7 @@ func generateMultipkg(t *testing.T) string {
 	t.Helper()
 	workdir := t.TempDir()
 	acceptancetest.CopyDir(t, multipkgFixture, workdir)
+	requireCmp(t, workdir)
 	res := acceptancetest.RunCmd(t, workdir, "run", "--config", multipkgConfig, "./...")
 	if res.ExitCode != 0 {
 		t.Fatalf("run exit %d\nstderr:\n%s", res.ExitCode, res.Stderr)
