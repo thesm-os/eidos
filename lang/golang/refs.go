@@ -441,8 +441,22 @@ func SubjectRef(origin node.Node, name string) emit.Ref {
 // right; a Go qualifier is one identifier and cannot hold one, so the
 // source form splits from the left. Reading source text with the
 // right-hand rule manufactures a qualifier that is not an identifier.
-// A slash before the last dot picks the first: no qualifier holds
-// one, and every path worth writing in a directive does.
+//
+// Which rule applies is decided by the file rather than by the text. A
+// slash before the last dot settles it early — no qualifier holds one
+// — but its absence settles nothing: a single-segment import path is
+// its own qualifier spelling, so `time.Duration` is both notations at
+// once. The import block is what tells them apart, because a qualifier
+// the file never bound is not a qualifier. So the source form is tried
+// first and the path form is what an unbound qualifier falls back to.
+//
+// The cost is that a name which is neither bound in the file nor a real
+// package resolves to an import the consumer's compiler then rejects,
+// rather than to a diagnostic here. Nothing available at this point
+// distinguishes a typo from a package this run never loaded, and the
+// alternative was refusing every stdlib package outright: `time` has no
+// longer spelling, and an import added to bind the qualifier would be
+// unused and would not compile.
 //
 // The second notation exists because an import written only to feed a
 // directive is an unused import, which does not compile. Without it a
@@ -486,13 +500,24 @@ func resolveValueRef(f *node.File, value string) (emit.Ref, error) {
 	ref, err := ResolveQualified(f, value, "")
 	switch {
 	case errors.Is(err, ErrUnresolvedQualifier):
-		// The full-path form is the way out of this, and an author who
-		// reached for a qualifier has no reason to know it exists.
-		_, symbol := QualifierOf(value)
-		return nil, fmt.Errorf(
-			"%q: %w; write the full path as <import/path>.%s if the package "+
-				"is imported only for this directive", value, err, symbol,
-		)
+		// Read as a path instead. The slash above is a fast path, not
+		// the decision: a single-segment import path is its own
+		// qualifier spelling, so `time.Duration` is both forms at once
+		// and no amount of looking at the text tells them apart. The
+		// import block does — a qualifier the file never bound is not a
+		// qualifier — so the answer is taken from the evidence rather
+		// than guessed ahead of it.
+		//
+		// Advising the full-path form here, as this once did, asked an
+		// author to write what they had already written: `time` has no
+		// longer spelling, and an import added to satisfy the qualifier
+		// would be unused and would not compile.
+		//
+		// A name that is neither bound in the file nor a real package
+		// reaches the consumer's compiler as a missing import rather
+		// than a diagnostic here. Nothing available at this point can
+		// tell a typo from a package this run never loaded.
+		return RefForQualified(value, "")
 	case err != nil:
 		return nil, fmt.Errorf("%q: %w", value, err)
 	}

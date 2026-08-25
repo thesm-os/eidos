@@ -680,14 +680,47 @@ func TestResolveValue(t *testing.T) {
 		}
 	})
 
-	t.Run("an unbound qualifier says how to write it instead", func(t *testing.T) {
+	t.Run("an unbound qualifier is read as an import path", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := golang.ResolveValue(&node.File{}, "seed.Region")
-		if err == nil {
-			t.Fatal("an unresolvable qualifier must not resolve to a guess")
+		// The import block is what decides, rather than the shape of
+		// the text: a qualifier the file never bound is not a
+		// qualifier, whatever it looks like.
+		pkg, symbol, err := golang.ResolveValue(&node.File{}, "seed.Region")
+		if err != nil {
+			t.Fatalf("ResolveValue(seed.Region): %v", err)
 		}
-		if !strings.Contains(err.Error(), "<import/path>.Region") {
-			t.Errorf("the remedy has to be in the message, got: %v", err)
+		if pkg != "seed" || symbol != "Region" {
+			t.Errorf("got (%q, %q), want seed and Region", pkg, symbol)
+		}
+	})
+
+	t.Run("a single-segment path resolves without an import", func(t *testing.T) {
+		t.Parallel()
+		// The case that had no spelling at all. A stdlib path is its
+		// own qualifier — `time` has no longer form — and an import
+		// added to bind the qualifier would be unused and would not
+		// compile, so refusing this refused the whole notation for most
+		// of the standard library.
+		pkg, symbol, err := golang.ResolveValue(&node.File{}, "time.Duration")
+		if err != nil {
+			t.Fatalf("ResolveValue(time.Duration): %v", err)
+		}
+		if pkg != "time" || symbol != "Duration" {
+			t.Errorf("got (%q, %q), want time and Duration", pkg, symbol)
+		}
+	})
+
+	t.Run("a bound qualifier still resolves through the import block", func(t *testing.T) {
+		t.Parallel()
+		// The fallback is a second try, not a change of precedence. An
+		// aliased import binds a name to a path the text does not
+		// carry, so reading the text would give the wrong package.
+		pkg, symbol, err := golang.ResolveValue(resolveFile(), "pb.Tier")
+		if err != nil {
+			t.Fatalf("ResolveValue(pb.Tier): %v", err)
+		}
+		if pkg != "example.com/gen/shopv1" || symbol != "Tier" {
+			t.Errorf("got (%q, %q), want the aliased import's own path", pkg, symbol)
 		}
 	})
 

@@ -13,6 +13,24 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Fixed
+
+- **A directive value can name a stdlib package.** The two notations a value
+  may take — a qualifier resolved against the declaring file's imports, or a
+  full import path for a package imported only to feed the directive — were
+  told apart by looking for a slash before the last dot. Every single-segment
+  import path has none, so `time.Duration`, `io.Writer` and `context.Context`
+  could only ever be read as qualifiers, and a file that did not already
+  import the package was told to write the full path it had just written.
+  Reported as [#58](https://github.com/thesm-os/eidos/issues/58).
+
+  The import block decides now, not the text: a qualifier the file never bound
+  is not a qualifier, so the source form is tried first and the path form is
+  what an unbound one falls back to. A name that is neither bound nor a real
+  package resolves to an import the consumer's compiler rejects rather than to
+  a diagnostic — nothing at that point tells a typo from a package the run
+  never loaded, and the alternative refused most of the standard library.
+
 ### Changed
 
 - **Generated code no longer carries the generator's reasoning.** The builder,
