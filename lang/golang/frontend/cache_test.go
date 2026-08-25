@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/cache"
-	"go.thesmos.sh/eidos/lang/golang/frontend"
 	"go.thesmos.sh/eidos/node"
 )
 
@@ -202,55 +201,8 @@ func TestCache_PutFailureEmitsWarnDiagnostic(t *testing.T) {
 	})
 }
 
-// TestCacheUsable is the whole regression barrier for the largest
-// item in the frontend's load cost: a run with the cache switched off
-// paying to hash every source file and marshal the entire node graph
-// for a store that discards both.
-//
-// A pure predicate, so the barrier is cheap. It is also the only
-// place the None case is stated — downstream both guards test for
-// nil, and a *cache.None is not nil.
-func TestCacheUsable(t *testing.T) {
-	t.Parallel()
-
-	t.Run("a nil cache cannot retain a write", func(t *testing.T) {
-		t.Parallel()
-		if frontend.CacheUsableForTest(nil) {
-			t.Fatalf("nil cache reported usable")
-		}
-	})
-
-	t.Run("a None cache cannot retain a write", func(t *testing.T) {
-		t.Parallel()
-		// The case the nil guards miss. None.Get always misses and
-		// None.Put always discards, so every byte spent producing a
-		// key or a body for it is wasted.
-		if frontend.CacheUsableForTest(cache.NewNone()) {
-			t.Fatalf("None cache reported usable")
-		}
-	})
-
-	t.Run("a disk cache is usable", func(t *testing.T) {
-		t.Parallel()
-		if !frontend.CacheUsableForTest(cache.NewDisk(t.TempDir())) {
-			t.Fatalf("disk cache reported unusable")
-		}
-	})
-
-	t.Run("an unrecognised implementation is assumed usable", func(t *testing.T) {
-		t.Parallel()
-		// Conservative on purpose: guessing wrong here costs only
-		// the status quo, where guessing wrong the other way would
-		// silently disable caching for a third-party store.
-		if !frontend.CacheUsableForTest(stubCache{}) {
-			t.Fatalf("unknown cache implementation reported unusable")
-		}
-	})
-}
-
-// stubCache is a third-party-shaped [cache.Cache] the predicate has
-// never seen.
-type stubCache struct{}
-
-func (stubCache) Get(string) ([]byte, bool) { return nil, false }
-func (stubCache) Put(string, []byte) error  { return nil }
+// No TestCacheUsable here. The predicate it covered moved to
+// plugin.CacheLoad with the rest of the dance, and the regression it
+// guards — a run with caching off still hashing every source file and
+// marshalling the whole graph — is pinned there, where every frontend
+// inherits it rather than each restating it.

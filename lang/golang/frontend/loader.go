@@ -153,34 +153,17 @@ func loadPattern(ctx *plugin.FrontendContext, opts Options) error {
 // Warn diagnostics so cache-disk problems are visible without
 // blocking the run.
 func convertPackageWithCache(ctx *plugin.FrontendContext, opts Options, pkg *packages.Package) error {
-	// The key hash and the node-graph marshal are skipped together
-	// when the cache cannot retain either. Both are pure waste under
-	// a None: the lookup could never hit and the write could never
-	// be read back.
-	usable := cacheUsable(ctx.Cache)
-	var (
-		key    string
-		keyErr = errCacheDisabled
+	// The framework owns the dance — compose the key, look it up,
+	// re-wire and add, or convert and write back — and this supplies
+	// the only half that is Go's: which bytes are this package's
+	// inputs. The composition fingerprint is folded in there rather
+	// than here, so it cannot be left out.
+	return plugin.CacheLoad(ctx, FrontendName, FrontendVersion, pkg.PkgPath,
+		func() (string, error) { return hashPackageInputs(pkg, opts) },
+		func() ([]*node.Package, error) {
+			return []*node.Package{buildPackage(ctx, opts, pkg)}, nil
+		},
 	)
-	if usable {
-		key, keyErr = packageCacheKey(pkg, opts, ctx.Fingerprint)
-		if keyErr == nil {
-			if cached, ok := loadPackageFromCache(ctx.Cache, key); ok {
-				if err := ctx.Store.Nodes().AddPackage(cached); err != nil {
-					return fmt.Errorf("add cached package: %w", err)
-				}
-				return nil
-			}
-		}
-	}
-	out := buildPackage(ctx, opts, pkg)
-	if err := ctx.Store.Nodes().AddPackage(out); err != nil {
-		return fmt.Errorf("add package: %w", err)
-	}
-	if usable && keyErr == nil {
-		storePackageInCache(ctx.Cache, key, out, ctx.Diag.For(FrontendName))
-	}
-	return nil
 }
 
 // buildPackage runs the AST→node conversion and returns the

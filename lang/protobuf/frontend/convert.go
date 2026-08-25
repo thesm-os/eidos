@@ -70,23 +70,6 @@ func convertFiles(
 	return out
 }
 
-// addPackages registers each converted package with the store.
-//
-// Split from [convertFiles] so a cache hit, which produces packages
-// by deserialisation rather than conversion, joins the same
-// registration path. Both routes must agree on what lands in the
-// store, or a cached run and a fresh one diverge.
-func addPackages(ctx *plugin.FrontendContext, ps *diag.PluginSink, pkgs []*node.Package) {
-	for _, pkg := range pkgs {
-		if err := ctx.Store.Nodes().AddPackage(pkg); err != nil {
-			ps.Errorf(
-				position.Pos{File: firstFilePath(pkg)},
-				"frontend: add package %s: %v", pkg.Path, err,
-			)
-		}
-	}
-}
-
 // sortDescriptors returns descriptors sorted by [protoreflect.FileDescriptor.Path]
 // so the per-package merge order is deterministic across runs.
 // protocompile resolves files in dependency order, which can vary
@@ -142,16 +125,4 @@ func appendFile(pkg *node.Package, fd protoreflect.FileDescriptor) {
 		Path:     path,
 		Imports:  collectFileImports(fd),
 	})
-}
-
-// firstFilePath returns the path of the first file recorded on pkg,
-// or the package's path qualifier when no files have landed yet.
-// Used as a fallback diagnostic position when a store-side
-// AddPackage call fails — the file path anchors the message even
-// though the failure isn't tied to any single declaration.
-func firstFilePath(pkg *node.Package) string {
-	if len(pkg.Files) > 0 {
-		return pkg.Files[0].Path
-	}
-	return pkg.Path
 }

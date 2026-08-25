@@ -58,8 +58,12 @@ func TestLoad_ConsultsCache(t *testing.T) {
 				secondKey,
 			)
 		}
-		if !strings.Contains(firstKey, "plugin:"+frontend.FrontendName) {
-			t.Fatalf("cache key should embed plugin name; got %q", firstKey)
+		// The frontend's own name, wherever the framework puts it in the
+		// key. What the key is *shaped* like belongs to plugin.CacheLoad
+		// and is pinned there; what matters here is that two frontends
+		// in one run cannot read back each other's graph.
+		if !strings.Contains(firstKey, frontend.FrontendName) {
+			t.Fatalf("cache key should name the frontend; got %q", firstKey)
 		}
 	})
 }

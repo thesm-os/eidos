@@ -7,12 +7,21 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"go.thesmos.sh/eidos/cache"
-	"go.thesmos.sh/eidos/node"
 )
 
-func TestPackageCacheKey(t *testing.T) {
+// What is left here is what is left of caching in this package.
+//
+// Composing the key, looking it up, re-wiring an entry and writing one
+// back moved to plugin.CacheLoad, and so did the tests for them: the
+// composition fingerprint reaching the key, a corrupt entry reading as
+// a miss, owner pointers rebuilt after a round trip. Every frontend
+// inherits those rather than each restating them.
+//
+// The input hash stays, because which bytes are a directory's inputs
+// is the one question the framework cannot answer for TypeScript.
+
+// TestHashInputs covers the half of caching this frontend still owns.
+func TestHashInputs(t *testing.T) {
 	t.Parallel()
 
 	write := func(t *testing.T, body string) string {
@@ -24,145 +33,73 @@ func TestPackageCacheKey(t *testing.T) {
 		return path
 	}
 
-	t.Run("the same inputs produce the same key", func(t *testing.T) {
+	t.Run("the same inputs hash alike", func(t *testing.T) {
 		t.Parallel()
 		path := write(t, "export interface A {}")
-		opts := defaultOptions()
-
-		first, err := packageCacheKey("dir", []string{path}, opts, "fp")
+		first, err := hashInputs([]string{path}, defaultOptions())
 		if err != nil {
-			t.Fatalf("packageCacheKey: %v", err)
+			t.Fatalf("hashInputs: %v", err)
 		}
-		second, _ := packageCacheKey("dir", []string{path}, opts, "fp")
+		second, _ := hashInputs([]string{path}, defaultOptions())
 		if first != second {
-			t.Fatal("the same inputs produced different keys")
+			t.Error("the same inputs hashed differently, so nothing would ever hit")
 		}
 	})
 
-	t.Run("changed content changes the key", func(t *testing.T) {
+	t.Run("changed content changes the hash", func(t *testing.T) {
 		t.Parallel()
 		a := write(t, "export interface A {}")
 		b := write(t, "export interface B {}")
-
-		ka, _ := packageCacheKey("dir", []string{a}, defaultOptions(), "fp")
-		kb, _ := packageCacheKey("dir", []string{b}, defaultOptions(), "fp")
-		if ka == kb {
-			t.Fatal("different content produced the same key")
+		ha, _ := hashInputs([]string{a}, defaultOptions())
+		hb, _ := hashInputs([]string{b}, defaultOptions())
+		if ha == hb {
+			t.Error("edited source hashed alike, so a run would serve the old graph")
 		}
 	})
 
-	t.Run("a changed fingerprint changes the key", func(t *testing.T) {
-		t.Parallel()
-		// Not optional: the cached graph carries the metadata
-		// downstream plugins read, and an upgraded plugin expecting a
-		// stamp an older frontend never wrote is the stale-cache
-		// failure this closes.
-		path := write(t, "export interface A {}")
-		ka, _ := packageCacheKey("dir", []string{path}, defaultOptions(), "one")
-		kb, _ := packageCacheKey("dir", []string{path}, defaultOptions(), "two")
-		if ka == kb {
-			t.Fatal("the fingerprint does not reach the key")
-		}
-	})
-
-	t.Run("changed options change the key", func(t *testing.T) {
+	t.Run("changed options change the hash", func(t *testing.T) {
 		t.Parallel()
 		path := write(t, "export interface A {}")
+		base := defaultOptions()
 		other := defaultOptions()
-		other.IncludeTests = true
+		other.IncludeDeclarations = !base.IncludeDeclarations
 
-		ka, _ := packageCacheKey("dir", []string{path}, defaultOptions(), "fp")
-		kb, _ := packageCacheKey("dir", []string{path}, other, "fp")
-		if ka == kb {
-			t.Fatal("options do not reach the key")
+		hb, _ := hashInputs([]string{path}, base)
+		ho, _ := hashInputs([]string{path}, other)
+		if hb == ho {
+			t.Error("options that change what is converted must change the hash")
+		}
+	})
+
+	t.Run("the hash does not depend on walk order", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		names := []string{"a.ts", "b.ts"}
+		paths := make([]string, 0, len(names))
+		for _, name := range names {
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, []byte("export interface X {}"), 0o600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			paths = append(paths, path)
+		}
+		forward, _ := hashInputs(paths, defaultOptions())
+		backward, _ := hashInputs([]string{paths[1], paths[0]}, defaultOptions())
+		if forward != backward {
+			t.Error("the walk's reporting order reached the hash, so the same " +
+				"directory would miss depending on how it was listed")
 		}
 	})
 
 	t.Run("a file that vanished is reported rather than hashed as empty", func(t *testing.T) {
 		t.Parallel()
-		// Hashing a missing file as nothing would key a real package
-		// on an input it does not have.
-		_, err := packageCacheKey("dir", []string{"/nonexistent/a.ts"}, defaultOptions(), "fp")
-		if err == nil {
-			t.Fatal("a missing input produced a key")
-		}
-	})
-
-	t.Run("the key does not depend on the order files were walked", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		names := []string{"a.ts", "b.ts"}
-		paths := make([]string, 0, len(names))
-		for _, n := range names {
-			p := filepath.Join(dir, n)
-			if err := os.WriteFile(p, []byte("export interface X {}"), 0o600); err != nil {
-				t.Fatalf("write: %v", err)
-			}
-			paths = append(paths, p)
-		}
-		forward, _ := packageCacheKey("d", paths, defaultOptions(), "fp")
-		reverse, _ := packageCacheKey("d", []string{paths[1], paths[0]}, defaultOptions(), "fp")
-		if forward != reverse {
-			t.Fatal("walk order reached the key")
-		}
-	})
-}
-
-func TestCacheRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	t.Run("a stored package comes back with owners rebuilt", func(t *testing.T) {
-		t.Parallel()
-		c := cache.NewDisk(t.TempDir())
-		pkg := &node.Package{
-			Name: "p", Path: "./p",
-			Interfaces: []*node.Interface{{
-				Name:   "A",
-				Fields: []*node.Field{{Name: "id"}},
-			}},
-		}
-		storePackageInCache(c, "k", pkg)
-
-		got, ok := loadPackageFromCache(c, "k")
-		if !ok {
-			t.Fatal("a stored package did not come back")
-		}
-		if got.Interfaces[0].Fields[0].Owner == nil {
-			t.Error("field Owner not rebuilt on read")
-		}
-	})
-
-	t.Run("a miss reports absence", func(t *testing.T) {
-		t.Parallel()
-		if _, ok := loadPackageFromCache(cache.NewDisk(t.TempDir()), "absent"); ok {
-			t.Fatal("a missing key reported a hit")
-		}
-	})
-
-	t.Run("a nil cache or empty key is a miss, not a panic", func(t *testing.T) {
-		t.Parallel()
-		if _, ok := loadPackageFromCache(nil, "k"); ok {
-			t.Error("a nil cache reported a hit")
-		}
-		if _, ok := loadPackageFromCache(cache.NewDisk(t.TempDir()), ""); ok {
-			t.Error("an empty key reported a hit")
-		}
-		// Writes through the same guards must not panic either.
-		storePackageInCache(nil, "k", &node.Package{})
-		storePackageInCache(cache.NewDisk(t.TempDir()), "", &node.Package{})
-	})
-
-	t.Run("a corrupt entry is a miss rather than a failure", func(t *testing.T) {
-		t.Parallel()
-		// The fallback is to convert the source again, which is always
-		// correct. A cache that could block a run would be worse than
-		// no cache.
-		c := cache.NewDisk(t.TempDir())
-		if err := c.Put("k", []byte("{not json")); err != nil {
-			t.Fatalf("Put: %v", err)
-		}
-		if _, ok := loadPackageFromCache(c, "k"); ok {
-			t.Fatal("a corrupt entry reported a hit")
+		// Silently hashing an unreadable file as empty is the failure
+		// worth naming: two directories whose files all vanished would
+		// hash alike and serve each other's graphs.
+		if _, err := hashInputs(
+			[]string{filepath.Join(t.TempDir(), "gone.ts")}, defaultOptions(),
+		); err == nil {
+			t.Error("a missing file produced a hash instead of an error")
 		}
 	})
 }

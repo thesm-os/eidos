@@ -20,6 +20,7 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/position"
+	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 )
 
@@ -75,27 +76,23 @@ func loadPattern(ctx *plugin.FrontendContext, opts Options) error {
 		ps.Errorf(position.Pos{}, "frontend: compile %s: %v", root, err)
 		return nil
 	}
-	// Cache consultation: the frontend composes a content-addressed
-	// key from the resolved descriptor set plus its declared options
-	// and version. On a hit the stored node graph is deserialised
-	// and registered directly, skipping conversion; on a miss the
-	// freshly-converted graph is stored for the next run.
+	// The framework owns the caching — composing the key, looking it
+	// up, re-wiring what it finds, adding to the store and writing
+	// back — and folds in the composition fingerprint where a caller
+	// cannot leave it out. What is proto's is the hash of the resolved
+	// descriptor set and the conversion itself.
 	//
-	// Both routes go through addPackages so a cached run and a fresh
-	// one register the same thing.
+	// One unit per pattern rather than one per package: a proto run
+	// resolves its whole import closure together, and a descriptor set
+	// is what any part of it is keyed by.
 	descriptors := make([]protoreflect.FileDescriptor, 0, len(resolved))
 	for _, f := range resolved {
 		descriptors = append(descriptors, f)
 	}
-	key := composeCacheKey(ps, opts, ctx.Fingerprint, descriptors)
-	if pkgs, hit := loadPackagesFromCache(ctx.Cache, key); hit {
-		addPackages(ctx, ps, pkgs)
-		return nil
-	}
-	pkgs := convertFiles(ctx, ps, descriptors)
-	storePackagesInCache(ctx.Cache, ps, key, pkgs)
-	addPackages(ctx, ps, pkgs)
-	return nil
+	return plugin.CacheLoad(ctx, FrontendName, FrontendVersion, ctx.Pattern,
+		func() (string, error) { return hashInputs(ps, opts, descriptors), nil },
+		func() ([]*node.Package, error) { return convertFiles(ctx, ps, descriptors), nil },
+	)
 }
 
 // resolveRoot returns the directory the resolver searches for

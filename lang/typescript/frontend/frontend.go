@@ -93,12 +93,8 @@ func (f *Frontend) Load(ctx *plugin.FrontendContext) error {
 	}
 
 	for dir, paths := range groupByDir(files) {
-		pkg, ok := loadPackage(ctx, dir, paths, opts)
-		if !ok {
-			continue
-		}
-		if err := ctx.Store.Nodes().AddPackage(pkg); err != nil {
-			ps.Errorf(pkg.Pos(), "add package %s: %v", pkg.Path, err)
+		if err := loadPackage(ctx, dir, paths, opts); err != nil {
+			ps.Errorf(pkgPos(dir), "load %s: %v", dir, err)
 		}
 	}
 	return nil
@@ -106,21 +102,30 @@ func (f *Frontend) Load(ctx *plugin.FrontendContext) error {
 
 // loadPackage converts one directory's files into a package,
 // consulting the cache first.
+//
+// The framework owns the caching: it composes the key — folding in the
+// composition fingerprint, which is the contract's one MUST — looks it
+// up, re-wires an entry it finds, and writes back what this converts.
+// What is TypeScript's is the hash of the directory's inputs and the
+// conversion itself.
 func loadPackage(
 	ctx *plugin.FrontendContext, dir string, paths []string, opts Options,
-) (*node.Package, bool) {
-	ps := ctx.Diag.For(FrontendName)
+) error {
+	return plugin.CacheLoad(ctx, FrontendName, FrontendVersion, dir,
+		func() (string, error) { return hashInputs(paths, opts) },
+		func() ([]*node.Package, error) { return convertDir(ctx, dir, paths, opts) },
+	)
+}
 
-	key, err := packageCacheKey(dir, paths, opts, ctx.Fingerprint)
-	if err != nil {
-		// A file that vanished between the walk and the hash pass. The
-		// run can still convert what remains, so this is a warning and
-		// the package is built uncached.
-		ps.Warnf(pkgPos(dir), "cache key for %s: %v", dir, err)
-	} else if cached, ok := loadPackageFromCache(ctx.Cache, key); ok {
-		return cached, true
-	}
-
+// convertDir parses one directory's files into a package.
+//
+// An empty result rather than a nil package for a directory nothing
+// converted: the caller adds whatever comes back, and a directory of
+// files this frontend cannot read is an ordinary outcome rather than a
+// failure of the run.
+func convertDir(
+	ctx *plugin.FrontendContext, dir string, paths []string, opts Options,
+) ([]*node.Package, error) {
 	pkg := &node.Package{
 		BaseNode: node.BaseNode{SourcePos: pkgPos(dir)},
 		Name:     filepath.Base(dir),
@@ -137,14 +142,10 @@ func loadPackage(
 		}
 	}
 	if !converted {
-		return nil, false
+		return nil, nil
 	}
 	dedupePackageImports(pkg)
-
-	if key != "" {
-		storePackageInCache(ctx.Cache, key, pkg)
-	}
-	return pkg, true
+	return []*node.Package{pkg}, nil
 }
 
 // convertFile parses one file and appends its declarations to pkg.
