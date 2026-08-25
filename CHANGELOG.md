@@ -13,6 +13,41 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Breaking
+
+- **Language support is grouped by language, one module apiece.**
+  `frontend/golang`, `backend/golang` and `sdk/golang` now live under
+  `lang/golang/{frontend,backend,sdk}`, and `frontend/protobuf` under
+  `lang/protobuf/frontend`. Each language is a single module: `lang/golang`
+  holds the conventions at its root and the adapters beneath. See ADR-0007.
+
+  Import paths change, and so do module paths — a Go module path change is a
+  new module, so `go.thesmos.sh/eidos/frontend/golang` and its siblings keep
+  their published tags and receive nothing further. Packages take their
+  directories' names, so `frontend.New()` and `backend.New()` replace four
+  packages all called `golang`. Two packages are now named `frontend`, so a
+  file registering both aliases them.
+
+- **A plugin declares what it emits per language.** `sdk.NewPlugin(name)`
+  replaces `sdkgo.NewGenerator` / `sdkgo.NewPlugin`, and `sdk.Base` replaces
+  `sdkgo.Base`. Templates, outputs and funcmaps move into a
+  `sdk.LanguageSupport` bundle registered with `For(lang, …)`; a plugin
+  targeting two languages declares two bundles, and one that renders nothing
+  declares none and is language-agnostic by construction.
+
+  A plugin's core no longer names a language: the Go bundle lives in a
+  `<plugin>_go.go` beside the embedded tree, built by `lang/golang/sdk.Support`
+  or `.Builtin`. Adding a target language is a sibling file and one more `For`
+  call.
+
+- **Template helpers register under the names they are declared with.** The
+  per-plugin funcmap prefix is gone, along with `FuncPrefix` and the `prefix`
+  parameter on every `lang/golang` funcmap constructor. It existed because
+  each plugin was handed its own copy of the whole Go vocabulary, so two
+  plugins reaching for one helper registered it twice; the backend now merges
+  that vocabulary once and a plugin registers only helpers it wrote. A
+  template calls a helper by the name its declaration contains.
+
 ### Added
 
 - **Five relational mixins can name the callable a check observes through.**

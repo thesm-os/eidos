@@ -18,6 +18,7 @@ evidence of what was true at the time.
 | [0006](0006-one-backend-per-pipeline-run.md) | Target one backend per pipeline run | Accepted |
 | [0007](0007-group-language-support-by-language.md) | Group language support by language, one module apiece | Accepted |
 | [0008](0008-map-typescript-interfaces-to-node-struct.md) | Map TypeScript interfaces to node.Struct | Proposed |
+| [0009](0009-register-the-language-funcmap-once.md) | Register a language's funcmap once, in its backend | Accepted |
 
 ## Writing one
 
@@ -41,3 +42,9 @@ plugins are compiled in, so they exchange facts through typed metadata
 rather than calls; facts are not output, so shared output composes
 through slots; slots render through templates their owners control; and
 rendering answers for one language at a time.
+
+[ADR-0007](0007-group-language-support-by-language.md) and
+[ADR-0009](0009-register-the-language-funcmap-once.md) follow from that
+last one: if a run answers for one language, a language's support
+belongs in one place and its shared funcmap is registered once, by the
+backend that answers for it.
