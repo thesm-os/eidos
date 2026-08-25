@@ -73,6 +73,10 @@ func (p *Plugin) Validator() *Validator {
 //	    pipe.WithAnnotator(a)
 //	}
 //
+// [go.thesmos.sh/eidos/plugins/annotator/shape/full.Annotators] is
+// this call over the whole shipped catalog, and is what a consumer
+// with no reason to curate should reach for.
+//
 // Order is the contract: the umbrella stamps, the resolver qualifies
 // what it stamped, the validator checks the result. Each depends on
 // its predecessor having run, and the priorities enforce that

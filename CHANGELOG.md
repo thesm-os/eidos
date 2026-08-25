@@ -13,6 +13,18 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Fixed
+
+- **`shape/detectors.All` is now checked against the directory tree.**
+  Its two siblings, `contracts.All` and `mixins.All`, have each failed since
+  they existed when a shipped sub-package is missing from the list; detectors
+  had no such check. A detector package added without a line in `All` shipped
+  and never ran, and nothing caught it — the detector's own tests drive it
+  directly and pass, `shape/full` composes the aggregator rather than the tree,
+  and a consumer sees callables the detector would have matched carrying no
+  shape stamp. That is indistinguishable from source the detector does not
+  apply to.
+
 ## v1.15.1 — 2026-08-25
 
 ### Breaking

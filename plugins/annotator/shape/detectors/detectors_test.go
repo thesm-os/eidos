@@ -4,6 +4,7 @@
 package detectors_test
 
 import (
+	"os"
 	"sort"
 	"testing"
 
@@ -57,5 +58,42 @@ func TestAll_FreshSlice(t *testing.T) {
 	first[0].Name = "_mutated_"
 	if second := detectors.All(); second[0].Name == "_mutated_" {
 		t.Fatalf("All() returned a shared slice; mutating first[0].Name leaked into the next call")
+	}
+}
+
+// TestAll_CoversEveryShippedPackage pins the aggregator against the
+// directory tree.
+//
+// [detectors.All] is a hand-maintained list, and a detector package
+// added to the tree without a line here ships and never runs. Nothing
+// else catches it: the detector's own tests drive it directly and
+// pass, `shape/full` composes the aggregator rather than the tree, and
+// what a consumer sees is callables the detector would have matched
+// carrying no shape stamp — indistinguishable from source it does not
+// apply to.
+//
+// The twin of this check has guarded contracts and mixins since each
+// aggregator existed; detectors is the axis that went without one.
+//
+// Relies on detector names matching their directory names, which every
+// shipped detector observes; a future detector whose name legitimately
+// differs extends the mapping below rather than weakening the test.
+func TestAll_CoversEveryShippedPackage(t *testing.T) {
+	t.Parallel()
+	registered := make(map[string]struct{})
+	for _, d := range detectors.All() {
+		registered[d.Name] = struct{}{}
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "internal" {
+			continue
+		}
+		if _, ok := registered[e.Name()]; !ok {
+			t.Errorf("package %q is shipped but not registered in detectors.All()", e.Name())
+		}
 	}
 }

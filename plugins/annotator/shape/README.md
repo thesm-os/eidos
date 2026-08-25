@@ -24,8 +24,31 @@ prefixes. A `Commit` callable can simultaneously carry
 
 ## Registering the plugin
 
-The umbrella plugin is constructed once per pipeline. Compose
-the detectors, contracts, and mixins your pipeline recognises:
+Take the whole shipped vocabulary unless you have a reason not to:
+
+```go
+import (
+    "go.thesmos.sh/eidos/pipeline"
+    "go.thesmos.sh/eidos/plugins/annotator/shape/full"
+)
+
+pipe := pipeline.New().WithFrontend(...)
+for _, a := range full.Annotators() {
+    pipe = pipe.WithAnnotator(a)
+}
+p, err := pipe.WithGenerator(...).Build()
+```
+
+`full.Annotators()` is every detector, contract and mixin, wired
+as the three plugin instances below. It closes both registration
+mistakes at once, and both of them look like success rather than
+like failure.
+
+### Curating instead
+
+Registering a classification nothing reads costs a walk over every
+callable and stamps meta a consumer may be surprised to find, so
+composing a smaller set is a legitimate choice:
 
 ```go
 import (
@@ -52,10 +75,16 @@ pipe, err := pipeline.New().
     Build()
 ```
 
-All three instances must be registered. Registering `s` alone
-stamps shapes but leaves partner names unqualified and every
+Two things to get right, and neither fails the build. All three
+instances must be registered: registering `s` alone stamps shapes
+but leaves partner names unqualified and every
 [`Contract.Required`] declaration and [`Mixin.Validate`] hook
-unenforced — a silent loss of diagnostics, not a build failure.
+unenforced. And an omitted axis is invisible — a pipeline with no
+`Mixins` call produces callables carrying no mixin stamps, which
+reads exactly like source that declares none.
+
+The per-axis aggregators (`detectors.All()`, `contracts.All()`,
+`mixins.All()`) sit between the two: each is one axis in full.
 
 Three plugin instances run in priority order:
 

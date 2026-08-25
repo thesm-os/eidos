@@ -217,10 +217,14 @@ type Plugin struct {
 //	    Contracts(persister.Contract(), saga.Contract()),
 //	)
 //
+// This is the curated path. For the whole shipped catalog reach for
+// [go.thesmos.sh/eidos/plugins/annotator/shape/full.New], which
+// registers all three axes and cannot leave one out; assembling the
+// same set here is three calls and three chances to omit one.
+//
 // A plugin registering nothing stamps nothing, which is a legitimate
 // configuration — a pipeline wanting contracts and no structural
-// shapes. Take [go.thesmos.sh/eidos/plugins/annotator/shape/full.New]
-// for the whole catalog rather than assembling one by hand.
+// shapes.
 //
 // The shape-detection bucket is where the merged plugin belongs: it
 // runs every directive override and every detector in one pass, so

@@ -61,9 +61,28 @@
 //
 // # Composition
 //
-// The umbrella [Plugin] takes every shape's [Detector] through
-// [Plugin.Detectors] and runs them in registration order on every
-// callable in the store:
+// A complete registration is `full.Annotators()`, and most consumers
+// want exactly that:
+//
+//	for _, a := range full.Annotators() {
+//	    pipe.WithAnnotator(a)
+//	}
+//
+// `full` is `plugins/annotator/shape/full`. It sits below this
+// package rather than in it because each catalog imports this one to
+// name the types it returns, so a union here would be an import
+// cycle.
+//
+// Two mistakes it closes, both of which look like success. Composing
+// the axes by hand — [Plugin.Detectors], [Plugin.Contracts],
+// [Plugin.Mixins] — is three chances to omit one, and the
+// classifications the missing axis would have stamped read downstream
+// as "this callable has no shape" rather than as a registration
+// mistake. Registering the umbrella alone rather than all three
+// annotators loses the resolver and the validator; see
+// [Plugin.Annotators].
+//
+// Assemble by hand where the set is genuinely known and small:
 //
 //	pipe.WithAnnotator(shape.New().Detectors(
 //	    reader.Detector(),
@@ -71,12 +90,17 @@
 //	    lifecycle.Detector(),
 //	))
 //
-// One plugin owns the `+gen:shape` directive schema, one walks
-// the node graph (via the framework's [plugin.Walk] hook
-// dispatcher), one applies the override-then-detect cascade.
-// There is no separate directive plugin to register and no risk
-// of duplicate-directive registration when the consumer wants
-// more than one shape.
+// Registering a classification nothing reads costs a walk over every
+// callable — cheap, but not free — and stamps meta a consumer may be
+// surprised to find, which is why taking everything stays a decision
+// rather than a default.
+//
+// Whichever way the vocabulary is assembled, one plugin owns the
+// `+gen:shape` directive schema, one walks the node graph (via the
+// framework's [plugin.Walk] hook dispatcher), and one applies the
+// override-then-detect cascade. There is no separate directive plugin
+// to register and no risk of duplicate-directive registration when
+// the consumer wants more than one shape.
 //
 // # User overrides
 //

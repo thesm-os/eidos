@@ -5,10 +5,15 @@
 // [shape.Detector] shipped under
 // `plugins/annotator/shape/detectors/...`.
 //
-// Consumers that want the full built-in catalog import this
-// package and call [All]:
+// One axis of three. [All] is every detector eidos ships and nothing
+// else — no contracts or mixins:
 //
 //	pipe.WithAnnotator(shape.New().Detectors(detectors.All()...))
+//
+// Reach for `shape/full` where the whole vocabulary is wanted. A
+// pipeline registering this axis alone stamps nothing for the other
+// two, and what a consumer sees is a callable with no contract or mixin
+// stamps — indistinguishable from one that legitimately has none.
 //
 // Consumers wanting a curated subset import the per-detector
 // sub-packages directly and pick what they need.
