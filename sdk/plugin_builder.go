@@ -62,6 +62,38 @@ type LanguageSupport struct {
 	// missing tree is deliberate rather than an omission.
 	Builtin bool
 
+	// Words is the plugin's own vocabulary for this language — the
+	// words its generated identifiers carry, keyed by whatever the
+	// plugin calls them.
+	//
+	// A generated identifier has two halves, and they belong to
+	// different owners. `Builder` in `UserBuilder` is the generator's
+	// word: it says what the type is for, and a repository preferring
+	// `Factory` changes it without the generator knowing. How that
+	// word joins `User` — concatenated and Pascal-cased, or
+	// lowercased and separated — is the language's, answered through
+	// [SourceRules.TypeName].
+	//
+	// Declared per language because the word itself can differ: a
+	// convention that reads as `Defaults` in one language reads as
+	// `default` in another, and a generator holding one constant
+	// would be spelling every language's output in the first
+	// language's idiom.
+	//
+	// Read through [Base.Word], which falls back to the empty string
+	// for a language that declared none — a generator treats that as
+	// "this language has no word for it" rather than substituting its
+	// own.
+	Words map[string]string
+
+	// Replaces names the templates this plugin deliberately replaces
+	// for this language — see [plugin.TemplateReplacer].
+	//
+	// Empty for almost every plugin. A name here is one another plugin
+	// ships and this one supersedes, which is how a consumer changes
+	// what a generator emits without forking it.
+	Replaces []string
+
 	// Source is how the plugin reads declarations written in this
 	// language — see [SourceRules]. Nil for a plugin that renders the
 	// language but never reads it.
@@ -151,6 +183,8 @@ type langData struct {
 	templates fs.FS
 	funcs     template.FuncMap
 	overrides template.FuncMap
+	replaces  []string
+	words     map[string]string
 	source    SourceRules
 }
 
@@ -177,6 +211,8 @@ func (b *Builder) Build() *Base {
 		data := langData{
 			outputs:   slices.Clone(s.Outputs),
 			overrides: s.Overrides,
+			replaces:  slices.Clone(s.Replaces),
+			words:     maps.Clone(s.Words),
 			source:    s.Source,
 		}
 		if s.Templates != nil {
@@ -310,6 +346,23 @@ func (b *Base) TemplateOverrides(lang string) template.FuncMap {
 	return maps.Clone(b.langs[lang].overrides)
 }
 
+// Word returns the plugin's word for key in lang, empty when the
+// language declared none.
+//
+// Empty is the honest answer rather than a default: a generator
+// substituting its own would spell one language's idiom into
+// another's output, which is the reason the words are declared per
+// language at all.
+func (b *Base) Word(lang, key string) string {
+	return b.langs[lang].words[key]
+}
+
+// ReplacesTemplates returns the template names the plugin replaces
+// for lang, satisfying [plugin.TemplateReplacer].
+func (b *Base) ReplacesTemplates(lang string) []string {
+	return slices.Clone(b.langs[lang].replaces)
+}
+
 // Source returns how the plugin reads declarations written in lang.
 //
 // The bool distinguishes "this plugin does not read that language"
@@ -325,4 +378,40 @@ func (b *Base) Source(lang string) (SourceRules, bool) {
 		return nil, false
 	}
 	return d.source, true
+}
+
+// SourceOf returns how the plugin reads declarations in pkg.
+//
+// The lookup a generator makes, resolving the package's own language
+// through [LanguageOf] — a declaration is read with the rules that
+// parsed it, not with the language the run renders.
+//
+// An unmarked package falls back to the plugin's only declared
+// language, where it has exactly one. Nothing claimed the package, so
+// there is no marker to disagree with, and a plugin that speaks one
+// language has no ambiguity to resolve: a fixture, a bridge or a
+// synthesised graph reads under the rules the plugin has. A plugin
+// declaring several refuses instead, because picking one would be a
+// guess that renders plausible output from the wrong rules.
+//
+// The resolved language is returned beside the rules, because a
+// caller reading the plugin's own per-language declarations —
+// [Base.Word] among them — needs the name the fallback settled on
+// rather than the empty marker it started from.
+//
+// False when the package names a language the plugin does not read,
+// which is a caller's signal to report rather than to skip: every
+// declaration in it would otherwise go unemitted with nothing saying
+// why.
+func (b *Base) SourceOf(pkg *Package) (rules SourceRules, lang string, ok bool) {
+	if named := LanguageOf(pkg); named != "" {
+		r, found := b.Source(named)
+		return r, named, found
+	}
+	langs := b.langsInOrder()
+	if len(langs) != 1 {
+		return nil, "", false
+	}
+	r, found := b.Source(langs[0])
+	return r, langs[0], found
 }

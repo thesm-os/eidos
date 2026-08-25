@@ -97,6 +97,25 @@ type mergedTemplateSet struct {
 	// Bind these after the core funcmap so they override the
 	// non-reserved canonical entries they target.
 	overrides template.FuncMap
+
+	// importAware are the plugins whose helpers are built per
+	// rendered file, against that file's import set.
+	//
+	// Held as the plugins rather than as their maps, because the maps
+	// cannot exist yet: each is bound to a file, and no file is being
+	// rendered when this set is built. Names were validated against
+	// the reserved set here all the same, by invoking each factory
+	// once against a registrar that records nothing — a collision
+	// found at Build names the plugin, while one found at render
+	// names a template line in a file the author did not write.
+	importAware []importAwarePlugin
+}
+
+// importAwarePlugin pairs a plugin with the name Build-time
+// diagnostics attribute its helpers to.
+type importAwarePlugin struct {
+	name  string
+	funcs plugin.ImportAwareFuncs
 }
 
 // mergePluginContributions runs the two-pass template + funcmap
@@ -120,7 +139,11 @@ func mergePluginContributions(
 	reserved map[string]struct{},
 	ps *diag.PluginSink,
 ) (*mergedTemplateSet, error) {
-	tmpl, err := parseTemplatesFromPlugins(ctx, parent, ps)
+	importAware, err := collectImportAware(ctx, reserved)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := parseTemplatesFromPlugins(ctx, parent, ps, importAwarePlaceholders(ctx, importAware))
 	if err != nil {
 		return nil, err
 	}
@@ -133,9 +156,10 @@ func mergePluginContributions(
 		return nil, err
 	}
 	return &mergedTemplateSet{
-		tmpl:       tmpl,
-		extensions: extensions,
-		overrides:  overrides,
+		tmpl:        tmpl,
+		extensions:  extensions,
+		overrides:   overrides,
+		importAware: importAware,
 	}, nil
 }
 
@@ -153,6 +177,7 @@ func parseTemplatesFromPlugins(
 	ctx *plugin.BackendContext,
 	parent *template.Template,
 	ps *diag.PluginSink,
+	importAware template.FuncMap,
 ) (*template.Template, error) {
 	merged, err := parent.Clone()
 	if err != nil {
@@ -164,7 +189,11 @@ func parseTemplatesFromPlugins(
 	for _, name := range merged.Templates() {
 		contributors[name.Name()] = coreContributor
 	}
-	for _, p := range ctx.Plugins {
+	// Replacers parse last, so a declared replacement wins whatever
+	// the registration order — otherwise "who replaces whom" would be
+	// decided by capability topology, which orders plugins for a
+	// different reason entirely.
+	for _, p := range replacersLast(ctx) {
 		tp, ok := p.(plugin.TemplateProvider)
 		if !ok {
 			continue
@@ -174,9 +203,16 @@ func parseTemplatesFromPlugins(
 			continue
 		}
 		pluginFuncs := template.FuncMap{}
+		// Import-aware helpers are not bound until a file is rendering,
+		// so the parser is given a stand-in of the right arity. Without
+		// it a template calling one fails to parse — which would make
+		// the whole extension point unreachable from a template, its
+		// only caller.
+		maps.Copy(pluginFuncs, importAware)
 		maps.Copy(pluginFuncs, tp.TemplateFuncs(ctx.Lang))
 		maps.Copy(pluginFuncs, tp.TemplateOverrides(ctx.Lang))
-		if err := parseOnePluginFS(merged, fsys, p.Name(), pluginFuncs, contributors, ps); err != nil {
+		if err := parseOnePluginFS(merged, fsys, p.Name(), pluginFuncs, contributors,
+			declaredReplacements(p, ctx.Lang), ps); err != nil {
 			return nil, err
 		}
 	}
@@ -204,6 +240,7 @@ func parseOnePluginFS(
 	pluginName string,
 	pluginFuncs template.FuncMap,
 	contributors map[string]string,
+	replaces map[string]bool,
 	ps *diag.PluginSink,
 ) error {
 	tmplFiles, err := collectTmplFiles(fsys)
@@ -239,9 +276,10 @@ func parseOnePluginFS(
 			}
 		}
 		prior, exists := contributors[name]
-		if exists && prior != coreContributor && prior != pluginName {
+		if exists && prior != coreContributor && prior != pluginName && !replaces[name] {
 			return fmt.Errorf(
-				"%w: %q defined by %s and %s",
+				"%w: %q defined by %s and %s; declare it in the plugin's "+
+					"Replaces list to supersede deliberately",
 				ErrTemplateNameCollision, name, prior, pluginName,
 			)
 		}
@@ -371,4 +409,97 @@ func mergeOverrides(
 		}
 	}
 	return out, nil
+}
+
+// collectImportAware gathers the plugins whose helpers bind to the
+// file being rendered, validating their names against the reserved
+// set.
+//
+// Validation invokes each factory once against [discardRegistrar],
+// which registers nothing. A factory is expected to return the same
+// names whatever registrar it is given — the registrar decides how a
+// reference is spelled, not which helpers exist — so one probe call
+// settles the question for every file.
+func collectImportAware(
+	ctx *plugin.BackendContext, reserved map[string]struct{},
+) ([]importAwarePlugin, error) {
+	var out []importAwarePlugin
+	for _, p := range ctx.Ordered {
+		aware, ok := p.(plugin.ImportAwareFuncs)
+		if !ok {
+			continue
+		}
+		for name := range aware.TemplateFuncsFor(ctx.Lang, discardRegistrar{}) {
+			if _, hit := reserved[name]; hit {
+				return nil, fmt.Errorf(
+					"%w: plugin %s tried to override %q through an import-aware helper",
+					ErrReservedFuncName, p.Name(), name,
+				)
+			}
+		}
+		out = append(out, importAwarePlugin{name: p.Name(), funcs: aware})
+	}
+	return out, nil
+}
+
+// discardRegistrar answers the probe call that validates helper
+// names, recording no import.
+//
+// The qualifier it returns is never rendered: the map the probe
+// produces is thrown away, and only its keys are read.
+type discardRegistrar struct{}
+
+func (discardRegistrar) Import(string) (string, error) { return "", nil }
+
+// importAwarePlaceholders returns a parse-time stand-in for every
+// import-aware helper name.
+//
+// text/template resolves function names at parse time and binds them
+// at execution, so a name absent from the parse funcmap is a parse
+// error however it is bound later. The stand-in is invoked only if
+// something executes a template without the real binding, which is a
+// backend bug rather than a plugin one — hence the error rather than
+// a value.
+func importAwarePlaceholders(
+	ctx *plugin.BackendContext, plugins []importAwarePlugin,
+) template.FuncMap {
+	out := template.FuncMap{}
+	for _, p := range plugins {
+		for name := range p.funcs.TemplateFuncsFor(ctx.Lang, discardRegistrar{}) {
+			out[name] = func() (string, error) { return "", errPlaceholderInvoked }
+		}
+	}
+	return out
+}
+
+// replacersLast orders plugins so every declared template
+// replacement is parsed after the templates it replaces.
+//
+// text/template's last-write-wins is what makes a replacement take
+// effect, so the order is the mechanism rather than a tidiness. A
+// plugin declaring no replacement keeps its position relative to its
+// peers, which keeps the diagnostics a collision produces stable.
+func replacersLast(ctx *plugin.BackendContext) []plugin.Plugin {
+	var plain, replacers []plugin.Plugin
+	for _, p := range ctx.Plugins {
+		if r, ok := p.(plugin.TemplateReplacer); ok && len(r.ReplacesTemplates(ctx.Lang)) > 0 {
+			replacers = append(replacers, p)
+			continue
+		}
+		plain = append(plain, p)
+	}
+	return append(plain, replacers...)
+}
+
+// declaredReplacements returns the template names p supersedes.
+func declaredReplacements(p plugin.Plugin, lang string) map[string]bool {
+	r, ok := p.(plugin.TemplateReplacer)
+	if !ok {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, name := range r.ReplacesTemplates(lang) {
+		out[name] = true
+	}
+	return out
 }

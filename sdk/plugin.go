@@ -136,3 +136,19 @@ type FunctionHook = plugin.FunctionHook
 // annotator context's store. See [plugin.Walk] for the
 // iteration contract.
 var Walk = plugin.Walk
+
+// ImportRegistrar re-exports [plugin.ImportRegistrar] — the ability
+// to name a package in the file currently rendering.
+type ImportRegistrar = plugin.ImportRegistrar
+
+// ImportAwareFuncs re-exports [plugin.ImportAwareFuncs] — the
+// optional interface a plugin implements when its template helpers
+// emit references to other packages.
+//
+// The static [LanguageSupport.Funcs] and [LanguageSupport.Overrides]
+// are built once for the whole run and cannot register an import, so
+// text they return naming another package renders cleanly and fails
+// the consumer's build. Implement this instead when a helper spells a
+// reference: it is called once per rendered file, against that file's
+// imports.
+type ImportAwareFuncs = plugin.ImportAwareFuncs

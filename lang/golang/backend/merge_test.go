@@ -5,6 +5,8 @@ package backend_test
 
 import (
 	"errors"
+	"io/fs"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -402,4 +404,189 @@ func TestMerge_ReservedTemplatePrefix(t *testing.T) {
 			t.Fatalf("expected reserved-prefix diagnostic; got %+v", d.Diagnostics())
 		}
 	})
+}
+
+// importAwareFixture is a plugin whose helper spells a reference into
+// another package.
+//
+// The shape a consumer replacing a generator's vocabulary takes: the
+// helper names a symbol the generated file has to import, which is
+// exactly what a static funcmap entry cannot arrange.
+type importAwareFixture struct{ pluginfixture.Plugin }
+
+// Templates shadows the embedded fixture's tree with one whose banner
+// calls the helper, so the assertion runs through the path a real
+// consumer uses — a template naming a symbol in another package.
+func (importAwareFixture) Templates(string) (fs.FS, bool) {
+	return fstest.MapFS{
+		"templates/golang/banner.tmpl": &fstest.MapFile{Data: []byte(
+			`{{- define "bannergen.banner" -}}` + "\n" +
+				`// === {{ .Title }} ===` + "\n" +
+				`var _ = {{ bannerRule }}` + "\n" +
+				`{{- end -}}`,
+		)},
+	}, true
+}
+
+func (importAwareFixture) TemplateFuncsFor(
+	_ string, reg plugin.ImportRegistrar,
+) template.FuncMap {
+	return template.FuncMap{
+		"bannerRule": func() (string, error) {
+			// Asking for the qualifier is what registers the import,
+			// so the returned text and the file's import block cannot
+			// disagree.
+			local, err := reg.Import("strings")
+			if err != nil {
+				return "", err
+			}
+			return local + ".Repeat(\"=\", 3)", nil
+		},
+	}
+}
+
+// TestMerge_ImportAwareFuncRegistersItsImport pins the capability a
+// static funcmap entry does not have.
+//
+// A plugin helper returning `strings.Repeat(…)` used to render
+// cleanly into a file that never imported strings — output that looks
+// right and fails the consumer's build, which is the worst place to
+// find out. The helper now receives the rendering file's import set,
+// so naming the package and importing it are one step.
+func TestMerge_ImportAwareFuncRegistersItsImport(t *testing.T) {
+	t.Parallel()
+
+	ctx, mem, d := newBackendContext(t)
+	fx := importAwareFixture{}
+	ctx.Plugins = []plugin.Plugin{fx}
+	ctx.Ordered = []plugin.Plugin{fx}
+	target := emit.Target{Dir: "users", Filename: "user.go", Package: "users"}
+	f := bindFile(t, ctx, target)
+	banner := &pluginfixture.Banner{
+		Title:   "USERS",
+		Message: "unused",
+		Target:  target,
+	}
+	if err := f.Top().Append(banner, emit.Provenance{SetBy: pluginfixture.Name}); err != nil {
+		t.Fatalf("append banner: %v", err)
+	}
+	addEmitPackage(t, ctx, emitPackage("users", &emit.Struct{
+		Name: "User", Package: "users", Target: target,
+		Fields: []*emit.Field{{Name: "ID", Type: emit.Builtin("int")}},
+	}))
+
+	body := string(assertRenderSucceeds(t, ctx, mem, d, target))
+
+	t.Run("the helper is callable from a plugin template", func(t *testing.T) {
+		t.Parallel()
+		if !strings.Contains(body, "strings.Repeat") {
+			t.Errorf("the helper did not render; got:\n%s", body)
+		}
+	})
+
+	t.Run("the package it names is imported", func(t *testing.T) {
+		t.Parallel()
+		if !strings.Contains(body, `"strings"`) {
+			t.Errorf("the reference rendered without its import, which is a file "+
+				"that does not compile; got:\n%s", body)
+		}
+	})
+}
+
+// replacerFixture ships a banner template declaring that it replaces
+// the one another plugin already defines.
+type replacerFixture struct{ pluginfixture.Plugin }
+
+func (replacerFixture) Name() string { return "replacer" }
+
+func (replacerFixture) ReplacesTemplates(string) []string {
+	return []string{"bannergen.banner"}
+}
+
+func (replacerFixture) Templates(string) (fs.FS, bool) {
+	return fstest.MapFS{
+		"templates/golang/banner.tmpl": &fstest.MapFile{Data: []byte(
+			`{{- define "bannergen.banner" -}}` + "\n" +
+				`// replaced: {{ .Title }}` + "\n" +
+				`{{- end -}}`,
+		)},
+	}, true
+}
+
+// TestMerge_DeclaredTemplateReplacement pins re-use over forking.
+//
+// Two plugins defining one template name is ordinarily a collision,
+// and that rule is right for the accident: whichever won would be
+// decided by registration order and nothing would say so. It is wrong
+// for the intent, which is a consumer changing how a generator's
+// output reads without forking the generator to do it.
+func TestMerge_DeclaredTemplateReplacement(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a declared replacement supersedes the original", func(t *testing.T) {
+		t.Parallel()
+		ctx, mem, d := newBackendContext(t)
+		// The replacer is registered *first*, so passing means the
+		// ordering rule did the work rather than luck.
+		fx, rep := pluginfixture.Plugin{}, replacerFixture{}
+		ctx.Plugins = []plugin.Plugin{rep, fx}
+		ctx.Ordered = []plugin.Plugin{rep, fx}
+		target := emit.Target{Dir: "users", Filename: "user.go", Package: "users"}
+		f := bindFile(t, ctx, target)
+		banner := &pluginfixture.Banner{Title: "USERS", Message: "m", Target: target}
+		if err := f.Top().Append(banner, emit.Provenance{SetBy: pluginfixture.Name}); err != nil {
+			t.Fatalf("append banner: %v", err)
+		}
+		addEmitPackage(t, ctx, emitPackage("users", &emit.Struct{
+			Name: "User", Package: "users", Target: target,
+			Fields: []*emit.Field{{Name: "ID", Type: emit.Builtin("int")}},
+		}))
+
+		body := string(assertRenderSucceeds(t, ctx, mem, d, target))
+		if !strings.Contains(body, "// replaced: USERS") {
+			t.Errorf("the declared replacement did not win; got:\n%s", body)
+		}
+		if strings.Contains(body, "// === USERS ===") {
+			t.Errorf("the superseded template still rendered; got:\n%s", body)
+		}
+	})
+
+	t.Run("an undeclared collision is still refused", func(t *testing.T) {
+		t.Parallel()
+		// The rule the declaration opts out of has to still be there,
+		// or every accidental claim of a dispatch name becomes a silent
+		// race decided by plugin order.
+		ctx, _, d := newBackendContext(t)
+		fx, other := pluginfixture.Plugin{}, silentReplacer{}
+		ctx.Plugins = []plugin.Plugin{fx, other}
+		ctx.Ordered = []plugin.Plugin{fx, other}
+		addEmitPackage(t, ctx, emitPackage("users", &emit.Struct{
+			Name: "User", Package: "users",
+			Target: emit.Target{Dir: "users", Filename: "user.go", Package: "users"},
+		}))
+		_ = backend.New().Render(ctx)
+		// Reported rather than returned: the backend records the
+		// refusal against the run so every offending plugin surfaces,
+		// instead of stopping at the first.
+		collided := func(x diag.Diag) bool {
+			return strings.Contains(x.Message, "template name collision")
+		}
+		if !slices.ContainsFunc(d.Diagnostics(), collided) {
+			t.Errorf("no collision reported; got %v", d.Diagnostics())
+		}
+	})
+}
+
+// silentReplacer claims a template name without declaring that it
+// means to.
+type silentReplacer struct{ pluginfixture.Plugin }
+
+func (silentReplacer) Name() string { return "silent" }
+
+func (silentReplacer) Templates(string) (fs.FS, bool) {
+	return fstest.MapFS{
+		"templates/golang/banner.tmpl": &fstest.MapFile{Data: []byte(
+			`{{- define "bannergen.banner" -}}x{{- end -}}`,
+		)},
+	}, true
 }

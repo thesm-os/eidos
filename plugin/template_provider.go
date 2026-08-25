@@ -68,3 +68,31 @@ type TemplateOverrideSource interface {
 	// definition won.
 	TemplateOverrides(lang string) template.FuncMap
 }
+
+// TemplateReplacer is the optional interface a plugin implements when
+// it deliberately replaces a template another plugin ships.
+//
+// Two plugins defining one template name is ordinarily
+// [ErrTemplateNameCollision] — a name reached by dispatch, claimed
+// twice, where whichever won would be decided by registration order
+// and nothing would say so. That rule is right for the accident and
+// wrong for the intent.
+//
+// The intent is re-use. A generator's templates encode both what it
+// emits and how that reads, and a consumer wanting the second
+// different — checks written against a helper library, a house style
+// for generated doc comments — otherwise has to fork the generator to
+// change a paragraph. Declaring the replacement keeps the fork down
+// to the templates actually being replaced, and keeps it visible: the
+// name appears in a plugin's own declarations rather than being
+// inferred from which plugin happened to parse last.
+//
+// A replacement is parsed after every plugin that did not declare
+// one, so it wins whatever the registration order. Two plugins
+// declaring a replacement of the same name is still a collision:
+// there is no answer to which of them meant it more.
+type TemplateReplacer interface {
+	// ReplacesTemplates returns the template names this plugin
+	// replaces for lang, empty for the plugins that replace nothing.
+	ReplacesTemplates(lang string) []string
+}

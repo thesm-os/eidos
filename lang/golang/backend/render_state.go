@@ -172,6 +172,41 @@ func newRenderState(
 	return s
 }
 
+// bindImportAware adds the plugin helpers that are built against this
+// file's import set.
+//
+// Bound after construction rather than inside it, because these are
+// the only helpers that need the state to exist first: each closes
+// over s so that asking for a qualifier registers the import on
+// whichever file s is currently writing.
+//
+// Applied last, so a helper bound to this file replaces the static
+// form of the same name. That order is the point — the static one
+// exists because most helpers never leave the file, and this one
+// exists for the replacement that does.
+func (s *renderState) bindImportAware(plugins []importAwarePlugin, lang string) {
+	if len(plugins) == 0 {
+		return
+	}
+	fm := template.FuncMap{}
+	for _, p := range plugins {
+		maps.Copy(fm, p.funcs.TemplateFuncsFor(lang, s))
+	}
+	s.tmpl.Funcs(fm)
+}
+
+// Import registers path with the file's import set and returns the
+// local name to spell references with, satisfying
+// [plugin.ImportRegistrar].
+//
+// The exported counterpart to [renderState.imp], and a method for the
+// same reason: [renderTarget] replaces s.imports once per target, so
+// a value bound at construction would write into a set the state has
+// already moved on from.
+func (s *renderState) Import(path string) (string, error) {
+	return s.imports.Imp(path)
+}
+
 // reservedFuncNames returns the set of canonical funcmap entry
 // names the backend ships — the dispatch, slot-composition, and
 // import-collection helpers core templates depend on. The set is

@@ -279,10 +279,16 @@ it does in your plugin's terms.
 ```go
 func goSupport() (string, sdk.LanguageSupport) {
     lang, s := sdkgo.Support(goTemplates, GoOutputs()...)
-    s.Funcs = template.FuncMap{"defaultsExpr": GoDefaultsExpr}
+    s.Funcs = template.FuncMap{"routePattern": goRoutePattern}
     return lang, s
 }
 ```
+
+A helper here is a plain function, built once for the whole run. It
+cannot register an import, so text it returns naming another package
+produces a file that does not import it — see
+[import-aware helpers](#import-aware-helpers-importawarefuncs) for the
+form that can.
 
 **Register nothing unless the plugin owns a helper of its own.** The
 whole shared Go vocabulary — `isExported`, `selfType`,
@@ -323,6 +329,110 @@ The override pass runs after the extension pass in capability
 topological order, so a downstream plugin can replace an
 upstream plugin's funcmap entry. Reserved-name overrides still
 fail with `ErrReservedFuncName`.
+
+Overrides are collected from **every** plugin into one funcmap applied
+to the whole render, which is what makes a plugin shipping nothing but
+overrides useful: it re-spells every other plugin's templates without
+either side knowing about the other.
+
+## Import-aware helpers: `ImportAwareFuncs`
+
+`Funcs` and `Overrides` are built once for the run, so a helper in
+either **cannot register an import**. Text it returns naming another
+package renders cleanly into a file that does not import it — output
+that looks right and fails the consumer's build, which is the worst
+place to find out.
+
+Implement `sdk.ImportAwareFuncs` when a helper spells a reference. It
+is called once per rendered file, against that file's import set:
+
+```go
+func (*Plugin) TemplateFuncsFor(
+    lang string, reg sdk.ImportRegistrar,
+) template.FuncMap {
+    return template.FuncMap{
+        golang.FuncAssertEqual: func(t, got, want, msg string) string {
+            // Asking for the qualifier is what registers the import,
+            // so the text and the import block cannot disagree.
+            local, _ := reg.Import("go.thesmos.sh/testkit")
+            return local + ".Equal(" + t + ", " + got + ", " + want +
+                ", " + strconv.Quote(msg) + ")"
+        },
+    }
+}
+```
+
+These bind **last**, so a helper built against the file replaces the
+static form of the same name. That order is the point: the static form
+exists because most helpers never leave the file, and this one exists
+for the replacement that does.
+
+Two rules follow from `text/template` resolving names at parse time
+and binding them at execution. Names are given parse-time stand-ins,
+so a template may call one; and reserved names are still rejected at
+Build, checked by invoking the factory once against a registrar that
+records nothing. Do not retain `reg` beyond the map you return — the
+next file has a different import set, and a stale one writes into a
+file already finished.
+
+The canonical use is [the assertion
+dialect](../../lang/golang/assert.go): the backend ships checks
+spelling assertions in terms of `testing` and nothing else, so a
+generated test depends on nothing the consumer did not choose, and a
+consumer who *does* want a helper library replaces those nine entries.
+
+## Replacing another plugin's template: `Replaces`
+
+Two plugins defining one template name is `ErrTemplateNameCollision`.
+That rule is right for the accident — whichever won would be decided
+by registration order and nothing would say so — and wrong for the
+intent.
+
+The intent is re-use. A generator's templates encode both *what* it
+emits and *how that reads*, and a consumer wanting the second
+different otherwise has to fork the generator to change a paragraph.
+Declare the replacement instead:
+
+```go
+func goSupport() (string, sdk.LanguageSupport) {
+    lang, s := sdkgo.Support(goTemplates, GoOutputs()...)
+    s.Replaces = []string{"builder.test"}
+    return lang, s
+}
+```
+
+Replacements parse after every plugin that declared none, so a
+declared one wins whatever the registration order. Two plugins
+declaring a replacement of the same name is still a collision: there
+is no answer to which of them meant it more.
+
+## Per-language vocabulary: `Words`
+
+A generated identifier has two halves with different owners. In
+`UserBuilder`, `Builder` is the *generator's* word — it says what the
+type is for, and a repository preferring `Factory` changes it. How
+that word joins `User` is the *language's*, answered through
+`SourceRules.TypeName`.
+
+Declare the words per language, because the word itself can differ: a
+convention reading as `Defaults` in one language reads as `default` in
+another, and a generator holding one constant spells every language's
+output in the first language's idiom.
+
+```go
+// builder_go.go — the words a Go reader expects.
+s.Words = map[string]string{
+    WordBuilder:   "Builder",
+    WordCompanion: "Defaults",
+    WordFrom:      "From",
+}
+```
+
+The plugin's core holds the *keys*, never the values, and reads them
+back through `Base.Word(lang, key)`. An empty answer means the
+language declared no word — treat that as "this language has no word
+for it" rather than substituting one, which would be the same mistake
+one level down.
 
 ## Anti-patterns
 

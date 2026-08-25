@@ -132,6 +132,7 @@ func (b *Backend) Render(ctx *plugin.BackendContext) error {
 	renderTargets(keys, results,
 		func() *renderState {
 			st := newRenderState(merged.tmpl, pluginOrder, merged.extensions, merged.overrides)
+			st.bindImportAware(merged.importAware, ctx.Lang)
 			st.bridgeImports = bridgeImports
 			st.selfAliases = selfAliases
 			return st

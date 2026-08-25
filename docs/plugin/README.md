@@ -27,7 +27,10 @@ plugin.
 4. **[templates.md](templates.md)** — shipping templates from a
    generator. Plugin-defined emit kinds, the template naming contract,
    the funcmap and its extension rules, walked through with
-   `registrygen`.
+   `registrygen`. Then the four ways a consumer re-uses a generator
+   rather than forking it: funcmap overrides, helpers that can
+   register an import, declared template replacement, and per-language
+   vocabulary.
 
 5. **[composition.md](composition.md)** — multi-generator composition.
    An ensemble producing one HTTP handler from one annotated struct,
