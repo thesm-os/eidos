@@ -59,9 +59,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("every sentinel is assigned", func(t *{{ $T }}) {
 		t.Parallel()
-		// A var declared and never assigned is nil, compiles, and
-		// matches nothing — so every caller's branch on it is dead, and
-		// no other check here can run without panicking.
 		for _, e := range all {
 			if e.err == nil {
 				t.Fatalf("every sentinel must be assigned: %s is nil", e.name)
@@ -71,9 +68,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("every sentinel carries a message", func(t *{{ $T }}) {
 		t.Parallel()
-		// An empty message reaches a log as nothing at all, which is
-		// worse than a bad one: the operator sees that something failed
-		// and no indication of what.
 		for _, e := range all {
 			if e.err.Error() == "" {
 				t.Errorf("every sentinel must carry a message: %s has none", e.name)
@@ -84,9 +78,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("every sentinel carries the package prefix", func(t *{{ $T }}) {
 		t.Parallel()
-		// A message without it reads in a log exactly like one from any
-		// other package, which is the confusion the prefix exists to
-		// prevent.
 		for _, e := range all {
 			if !{{ $hasPrefix }}(e.err.Error(), {{ printf "%q" .Prefix }}) {
 				t.Errorf("every sentinel must carry the package prefix %q: %s reads %q",
@@ -104,8 +95,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("no two sentinels share a message", func(t *{{ $T }}) {
 		t.Parallel()
-		// Two identical messages cannot be told apart in a log, and the
-		// second is usually a copy that was meant to be edited.
 		seen := map[string]string{}
 		for _, e := range all {
 			if first, dup := seen[e.err.Error()]; dup {
@@ -117,9 +106,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("no sentinel's message begins with another's", func(t *{{ $T }}) {
 		t.Parallel()
-		// Distinct from sharing a message. One message that starts with
-		// another makes every search for the shorter one match the
-		// longer, and any code matching on message text ambiguous.
 		for _, a := range all {
 			for _, b := range all {
 				if a.name == b.name {
@@ -135,8 +121,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("no sentinel matches another", func(t *{{ $T }}) {
 		t.Parallel()
-		// Two that match collapse a caller's branches into one, and the
-		// caller cannot see it from the declarations.
 		for _, a := range all {
 			for _, b := range all {
 				if a.name == b.name {
@@ -159,9 +143,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 	t.Run("no sentinel matches one in {{ .Name }}", func(t *{{ $T }}) {
 		t.Parallel()
 {{- if .Sentinels }}
-		// Distinct values describing the same condition are where a copy
-		// between packages produces an alias, and neither package can
-		// see it alone.
 		for _, a := range all {
 			for _, b := range []struct {
 				name string
@@ -204,19 +185,12 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 {{- $lit := printf "%s%s{}" $amp (renderExpr .Ref) -}}
 	t.Run("reports a message for its zero value", func(t *{{ $T }}) {
 		t.Parallel()
-		// A message that reads through a member the zero value leaves
-		// unset panics — replacing the error a caller needed to report
-		// with a crash inside whatever was already going wrong.
 		{{ assertNotEqual "t" (printf "(%s).Error()" $lit) `""` "an error must report a message without panicking" }}
 	})
 {{- if .Prefix }}
 
 	t.Run("carries the package prefix like a sentinel does", func(t *{{ $T }}) {
 		t.Parallel()
-		// A custom error reaches the same logs as a declared one and is
-		// read the same way, so it owes the same prefix. Checking only
-		// the declared values leaves half a package's messages
-		// unexamined.
 		{{ assertTrue "t" (printf "%s((%s).Error(), %q)" $hasPrefix $lit .Prefix) "an error type must carry the package prefix" }}
 	})
 {{- end }}
@@ -229,8 +203,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("does not match the package's other error types", func(t *{{ $T }}) {
 		t.Parallel()
-		// Two error types that match each other collapse a caller's
-		// branches, and the caller cannot see it from the declarations.
 		subject := {{ $lit }}
 		for _, other := range []error{
 {{- range .Peers }}
@@ -245,19 +217,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("agrees with the standard comparison about what it matches", func(t *{{ $T }}) {
 		t.Parallel()
-		// Emitted because the type declares its own comparison and no
-		// cause. What is asserted is that the standard comparison
-		// REACHES the declared method — one written on the wrong
-		// receiver form is never consulted, and the type then silently
-		// matches nothing.
-		//
-		// Both halves of that condition are load-bearing. The subject
-		// carries a declared error, because a zero one answers false on
-		// both sides whether the method was consulted or not. And the
-		// type names no cause, because the comparison walks the chain
-		// too: a type exposing the same cause that way matches
-		// regardless, and the two sides then agree for every receiver
-		// form — including the one this check exists to catch.
 {{- if .Cause }}
 		subject := {{ $amp }}{{ renderExpr .Ref }}{ {{- .Cause }}: {{ renderExpr .Seed.Ref }}}
 {{- else }}
@@ -285,23 +244,13 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("exposes the cause it was given", func(t *{{ $T }}) {
 		t.Parallel()
-		// A wrapper that does not return its cause silently truncates
-		// every chain it takes part in.
 		cause := {{ $errorf }}("cause")
-		// Declared and assigned rather than built as a literal: the
-		// cause may sit on a folded-in type, where the selector is legal
-		// and a composite-literal key is not.
 {{- if .Addressed }}
 		got := &{{ renderExpr .Ref }}{}
 {{- else }}
 		var got {{ renderExpr .Ref }}
 {{- end }}
 		got.{{ .Cause }} = cause
-		// Unwrapping rather than comparing. A type declaring its own
-		// comparison answers from there whatever the cause accessor
-		// returns, so a comparison-based assertion passes against a
-		// truncated chain — which is the one thing this check exists to
-		// catch.
 		{{ assertEqual "t" (printf "%s(got)" $unwrap) "cause" "an error naming a cause must expose it" }}
 	})
 {{- end }}
@@ -309,9 +258,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 
 	t.Run("puts every member it carries into its message", func(t *{{ $T }}) {
 		t.Parallel()
-		// A member the message drops is a detail the operator cannot
-		// see, and the declaration is the only record that it was meant
-		// to be visible.
 		got := {{ $amp }}{{ renderExpr .Ref }}{
 {{- range .Written }}
 			{{ .Name }}: {{ renderSample .Sample }},

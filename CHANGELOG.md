@@ -13,6 +13,29 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Changed
+
+- **Generated code no longer carries the generator's reasoning.** The builder,
+  enum and sentinel templates wrote their design rationale into the bodies of
+  the functions they emit — why a check is spelled the way it is, what a
+  variadic setter does with a seeded default. That is a fact about the
+  template, and it landed in a file the consumer cannot edit. It now lives in
+  the templates.
+
+  Four comments stay, all in the sentinel checks, and all explaining a check
+  that is *absent*: the suppressed prefix, the wrapping identity, the recovery
+  walk, and an empty overlap subtest. Nothing else in the generated file
+  carries that, so removing them would remove the only account of why a reader
+  is not seeing what they expected.
+
+- **Exported generated API carries docblocks that say what the signature does
+  not.** `Build`, the three constructors and every setter shape were one
+  sentence each. `Build` now says what a second call returns and which members
+  stay shared with the builder; a replacing setter says what it discards and
+  which counterpart keeps it; an entry setter says what it does with a key
+  already present. These are read through godoc by consumers who did not write
+  the file.
+
 ### Added
 
 - **`lang/golang/sdk` re-exports the assertion dialect's entry names.** The

@@ -120,7 +120,11 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
        Compared member by member rather than as whole values: a struct
        holding a sequence or a mapping is not comparable in Go, so a
        whole-value assertion does not compile at all — and where it
-       does, it names the type rather than the member that broke. */ -}}
+       does, it names the type rather than the member that broke.
+
+       Seeded with named values rather than a zero: a round trip
+       comparing a zero against itself passes against a builder that
+       dropped every member it was given. */ -}}
 {{- define "builder.test.construction" -}}
 {{- $T := renderExpr (external "testing" "T") -}}
 {{- $diffFn := printf "%sDiff" (camel .TypeName) -}}
@@ -131,9 +135,6 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- if .Seedable }}
 	t.Run("From round-trips what it was seeded with", func(t *{{ $T }}) {
 		t.Parallel()
-		// Seeded with named values rather than a zero value: a round
-		// trip comparing a zero against itself passes against a builder
-		// that dropped every member it was given.
 		var seed {{ $v }}{{ template "builder.test.instantiation" $t }}
 {{- range .Seedable }}
 		seed.{{ .Name }} = {{ template "builder.sample" . }}
@@ -156,7 +157,32 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- end }}{{ end }}
 {{- end -}}
 
-{{- /* One check per setter that has a value to write. */ -}}
+{{- /* One check per setter that has a value to write.
+
+       Each shape is driven through the setter it owns, which is why
+       the arms differ. A sequence spreads, because its replacing
+       setter is variadic and the sample is the whole collection. A
+       keyed member goes through the replacing setter rather than the
+       entry one, which takes a key this projection has no sample of. A
+       byte sequence is compared by length, because Go compares a slice
+       only against nil.
+
+       The scalar arm binds the sample before calling the setter, and
+       binds it at the member's declared type. Both halves are load
+       bearing. A sample is an expression and some of them make a new
+       value each time they are evaluated — a channel's `make`, a func
+       literal — so a check spelling it in both places compares two
+       different values and fails against a setter that did what it was
+       asked. And a directional channel takes its value from a `make`
+       of the bidirectional form, so an inferred binding is a `chan T`
+       where the member is a `<-chan T`; a structural comparison of two
+       different types reports a difference whatever the values are.
+
+       The replacement check writes twice with two distinct values,
+       because the check above cannot tell a working setter from one
+       that does nothing: where the constructor already seeded the
+       value being written, asserting it is there afterwards passes
+       either way. */ -}}
 {{- define "builder.test.setters" -}}
 {{- $diffFn := printf "%sDiff" (camel .TypeName) -}}
 {{- $T := renderExpr (external "testing" "T") -}}
@@ -168,37 +194,18 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 	t.Run("{{ $with }} writes {{ $f.Name }}", func(t *{{ $T }}) {
 		t.Parallel()
 {{- if $f.IsSequence }}
-		// Spread, because the replacing setter is variadic: it takes the
-		// elements, and the sample of a sequence type is the whole thing.
 		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}...).Build()
 		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the sequence" }}
 {{- else if $f.Keyed }}
-		// Driven through the replacing setter rather than the entry one:
-		// a sample of a keyed type is the whole collection, and the entry
-		// setter takes a key — which this projection has no sample of.
 		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
 		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the collection" }}
 {{- else if $f.IsBytes }}
-		// Compared by length rather than by value: a byte sequence is a
-		// slice, and Go compares a slice only against nil.
 		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
 		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the sequence" }}
 {{- else if $f.IsOptional }}
 		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
 		{{ assertNotNil "t" (printf "got.%s" $f.Name) "the setter addresses the value it was given" }}
 {{- else }}
-		// Bound rather than written twice. A sample is an expression,
-		// and some of them make a new value each time they are
-		// evaluated — a channel's `make`, a func literal — so a check
-		// spelling it in both places compares two different values and
-		// fails against a setter that did exactly what it was asked.
-		//
-		// Declared at the member's type rather than inferred from the
-		// sample. A directional channel takes its value from a `make`
-		// of the bidirectional form, so the inferred binding is a
-		// `chan T` where the member is a `<-chan T` — and a structural
-		// comparison of two different types reports a difference
-		// whatever the values are.
 		var want {{ renderType $f.Type }} = {{ template "builder.sample" $f }}
 		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}(want).Build()
 		{{ assertDeepEqual "t" $diffFn (printf "got.%s" $f.Name) "want" "the setter writes what it was given" }}
@@ -207,11 +214,6 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{ if and $f.IsScalar $f.Alternate.OK }}
 	t.Run("{{ $with }} replaces what was already there", func(t *{{ $T }}) {
 		t.Parallel()
-		// Two distinct values, because the check above cannot tell a
-		// working setter from one that does nothing: if the constructor
-		// already seeded the value being written, asserting it is there
-		// afterwards passes either way. Writing twice and asserting the
-		// second won cannot pass vacuously.
 		var want {{ renderType $f.Type }} = {{ template "builder.alternate" $f }}
 		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).{{ $with }}(want).Build()
 		{{ assertDeepEqual "t" $diffFn (printf "got.%s" $f.Name) "want" "the later call wins" }}

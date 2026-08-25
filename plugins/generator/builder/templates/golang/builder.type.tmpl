@@ -49,7 +49,7 @@ func (b *{{ $b }}{{ $ta }}) Mutate(fn func(*{{ $v }}{{ $ta }})) *{{ $b }}{{ $ta 
 
 {{ template "builder.clone" . }}
 
-{{ wrapDoc (printf "Build returns the constructed [%s]." $src) }}
+{{ wrapDoc (printf "Build returns the constructed [%s].\n\nThe builder stays usable afterwards, and a second call returns the value as it stands then — so a caller may build, set one more member, and build again. What it returns is a copy of the value under construction, but only as far as Go copies: a member holding a slice or a map is shared with the builder and with every value built from it, and [%s.Clone] is what separates them." $src $b) }}
 func (b *{{ $b }}{{ $ta }}) Build() {{ $v }}{{ $ta }} {
 {{- range (slot . "build").Items }}
 	{{ render . }}
@@ -67,7 +67,7 @@ func (b *{{ $b }}{{ $ta }}) Build() {{ $v }}{{ $ta }} {
 {{- $ta := .TypeArgs -}}
 {{- $v := renderExpr .ValueRef -}}
 {{- if .Companion }}
-{{ wrapDoc (printf "%s returns a builder seeded from the package's companion, with any declared per-member default applied over it." .CtorName) }}
+{{ wrapDoc (printf "%s returns a builder seeded from the package's companion, with any declared per-member default applied over it.\n\nTwo layers, in that order: whatever the companion supplies, then each member that declares its own default. A member the companion sets and the declaration does not keeps the companion's value, so the two sources compose rather than one replacing the other." .CtorName) }}
 func {{ .CtorName }}{{ $tp }}() *{{ $b }}{{ $ta }} {
 	v := {{ renderExpr .Companion }}{{ $ta }}()
 {{- range .Fields }}{{ if .Declared }}
@@ -76,7 +76,7 @@ func {{ .CtorName }}{{ $tp }}() *{{ $b }}{{ $ta }} {
 	return &{{ $b }}{{ $ta }}{v: v}
 }
 {{- else if .Seeded }}
-{{ wrapDoc (printf "%s returns a builder seeded with the declared defaults." .CtorName) }}
+{{ wrapDoc (printf "%s returns a builder seeded with the declared defaults.\n\nOnly the members that declare one. Everything else holds its zero value, so a caller that sets nothing gets a mixture rather than either extreme — which is what makes a check against a built value worth writing." .CtorName) }}
 func {{ .CtorName }}{{ $tp }}() *{{ $b }}{{ $ta }} {
 	return &{{ $b }}{{ $ta }}{v: {{ $v }}{{ $ta }}{
 {{- range .Fields }}{{ if .Declared }}
@@ -85,7 +85,7 @@ func {{ .CtorName }}{{ $tp }}() *{{ $b }}{{ $ta }} {
 	}}
 }
 {{- else }}
-{{ wrapDoc (printf "%s returns a builder holding the zero value." .CtorName) }}
+{{ wrapDoc (printf "%s returns a builder holding the zero value.\n\nNo member declares a default, so there is nothing to seed. A caller that builds immediately gets the same value a composite literal with no fields would, and the setters are what make it differ." .CtorName) }}
 func {{ .CtorName }}{{ $tp }}() *{{ $b }}{{ $ta }} {
 	return &{{ $b }}{{ $ta }}{}
 }
@@ -108,7 +108,7 @@ func {{ .CtorName }}{{ $tp }}() *{{ $b }}{{ $ta }} {
 {{- $recv := printf "b *%s%s" $b $ta -}}
 {{- $ret := printf "*%s%s" $b $ta -}}
 {{- if $f.IsSequence }}
-{{ wrapDoc (printf "%s replaces %s." $with $f.Name) }}
+{{ wrapDoc (printf "%s replaces %s with the elements given.\n\nVariadic, and replacing: whatever the collection held is discarded, including anything a constructor seeded. %s is the counterpart that keeps it. Called with no arguments this empties the member rather than leaving it alone, which is how a caller clears a seeded default." $with $f.Name $f.Append) }}
 func ({{ $recv }}) {{ $with }}(v ...{{ renderType $f.Elem }}) {{ $ret }} {
 	b.v.{{ $f.Name }} = v
 	return b
@@ -120,7 +120,7 @@ func ({{ $recv }}) {{ $f.Append }}(v ...{{ renderType $f.Elem }}) {{ $ret }} {
 	return b
 }
 {{ else if $f.IsBytes }}
-{{ wrapDoc (printf "%s replaces %s." $with $f.Name) }}
+{{ wrapDoc (printf "%s replaces %s with the bytes given.\n\nThe bytes are kept, not copied: the builder and every value built from it share the array the caller passed, so a caller that mutates it afterwards changes what was already built. %s is the form that takes text and has no such tie." $with $f.Name $f.SetText) }}
 func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
 	b.v.{{ $f.Name }} = v
 	return b
@@ -132,7 +132,7 @@ func ({{ $recv }}) {{ $f.SetText }}(s string) {{ $ret }} {
 	return b
 }
 {{ else if $f.IsSet }}
-{{ wrapDoc (printf "%s replaces %s wholesale." $with $f.Name) }}
+{{ wrapDoc (printf "%s replaces %s wholesale.\n\nThe whole collection, not one key: what the member held is discarded rather than merged into, and the map is kept rather than copied. %s is what adds to what is already there." $with $f.Name $f.SetEntry) }}
 func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
 	b.v.{{ $f.Name }} = v
 	return b
@@ -147,7 +147,7 @@ func ({{ $recv }}) {{ $f.SetEntry }}(k {{ renderType $f.Key }}) {{ $ret }} {
 	return b
 }
 
-{{ wrapDoc (printf "%s adds each key to %s, keeping those it holds." $f.SetEntries $f.Name) }}
+{{ wrapDoc (printf "%s adds each key to %s, keeping those it holds.\n\nAdditive like %s, so two calls union rather than the second replacing the first. A key already present is left as it stands: a set holds a key or it does not, and adding one twice is the same as adding it once." $f.SetEntries $f.Name $f.SetEntry) }}
 func ({{ $recv }}) {{ $f.SetEntries }}(keys ...{{ renderType $f.Key }}) {{ $ret }} {
 	if b.v.{{ $f.Name }} == nil {
 		b.v.{{ $f.Name }} = make({{ renderType $f.Type }}, len(keys))
@@ -158,13 +158,13 @@ func ({{ $recv }}) {{ $f.SetEntries }}(keys ...{{ renderType $f.Key }}) {{ $ret 
 	return b
 }
 {{ else if $f.IsMapping }}
-{{ wrapDoc (printf "%s replaces %s wholesale." $with $f.Name) }}
+{{ wrapDoc (printf "%s replaces %s wholesale.\n\nThe whole mapping, not one entry: what the member held is discarded rather than merged into, and the map is kept rather than copied — so a caller that writes to it afterwards changes what was already built. %s is what sets a single key." $with $f.Name $f.SetEntry) }}
 func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
 	b.v.{{ $f.Name }} = v
 	return b
 }
 
-{{ wrapDoc (printf "%s sets one key of %s, allocating on first use." $f.SetEntry $f.Name) }}
+{{ wrapDoc (printf "%s sets one key of %s, allocating on first use.\n\nA key already present takes the new value. The allocation is why this is offered at all: a caller writing to the member directly has to check for nil first, and the builder is the thing that knows whether a constructor seeded one." $f.SetEntry $f.Name) }}
 func ({{ $recv }}) {{ $f.SetEntry }}(k {{ renderType $f.Key }}, v {{ renderType $f.Elem }}) {{ $ret }} {
 	if b.v.{{ $f.Name }} == nil {
 		b.v.{{ $f.Name }} = make({{ renderType $f.Type }})
@@ -190,7 +190,7 @@ func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Elem }}) {{ $ret }} {
 	return b
 }
 {{ else }}
-{{ wrapDoc (printf "%s replaces %s." $with $f.Name) }}
+{{ wrapDoc (printf "%s replaces %s.\n\nThe later call wins: a setter overwrites rather than merges, so a caller building from a constructor that seeded this member states only what it varies." $with $f.Name) }}
 func ({{ $recv }}) {{ $with }}(v {{ renderType $f.Type }}) {{ $ret }} {
 	b.v.{{ $f.Name }} = v
 	return b

@@ -13,7 +13,6 @@ func (h *{{ .TypeName }}) ServeHTTP(w {{ renderType .WriterRef }}, r {{ renderTy
 	{{ render . }}
 {{- end }}
 
-	// body owned by handlergen
 	h.serve(w, r)
 {{- range (slot . "postbody").Items }}
 	{{ render . }}

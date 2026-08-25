@@ -70,16 +70,11 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("declares exactly {{ $n }} variants", func(t *{{ $T }}) {
 		t.Parallel()
-		// A variant added without the handling it needs is the
-		// defect. The count is the one place a reviewer is made to
-		// notice.
 		{{ assertLen "t" "all" $n "the declared set must not change unnoticed" }}
 	})
 
 	t.Run("no two variants share a value", func(t *{{ $T }}) {
 		t.Parallel()
-		// Two names for one value make one of their branches
-		// unreachable, and the compiler has nothing to say about it.
 		seen := map[{{ $t }}]bool{}
 		for _, v := range all {
 			{{ assertFalse "t" "seen[v]" "each variant must hold a distinct value" }}
@@ -91,13 +86,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("every variant renders the value it declares", func(t *{{ $T }}) {
 		t.Parallel()
-		// A textual enumeration's declared value IS its textual form,
-		// and it is already written down. A derivation taking the
-		// identifier instead passes every relational check here — it
-		// round-trips against its own parser, renders distinctly and
-		// validates — while every value arriving from JSON, a column
-		// or a query parameter fails to parse. Only this comparison
-		// tells the two apart.
 {{- range .Variants }}
 		{{ assertEqual "t" (printf "%s.%s()" (renderExpr .Ref) $.Render) .Text "the declared value is the textual form" }}
 {{- end }}
@@ -106,8 +94,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("no two variants share a textual form", func(t *{{ $T }}) {
 		t.Parallel()
-		// The parser maps text back to exactly one variant, so a
-		// collision makes one of them unreachable through it.
 		seen := map[string]bool{}
 		for _, v := range all {
 			{{ assertFalse "t" (printf "seen[v.%s()]" .Render) "each variant must render distinctly" }}
@@ -120,18 +106,12 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("a value outside the set is not valid", func(t *{{ $T }}) {
 		t.Parallel()
-		// A conversion admits any value of the underlying type, so
-		// this is the one place an undeclared value is turned away. An
-		// enumeration whose zero is itself a variant has no other
-		// check that reaches this branch.
 		{{ assertFalse "t" (printf "%s(%s).%s()" $t .OutOfRange .Valid) "an undeclared value must not be valid" }}
 	})
 {{- end }}
 
 	t.Run("every declared variant is valid", func(t *{{ $T }}) {
 		t.Parallel()
-		// A variant the validity test rejects is one the type's own
-		// surface treats as corrupt.
 		for _, v := range all {
 			{{ assertTrue "t" (printf "v.%s()" .Valid) "a declared variant must be valid" }}
 		}
@@ -140,9 +120,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("the zero value is {{ .ZeroName }}", func(t *{{ $T }}) {
 		t.Parallel()
-		// An unset {{ .TypeName }} means {{ .ZeroName }} rather than
-		// nothing, so a caller who forgot to set one gets a working
-		// value and no warning.
 		var zero {{ $t }}
 		{{ assertTrue "t" (printf "zero.%s()" .Valid) "the zero value is a declared variant" }}
 		{{ assertEqual "t" "zero" (renderExpr .ZeroRef) (printf "the zero value is %s" .ZeroName) }}
@@ -151,9 +128,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("the zero value is not a declared variant", func(t *{{ $T }}) {
 		t.Parallel()
-		// The declaration starts past zero, so an unset
-		// {{ .TypeName }} is invalid rather than silently meaning the
-		// first variant.
 		var zero {{ $t }}
 		{{ assertFalse "t" (printf "zero.%s()" .Valid) "the zero value must not be a variant" }}
 	})
@@ -171,8 +145,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("every variant survives a text round trip", func(t *{{ $T }}) {
 		t.Parallel()
-		// A variant that renders one way and parses another is a value
-		// that leaves the process and does not come home.
 		for _, v := range all {
 			got, err := {{ $parse }}(v.{{ .Render }}())
 			{{ assertNoError "t" "err" "a declared variant must parse back" }}
@@ -183,8 +155,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("text naming no variant is refused", func(t *{{ $T }}) {
 		t.Parallel()
-		// Admitting it would let an unnamed value in through the one
-		// door that exists to keep it out.
 		{{- $is := renderExpr (external "errors" "Is") }}
 		_, err := {{ $parse }}({{ .UnknownText }})
 		{{ assertTrue "t" (printf "%s(err, %s)" $is (renderExpr .SentinelRef)) "unknown text must be refused with the declared refusal" }}
@@ -194,9 +164,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("a value outside the set does not render as one inside it", func(t *{{ $T }}) {
 		t.Parallel()
-		// A conversion admits any value of the underlying type. One
-		// whose fallback collided with a declared variant's text would
-		// be indistinguishable from it in a log.
 		out := {{ $t }}({{ .OutOfRange }})
 		for _, v := range all {
 			{{ assertNotEqual "t" (printf "out.%s()" .Render) (printf "v.%s()" .Render) "an undeclared value must render distinctly" }}
@@ -214,8 +181,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("every variant encodes to its textual form", func(t *{{ $T }}) {
 		t.Parallel()
-		// The encoder and the renderer must agree, or a value reads
-		// one way in a log and another on the wire.
 		for _, v := range all {
 			text, err := v.{{ .Encode }}()
 			{{ assertNoError "t" "err" "a declared variant must encode" }}
@@ -238,8 +203,6 @@ func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 
 	t.Run("text naming no variant is refused on decode", func(t *{{ $T }}) {
 		t.Parallel()
-		// The decoder is the boundary an unnamed value arrives at, so
-		// refusing here is what keeps it out of everything downstream.
 		var got {{ $t }}
 		{{ assertError "t" (printf "got.%s([]byte(%s))" .Decode .UnknownText) "unknown text must not decode" }}
 	})
