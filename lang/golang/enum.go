@@ -507,3 +507,98 @@ func OutOfRangeLiteral(e *node.Enum) (string, bool) {
 func isFloatEnum(e *node.Enum) bool {
 	return e != nil && IsFloat(e.Underlying)
 }
+
+// EnumInfoOf projects a Go enum into the neutral vocabulary a
+// language-neutral generator renders.
+//
+// Every function above, asked once and answered together. A generator
+// calling them one at a time re-derives the relationships between
+// them: the form decides where the text comes from, the texts decide
+// whether two collide, and the declared values decide what lies
+// outside them. Two generators in this workspace asked separately and
+// disagreed about the first.
+//
+// The constants are the run's loose constant declarations, which is
+// what lets [emit.EnumInfo.Foreign] report variants declared outside
+// the type's own package. A caller with none passes nil.
+//
+// Every text arrives as a quoted literal rather than as bare text,
+// which is where the quoting belongs: an authored override is
+// arbitrary text, and a template concatenating quotes around one
+// carrying a quote produces a literal that truncates at the first.
+func EnumInfoOf(e *node.Enum, constants []*node.Constant) emit.EnumInfo {
+	conv, verb := EnumFallback(e)
+	dup, _ := DuplicateText(e)
+	info := emit.EnumInfo{
+		Form:           enumFormOut(e),
+		Variants:       enumTextsOut(e),
+		Fallback:       conv,
+		FallbackFormat: verb,
+		Duplicate:      dup,
+		Foreign:        ForeignVariants(e, constants),
+	}
+	if zero, ok := ZeroVariant(e); ok {
+		info.Zero = zero.Name
+	}
+	if text, ok := OutOfRangeText(e); ok {
+		info.UnknownText = Quote(text)
+	}
+	info.OutOfRange = outOfRangeOut(e)
+	return info
+}
+
+// enumFormOut maps this package's form vocabulary onto the neutral
+// one.
+//
+// A conversion rather than an alias. The two are the same distinction
+// and they are not the same type: [EnumForm] classifies a Go
+// declaration and [emit.EnumForm] is what a template branches on, and
+// tying them together would make a rename here a change to every
+// language's contract.
+func enumFormOut(e *node.Enum) emit.EnumForm {
+	if EnumFormOf(e) == FormValue {
+		return emit.EnumFormValue
+	}
+	return emit.EnumFormIdentifier
+}
+
+// enumTextsOut pairs each variant's identifier with its quoted text,
+// in declaration order.
+func enumTextsOut(e *node.Enum) []emit.EnumText {
+	if e == nil {
+		return nil
+	}
+	out := make([]emit.EnumText, 0, len(e.Variants))
+	for _, v := range e.Variants {
+		if v == nil {
+			continue
+		}
+		out = append(out, emit.EnumText{Name: v.Name, Text: EnumTextLiteral(e, v)})
+	}
+	return out
+}
+
+// outOfRangeOut returns a value past the declared set as Go source,
+// whichever kind the set is declared in.
+//
+// A textual set probes with a marker and a numeric one with a value,
+// and the two are different literals — so the branch is here rather
+// than in a caller that would have to know which question to ask
+// before it could ask it. Empty drops the checks that need a
+// boundary, which is the conservative answer: a probe rendered from a
+// value the set turns out to declare asserts that a declared variant
+// is undeclared.
+func outOfRangeOut(e *node.Enum) string {
+	if EnumFormOf(e) == FormValue {
+		text, ok := OutOfRangeText(e)
+		if !ok {
+			return ""
+		}
+		return Quote(text)
+	}
+	literal, ok := OutOfRangeLiteral(e)
+	if !ok {
+		return ""
+	}
+	return literal
+}

@@ -196,3 +196,31 @@ func (Source) ZeroLiteral(t *node.TypeRef, r Resolver) (string, bool) {
 func (Source) WitnessArgs(params []*node.TypeParam) string {
 	return WitnessUse(params)
 }
+
+// EnumOf projects a Go enum into the neutral vocabulary.
+//
+// The optional half of the read side, and the reason it is optional:
+// a language with no enumerated declarations does not implement this,
+// and a generator finds that out by asserting rather than by reading
+// an empty answer back. See [EnumInfoOf].
+func (Source) EnumOf(e *node.Enum, constants []*node.Constant) emit.EnumInfo {
+	return EnumInfoOf(e, constants)
+}
+
+// SentinelName composes an error variable's identifier — `Err<Base>`.
+func (Source) SentinelName(base string) string { return SentinelName(base) }
+
+// IsSentinelName reports whether an identifier is spelled as one.
+//
+// The matcher beside the composer deliberately: a generator emitting
+// under one rule and finding under another produces variables its own
+// detector cannot see. See [IsSentinelName].
+func (Source) IsSentinelName(ident string) bool { return IsSentinelName(ident) }
+
+// ErrorOf projects a Go struct into the error contract it carries.
+//
+// The method set is walked through embeds and the literal's field set
+// is not — see [ErrorInfoOf] for why the two differ.
+func (Source) ErrorOf(s *node.Struct, r Resolver) (emit.ErrorInfo, bool) {
+	return ErrorInfoOf(s, r)
+}

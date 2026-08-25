@@ -46,10 +46,87 @@ import (
 // A question only one generator asks belongs to that generator. The
 // vocabulary here is deliberately narrow, since a method added is one
 // every language that already implements this has to answer.
+//
+// # What a language may also answer
+//
+// [EnumRules] and [ErrorRules] are asked about declarations not every
+// language has, so a language declares them by satisfying them and a
+// generator finds them by asserting:
+//
+//	er, ok := rules.(sdk.EnumRules)
+//
+// The same arrangement [TemplateReplacer] and [ImportAwareFuncs] use,
+// and for the same reason: required here, they would be methods a
+// language with no enumerations has to answer by refusing. A generator
+// that asks and is refused reports the language once and generates
+// nothing for it, which is the honest outcome — better than a
+// projection built from a default nobody chose.
 type SourceRules interface {
 	DeclarationRules
 	TypeRules
 	NamingRules
+}
+
+// EnumRules is what a language answers about a declared enumeration.
+//
+// Optional: a language with no enumerated declarations does not
+// implement it, and a generator asking finds out by asserting rather
+// than by reading an empty answer back.
+type EnumRules interface {
+	// EnumOf projects a declared enumeration into the neutral form —
+	// what each variant renders as, which of them is the zero, what an
+	// undeclared value looks like, and what the set as a whole
+	// forbids.
+	//
+	// The constants are the run's loose constant declarations, which
+	// is what lets the projection report variants declared outside the
+	// type's own package. A caller with none passes nil and gets an
+	// empty [emit.EnumInfo.Foreign]; a caller holding the reader
+	// passes what it holds.
+	//
+	// One call rather than a question per fact, because the answers
+	// are derived from one another: the form decides where the text
+	// comes from, the texts decide whether two collide, and the values
+	// decide what lies outside them. Asked separately, a language
+	// answers the same question twice and the two drift.
+	EnumOf(e *node.Enum, constants []*node.Constant) emit.EnumInfo
+}
+
+// ErrorRules is what a language answers about its error protocol.
+//
+// Optional, for the same reason as [EnumRules]: how a value reports
+// failure differs enough between languages that a shared required
+// method would be one most of them answer by refusing.
+type ErrorRules interface {
+	// SentinelName spells the identifier a declared error value is
+	// named under — Go's `Err` prefix giving `ErrNotFound` from
+	// `NotFound`.
+	SentinelName(base string) string
+
+	// IsSentinelName reports whether an identifier follows that
+	// convention, which is how a generator finds the declared errors
+	// it was pointed at.
+	//
+	// The inverse of [ErrorRules.SentinelName] and declared beside it,
+	// because a generator that emits under one convention and a
+	// detector that looks for another is the same rule written twice —
+	// disagreeing the first time either is corrected.
+	IsSentinelName(ident string) bool
+
+	// ErrorOf projects a declaration into the error contract it
+	// carries, reporting false for one that carries none.
+	//
+	// Matched on the protocol rather than on the name. A declaration
+	// with a same-named member that does not satisfy the protocol is
+	// not an error, and a check calling it as one does not compile —
+	// which puts the failure in the consuming repository rather than a
+	// diagnostic in this one.
+	//
+	// The resolver reaches whatever the declaration folds in, so a
+	// family of errors sharing one embedded base is projected from the
+	// contract it inherits rather than from the members it happens to
+	// restate.
+	ErrorOf(s *node.Struct, r node.Resolver) (emit.ErrorInfo, bool)
 }
 
 // DeclarationRules is how a declaration written in one language is

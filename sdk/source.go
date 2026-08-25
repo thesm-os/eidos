@@ -19,6 +19,47 @@ import (
 // front of it — see [LanguageOf].
 type SourceRules = plugin.SourceRules
 
+// EnumRules re-exports [plugin.EnumRules] — what a language answers
+// about a declared enumeration.
+//
+// A capability rather than a requirement: a plugin asks for it by
+// asserting against the rules [Base.SourceOf] handed back, and a
+// language that does not describe enumerations simply does not
+// satisfy it.
+type EnumRules = plugin.EnumRules
+
+// ErrorRules re-exports [plugin.ErrorRules] — what a language answers
+// about its error protocol. Optional, on the same terms as
+// [EnumRules].
+type ErrorRules = plugin.ErrorRules
+
+// EnumForm re-exports [emit.EnumForm] — where a variant's textual
+// form comes from.
+type EnumForm = emit.EnumForm
+
+// The two forms, re-exported so a plugin branching on one need not
+// import the emit package to name it.
+const (
+	EnumFormIdentifier = emit.EnumFormIdentifier
+	EnumFormValue      = emit.EnumFormValue
+)
+
+// EnumInfo re-exports [emit.EnumInfo] — what a language answers about
+// one declared enumeration.
+type EnumInfo = emit.EnumInfo
+
+// EnumText re-exports [emit.EnumText] — one variant's identifier and
+// the literal its textual form renders as.
+type EnumText = emit.EnumText
+
+// ErrorInfo re-exports [emit.ErrorInfo] — what a language answers
+// about one declaration taking part in its error protocol.
+type ErrorInfo = emit.ErrorInfo
+
+// ErrorMember re-exports [emit.ErrorMember] — one member of an error
+// declaration, with what a check can write into it.
+type ErrorMember = emit.ErrorMember
+
 // Resolver re-exports [node.Resolver] — what a named type is, over
 // the declarations a run loaded.
 //
