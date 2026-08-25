@@ -288,6 +288,7 @@ func TestAssertFuncMapMatchesItsNames(t *testing.T) {
 		golang.FuncAssertTrue, golang.FuncAssertFalse,
 		golang.FuncAssertNil, golang.FuncAssertNotNil,
 		golang.FuncAssertLen, golang.FuncAssertNoError,
+		golang.FuncNeedsDiffHelper,
 		golang.FuncAssertError,
 	}
 

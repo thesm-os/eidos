@@ -15,6 +15,18 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`needsDiffHelper` lets a replaced dialect drop what it does not use.** The
+  builder's generated tests declare a file-level comparison helper and call it
+  from every deep-equality check, which is right for the shipped dialect: the
+  options a member of any type needs are too long to repeat per check. A dialect
+  that replaces `assertDeepEqual` with a library call leaves that helper
+  uncalled — and the file still imports go-cmp and reflect for it, so the
+  consumer carries the dependency the replacement existed to remove.
+
+  Templates now guard both the helper and the references it composes on this
+  entry. `external` registers an import where it renders, so composing the
+  references above the guard was itself enough to keep the import.
+
 - **`+gen:witness` names the type a parameter is instantiated at.** A generated
   check is an ordinary function and cannot take type parameters, so a language
   derives concrete types where the constraint's type set is knowable without

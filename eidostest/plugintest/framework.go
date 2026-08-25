@@ -866,6 +866,7 @@ var overrideableFuncNames = []string{
 	"metaEq",
 	"metaStr",
 	"namedFields",
+	"needsDiffHelper",
 	"nilable",
 	"origin",
 	"outOfRange",

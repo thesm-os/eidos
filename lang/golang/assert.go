@@ -59,6 +59,10 @@ const (
 	FuncAssertLen       = "assertLen"
 	FuncAssertNoError   = "assertNoError"
 	FuncAssertError     = "assertError"
+
+	// FuncNeedsDiffHelper answers whether the dialect's deep-equality
+	// form wants a file-level comparison helper emitted beside it.
+	FuncNeedsDiffHelper = "needsDiffHelper"
 )
 
 // AssertFuncMap returns the assertion dialect.
@@ -84,6 +88,7 @@ func AssertFuncMap() template.FuncMap {
 		FuncAssertLen:       AssertLen,
 		FuncAssertNoError:   AssertNoError,
 		FuncAssertError:     AssertError,
+		FuncNeedsDiffHelper: NeedsDiffHelper,
 	}
 }
 
@@ -135,6 +140,25 @@ func AssertDeepEqual(t, diff, got, want, msg string) string {
 // alone, because a generated check sits inside a consumer's test
 // where a one-letter name is likelier to shadow something.
 const reportVar = "gotDiff"
+
+// NeedsDiffHelper reports whether a template should emit the
+// file-level comparison helper [AssertDeepEqual] is written against.
+//
+// True for this dialect, because [AssertDeepEqual] takes its callee as
+// an argument: something has to declare the thing it calls, and a
+// comparison carrying the options a member of any type needs is too
+// long to repeat at every check.
+//
+// The reason it is a question rather than an assumption is what a
+// replacement costs without it. A dialect whose deep-equality form
+// calls a library instead — testkit's, say — leaves that helper
+// uncalled, and the file still imports what the helper names. The
+// consumer then carries a dependency the replacement existed to
+// remove, and reads a declaration nothing uses.
+//
+// A template guards both the helper and the references it composes on
+// this, so a false answer emits neither.
+func NeedsDiffHelper() bool { return true }
 
 // AssertNotEqual renders the check that got differs from want.
 //

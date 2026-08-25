@@ -23,14 +23,6 @@
 
 {{- define "builder.test" -}}
 {{- $T := renderExpr (external "testing" "T") -}}
-{{- $cmpDiff := renderExpr (external "github.com/google/go-cmp/cmp" "Diff") -}}
-{{- $cmpExporter := renderExpr (external "github.com/google/go-cmp/cmp" "Exporter") -}}
-{{- $cmpFilterValues := renderExpr (external "github.com/google/go-cmp/cmp" "FilterValues") -}}
-{{- $cmpComparer := renderExpr (external "github.com/google/go-cmp/cmp" "Comparer") -}}
-{{- $reflectType := renderExpr (external "reflect" "Type") -}}
-{{- $reflectTypeOf := renderExpr (external "reflect" "TypeOf") -}}
-{{- $reflectValueOf := renderExpr (external "reflect" "ValueOf") -}}
-{{- $reflectFunc := renderExpr (external "reflect" "Func") -}}
 {{- $diffFn := printf "%sDiff" (camel .TypeName) -}}
 {{- $b := .TypeName -}}
 {{- $src := .SourceName -}}
@@ -44,6 +36,19 @@
 // nothing a check could name. Write one by hand at the types your own code
 // uses.
 {{- else }}
+{{- /* The references the helper names are composed inside the guard,
+       not above it. `external` registers the import where it renders,
+       so composing them unconditionally left a file importing go-cmp
+       and reflect for a helper a replaced dialect never calls. */ -}}
+{{- if needsDiffHelper }}
+{{- $cmpDiff := renderExpr (external "github.com/google/go-cmp/cmp" "Diff") -}}
+{{- $cmpExporter := renderExpr (external "github.com/google/go-cmp/cmp" "Exporter") -}}
+{{- $cmpFilterValues := renderExpr (external "github.com/google/go-cmp/cmp" "FilterValues") -}}
+{{- $cmpComparer := renderExpr (external "github.com/google/go-cmp/cmp" "Comparer") -}}
+{{- $reflectType := renderExpr (external "reflect" "Type") -}}
+{{- $reflectTypeOf := renderExpr (external "reflect" "TypeOf") -}}
+{{- $reflectValueOf := renderExpr (external "reflect" "ValueOf") -}}
+{{- $reflectFunc := renderExpr (external "reflect" "Func") -}}
 // {{ $diffFn }} compares two member values structurally.
 //
 // `==` cannot serve. Go rejects it outright on a member whose type holds a
@@ -77,6 +82,7 @@ func {{ $diffFn }}(want, got any) string {
 		),
 	)
 }
+{{- end }}
 
 // {{ testFuncName $b "Construction" }} pins what the constructors produce.
 func {{ testFuncName $b "Construction" }}(t *{{ $T }}) {
