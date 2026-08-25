@@ -1,0 +1,415 @@
+{
+  "pos": {
+    "file": "."
+  },
+  "meta": {
+    "entries": [
+      {
+        "name": "frontend",
+        "authority": 0,
+        "value": "typescript",
+        "set_by": "typescript",
+        "pos": {
+          "file": "."
+        }
+      }
+    ]
+  },
+  "name": "functions_and_bindings",
+  "path": ".",
+  "files": [
+    {
+      "pos": {
+        "file": "source.ts"
+      },
+      "name": "source.ts",
+      "path": "source.ts"
+    }
+  ],
+  "functions": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 1,
+        "column": 16,
+        "offset": 15
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.ambient",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 16,
+              "offset": 15
+            }
+          },
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 16,
+              "offset": 15
+            }
+          }
+        ]
+      },
+      "name": "ambient",
+      "package": ".",
+      "params": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 1,
+            "column": 33,
+            "offset": 32
+          },
+          "meta": {
+            "entries": []
+          },
+          "name": "a",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 36,
+              "offset": 35
+            },
+            "type_kind": 0,
+            "name": "string"
+          }
+        }
+      ],
+      "returns": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 1,
+            "column": 45,
+            "offset": 44
+          },
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 45,
+              "offset": 44
+            },
+            "type_kind": 0,
+            "name": "void"
+          }
+        }
+      ]
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 3,
+        "column": 8,
+        "offset": 58
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 8,
+              "offset": 58
+            }
+          },
+          {
+            "name": "ts.overloads",
+            "authority": 0,
+            "value": [
+              {
+                "text": "function overloaded(a: number): void"
+              }
+            ],
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 8,
+              "offset": 58
+            }
+          }
+        ]
+      },
+      "name": "overloaded",
+      "package": ".",
+      "params": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 3,
+            "column": 28,
+            "offset": 78
+          },
+          "meta": {
+            "entries": []
+          },
+          "name": "a",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 31,
+              "offset": 81
+            },
+            "type_kind": 0,
+            "name": "string"
+          }
+        }
+      ],
+      "returns": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 3,
+            "column": 40,
+            "offset": 90
+          },
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 40,
+              "offset": 90
+            },
+            "type_kind": 0,
+            "name": "void"
+          }
+        }
+      ]
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 6,
+        "column": 8,
+        "offset": 149
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 6,
+              "column": 8,
+              "offset": 149
+            }
+          }
+        ]
+      },
+      "name": "generic",
+      "package": ".",
+      "params": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 48,
+            "offset": 189
+          },
+          "meta": {
+            "entries": []
+          },
+          "name": "value",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 6,
+              "column": 55,
+              "offset": 196
+            },
+            "type_kind": 0,
+            "name": "T"
+          }
+        }
+      ],
+      "returns": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 59,
+            "offset": 200
+          },
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 6,
+              "column": 59,
+              "offset": 200
+            },
+            "type_kind": 0,
+            "name": "T"
+          }
+        }
+      ],
+      "type_params": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 25,
+            "offset": 166
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.typeParamDefault",
+                "authority": 0,
+                "value": "{}",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 44,
+                  "offset": 185
+                }
+              }
+            ]
+          },
+          "name": "T",
+          "constraint": {
+            "raw": "object",
+            "embedded": [
+              {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 35,
+                  "offset": 176
+                },
+                "type_kind": 0,
+                "name": "object"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 11,
+        "column": 12,
+        "offset": 282
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 11,
+              "column": 8,
+              "offset": 278
+            }
+          }
+        ]
+      },
+      "name": "mutable",
+      "package": ".",
+      "type": {
+        "pos": {
+          "file": "source.ts",
+          "line": 11,
+          "column": 21,
+          "offset": 291
+        },
+        "type_kind": 0,
+        "name": "number"
+      }
+    }
+  ],
+  "constants": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 10,
+        "column": 14,
+        "offset": 236
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 10,
+              "column": 8,
+              "offset": 230
+            }
+          }
+        ]
+      },
+      "name": "NAME",
+      "package": ".",
+      "type": {
+        "pos": {
+          "file": "source.ts",
+          "line": 10,
+          "column": 20,
+          "offset": 242
+        },
+        "type_kind": 0,
+        "name": "string"
+      },
+      "value": "'eidos'"
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 10,
+        "column": 38,
+        "offset": 260
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 10,
+              "column": 8,
+              "offset": 230
+            }
+          }
+        ]
+      },
+      "name": "COUNT",
+      "package": ".",
+      "value": "2"
+    }
+  ]
+}

@@ -1,0 +1,685 @@
+{
+  "pos": {
+    "file": "."
+  },
+  "meta": {
+    "entries": [
+      {
+        "name": "frontend",
+        "authority": 0,
+        "value": "typescript",
+        "set_by": "typescript",
+        "pos": {
+          "file": "."
+        }
+      }
+    ]
+  },
+  "name": "class_members",
+  "path": ".",
+  "files": [
+    {
+      "pos": {
+        "file": "source.ts"
+      },
+      "name": "source.ts",
+      "path": "source.ts"
+    }
+  ],
+  "structs": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 1,
+        "column": 8,
+        "offset": 7
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.abstract",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 8,
+              "offset": 7
+            }
+          },
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 8,
+              "offset": 7
+            }
+          }
+        ]
+      },
+      "name": "Repo",
+      "package": ".",
+      "fields": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 2,
+            "column": 3,
+            "offset": 64
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.initialiser",
+                "authority": 0,
+                "value": "new Map()",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 51,
+                  "offset": 112
+                }
+              },
+              {
+                "name": "ts.readonly",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 3,
+                  "offset": 64
+                }
+              },
+              {
+                "name": "ts.static",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 3,
+                  "offset": 64
+                }
+              },
+              {
+                "name": "ts.visibility",
+                "authority": 0,
+                "value": "private",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 3,
+                  "offset": 64
+                }
+              }
+            ]
+          },
+          "name": "cache",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 34,
+              "offset": 95
+            },
+            "type_kind": 0,
+            "name": "Map",
+            "type_args": [
+              {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 38,
+                  "offset": 99
+                },
+                "type_kind": 0,
+                "name": "string"
+              },
+              {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 46,
+                  "offset": 107
+                },
+                "type_kind": 0,
+                "name": "T"
+              }
+            ]
+          }
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 3,
+            "column": 3,
+            "offset": 125
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.initialiser",
+                "authority": 0,
+                "value": "1",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 3,
+                  "column": 13,
+                  "offset": 135
+                }
+              },
+              {
+                "name": "ts.visibility",
+                "authority": 0,
+                "value": "hard-private",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 3,
+                  "column": 3,
+                  "offset": 125
+                }
+              }
+            ]
+          },
+          "name": "#secret"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 4,
+            "column": 3,
+            "offset": 140
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.definiteAssignment",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 4,
+                  "column": 3,
+                  "offset": 140
+                }
+              },
+              {
+                "name": "ts.visibility",
+                "authority": 0,
+                "value": "protected",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 4,
+                  "column": 3,
+                  "offset": 140
+                }
+              }
+            ]
+          },
+          "name": "items",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 4,
+              "column": 21,
+              "offset": 158
+            },
+            "type_kind": 2,
+            "elem": {
+              "pos": {
+                "file": "source.ts",
+                "line": 4,
+                "column": 21,
+                "offset": 158
+              },
+              "type_kind": 0,
+              "name": "T"
+            }
+          }
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 15,
+            "offset": 178
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.parameterProperty",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript"
+              },
+              {
+                "name": "ts.readonly",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript"
+              },
+              {
+                "name": "ts.visibility",
+                "authority": 0,
+                "value": "public",
+                "set_by": "typescript"
+              }
+            ]
+          },
+          "name": "name",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 6,
+              "column": 37,
+              "offset": 200
+            },
+            "type_kind": 0,
+            "name": "string"
+          }
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 45,
+            "offset": 208
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.optional",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript"
+              },
+              {
+                "name": "ts.parameterProperty",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript"
+              },
+              {
+                "name": "ts.visibility",
+                "authority": 0,
+                "value": "private",
+                "set_by": "typescript"
+              }
+            ]
+          },
+          "name": "dep",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 6,
+              "column": 59,
+              "offset": 222
+            },
+            "type_kind": 0,
+            "name": "Dep"
+          }
+        }
+      ],
+      "embeds": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 1,
+            "column": 39,
+            "offset": 38
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.heritage",
+                "authority": 0,
+                "value": "extends",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 1,
+                  "column": 39,
+                  "offset": 38
+                }
+              }
+            ]
+          },
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 39,
+              "offset": 38
+            },
+            "meta": {
+              "entries": [
+                {
+                  "name": "ts.typeText",
+                  "authority": 0,
+                  "value": "Base",
+                  "set_by": "typescript",
+                  "pos": {
+                    "file": "source.ts",
+                    "line": 1,
+                    "column": 39,
+                    "offset": 38
+                  }
+                }
+              ]
+            },
+            "type_kind": 0,
+            "package": "ts",
+            "name": "operator"
+          }
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 1,
+            "column": 55,
+            "offset": 54
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.heritage",
+                "authority": 0,
+                "value": "implements",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 1,
+                  "column": 55,
+                  "offset": 54
+                }
+              }
+            ]
+          },
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 55,
+              "offset": 54
+            },
+            "type_kind": 0,
+            "name": "Store"
+          }
+        }
+      ],
+      "methods": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 3,
+            "offset": 166
+          },
+          "meta": {
+            "entries": []
+          },
+          "name": "constructor",
+          "params": [
+            {
+              "pos": {
+                "file": "source.ts",
+                "line": 6,
+                "column": 15,
+                "offset": 178
+              },
+              "meta": {
+                "entries": [
+                  {
+                    "name": "ts.parameterProperty",
+                    "authority": 0,
+                    "value": true,
+                    "set_by": "typescript",
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 6,
+                      "column": 15,
+                      "offset": 178
+                    }
+                  },
+                  {
+                    "name": "ts.readonly",
+                    "authority": 0,
+                    "value": true,
+                    "set_by": "typescript",
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 6,
+                      "column": 15,
+                      "offset": 178
+                    }
+                  },
+                  {
+                    "name": "ts.visibility",
+                    "authority": 0,
+                    "value": "public",
+                    "set_by": "typescript",
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 6,
+                      "column": 15,
+                      "offset": 178
+                    }
+                  }
+                ]
+              },
+              "name": "name",
+              "type": {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 37,
+                  "offset": 200
+                },
+                "type_kind": 0,
+                "name": "string"
+              }
+            },
+            {
+              "pos": {
+                "file": "source.ts",
+                "line": 6,
+                "column": 45,
+                "offset": 208
+              },
+              "meta": {
+                "entries": [
+                  {
+                    "name": "ts.optional",
+                    "authority": 0,
+                    "value": true,
+                    "set_by": "typescript",
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 6,
+                      "column": 45,
+                      "offset": 208
+                    }
+                  },
+                  {
+                    "name": "ts.parameterProperty",
+                    "authority": 0,
+                    "value": true,
+                    "set_by": "typescript",
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 6,
+                      "column": 45,
+                      "offset": 208
+                    }
+                  },
+                  {
+                    "name": "ts.visibility",
+                    "authority": 0,
+                    "value": "private",
+                    "set_by": "typescript",
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 6,
+                      "column": 45,
+                      "offset": 208
+                    }
+                  }
+                ]
+              },
+              "name": "dep",
+              "type": {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 59,
+                  "offset": 222
+                },
+                "type_kind": 0,
+                "name": "Dep"
+              }
+            }
+          ]
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 12,
+            "column": 3,
+            "offset": 289
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.async",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 12,
+                  "column": 3,
+                  "offset": 289
+                }
+              },
+              {
+                "name": "ts.generator",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 12,
+                  "column": 3,
+                  "offset": 289
+                }
+              }
+            ]
+          },
+          "name": "stream",
+          "returns": [
+            {
+              "pos": {
+                "file": "source.ts",
+                "line": 12,
+                "column": 20,
+                "offset": 306
+              },
+              "type": {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 12,
+                  "column": 20,
+                  "offset": 306
+                },
+                "type_kind": 0,
+                "name": "AsyncGenerator",
+                "type_args": [
+                  {
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 12,
+                      "column": 35,
+                      "offset": 321
+                    },
+                    "type_kind": 0,
+                    "name": "T"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 14,
+            "column": 3,
+            "offset": 330
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.accessor",
+                "authority": 0,
+                "value": "get",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 14,
+                  "column": 3,
+                  "offset": 330
+                }
+              }
+            ]
+          },
+          "name": "size",
+          "returns": [
+            {
+              "pos": {
+                "file": "source.ts",
+                "line": 14,
+                "column": 15,
+                "offset": 342
+              },
+              "type": {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 14,
+                  "column": 15,
+                  "offset": 342
+                },
+                "type_kind": 0,
+                "name": "number"
+              }
+            }
+          ]
+        }
+      ],
+      "type_params": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 1,
+            "column": 28,
+            "offset": 27
+          },
+          "name": "T"
+        }
+      ]
+    }
+  ]
+}

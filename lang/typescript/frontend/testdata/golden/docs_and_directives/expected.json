@@ -1,0 +1,107 @@
+{
+  "pos": {
+    "file": "."
+  },
+  "meta": {
+    "entries": [
+      {
+        "name": "frontend",
+        "authority": 0,
+        "value": "typescript",
+        "set_by": "typescript",
+        "pos": {
+          "file": "."
+        }
+      }
+    ]
+  },
+  "name": "docs_and_directives",
+  "path": ".",
+  "files": [
+    {
+      "pos": {
+        "file": "source.ts"
+      },
+      "name": "source.ts",
+      "path": "source.ts"
+    }
+  ],
+  "interfaces": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 7,
+        "column": 8,
+        "offset": 94
+      },
+      "docs": [
+        "A documented type.",
+        "",
+        "@deprecated use Other instead",
+        "+gen:shape writer"
+      ],
+      "directives": [
+        {
+          "Name": "shape",
+          "Negated": false,
+          "Args": [
+            "writer"
+          ],
+          "KV": {},
+          "Raw": "shape writer",
+          "Pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 1,
+            "offset": 66
+          }
+        }
+      ],
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 7,
+              "column": 8,
+              "offset": 94
+            }
+          }
+        ]
+      },
+      "name": "Documented",
+      "package": ".",
+      "fields": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 9,
+            "column": 3,
+            "offset": 144
+          },
+          "docs": [
+            "The identifier."
+          ],
+          "meta": {
+            "entries": []
+          },
+          "name": "id",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 9,
+              "column": 7,
+              "offset": 148
+            },
+            "type_kind": 0,
+            "name": "string"
+          }
+        }
+      ]
+    }
+  ]
+}

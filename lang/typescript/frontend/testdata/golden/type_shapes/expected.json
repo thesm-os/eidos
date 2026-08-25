@@ -1,0 +1,819 @@
+{
+  "pos": {
+    "file": "."
+  },
+  "meta": {
+    "entries": [
+      {
+        "name": "frontend",
+        "authority": 0,
+        "value": "typescript",
+        "set_by": "typescript",
+        "pos": {
+          "file": "."
+        }
+      }
+    ]
+  },
+  "name": "type_shapes",
+  "path": ".",
+  "files": [
+    {
+      "pos": {
+        "file": "source.ts"
+      },
+      "name": "source.ts",
+      "path": "source.ts"
+    }
+  ],
+  "aliases": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 1,
+        "column": 8,
+        "offset": 7
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 8,
+              "offset": 7
+            }
+          }
+        ]
+      },
+      "name": "Union",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 1,
+          "column": 21,
+          "offset": 20
+        },
+        "type_kind": 0,
+        "package": "ts",
+        "name": "union",
+        "type_args": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 21,
+              "offset": 20
+            },
+            "meta": {
+              "entries": [
+                {
+                  "name": "ts.literalType",
+                  "authority": 0,
+                  "value": "'a'",
+                  "set_by": "typescript",
+                  "pos": {
+                    "file": "source.ts",
+                    "line": 1,
+                    "column": 21,
+                    "offset": 20
+                  }
+                }
+              ]
+            },
+            "type_kind": 0,
+            "name": "'a'"
+          },
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 27,
+              "offset": 26
+            },
+            "meta": {
+              "entries": [
+                {
+                  "name": "ts.literalType",
+                  "authority": 0,
+                  "value": "'b'",
+                  "set_by": "typescript",
+                  "pos": {
+                    "file": "source.ts",
+                    "line": 1,
+                    "column": 27,
+                    "offset": 26
+                  }
+                }
+              ]
+            },
+            "type_kind": 0,
+            "name": "'b'"
+          },
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 33,
+              "offset": 32
+            },
+            "type_kind": 0,
+            "name": "number"
+          }
+        ]
+      },
+      "is_alias": true
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 2,
+        "column": 8,
+        "offset": 47
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 8,
+              "offset": 47
+            }
+          }
+        ]
+      },
+      "name": "Intersect",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 2,
+          "column": 25,
+          "offset": 64
+        },
+        "type_kind": 0,
+        "package": "ts",
+        "name": "intersection",
+        "type_args": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 25,
+              "offset": 64
+            },
+            "type_kind": 0,
+            "name": "A"
+          },
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 29,
+              "offset": 68
+            },
+            "type_kind": 0,
+            "name": "B"
+          }
+        ]
+      },
+      "is_alias": true
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 3,
+        "column": 8,
+        "offset": 78
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 8,
+              "offset": 78
+            }
+          }
+        ]
+      },
+      "name": "Tup",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 3,
+          "column": 19,
+          "offset": 89
+        },
+        "type_kind": 0,
+        "package": "ts",
+        "name": "tuple",
+        "type_args": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 25,
+              "offset": 95
+            },
+            "meta": {
+              "entries": []
+            },
+            "type_kind": 0,
+            "name": "string"
+          },
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 41,
+              "offset": 111
+            },
+            "meta": {
+              "entries": [
+                {
+                  "name": "ts.optional",
+                  "authority": 0,
+                  "value": true,
+                  "set_by": "typescript",
+                  "pos": {
+                    "file": "source.ts",
+                    "line": 3,
+                    "column": 33,
+                    "offset": 103
+                  }
+                }
+              ]
+            },
+            "type_kind": 0,
+            "name": "number"
+          }
+        ]
+      },
+      "is_alias": true
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 4,
+        "column": 8,
+        "offset": 127
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 4,
+              "column": 8,
+              "offset": 127
+            }
+          }
+        ]
+      },
+      "name": "Fn",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 4,
+          "column": 18,
+          "offset": 137
+        },
+        "type_kind": 5,
+        "func_params": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 4,
+              "column": 22,
+              "offset": 141
+            },
+            "type_kind": 0,
+            "name": "string"
+          },
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 4,
+              "column": 39,
+              "offset": 158
+            },
+            "type_kind": 2,
+            "elem": {
+              "pos": {
+                "file": "source.ts",
+                "line": 4,
+                "column": 39,
+                "offset": 158
+              },
+              "type_kind": 0,
+              "name": "number"
+            }
+          }
+        ],
+        "func_returns": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 4,
+              "column": 52,
+              "offset": 171
+            },
+            "type_kind": 0,
+            "name": "void"
+          }
+        ]
+      },
+      "is_alias": true
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 5,
+        "column": 8,
+        "offset": 184
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 5,
+              "column": 8,
+              "offset": 184
+            }
+          }
+        ]
+      },
+      "name": "Obj",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 5,
+          "column": 19,
+          "offset": 195
+        },
+        "type_kind": 7,
+        "fields": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 5,
+              "column": 21,
+              "offset": 197
+            },
+            "meta": {
+              "entries": []
+            },
+            "name": "x",
+            "type": {
+              "pos": {
+                "file": "source.ts",
+                "line": 5,
+                "column": 24,
+                "offset": 200
+              },
+              "type_kind": 0,
+              "name": "string"
+            }
+          },
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 5,
+              "column": 32,
+              "offset": 208
+            },
+            "meta": {
+              "entries": [
+                {
+                  "name": "ts.optional",
+                  "authority": 0,
+                  "value": true,
+                  "set_by": "typescript",
+                  "pos": {
+                    "file": "source.ts",
+                    "line": 5,
+                    "column": 32,
+                    "offset": 208
+                  }
+                }
+              ]
+            },
+            "name": "y",
+            "type": {
+              "pos": {
+                "file": "source.ts",
+                "line": 5,
+                "column": 36,
+                "offset": 212
+              },
+              "type_kind": 0,
+              "name": "number"
+            }
+          }
+        ]
+      },
+      "is_alias": true
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 6,
+        "column": 8,
+        "offset": 229
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 6,
+              "column": 8,
+              "offset": 229
+            }
+          }
+        ]
+      },
+      "name": "Mapped",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 6,
+          "column": 25,
+          "offset": 246
+        },
+        "meta": {
+          "entries": [
+            {
+              "name": "ts.mapped",
+              "authority": 0,
+              "value": true,
+              "set_by": "typescript",
+              "pos": {
+                "file": "source.ts",
+                "line": 6,
+                "column": 25,
+                "offset": 246
+              }
+            },
+            {
+              "name": "ts.typeText",
+              "authority": 0,
+              "value": "{ [K in keyof T]: T[K] }",
+              "set_by": "typescript",
+              "pos": {
+                "file": "source.ts",
+                "line": 6,
+                "column": 25,
+                "offset": 246
+              }
+            }
+          ]
+        },
+        "type_kind": 0,
+        "package": "ts",
+        "name": "operator"
+      },
+      "is_alias": true,
+      "type_params": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 20,
+            "offset": 241
+          },
+          "name": "T"
+        }
+      ]
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 7,
+        "column": 8,
+        "offset": 279
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 7,
+              "column": 8,
+              "offset": 279
+            }
+          }
+        ]
+      },
+      "name": "Indexed",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 7,
+          "column": 23,
+          "offset": 294
+        },
+        "type_kind": 4,
+        "map_key": {
+          "pos": {
+            "file": "source.ts",
+            "line": 7,
+            "column": 29,
+            "offset": 300
+          },
+          "type_kind": 0,
+          "name": "string"
+        },
+        "map_value": {
+          "pos": {
+            "file": "source.ts",
+            "line": 7,
+            "column": 38,
+            "offset": 309
+          },
+          "type_kind": 0,
+          "name": "unknown"
+        }
+      },
+      "is_alias": true
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 8,
+        "column": 8,
+        "offset": 327
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 8,
+              "column": 8,
+              "offset": 327
+            }
+          }
+        ]
+      },
+      "name": "Cond",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 8,
+          "column": 23,
+          "offset": 342
+        },
+        "meta": {
+          "entries": [
+            {
+              "name": "ts.typeText",
+              "authority": 0,
+              "value": "T extends string ? A : B",
+              "set_by": "typescript",
+              "pos": {
+                "file": "source.ts",
+                "line": 8,
+                "column": 23,
+                "offset": 342
+              }
+            }
+          ]
+        },
+        "type_kind": 0,
+        "package": "ts",
+        "name": "operator"
+      },
+      "is_alias": true,
+      "type_params": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 8,
+            "column": 18,
+            "offset": 337
+          },
+          "name": "T"
+        }
+      ]
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 9,
+        "column": 8,
+        "offset": 375
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 9,
+              "column": 8,
+              "offset": 375
+            }
+          }
+        ]
+      },
+      "name": "Nested",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 9,
+          "column": 22,
+          "offset": 389
+        },
+        "type_kind": 0,
+        "name": "Promise",
+        "type_args": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 9,
+              "column": 30,
+              "offset": 397
+            },
+            "type_kind": 0,
+            "name": "Array",
+            "type_args": [
+              {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 9,
+                  "column": 36,
+                  "offset": 403
+                },
+                "type_kind": 0,
+                "name": "Map",
+                "type_args": [
+                  {
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 9,
+                      "column": 40,
+                      "offset": 407
+                    },
+                    "type_kind": 0,
+                    "name": "string"
+                  },
+                  {
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 9,
+                      "column": 48,
+                      "offset": 415
+                    },
+                    "type_kind": 0,
+                    "name": "number"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "is_alias": true
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 10,
+        "column": 8,
+        "offset": 433
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 10,
+              "column": 8,
+              "offset": 433
+            }
+          }
+        ]
+      },
+      "name": "Nullable",
+      "package": ".",
+      "target": {
+        "pos": {
+          "file": "source.ts",
+          "line": 10,
+          "column": 24,
+          "offset": 449
+        },
+        "meta": {
+          "entries": [
+            {
+              "name": "ts.nullable",
+              "authority": 0,
+              "value": true,
+              "set_by": "typescript",
+              "pos": {
+                "file": "source.ts",
+                "line": 10,
+                "column": 24,
+                "offset": 449
+              }
+            }
+          ]
+        },
+        "type_kind": 0,
+        "package": "ts",
+        "name": "union",
+        "type_args": [
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 10,
+              "column": 24,
+              "offset": 449
+            },
+            "type_kind": 0,
+            "name": "string"
+          },
+          {
+            "pos": {
+              "file": "source.ts",
+              "line": 10,
+              "column": 33,
+              "offset": 458
+            },
+            "meta": {
+              "entries": [
+                {
+                  "name": "ts.literalType",
+                  "authority": 0,
+                  "value": "null",
+                  "set_by": "typescript",
+                  "pos": {
+                    "file": "source.ts",
+                    "line": 10,
+                    "column": 33,
+                    "offset": 458
+                  }
+                }
+              ]
+            },
+            "type_kind": 0,
+            "name": "null"
+          }
+        ]
+      },
+      "is_alias": true
+    }
+  ]
+}

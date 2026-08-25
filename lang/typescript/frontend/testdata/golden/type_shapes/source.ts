@@ -1,0 +1,10 @@
+export type Union = 'a' | 'b' | number;
+export type Intersect = A & B;
+export type Tup = [key: string, value?: number];
+export type Fn = (a: string, ...rest: number[]) => void;
+export type Obj = { x: string; y?: number };
+export type Mapped<T> = { [K in keyof T]: T[K] };
+export type Indexed = { [k: string]: unknown };
+export type Cond<T> = T extends string ? A : B;
+export type Nested = Promise<Array<Map<string, number>>>;
+export type Nullable = string | null;

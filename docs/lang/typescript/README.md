@@ -1,9 +1,8 @@
 # TypeScript language support (`lang/typescript`)
 
-> **Status: proposed.** No package under `lang/typescript` exists yet.
-> This document describes the design; the contested part of it is
-> [ADR-0008](../../adr/0008-map-typescript-interfaces-to-node-struct.md),
-> which is Proposed rather than Accepted.
+> **Status: partial.** `lang/typescript` and `lang/typescript/frontend`
+> are built; `backend` and `sdk` are not. Declaration mapping follows
+> [ADR-0008](../../adr/0008-map-typescript-interfaces-to-node-interface.md).
 
 Everything eidos knows about TypeScript lives under `lang/typescript`,
 in one module, following
@@ -65,22 +64,36 @@ that is the left column.
 
 | tree-sitter kind | → node kind | Notes |
 |---|---|---|
-| `interface_declaration` | `node.Struct` | See [ADR-0008](../../adr/0008-map-typescript-interfaces-to-node-struct.md) |
+| `interface_declaration` | `node.Interface` | Properties → Fields, method signatures → Methods; see [ADR-0008](../../adr/0008-map-typescript-interfaces-to-node-interface.md) |
 | `class_declaration` | `node.Struct` | `public_field_definition` → Field, `method_definition` → Method |
 | `abstract_class_declaration` | `node.Struct` | + `ts.abstract` |
 | `type_alias_declaration` | `node.Alias` | `IsAlias` always true; TypeScript has no defined-type form |
 | `enum_declaration` | `node.Enum` | Covers `const enum`, which rides on `ts.constEnum` |
 | `function_declaration` | `node.Function` | |
-| `function_signature` | `node.Function` | Overload declaration without a body; see `ts.overloads` |
+| `function_signature` | folded | Overload signatures collapse onto the implementation via `ts.overloads` |
 | `lexical_declaration` (`const`) | `node.Constant` | |
 | `lexical_declaration` (`let`), `variable_declaration` | `node.Variable` | |
 | `import_statement` | `node.Import` | `Path` is the module specifier verbatim |
+| `export … from` | `node.Import` | Re-export; `ts.reExport` plus `ts.reExportNames` |
 | `ambient_declaration` | unwrapped | Inner declaration + `ts.ambient` |
 | `export_statement` | unwrapped | Inner declaration + `ts.exported`, `ts.defaultExport` |
 | `internal_module` | flattened | Namespace members hoisted, qualified via `ts.namespace` |
 
+An interface and a class are different model kinds because they are
+different things: a class is instantiable, an interface is a contract.
+Both carry fields, which is why `node.Interface` has a field list at
+all — most TypeScript interfaces declare no methods.
+
 `class_heritage` carries `extends` and `implements` together. Both
 become `node.Embed` entries, discriminated by `ts.heritage`.
+
+Two type shapes are worth naming because they are easy to get wrong.
+An index-signature-only object type — `{ [k: string]: V }` — converts
+to a Map ref with `MapKey` and `MapValue`, not to a struct with no
+fields; an object carrying fields *and* a signature stays a struct
+with the signature on `ts.indexSignature`. And a rest parameter
+records the *element* type, per `node.Param`'s contract: `...rest:
+string[]` yields `Variadic` with `Type` of `string`.
 
 ## What rides on `ts.*` metadata
 

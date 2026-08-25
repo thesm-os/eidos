@@ -1,0 +1,184 @@
+{
+  "pos": {
+    "file": "."
+  },
+  "meta": {
+    "entries": [
+      {
+        "name": "frontend",
+        "authority": 0,
+        "value": "typescript",
+        "set_by": "typescript",
+        "pos": {
+          "file": "."
+        }
+      }
+    ]
+  },
+  "name": "namespaces",
+  "path": ".",
+  "files": [
+    {
+      "pos": {
+        "file": "source.ts"
+      },
+      "name": "source.ts",
+      "path": "source.ts"
+    }
+  ],
+  "interfaces": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 2,
+        "column": 10,
+        "offset": 40
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 10,
+              "offset": 40
+            }
+          },
+          {
+            "name": "ts.namespace",
+            "authority": 0,
+            "value": "Outer.Inner",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 10,
+              "offset": 40
+            }
+          }
+        ]
+      },
+      "name": "Nested",
+      "package": ".",
+      "fields": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 3,
+            "column": 5,
+            "offset": 63
+          },
+          "meta": {
+            "entries": []
+          },
+          "name": "v",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 8,
+              "offset": 66
+            },
+            "type_kind": 0,
+            "name": "string"
+          }
+        }
+      ]
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 9,
+        "column": 3,
+        "offset": 122
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.ambient",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 9,
+              "column": 3,
+              "offset": 122
+            }
+          }
+        ]
+      },
+      "name": "Window",
+      "package": ".",
+      "fields": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 10,
+            "column": 5,
+            "offset": 145
+          },
+          "meta": {
+            "entries": []
+          },
+          "name": "custom",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 10,
+              "column": 13,
+              "offset": 153
+            },
+            "type_kind": 0,
+            "name": "number"
+          }
+        }
+      ]
+    }
+  ],
+  "constants": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 5,
+        "column": 16,
+        "offset": 93
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 5,
+              "column": 10,
+              "offset": 87
+            }
+          },
+          {
+            "name": "ts.namespace",
+            "authority": 0,
+            "value": "Outer.Inner",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 5,
+              "column": 10,
+              "offset": 87
+            }
+          }
+        ]
+      },
+      "name": "K",
+      "package": ".",
+      "value": "1"
+    }
+  ]
+}

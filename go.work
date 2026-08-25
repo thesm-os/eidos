@@ -8,6 +8,7 @@ use (
 	./eidostest
 	./lang/golang
 	./lang/protobuf
+	./lang/typescript
 	./plugins
 	./reference
 )

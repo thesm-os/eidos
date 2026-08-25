@@ -1,0 +1,521 @@
+{
+  "pos": {
+    "file": "."
+  },
+  "meta": {
+    "entries": [
+      {
+        "name": "frontend",
+        "authority": 0,
+        "value": "typescript",
+        "set_by": "typescript",
+        "pos": {
+          "file": "."
+        }
+      }
+    ]
+  },
+  "name": "imports_and_reexports",
+  "path": ".",
+  "files": [
+    {
+      "pos": {
+        "file": "source.ts"
+      },
+      "name": "source.ts",
+      "path": "source.ts",
+      "imports": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 1,
+            "column": 1
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "./local",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 1,
+                  "column": 1
+                }
+              }
+            ]
+          },
+          "path": "./local"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 2,
+            "column": 1,
+            "offset": 37
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "pkg",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 1,
+                  "offset": 37
+                }
+              },
+              {
+                "name": "ts.typeOnly",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 2,
+                  "column": 1,
+                  "offset": 37
+                }
+              }
+            ]
+          },
+          "path": "pkg"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 3,
+            "column": 1,
+            "offset": 67
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "./default",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 3,
+                  "column": 1,
+                  "offset": 67
+                }
+              }
+            ]
+          },
+          "path": "./default",
+          "alias": "Default"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 4,
+            "column": 1,
+            "offset": 100
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "./namespace",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 4,
+                  "column": 1,
+                  "offset": 100
+                }
+              }
+            ]
+          },
+          "path": "./namespace",
+          "alias": "NS"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 6,
+            "column": 1,
+            "offset": 136
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "./local",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 1,
+                  "offset": 136
+                }
+              },
+              {
+                "name": "ts.reExport",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 1,
+                  "offset": 136
+                }
+              },
+              {
+                "name": "ts.reExportNames",
+                "authority": 0,
+                "value": [
+                  "A"
+                ],
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 1,
+                  "offset": 136
+                }
+              }
+            ]
+          },
+          "path": "./local"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 7,
+            "column": 1,
+            "offset": 165
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "./types",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 7,
+                  "column": 1,
+                  "offset": 165
+                }
+              },
+              {
+                "name": "ts.reExport",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 7,
+                  "column": 1,
+                  "offset": 165
+                }
+              }
+            ]
+          },
+          "path": "./types"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 8,
+            "column": 1,
+            "offset": 190
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "./bundle",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 8,
+                  "column": 1,
+                  "offset": 190
+                }
+              },
+              {
+                "name": "ts.reExport",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 8,
+                  "column": 1,
+                  "offset": 190
+                }
+              }
+            ]
+          },
+          "path": "./bundle",
+          "alias": "Bundle"
+        },
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 9,
+            "column": 1,
+            "offset": 226
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.moduleSpecifier",
+                "authority": 0,
+                "value": "pkg",
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 9,
+                  "column": 1,
+                  "offset": 226
+                }
+              },
+              {
+                "name": "ts.reExport",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 9,
+                  "column": 1,
+                  "offset": 226
+                }
+              },
+              {
+                "name": "ts.reExportNames",
+                "authority": 0,
+                "value": [
+                  "T"
+                ],
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 9,
+                  "column": 1,
+                  "offset": 226
+                }
+              },
+              {
+                "name": "ts.typeOnly",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 9,
+                  "column": 1,
+                  "offset": 226
+                }
+              }
+            ]
+          },
+          "path": "pkg"
+        }
+      ]
+    }
+  ],
+  "imports": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 1,
+        "column": 1
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.moduleSpecifier",
+            "authority": 0,
+            "value": "./local",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 1
+            }
+          }
+        ]
+      },
+      "path": "./local"
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 2,
+        "column": 1,
+        "offset": 37
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.moduleSpecifier",
+            "authority": 0,
+            "value": "pkg",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 1,
+              "offset": 37
+            }
+          },
+          {
+            "name": "ts.typeOnly",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 1,
+              "offset": 37
+            }
+          }
+        ]
+      },
+      "path": "pkg"
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 3,
+        "column": 1,
+        "offset": 67
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.moduleSpecifier",
+            "authority": 0,
+            "value": "./default",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 3,
+              "column": 1,
+              "offset": 67
+            }
+          }
+        ]
+      },
+      "path": "./default",
+      "alias": "Default"
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 4,
+        "column": 1,
+        "offset": 100
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.moduleSpecifier",
+            "authority": 0,
+            "value": "./namespace",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 4,
+              "column": 1,
+              "offset": 100
+            }
+          }
+        ]
+      },
+      "path": "./namespace",
+      "alias": "NS"
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 7,
+        "column": 1,
+        "offset": 165
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.moduleSpecifier",
+            "authority": 0,
+            "value": "./types",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 7,
+              "column": 1,
+              "offset": 165
+            }
+          },
+          {
+            "name": "ts.reExport",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 7,
+              "column": 1,
+              "offset": 165
+            }
+          }
+        ]
+      },
+      "path": "./types"
+    },
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 8,
+        "column": 1,
+        "offset": 190
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.moduleSpecifier",
+            "authority": 0,
+            "value": "./bundle",
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 8,
+              "column": 1,
+              "offset": 190
+            }
+          },
+          {
+            "name": "ts.reExport",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 8,
+              "column": 1,
+              "offset": 190
+            }
+          }
+        ]
+      },
+      "path": "./bundle",
+      "alias": "Bundle"
+    }
+  ]
+}

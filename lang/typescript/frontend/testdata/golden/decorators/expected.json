@@ -1,0 +1,225 @@
+{
+  "pos": {
+    "file": "."
+  },
+  "meta": {
+    "entries": [
+      {
+        "name": "frontend",
+        "authority": 0,
+        "value": "typescript",
+        "set_by": "typescript",
+        "pos": {
+          "file": "."
+        }
+      }
+    ]
+  },
+  "name": "decorators",
+  "path": ".",
+  "files": [
+    {
+      "pos": {
+        "file": "source.ts"
+      },
+      "name": "source.ts",
+      "path": "source.ts"
+    }
+  ],
+  "structs": [
+    {
+      "pos": {
+        "file": "source.ts",
+        "line": 2,
+        "column": 8,
+        "offset": 34
+      },
+      "meta": {
+        "entries": [
+          {
+            "name": "ts.decorators",
+            "authority": 0,
+            "value": [
+              {
+                "name": "Entity",
+                "args": "({ name: 'users' })"
+              }
+            ],
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 1,
+              "column": 1
+            }
+          },
+          {
+            "name": "ts.exported",
+            "authority": 0,
+            "value": true,
+            "set_by": "typescript",
+            "pos": {
+              "file": "source.ts",
+              "line": 2,
+              "column": 8,
+              "offset": 34
+            }
+          }
+        ]
+      },
+      "name": "User",
+      "package": ".",
+      "fields": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 3,
+            "column": 3,
+            "offset": 49
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.decorators",
+                "authority": 0,
+                "value": [
+                  {
+                    "name": "Column",
+                    "args": "({ type: 'varchar', length: 200 })"
+                  }
+                ],
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 3,
+                  "column": 3,
+                  "offset": 49
+                }
+              },
+              {
+                "name": "ts.definiteAssignment",
+                "authority": 0,
+                "value": true,
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 3,
+                  "column": 3,
+                  "offset": 49
+                }
+              }
+            ]
+          },
+          "name": "name",
+          "type": {
+            "pos": {
+              "file": "source.ts",
+              "line": 4,
+              "column": 10,
+              "offset": 100
+            },
+            "type_kind": 0,
+            "name": "string"
+          }
+        }
+      ],
+      "methods": [
+        {
+          "pos": {
+            "file": "source.ts",
+            "line": 8,
+            "column": 3,
+            "offset": 175
+          },
+          "meta": {
+            "entries": [
+              {
+                "name": "ts.decorators",
+                "authority": 0,
+                "value": [
+                  {
+                    "name": "ApiResponse",
+                    "args": "({ status: 200 })"
+                  },
+                  {
+                    "name": "ApiResponse",
+                    "args": "({ status: 404 })"
+                  }
+                ],
+                "set_by": "typescript",
+                "pos": {
+                  "file": "source.ts",
+                  "line": 6,
+                  "column": 3,
+                  "offset": 111
+                }
+              }
+            ]
+          },
+          "name": "handle",
+          "params": [
+            {
+              "pos": {
+                "file": "source.ts",
+                "line": 8,
+                "column": 10,
+                "offset": 182
+              },
+              "meta": {
+                "entries": [
+                  {
+                    "name": "ts.decorators",
+                    "authority": 0,
+                    "value": [
+                      {
+                        "name": "Inject",
+                        "args": "('TOK')"
+                      }
+                    ],
+                    "set_by": "typescript",
+                    "pos": {
+                      "file": "source.ts",
+                      "line": 8,
+                      "column": 10,
+                      "offset": 182
+                    }
+                  }
+                ]
+              },
+              "name": "dep",
+              "type": {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 8,
+                  "column": 30,
+                  "offset": 202
+                },
+                "type_kind": 0,
+                "name": "Dep"
+              }
+            }
+          ],
+          "returns": [
+            {
+              "pos": {
+                "file": "source.ts",
+                "line": 8,
+                "column": 36,
+                "offset": 208
+              },
+              "type": {
+                "pos": {
+                  "file": "source.ts",
+                  "line": 8,
+                  "column": 36,
+                  "offset": 208
+                },
+                "type_kind": 0,
+                "name": "void"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
