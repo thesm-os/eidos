@@ -51,10 +51,14 @@ type FrontendContext struct {
 
 	// Registry is the directive-schema registry built from every
 	// [pipeline.Builder.WithDirective] schema declared on the
-	// pipeline. Frontends look up registered schemas when validating
-	// parsed `+gen:` / `-gen:` directives; unregistered directives
-	// parse cleanly so in-development plugins remain forward-
-	// compatible.
+	// pipeline, for a frontend that needs to read what this run
+	// recognises.
+	//
+	// Not a validation duty. The pipeline validates every directive in
+	// the loaded graph after the frontend phase, whatever produced it,
+	// so a frontend neither has to walk its own output nor can skip
+	// doing so — which is what it did when this was its job: the walk
+	// ran inside conversion, and a cache hit skips conversion.
 	Registry *directive.Registry
 
 	// Parser is the project-wide directive parser shared by every

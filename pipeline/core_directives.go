@@ -157,6 +157,20 @@ func coreDirectives() []directive.Schema {
 			AllowedKeys("plugin", "tag", "pkg").
 			DenyNegation().
 			Build(),
+		directive.NewSchema(MetaDirectiveName).
+			Describe(
+				"Sets or clears metadata on the host node. The positive form " +
+					"takes `KEY=VALUE` pairs, or a bare positional KEY to set it " +
+					"true; the negated form tombstones each named key, and a name " +
+					"no meta key matches is read as a prefix so a group can be " +
+					"cleared without enumerating its leaves. Applied by the " +
+					"pipeline between the annotator and generator phases.",
+			).
+			// Negation is not denied: the tombstoning form is half of what
+			// this directive is for.
+			Positional("key").
+			AllowExtraPositional().
+			Build(),
 		directive.NewSchema(ValueDirective).
 			Describe(
 				"Per-source override for the rendered or serialised string " +

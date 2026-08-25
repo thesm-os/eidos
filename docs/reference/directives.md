@@ -147,6 +147,38 @@ type UserRepo interface { /* … */ }
 emitting against the same declaration inherits the routing. `tag=`
 scopes to the declaring plugin, because tags are plugin-namespaced.
 
+## A name nothing claims is an error
+
+A directive whose name no registered schema declares is reported,
+with a "did you mean?" where something registered is close enough to
+be the typo:
+
+```
+user.go:12:1: pipeline: no directive named "buildr" is registered — did you mean "builder"?
+```
+
+The alternative is worse than it looks. `//+gen:buildr` parses, matches
+no schema, stamps nothing and generates nothing — output identical to a
+declaration carrying no directive at all. The line you wrote is the
+only evidence you asked for anything, and the run's evidence is
+silence.
+
+Every directive in the loaded graph is checked, whichever language it
+was read from and whether or not the frontend served it from cache.
+
+### When you want the run to be narrower than the source
+
+A project registering three plugins over a tree annotated for eight has
+names nothing in that run claims, and every one is a line its author
+meant. Turn the check off for those runs:
+
+```go
+pipeline.New().WithUnclaimedDirectives()
+```
+
+It is off by default, and the default is the point: you are trading the
+typo back for the flexibility.
+
 ## Discovering what is available
 
 `eidos plan` lists every registered plugin and its declared

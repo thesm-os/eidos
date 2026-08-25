@@ -271,8 +271,12 @@ func TestPipeline_RunDirectiveOverride(t *testing.T) {
 					Name: "User", Package: "x",
 					BaseNode: node.BaseNode{
 						DirectiveList: []*directive.Directive{{
-							Name: "not-meta", // not the override name
-							KV:   map[string]string{"anything": "value"},
+							// A registered directive that is not the override
+							// name. An unregistered one would be refused before
+							// the override step ever saw it, so the subtest
+							// would pass for the wrong reason.
+							Name: pipeline.OutDirective,
+							Args: []string{"user_gen.go"},
 							Pos:  position.At("user.go", 1, 1),
 						}},
 					},

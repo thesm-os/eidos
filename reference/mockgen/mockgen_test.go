@@ -337,8 +337,14 @@ func TestRendered_SourceSideMock(t *testing.T) {
 func TestRendered_SuffixOption(t *testing.T) {
 	t.Parallel()
 
+	// Unclaimed directives are permitted because this run registers only
+	// mockgen, while the shared fixture also carries `repo` for the
+	// composition the neighbouring tests exercise. Registering repogen
+	// here would change what is rendered, and what is rendered is the
+	// subject.
 	p := golangtest.Driver(t, backendgolang.New(), fixtureBuilder().PackageNode(), mockgen.New()).
 		WithPluginOptions(mockgen.Name, map[string]string{"suffix": "Stub"}).
+		WithUnclaimedDirectives().
 		Build().
 		Run("./...")
 

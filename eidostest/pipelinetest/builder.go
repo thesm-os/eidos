@@ -77,6 +77,18 @@ func New(tb testing.TB) *Builder {
 	}
 }
 
+// WithUnclaimedDirectives stops the run reporting a directive no
+// registered schema claims.
+//
+// For a fixture annotated for more plugins than the test registers.
+// Not the default, deliberately: a fixture written as source carries
+// its directive names as literal text, and leniency would let a
+// misspelt one read as a plugin the test simply did not register.
+func (b *Builder) WithUnclaimedDirectives() *Builder {
+	b.inner.WithUnclaimedDirectives()
+	return b
+}
+
 // WithFrontend registers a frontend on the underlying pipeline.
 func (b *Builder) WithFrontend(p plugin.Frontend) *Builder {
 	b.inner.WithFrontend(p)

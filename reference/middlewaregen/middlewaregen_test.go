@@ -86,7 +86,16 @@ func handlerPkg(t *testing.T, names ...string) *sdk.Package {
 // and the Go backend.
 func runPipeline(t *testing.T, pkg *sdk.Package, gens ...sdk.Generator) *pipelinetest.Pipeline {
 	t.Helper()
-	return golangtest.Driver(t, backendgolang.New(), pkg, gens...).Build().Run("./...")
+	// Unclaimed directives are permitted because this run is
+	// deliberately narrower than its fixture. `handler` is handlergen's
+	// directive — this plugin reads it and declares nothing — so a run
+	// registering the contributor without its host has a name nothing
+	// claims, which is the arrangement several of these subtests exist
+	// to exercise.
+	return golangtest.Driver(t, backendgolang.New(), pkg, gens...).
+		WithUnclaimedDirectives().
+		Build().
+		Run("./...")
 }
 
 // middlewareModule is the module the generated chain is compiled

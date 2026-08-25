@@ -30,11 +30,14 @@ import (
 // [Schema.RequiredKeys], [Schema.AllowedKeys],
 // [Schema.PositionalArgs], and [Schema.AllowExtraPositional].
 //
-// Unregistered directive names are not errors — they parse and
-// remain inert. Frontends or plugins that want strict-mode validation
-// can pre-screen with [Registry.Lookup] and emit their own
-// "unknown directive" diagnostics with [Registry.Suggest] for
-// "did you mean?" hints.
+// A directive no schema claims is an error, with a "did you mean?"
+// where [Registry.Suggest] finds a plausible one. It parses, matches
+// nothing, stamps nothing and generates nothing — output
+// indistinguishable from a declaration that asked for nothing at all,
+// so the line the author wrote is the only evidence they asked for
+// something and the run's evidence is silence. A run deliberately
+// narrower than the source it reads turns this off through
+// [Registry.AllowUnclaimed].
 func Validate(directives []*Directive, nodeKind kind.Kind, registry *Registry, sink *diag.PluginSink) bool {
 	ok := true
 	for _, d := range directives {
@@ -48,7 +51,7 @@ func Validate(directives []*Directive, nodeKind kind.Kind, registry *Registry, s
 func validateOne(d *Directive, nodeKind kind.Kind, peers []*Directive, registry *Registry, sink *diag.PluginSink) bool {
 	schema, registered := registry.Lookup(d.Name)
 	if !registered {
-		return true
+		return checkClaimed(d, registry, sink)
 	}
 	// Each check emits its own diagnostics; we keep AND-ing the
 	// running ok so every check still runs even after an earlier one
@@ -60,6 +63,33 @@ func validateOne(d *Directive, nodeKind kind.Kind, peers []*Directive, registry 
 	ok = checkKeys(d, schema, sink) && ok
 	ok = checkPositional(d, schema, sink) && ok
 	return ok
+}
+
+// checkClaimed reports a directive no schema registers.
+//
+// The name is quoted as the author wrote it, because that is what they
+// have to find and edit. A plausible near-miss is named as one: the
+// edit-distance threshold [Registry.Suggest] applies is what keeps
+// `+gen:buildr` reading as a typo for `builder` and `+gen:xyzzy`
+// reading as a name nothing here has ever had.
+//
+// Both forms are errors rather than warnings. What the directive
+// produced is nothing, which is what a declaration carrying no
+// directive produces, so a warning would ask the author to notice an
+// absence in a build log — and the absence is exactly what they
+// already failed to notice in their own source.
+func checkClaimed(d *Directive, registry *Registry, sink *diag.PluginSink) bool {
+	if registry.UnclaimedAllowed() {
+		return true
+	}
+	if did, plausible := registry.Suggest(d.Name); plausible {
+		sink.Errorf(d.Pos, "no directive named %q is registered — did you mean %q?", d.Name, did)
+		return false
+	}
+	sink.Errorf(d.Pos,
+		"no directive named %q is registered, and nothing registered is close enough to be the one you meant",
+		d.Name)
+	return false
 }
 
 func checkNegation(d *Directive, s Schema, sink *diag.PluginSink) bool {

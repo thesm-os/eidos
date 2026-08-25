@@ -33,25 +33,26 @@ import (
 //
 // The zero value is unusable; construct via [New].
 type Builder struct {
-	frontends       []plugin.Frontend
-	annotators      []plugin.Annotator
-	generators      []plugin.Generator
-	backends        []plugin.Backend
-	directives      []directive.Schema
-	directivePrefix string
-	sink            sink.Sink
-	cache           cache.Cache
-	diag            *diag.Sink
-	verbose         bool
-	parallel        map[Phase]bool
-	manifestPath    string
-	pipelineID      string
-	brand           string
-	dryRun          bool
-	options         map[string]map[string]string
-	command         string
-	sourceRoot      string
-	outputFilename  string
+	frontends           []plugin.Frontend
+	annotators          []plugin.Annotator
+	generators          []plugin.Generator
+	backends            []plugin.Backend
+	directives          []directive.Schema
+	directivePrefix     string
+	unclaimedDirectives bool
+	sink                sink.Sink
+	cache               cache.Cache
+	diag                *diag.Sink
+	verbose             bool
+	parallel            map[Phase]bool
+	manifestPath        string
+	pipelineID          string
+	brand               string
+	dryRun              bool
+	options             map[string]map[string]string
+	command             string
+	sourceRoot          string
+	outputFilename      string
 	// pluginOutputFilenames captures the CLI
 	// `-o <plugin>[:<tag>]=<path>` form keyed by (plugin, tag).
 	// Populated by repeated [Builder.WithPluginOutputFilename]
@@ -365,6 +366,24 @@ func (b *Builder) WithDirective(schemas ...directive.Schema) *Builder {
 // [directive.ErrInvalidPrefix].
 func (b *Builder) WithDirectivePrefix(prefix string) *Builder {
 	b.directivePrefix = prefix
+	return b
+}
+
+// WithUnclaimedDirectives stops the run reporting a directive no
+// registered schema claims.
+//
+// For a run deliberately narrower than the source it reads. A consumer
+// registering three plugins over a tree annotated for eight has
+// directives nothing in this run claims, and every one of them is a
+// line their author meant — reporting those makes a narrowed run
+// unusable rather than merely partial.
+//
+// Off by default, and the default is the point. An unclaimed name
+// parses, matches no schema, stamps nothing and generates nothing:
+// output indistinguishable from a declaration that asked for nothing
+// at all. Turning this on trades the typo back for the flexibility.
+func (b *Builder) WithUnclaimedDirectives() *Builder {
+	b.unclaimedDirectives = true
 	return b
 }
 
@@ -933,6 +952,9 @@ func (b *Builder) validateEmitVersions() []error {
 // caller's explicit declarations.
 func (b *Builder) buildDirectiveRegistry() (*directive.Registry, map[directive.Name]string, []error) {
 	r := directive.NewRegistry()
+	if b.unclaimedDirectives {
+		r.AllowUnclaimed()
+	}
 	owners := map[directive.Name]string{}
 	var errs []error
 	// Register the framework's core directives first so they're

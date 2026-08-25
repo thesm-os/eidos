@@ -89,7 +89,7 @@ func (p *Pipeline) Run(ctx context.Context, patterns ...string) error {
 		name string
 		run  func()
 	}{
-		{"frontend", func() { p.runFrontends(s, patterns); s.Nodes().Freeze() }},
+		{"frontend", func() { p.runFrontends(s, patterns); p.validateDirectives(s); s.Nodes().Freeze() }},
 		{"annotator", func() { p.runAnnotators(s); p.runDirectiveOverride(s) }},
 		{"generator", func() { p.runGenerators(s) }},
 		{"layout", func() { p.runLayout(s); s.Emit().Freeze() }},

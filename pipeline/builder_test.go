@@ -272,11 +272,12 @@ func TestBuilder_WithDirective(t *testing.T) {
 		assertNoError(t, err)
 		got := p.DirectiveRegistry().Names()
 		// The pipeline always registers its core directives ("out"
-		// for the Router phase, "value" for per-source string-form
-		// overrides any plugin can consume) ahead of user-supplied
-		// schemas, so the expected count is the user schemas plus
-		// the core set.
-		want := []string{"a", "b", "c", "out", "value"}
+		// for the Router phase, "meta" for the metadata override the
+		// pipeline applies between phases, "value" for per-source
+		// string-form overrides any plugin can consume) ahead of
+		// user-supplied schemas, so the expected count is the user
+		// schemas plus the core set.
+		want := []string{"a", "b", "c", "meta", "out", "value"}
 		if len(got) != len(want) {
 			t.Fatalf("registered names: got %v, want %v", got, want)
 		}

@@ -38,16 +38,52 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts unregistered directives without complaint", func(t *testing.T) {
+	// A name nothing claims parses, matches nothing, stamps nothing and
+	// generates nothing — output indistinguishable from a declaration
+	// that asked for nothing at all.
+	t.Run("rejects a directive no schema claims", func(t *testing.T) {
 		t.Parallel()
 		r := directive.NewRegistry()
+		assertNoError(t, r.Register(directive.NewSchema("builder").Build()), "register")
+		d := &directive.Directive{Name: "buildr", Pos: position.At("a.go", 1, 1)}
+		sink, plugin := newSinkAndPlugin()
+		if directive.Validate([]*directive.Directive{d}, "struct", r, plugin) {
+			t.Fatalf("a directive nothing claims should fail validation")
+		}
+		if !errorContaining(sink, `did you mean "builder"`) {
+			t.Fatalf("a near-miss should be named as one; got %+v", sink.Diagnostics())
+		}
+	})
+
+	t.Run("says so plainly when nothing is close", func(t *testing.T) {
+		t.Parallel()
+		r := directive.NewRegistry()
+		assertNoError(t, r.Register(directive.NewSchema("builder").Build()), "register")
+		d := &directive.Directive{Name: "xyzzy", Pos: position.At("a.go", 1, 1)}
+		sink, plugin := newSinkAndPlugin()
+		if directive.Validate([]*directive.Directive{d}, "struct", r, plugin) {
+			t.Fatalf("a directive nothing claims should fail validation")
+		}
+		// Suggesting the only registered name for an unrelated one would
+		// send the author to rename something they never wrote.
+		if errorContaining(sink, "did you mean") {
+			t.Fatalf("nothing here is a plausible typo for xyzzy; got %+v", sink.Diagnostics())
+		}
+	})
+
+	// The run deliberately narrower than the source it reads: every
+	// unclaimed name in it is a line the author meant, for a plugin this
+	// run did not register.
+	t.Run("permits unclaimed names when the registry allows them", func(t *testing.T) {
+		t.Parallel()
+		r := directive.NewRegistry().AllowUnclaimed()
 		d := &directive.Directive{Name: "anything", Pos: position.At("a.go", 1, 1)}
 		sink, plugin := newSinkAndPlugin()
 		if !directive.Validate([]*directive.Directive{d}, "struct", r, plugin) {
-			t.Fatalf("unregistered directives should not fail validation")
+			t.Fatalf("an allowing registry should not fail validation")
 		}
 		if sink.Count(diag.Error) != 0 {
-			t.Fatalf("unregistered directives should not emit errors; got %+v", sink.Diagnostics())
+			t.Fatalf("an allowing registry should emit no errors; got %+v", sink.Diagnostics())
 		}
 	})
 
@@ -108,6 +144,9 @@ func TestValidate(t *testing.T) {
 		t.Parallel()
 		r := directive.NewRegistry()
 		assertNoError(t, r.Register(directive.NewSchema("mock").Requires("repo").Build()), "register")
+		// Registered as well as written: a peer satisfying Requires is a
+		// directive like any other, and an unclaimed one is now refused.
+		assertNoError(t, r.Register(directive.NewSchema("repo").Build()), "register")
 		mock := &directive.Directive{Name: "mock", Pos: position.At("a.go", 1, 1)}
 		repo := &directive.Directive{Name: "repo", Pos: position.At("a.go", 2, 1)}
 		_, plugin := newSinkAndPlugin()

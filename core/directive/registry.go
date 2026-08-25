@@ -24,13 +24,47 @@ var ErrSchemaConflict = errors.New("directive: schema name already registered")
 //
 // The zero value is unusable; construct with [NewRegistry].
 type Registry struct {
-	mu      sync.RWMutex
-	schemas map[Name]Schema
+	mu        sync.RWMutex
+	schemas   map[Name]Schema
+	unclaimed bool
 }
 
 // NewRegistry returns an empty registry ready for use.
+//
+// Strict about unclaimed names: a directive no schema registers is
+// reported by [Validate]. See [Registry.AllowUnclaimed] for the run
+// that has to permit them.
 func NewRegistry() *Registry {
 	return &Registry{schemas: map[Name]Schema{}}
+}
+
+// AllowUnclaimed stops [Validate] reporting a directive no schema
+// registers.
+//
+// For a run that is deliberately narrower than the source it reads: a
+// consumer registering three plugins over a tree annotated for eight
+// has directives nothing in this run claims, and every one of them is
+// a line the author meant. Reporting those would make a narrowed run
+// unusable rather than merely partial.
+//
+// Off by default, because the ordinary case is the opposite one. A
+// misspelt name parses, matches no schema, stamps nothing and
+// generates nothing — output indistinguishable from a declaration
+// that asked for nothing at all, which is the failure a directive
+// vocabulary can least afford.
+func (r *Registry) AllowUnclaimed() *Registry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unclaimed = true
+	return r
+}
+
+// UnclaimedAllowed reports whether [Registry.AllowUnclaimed] was
+// called.
+func (r *Registry) UnclaimedAllowed() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.unclaimed
 }
 
 // Register adds s to r. Returns [ErrSchemaConflict] wrapped with the

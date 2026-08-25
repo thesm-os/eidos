@@ -94,7 +94,6 @@ func (c *converter) run() *node.Package {
 	c.convertDecls()
 	c.attachMethods()
 	c.detectEnums()
-	c.validateDirectives()
 	return c.out
 }
 
