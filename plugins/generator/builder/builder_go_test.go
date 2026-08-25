@@ -81,9 +81,9 @@ func projectBoth(
 // fieldNamed returns the projected member by name.
 func fieldNamed(t *testing.T, value *builderplugin.Type, name string) builderplugin.Field {
 	t.Helper()
-	for _, f := range value.Fields {
-		if f.Name == name {
-			return f
+	for i := range value.Fields {
+		if value.Fields[i].Name == name {
+			return value.Fields[i]
 		}
 	}
 	t.Fatalf("no member %q in the projection", name)
@@ -317,6 +317,88 @@ func TestChecksAreEmittedBeside(t *testing.T) {
 		t.Parallel()
 		if !checks.Instantiable() {
 			t.Error("a declaration with no type parameters needs no witness")
+		}
+	})
+}
+
+// Two members reaching one setter identifier are refused, naming
+// both.
+//
+// `Data []byte` owes a text-accepting setter beside its plain one, so
+// it reaches `WithDataString` — and so does a plain member called
+// `DataString`. Emitted, the file declares one method twice and the
+// failure lands in the consumer's build. Detecting it needs the
+// derived names in the core, which is why they are composed there
+// from words the language declares rather than in the template.
+func TestSetterNameCollisionIsRefused(t *testing.T) {
+	t.Parallel()
+
+	b := storefixture.New().
+		Package("blog", "example.com/blog").
+		Struct("Payload", func(sb *storefixture.StructBuilder) {
+			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
+			sb.Field("Data", storefixture.Slice(storefixture.Named("byte")), nil)
+			sb.Field("DataString", storefixture.Named("string"), nil)
+		})
+	s := b.Build()
+	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
+	d := diag.Capture()
+	if err := builderplugin.New().Generate(&sdk.GeneratorContext{
+		Store: s, Reader: store.NewReader(s), Diag: d,
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	t.Run("nothing is queued", func(t *testing.T) {
+		t.Parallel()
+		if len(s.Emit().PendingOriginSlots()) != 0 {
+			t.Error("a builder declaring one method twice does not compile, so " +
+				"emitting it moves the failure into the consumer's build")
+		}
+	})
+
+	t.Run("and both members are named", func(t *testing.T) {
+		t.Parallel()
+		if !d.HasErrors() {
+			t.Fatal("a refusal with nothing to say sends the author looking")
+		}
+	})
+}
+
+// A member that owes no extra setter cannot collide with itself.
+//
+// The guard has to distinguish the shapes: reading every member as
+// though it owed the whole set would report a collision between two
+// plain members whose setters differ.
+func TestDistinctMembersAreNotRefused(t *testing.T) {
+	t.Parallel()
+
+	value := project(t, func(sb *storefixture.StructBuilder) {
+		sb.Field("Data", storefixture.Slice(storefixture.Named("byte")), nil)
+		sb.Field("Note", storefixture.Named("string"), nil)
+	})
+
+	for _, tc := range []struct{ member, want string }{
+		{"Data", "WithData"},
+		{"Note", "WithNote"},
+	} {
+		t.Run(tc.member+" sets through "+tc.want, func(t *testing.T) {
+			t.Parallel()
+			if got := fieldNamed(t, value, tc.member).Set; got != tc.want {
+				t.Errorf("Set = %q, want %q — the word is the language's and the "+
+					"order is the plugin's", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("only a byte sequence owes a text setter", func(t *testing.T) {
+		t.Parallel()
+		if fieldNamed(t, value, "Note").SetText != "" {
+			t.Error("a plain member owes one setter, and a name derived for a " +
+				"second would collide with a member that genuinely has that name")
+		}
+		if fieldNamed(t, value, "Data").SetText != "WithDataString" {
+			t.Error("the text-accepting setter is what makes the collision possible")
 		}
 	})
 }

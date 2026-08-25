@@ -101,7 +101,7 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- $generic := .Generic -}}
 {{- range $f := .Fields }}
 {{- if and $f.Sample.OK (not $generic) }}
-{{- $with := withName $f.Name }}
+{{- $with := $f.Set }}
 	t.Run("{{ $with }} writes {{ $f.Name }}", func(t *{{ $T }}) {
 		t.Parallel()
 {{- if $f.IsSequence }}
@@ -151,7 +151,7 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- $ta := .TypeArgs -}}
 {{- range $f := .Fields }}
 {{- if and $f.Copies $f.Sample.OK }}
-{{- $with := withName $f.Name }}
+{{- $with := $f.Set }}
 	t.Run("{{ $f.Name }} is not shared with a clone", func(t *{{ $T }}) {
 		t.Parallel()
 		original := {{ $ctor }}{{ $ta }}()
@@ -159,7 +159,7 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- if $f.Keyed }}
 		clone.{{ $with }}({{ template "builder.sample" $f }})
 {{- else if $f.IsSequence }}
-		clone.Append{{ $f.Name }}({{ template "builder.sample" $f }}...)
+		clone.{{ $f.Append }}({{ template "builder.sample" $f }}...)
 {{- else }}
 		clone.{{ $with }}({{ template "builder.sample" $f }})
 {{- end }}

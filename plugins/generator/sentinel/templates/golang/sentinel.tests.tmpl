@@ -1,267 +1,325 @@
-{{- define "sentinel.tests" -}}
-{{- if .Sentinels }}
+{{- /* The checks over a package's error contract.
 
-// Test{{ .TestName }} pins the package's Err* sentinel set:
-{{- if .EmitPrefix }}
-//   - prefix:           every sentinel's .Error() starts with {{ printf "%q" .Prefix }}.
-{{- end }}
-//   - uniqueness:       no two sentinels share an .Error() message.
-//   - non-overlap:      errors.Is is false for every cross-pair.
-//   - errors.Join chain: errors.Is sees through errors.Join.
-//   - fmt.Errorf chain: errors.Is sees through fmt.Errorf("...: %w", err).
-func Test{{ .TestName }}(t *{{ renderExpr (external "testing" "T") }}) {
+       Single-subject assertions go through the backend's assertion
+       dialect — `assertEqual` and friends — so the generated file
+       depends on nothing but `testing`, `errors`, `fmt` and
+       `strings`, and a repository preferring a helper library
+       replaces the dialect rather than these templates.
+
+       Assertions inside a loop are written out instead. The dialect's
+       message is a literal, and a failure over a set has to name
+       which member of it broke — a report that says only "two
+       sentinels match" sends the reader to compare every pair by
+       hand. The pairs are not unrolled to get the literal back
+       because the count is quadratic in a number this plugin does not
+       bound.
+
+       One t.Run per asserted behaviour, each parallel, so a failure
+       names the property that broke rather than the function it was
+       written in. */ -}}
+
+{{- define "sentinel.tests" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- if .Sentinels }}
+{{ wrapDoc (printf "%s pins the contract every declared error in this package carries.\n\nCallers match on these values, read them in logs and branch on them, so their messages and identities are as much an API as any exported signature — and nothing in the compiler holds them to it." (testFuncName .PackageName "Sentinels")) }}
+func {{ testFuncName .PackageName "Sentinels" }}(t *{{ $T }}) {
 	t.Parallel()
 
-	type entry struct {
+{{ template "sentinel.tests.declared" . }}
+}
+{{- end }}
+{{- range .ErrTypes }}
+
+{{ wrapDoc (printf "%s pins what %s owes a caller beyond taking part in the error protocol." (testFuncName .Name "Contract") .Name) }}
+func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
+	t.Parallel()
+
+{{ template "sentinel.tests.type" . }}
+}
+{{- end }}
+{{- range (slot . "checks").Items }}
+
+{{ render . }}
+{{- end }}
+{{- end -}}
+
+{{- /* What every declared error in the package owes. */ -}}
+{{- define "sentinel.tests.declared" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $is := renderExpr (external "errors" "Is") -}}
+{{- $hasPrefix := renderExpr (external "strings" "HasPrefix") -}}
+	all := []struct {
 		name string
 		err  error
-	}
-	all := []entry{
+	}{
 {{- range .Sentinels }}
-		{ {{ printf "%q" .Name }}, {{ renderExpr .Ref }} },
+		{"{{ .Name }}", {{ renderExpr .Ref }}},
 {{- end }}
 	}
-{{- if .EmitPrefix }}
 
-	// "prefix": every Err* var's .Error() must start with the
-	// package-derived prefix. Catches sentinels that silently
-	// lose their prefix during refactors.
-	t.Run("prefix", func(t *testing.T) {
+	t.Run("every sentinel is assigned", func(t *{{ $T }}) {
 		t.Parallel()
-		const want = {{ printf "%q" .Prefix }}
+		// A var declared and never assigned is nil, compiles, and
+		// matches nothing — so every caller's branch on it is dead, and
+		// no other check here can run without panicking.
 		for _, e := range all {
-			if !{{ renderExpr (external "strings" "HasPrefix") }}(e.err.Error(), want) {
-				t.Errorf("%s.Error() = %q, must start with %q", e.name, e.err.Error(), want)
+			if e.err == nil {
+				t.Fatalf("every sentinel must be assigned: %s is nil", e.name)
 			}
 		}
 	})
+
+	t.Run("every sentinel carries a message", func(t *{{ $T }}) {
+		t.Parallel()
+		// An empty message reaches a log as nothing at all, which is
+		// worse than a bad one: the operator sees that something failed
+		// and no indication of what.
+		for _, e := range all {
+			if e.err.Error() == "" {
+				t.Errorf("every sentinel must carry a message: %s has none", e.name)
+			}
+		}
+	})
+{{- if .Prefix }}
+
+	t.Run("every sentinel carries the package prefix", func(t *{{ $T }}) {
+		t.Parallel()
+		// A message without it reads in a log exactly like one from any
+		// other package, which is the confusion the prefix exists to
+		// prevent.
+		for _, e := range all {
+			if !{{ $hasPrefix }}(e.err.Error(), {{ printf "%q" .Prefix }}) {
+				t.Errorf("every sentinel must carry the package prefix %q: %s reads %q",
+					{{ printf "%q" .Prefix }}, e.name, e.err.Error())
+			}
+		}
+	})
+{{- else }}
+
+	// No prefix check: this package suppressed it, so its messages are
+	// deliberately bare. Every string begins with the empty string, so
+	// a check written against one would pass for any input and read as
+	// though the contract had been examined.
 {{- end }}
 
-	// "uniqueness": no two sentinels may share an identical
-	// .Error() message — duplicate text would let errors.Is
-	// succeed for the wrong reason in user code that compares
-	// strings.
-	t.Run("uniqueness", func(t *testing.T) {
+	t.Run("no two sentinels share a message", func(t *{{ $T }}) {
 		t.Parallel()
-		seen := make(map[string]string, len(all))
+		// Two identical messages cannot be told apart in a log, and the
+		// second is usually a copy that was meant to be edited.
+		seen := map[string]string{}
 		for _, e := range all {
-			msg := e.err.Error()
-			if other, dup := seen[msg]; dup {
-				t.Errorf("%s and %s have identical .Error(): %q", e.name, other, msg)
+			if first, dup := seen[e.err.Error()]; dup {
+				t.Errorf("no two sentinels may share a message: %s repeats %s", e.name, first)
 			}
-			seen[msg] = e.name
+			seen[e.err.Error()] = e.name
 		}
 	})
 
-	// "non-overlap": errors.Is(a, b) must be false for every
-	// distinct pair. A passing test guarantees a caller's
-	// `if errors.Is(err, ErrFoo)` cannot accidentally match a
-	// different sentinel.
-	t.Run("non-overlap", func(t *testing.T) {
+	t.Run("no sentinel's message begins with another's", func(t *{{ $T }}) {
 		t.Parallel()
-		for i, a := range all {
-			for j, b := range all {
-				if i == j {
+		// Distinct from sharing a message. One message that starts with
+		// another makes every search for the shorter one match the
+		// longer, and any code matching on message text ambiguous.
+		for _, a := range all {
+			for _, b := range all {
+				if a.name == b.name {
 					continue
 				}
-				if {{ renderExpr (external "errors" "Is") }}(a.err, b.err) {
-					t.Errorf("%s must not errors.Is-match %s", a.name, b.name)
+				if {{ $hasPrefix }}(a.err.Error(), b.err.Error()) {
+					t.Errorf("no sentinel's message may begin with another's: %s begins with the whole of %s",
+						a.name, b.name)
 				}
 			}
 		}
 	})
 
-	// "errors.Join chain": wrapping a sentinel via errors.Join
-	// must preserve errors.Is — confirms sentinels are usable
-	// inside multi-error aggregates without callers losing
-	// identity checks.
-	t.Run("errors.Join chain", func(t *testing.T) {
+	t.Run("no sentinel matches another", func(t *{{ $T }}) {
 		t.Parallel()
-		for _, e := range all {
-			wrapped := {{ renderExpr (external "errors" "Join") }}(e.err, {{ renderExpr (external "errors" "New") }}("extra context"))
-			if !errors.Is(wrapped, e.err) {
-				t.Errorf("errors.Join(%s, ...) must satisfy errors.Is", e.name)
+		// Two that match collapse a caller's branches into one, and the
+		// caller cannot see it from the declarations.
+		for _, a := range all {
+			for _, b := range all {
+				if a.name == b.name {
+					continue
+				}
+				if {{ $is }}(a.err, b.err) {
+					t.Errorf("no sentinel may match another: %s matches %s", a.name, b.name)
+				}
 			}
 		}
 	})
 
-	// "fmt.Errorf chain": wrapping with fmt.Errorf("...: %w", err)
-	// must preserve errors.Is — the most common wrapping idiom in
-	// Go must not break sentinel identity.
-	t.Run("fmt.Errorf chain", func(t *testing.T) {
+	// No check that a sentinel survives wrapping. Identity is compared
+	// before anything a type declares is consulted, so every value
+	// passes — including one whose own comparison always refuses. The
+	// assertion would be about the standard library rather than about
+	// this package.
+{{- range .Neighbours }}
+
+	t.Run("no sentinel matches one in {{ .Name }}", func(t *{{ $T }}) {
 		t.Parallel()
-		for _, e := range all {
-			wrapped := {{ renderExpr (external "fmt" "Errorf") }}("context: %w", e.err)
-			if !errors.Is(wrapped, e.err) {
-				t.Errorf("fmt.Errorf(%%w, %s) must satisfy errors.Is", e.name)
+{{- if .Sentinels }}
+		// Distinct values describing the same condition are where a copy
+		// between packages produces an alias, and neither package can
+		// see it alone.
+		for _, a := range all {
+			for _, b := range []struct {
+				name string
+				err  error
+			}{
+{{- range .Sentinels }}
+				{"{{ .Name }}", {{ renderExpr .Ref }}},
+{{- end }}
+			} {
+				if {{ $is }}(a.err, b.err) {
+					t.Errorf("no sentinel may match one in {{ .Name }}: %s matches %s", a.name, b.name)
+				}
 			}
 		}
-	})
-}
-{{- end }}
-{{- range $et := .ErrorTypes }}
-
-// Test{{ $et.Name }} pins the *{{ $et.Name }} contract:
-//   - errors.As round-trip:  extracted instance preserves every field.
-//   - errors.Join wrapping:  errors.As succeeds through errors.Join.
-//   - fmt.Errorf wrapping:   errors.As succeeds through fmt.Errorf("%w").
-{{- if $et.FormatCheckOrder }}
-//   - Error format:          output includes every recognised field value.
-{{- end }}
-{{- if $et.OtherTypes }}
-//   - non-overlap:           does not alias other custom error types.
-{{- end }}
-{{- if $et.HasIs }}
-//   - Is method:             same-type instances match; foreign errors do not.
-{{- end }}
-{{- if $et.HasUnwrap }}
-//   - Unwrap method:         returns the wrapped cause; errors.Is traverses the chain.
-{{- end }}
-func Test{{ $et.Name }}(t *{{ renderExpr (external "testing" "T") }}) {
-	t.Parallel()
-
-	// errors.As must extract the concrete error type and
-	// round-trip every exported field value back to the caller.
-	t.Run("errors.As extracts type", func(t *testing.T) {
-		t.Parallel()
-{{- range $et.Fields }}
-		want{{ .Name }} := {{ .SampleValue }}
-{{- end }}
-		err := &{{ renderExpr $et.Ref }}{
-{{- range $et.Fields }}
-			{{ .Name }}: want{{ .Name }},
-{{- end }}
-		}
-		var target *{{ renderExpr $et.Ref }}
-		if !{{ renderExpr (external "errors" "As") }}(err, &target) {
-			t.Fatalf("errors.As must succeed for *{{ $et.Name }}")
-		}
-{{- range $et.Fields }}
-{{- if .IsError }}
-		if !{{ renderExpr (external "errors" "Is") }}(target.{{ .Name }}, want{{ .Name }}) {
-			t.Errorf("{{ .Name }} must round-trip through errors.As")
-		}
 {{- else }}
-		if target.{{ .Name }} != want{{ .Name }} {
-			t.Errorf("{{ .Name }} = %v, want %v", target.{{ .Name }}, want{{ .Name }})
-		}
-{{- end }}
-{{- end }}
-	})
-
-	// errors.As must keep working when the error is one branch
-	// of an errors.Join multi-error — confirms the type is
-	// reachable through the Join tree, not just at the top level.
-	t.Run("survives errors.Join wrapping", func(t *testing.T) {
-		t.Parallel()
-		original := &{{ renderExpr $et.Ref }}{
-{{- range $et.Fields }}
-			{{ .Name }}: {{ .SampleValue }},
-{{- end }}
-		}
-		wrapped := {{ renderExpr (external "errors" "Join") }}(original, {{ renderExpr (external "errors" "New") }}("extra context"))
-		var target *{{ renderExpr $et.Ref }}
-		if !errors.As(wrapped, &target) {
-			t.Fatalf("errors.As must work through errors.Join for *{{ $et.Name }}")
-		}
-	})
-
-	// errors.As must keep working when the error is wrapped via
-	// fmt.Errorf("...: %w", err) — the canonical Go wrapping
-	// idiom.
-	t.Run("survives fmt.Errorf wrapping", func(t *testing.T) {
-		t.Parallel()
-		original := &{{ renderExpr $et.Ref }}{
-{{- range $et.Fields }}
-			{{ .Name }}: {{ .SampleValue }},
-{{- end }}
-		}
-		wrapped := {{ renderExpr (external "fmt" "Errorf") }}("context: %w", original)
-		var target *{{ renderExpr $et.Ref }}
-		if !errors.As(wrapped, &target) {
-			t.Fatalf("errors.As must work through fmt.Errorf for *{{ $et.Name }}")
-		}
-	})
-{{- if $et.FormatCheckOrder }}
-
-	// Error() output must be non-empty and include every
-	// recognised field value as a substring. Catches regressions
-	// where a refactor drops a field from the format string.
-	t.Run("Error format includes all fields", func(t *testing.T) {
-		t.Parallel()
-		err := &{{ renderExpr $et.Ref }}{
-{{- range $et.Fields }}
-			{{ .Name }}: {{ .SampleValue }},
-{{- end }}
-		}
-		got := err.Error()
-		if got == "" {
-			t.Fatalf("Error() returned empty string")
-		}
-{{- range $et.FormatCheckOrder }}
-		if !{{ renderExpr (external "strings" "Contains") }}(got, {{ printf "%q" . }}) {
-			t.Errorf("Error() %q missing substring %q", got, {{ printf "%q" . }})
-		}
+		// {{ .Path }} declares no error value, so there is nothing to
+		// overlap. The subtest is emitted anyway: a directive naming a
+		// package that has none should read as an empty check rather
+		// than as one that was never generated.
+		_ = all
 {{- end }}
 	})
 {{- end }}
-{{- if $et.OtherTypes }}
+{{- end -}}
 
-	// Each custom error type must be distinct from every other
-	// custom error type in the package — errors.Is on a foreign
-	// type must return false. Catches degenerate Is()
-	// implementations that silently match unrelated types.
-	t.Run("does not match other error types in package", func(t *testing.T) {
+{{- /* One error type's contract.
+
+       Every package-level fact this needs is carried on the value —
+       the prefix, the peers it must not match, the declared error a
+       comparison check compares against — so the block stands on its
+       own and a slot contributor extending it gets the same. */ -}}
+{{- define "sentinel.tests.type" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $is := renderExpr (external "errors" "Is") -}}
+{{- $unwrap := renderExpr (external "errors" "Unwrap") -}}
+{{- $errorf := renderExpr (external "fmt" "Errorf") -}}
+{{- $contains := renderExpr (external "strings" "Contains") -}}
+{{- $hasPrefix := renderExpr (external "strings" "HasPrefix") -}}
+{{- $amp := "" }}{{ if .Addressed }}{{ $amp = "&" }}{{ end }}
+{{- $lit := printf "%s%s{}" $amp (renderExpr .Ref) -}}
+	t.Run("reports a message for its zero value", func(t *{{ $T }}) {
 		t.Parallel()
-		err := &{{ renderExpr $et.Ref }}{}
-{{- range $et.OtherTypeRefs }}
-		if errors.Is(err, &{{ renderExpr . }}{}) {
-			t.Errorf("foreign error type matched via errors.Is")
-		}
-{{- end }}
+		// A message that reads through a member the zero value leaves
+		// unset panics — replacing the error a caller needed to report
+		// with a crash inside whatever was already going wrong.
+		{{ assertNotEqual "t" (printf "(%s).Error()" $lit) `""` "an error must report a message without panicking" }}
+	})
+{{- if .Prefix }}
+
+	t.Run("carries the package prefix like a sentinel does", func(t *{{ $T }}) {
+		t.Parallel()
+		// A custom error reaches the same logs as a declared one and is
+		// read the same way, so it owes the same prefix. Checking only
+		// the declared values leaves half a package's messages
+		// unexamined.
+		{{ assertTrue "t" (printf "%s((%s).Error(), %q)" $hasPrefix $lit .Prefix) "an error type must carry the package prefix" }}
 	})
 {{- end }}
-{{- if $et.HasIs }}
 
-	// The type's Is method must accept same-type instances
-	// regardless of field values and reject foreign errors.
-	t.Run("Is method accepts same-type, rejects foreign", func(t *testing.T) {
+	// No recovery check. Recovery finds a value by assignability while
+	// walking the chain, so it succeeds for any type reachable through
+	// it and fails for none. What a type can genuinely get wrong is its
+	// own cause, which is checked below when it declares one.
+{{- if .Peers }}
+
+	t.Run("does not match the package's other error types", func(t *{{ $T }}) {
 		t.Parallel()
-		a := &{{ renderExpr $et.Ref }}{}
-		b := &{{ renderExpr $et.Ref }}{}
-		if !a.Is(b) {
-			t.Errorf("*{{ $et.Name }}.Is must accept same-type instances")
-		}
-		foreign := errors.New("foreign")
-		if a.Is(foreign) {
-			t.Errorf("*{{ $et.Name }}.Is must reject foreign errors")
+		// Two error types that match each other collapse a caller's
+		// branches, and the caller cannot see it from the declarations.
+		subject := {{ $lit }}
+		for _, other := range []error{
+{{- range .Peers }}
+			{{ if .Addressed }}&{{ end }}{{ renderExpr .Ref }}{},
+{{- end }}
+		} {
+			{{ assertFalse "t" (printf "%s(subject, other)" $is) "an error type must not match another declared here" }}
 		}
 	})
 {{- end }}
-{{- if $et.HasUnwrap }}
+{{- if and .Compares (not .Unwraps) .Seed }}
 
-	// The type's Unwrap method must return the wrapped cause
-	// when set, and errors.Is must traverse the chain. nil cause
-	// must surface as nil from Unwrap (not panic).
-	t.Run("Unwrap returns the wrapped cause", func(t *testing.T) {
+	t.Run("agrees with the standard comparison about what it matches", func(t *{{ $T }}) {
 		t.Parallel()
-{{- if $et.UnwrapField }}
-		cause := errors.New("test-cause")
-		err := &{{ renderExpr $et.Ref }}{ {{ $et.UnwrapField }}: cause }
-		if got := err.Unwrap(); got != cause {
-			t.Errorf("Unwrap() = %v, want %v", got, cause)
-		}
-		if !errors.Is(err, cause) {
-			t.Errorf("errors.Is must traverse Unwrap chain")
-		}
+		// Emitted because the type declares its own comparison and no
+		// cause. What is asserted is that the standard comparison
+		// REACHES the declared method — one written on the wrong
+		// receiver form is never consulted, and the type then silently
+		// matches nothing.
+		//
+		// Both halves of that condition are load-bearing. The subject
+		// carries a declared error, because a zero one answers false on
+		// both sides whether the method was consulted or not. And the
+		// type names no cause, because the comparison walks the chain
+		// too: a type exposing the same cause that way matches
+		// regardless, and the two sides then agree for every receiver
+		// form — including the one this check exists to catch.
+{{- if .Cause }}
+		subject := {{ $amp }}{{ renderExpr .Ref }}{ {{- .Cause }}: {{ renderExpr .Seed.Ref }}}
 {{- else }}
-		err := &{{ renderExpr $et.Ref }}{}
-		if got := err.Unwrap(); got != nil {
-			t.Errorf("Unwrap() on zero value = %v, want nil", got)
-		}
+		subject := {{ $lit }}
 {{- end }}
+		for _, e := range []error{
+{{- range .Seeds }}
+			{{ renderExpr .Ref }},
+{{- end }}
+		} {
+			{{ assertEqual "t" (printf "%s(subject, e)" $is) "subject.Is(e)" "the standard comparison must agree with the declared one" }}
+		}
 	})
 {{- end }}
-}
+{{- if and .Compares .Unwraps .Seed }}
+
+	// No agreement check: this type names a cause as well, so the
+	// standard comparison reaches a declared error by walking the chain
+	// whether or not the declared comparison was consulted. The two
+	// sides then agree for every receiver form, including the one the
+	// check exists to catch. What the cause itself owes is checked
+	// below.
+{{- end }}
+{{- if and .Unwraps .Cause }}
+
+	t.Run("exposes the cause it was given", func(t *{{ $T }}) {
+		t.Parallel()
+		// A wrapper that does not return its cause silently truncates
+		// every chain it takes part in.
+		cause := {{ $errorf }}("cause")
+		// Declared and assigned rather than built as a literal: the
+		// cause may sit on a folded-in type, where the selector is legal
+		// and a composite-literal key is not.
+{{- if .Addressed }}
+		got := &{{ renderExpr .Ref }}{}
+{{- else }}
+		var got {{ renderExpr .Ref }}
+{{- end }}
+		got.{{ .Cause }} = cause
+		// Unwrapping rather than comparing. A type declaring its own
+		// comparison answers from there whatever the cause accessor
+		// returns, so a comparison-based assertion passes against a
+		// truncated chain — which is the one thing this check exists to
+		// catch.
+		{{ assertEqual "t" (printf "%s(got)" $unwrap) "cause" "an error naming a cause must expose it" }}
+	})
+{{- end }}
+{{- if .Checked }}
+
+	t.Run("puts every member it carries into its message", func(t *{{ $T }}) {
+		t.Parallel()
+		// A member the message drops is a detail the operator cannot
+		// see, and the declaration is the only record that it was meant
+		// to be visible.
+		got := {{ $amp }}{{ renderExpr .Ref }}{
+{{- range .Written }}
+			{{ .Name }}: {{ renderSample .Sample }},
+{{- end }}
+		}
+{{- range .Checked }}
+		{{ assertTrue "t" (printf "%s(got.Error(), %s)" $contains (renderSample .Sample)) (printf "%s must reach the message" .Name) }}
+{{- end }}
+	})
 {{- end }}
 {{- end -}}

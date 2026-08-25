@@ -1,538 +1,788 @@
 // Copyright Thesmos B.V. 2026
 // SPDX-License-Identifier: MIT
 
-// Package enum is the production multi-output generator for
-// idiomatic enum types. A source [sdk.Enum] (e.g. a Go
-// `type Status int` plus its grouped const variants) drives
-// the generation of two files: a per-source-basename file
-// carrying the production API surface (`String`, `Parse<Type>`,
-// `MarshalJSON`, `UnmarshalJSON`) and a paired test file
-// pinning the API's contract.
+// Package enum generates an enumerated type's textual surface and the
+// checks that hold it to what the declaration says.
 //
-// # Language-agnostic core, language-keyed adapters
+// An enumeration is often a convention rather than a language
+// feature: a defined type and a block of typed constants. Nothing
+// stops a conversion admitting a value outside the set, nothing
+// notices when a variant is added without the handling it needs, and
+// nothing relates the type's textual form to the values it was
+// declared with. Each is a one-line mistake that compiles.
 //
-// This file holds the plugin's language-neutral core: the
-// directive schema, the [Options] surface, the [API] and
-// [Tests] emit values, and the [Plugin.Generate] pass that
-// walks annotated source enums and queues one contribution
-// against each output. Per-language behaviour — the file
-// suffix and tag pair, the embedded template tree — lives in
-// the sibling `enum_<lang>.go` adapter, which [New] hands to
-// the embedded [sdk.Base]. The base answers the declaration
-// methods for Go and reports *not provided* for every other
-// language, so a second target language ships a
-// `templates/<lang>/...` tree, an `enum_<lang>.go` adapter,
-// and the per-language dispatch the base does not model.
+// # Language-neutral core
 //
-// # Source detection
+// This file names no language. Every question about the declaration
+// is asked through [sdk.EnumRules], which answers what each variant
+// renders as, which of them is the zero, what lies outside the set,
+// and what the set as a whole forbids. The identifiers the surface is
+// declared under are composed through [sdk.SourceRules.TypeName] from
+// words the language declares — see [sdk.LanguageSupport.Words] — and
+// the signatures around them are spelled in the templates, which are
+// per-language by construction.
 //
-// The plugin opts in on each source [sdk.Enum] carrying a
-// `+gen:enum` directive. The enum's [sdk.EnumVariant] list
-// supplies the rendered string-form for each variant, with
-// two resolution layers stacked low-to-high:
-//
-//  1. Default: the variant's [sdk.EnumVariant.Name] with
-//     the enum's [sdk.Enum.Name] prefix stripped when
-//     present and [Options.StripPrefix] is true (the
-//     default). So `StatusActive` on `type Status int`
-//     renders as the string `"Active"`.
-//  2. Override: a `+gen:value <override>` directive on the
-//     variant pins the rendered string verbatim, regardless
-//     of [Options.StripPrefix]. Source authors reach for the
-//     override when the default-derived string clashes with
-//     an external protocol's spelling.
-//
-// # Output set
-//
-// Two outputs flow from one source enum:
-//
-//   - Primary file: hosts the [API] kind, rendered by the
-//     `enum.api` template. Carries the full production
-//     surface.
-//   - Tagged "test" file: hosts the [Tests] kind, rendered
-//     by the `enum.test` template. In the Go adapter the
-//     `_test.go` suffix triggers the framework's automatic
-//     `<pkg>_test` package shift so the tests live in an
-//     external test package and can't accidentally read
-//     private state.
-//
-// # Imports
-//
-// The plugin expresses every cross-package and stdlib
-// reference through [sdk.NewExternal] expressions. The
-// backend's `renderExpr` funcmap registers each referenced
-// package on the rendered file's import set automatically —
-// the templates carry no hard-coded import statements.
+// See the package README for what is generated, how the textual form
+// is decided, what the checks assert, and the limits.
 package enum
 
 import (
-	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 )
 
 // Name is the plugin's stable identifier.
 const Name = "enum"
 
-// Version is the plugin's declared version. It composes into the
-// pipeline's plugin fingerprint, which frontends fold into their cache
-// keys — so bumping it invalidates a warm cache populated when this
-// plugin behaved differently. A plugin that declares no version
-// contributes an empty string and can never invalidate anything, which
-// is a silent staleness bug waiting for its first behavioural change.
-const Version = "1.0.0"
+// Version composes into the pipeline's plugin fingerprint, which
+// frontends fold into their cache keys — so bumping it invalidates a
+// warm cache populated when this plugin emitted something else.
+const Version = "2.0.0"
 
-// Capability is the capability label the plugin advertises
-// so downstream consumers can declare
-// `Requires: []string{Capability}` to document a dependency
-// on enum-API generation.
+// Capability is the label the plugin advertises so a downstream
+// consumer can declare a documentary dependency on enum generation.
 const Capability = "enum"
 
-// DirectiveName is the bare directive name (without the
-// `+gen:` or `-gen:` prefix) the plugin reads from source
-// enum types.
+// DirectiveName is the bare directive name, without the `+gen:`
+// prefix, that opts a declaration in.
 const DirectiveName sdk.DirectiveName = "enum"
 
-// SlotName is the [sdk.EmitFile] slot the plugin appends its
-// rendered [API] / [Tests] emit values into. `top` renders
-// the content between the package clause and the first core
-// decl — the natural placement for whole methods +
-// functions emitted as a single template-rendered block.
-// Universal across target languages.
-const SlotName = "top"
+// MethodsKey suppresses the surface entirely, leaving the checks:
+//
+//	//+gen:enum methods=off
+//
+// For a type whose surface is already written by hand and only wants
+// pinning. A single member that already exists is skipped without
+// this — the key is for declaring the intent up front rather than
+// discovering it one member at a time.
+const MethodsKey = "methods"
 
-// KindAPI is the plugin-defined [sdk.Kind] every [API] emit
-// value reports. Universal across target languages; the
-// matching template per language lives at
-// `templates/<lang>/enum.api.tmpl`.
-const KindAPI sdk.Kind = "enum.api"
+// MethodsOff is the only value [MethodsKey] accepts.
+const MethodsOff = "off"
 
-// KindTests is the plugin-defined [sdk.Kind] every [Tests]
-// emit value reports. Universal across target languages;
-// the matching template per language lives at
-// `templates/<lang>/enum.test.tmpl`.
-const KindTests sdk.Kind = "enum.test"
+// The surface this plugin generates, named by what each part does
+// rather than by what a language calls it.
+//
+// Keys, not identifiers. `String` and `MarshalText` are Go's
+// spellings; another language renders and encodes under names of its
+// own, and a constant here holding one would write that language's
+// answer into every other language's output. What each key is spelled
+// as comes from [sdk.LanguageSupport.Words], joined to the type name
+// by [sdk.SourceRules.TypeName].
+const (
+	// SurfaceRender turns a value into its textual form.
+	SurfaceRender = "render"
 
-// ErrEnumHasNoVariants is recorded as a diagnostic when an
-// annotated source enum carries no [sdk.EnumVariant]
-// entries — the plugin has nothing to render against. The
-// run continues; the offending enum is skipped.
-var ErrEnumHasNoVariants = errors.New("enum: source enum has no variants")
+	// SurfaceParse turns text back into a value, and is the half that
+	// makes the round trip a law rather than a coincidence.
+	SurfaceParse = "parse"
+
+	// SurfaceValues returns the declared set, so a caller can iterate
+	// it without restating it.
+	SurfaceValues = "values"
+
+	// SurfaceValid reports whether a value is one the declaration
+	// admits — the only thing standing between a conversion and the
+	// rest of the program.
+	SurfaceValid = "valid"
+
+	// SurfaceEncode and SurfaceDecode are the encoding pair, which
+	// travel together: a type that encodes as text and does not decode
+	// from text leaves the program one way and comes back another.
+	SurfaceEncode = "encode"
+	SurfaceDecode = "decode"
+)
+
+// The keys this plugin's per-language vocabulary is declared under.
+//
+// One per surface member, plus the two the refusal's identifier is
+// composed from. How the words join the type name is the language's
+// too, through [sdk.SourceRules.TypeName].
+const (
+	// WordRender, WordParse, WordValues, WordValid, WordEncode and
+	// WordDecode name the six surface members.
+	WordRender = SurfaceRender
+	WordParse  = SurfaceParse
+	WordValues = SurfaceValues
+	WordValid  = SurfaceValid
+	WordEncode = SurfaceEncode
+	WordDecode = SurfaceDecode
+
+	// WordUnknown is the subject the parse refusal is named for —
+	// `Unknown` giving `ErrUnknownStatus` in a language that prefixes.
+	WordUnknown = "unknown"
+)
+
+// TestOutputTag is the tag the check output advertises.
+//
+// A tag names an output within the plugin's own namespace, which is
+// what a routing override and a per-output directive address. Neutral
+// by nature: it is this plugin's word for the second file, not a
+// spelling any language decides.
+const TestOutputTag = "test"
+
+// FileSlot is the [sdk.EmitFile] slot both outputs land in. `top`
+// renders between the package clause and the first core declaration,
+// which is where a block of whole declarations belongs.
+const FileSlot = "top"
+
+// The slots this plugin hands out.
+//
+// A slot is reached by name, so the generator handing the region out
+// and the one filling it both spell it — from here, because a
+// misspelling on either side mints a second, unconstrained region
+// under a near-miss name rather than failing.
+const (
+	// SlotSurface is the API file's declaration block, after the
+	// members this plugin derives.
+	//
+	// For a contributor adding a member this plugin does not model — a
+	// database codec pair, a flag binding, a schema description. Each
+	// of those is derived from the same declared set, and without the
+	// slot a second generator emits a whole file beside this one and
+	// re-derives the set to fill it.
+	SlotSurface = "surface"
+
+	// SlotChecks is the check file's function block, after the checks
+	// this plugin derives. For an assertion this plugin cannot see: a
+	// wire format the set has to stay compatible with, or a mapping
+	// onto a neighbouring enumeration.
+	SlotChecks = "checks"
+)
+
+// KindAPI and KindTests are the plugin-defined emit kinds. The backend
+// resolves a template by the kind's string value, so each constant
+// doubles as the name its template defines.
+const (
+	KindAPI   sdk.Kind = "enum.api"
+	KindTests sdk.Kind = "enum.test"
+)
+
+// MetaParse and MetaSentinel name the parse function and the refusal
+// this plugin generated, stamped on the declaration itself.
+//
+// The coupling a second generator needs. One constructing a value
+// from text otherwise re-derives the naming convention from a
+// literal, and a run that configured [Options.ParseWord] leaves it
+// naming a function nothing declares. Reading the stamp costs one
+// lookup and cannot drift.
+//
+//nolint:gochecknoglobals // meta key registration, immutable after init.
+var (
+	MetaParse    = sdk.EnsureKey(Name+".parse", sdk.StringParser)
+	MetaSentinel = sdk.EnsureKey(Name+".sentinel", sdk.StringParser)
+)
 
 // Options carries the plugin's user-tunable settings.
-//
-// The default values reflect Go idioms — `Parse` /
-// `ErrUnknown` prefixes match the canonical Go naming —
-// because Go is the only language the plugin ships
-// templates for today. Project configs in other-language
-// projects override the defaults via the YAML.
 type Options struct {
-	// StripPrefix toggles the default name-to-string
-	// resolution rule: when true (the default), a variant
-	// whose [sdk.EnumVariant.Name] starts with the enum's
-	// [sdk.Enum.Name] renders with the prefix stripped
-	// (e.g. `StatusActive` → `"Active"`). The
-	// `+gen:value <override>` directive on a variant
-	// overrides both branches.
-	StripPrefix bool `eidos:"strip_prefix,default=true"`
+	// ParseWord overrides the word the parse function's identifier
+	// carries beside the type it parses.
+	//
+	// Unset takes the language's own word. Set, it applies to every
+	// language, which is what a caller asking for `Decode` means: the
+	// word is theirs, and only the joining stays the language's.
+	ParseWord string `eidos:"parse-word"`
 
-	// ParsePrefix is the prefix the plugin uses to form the
-	// parse function's identifier. Combined with the enum's
-	// type name yields `ParseStatus`. Defaults to
-	// [GoDefaultParsePrefix].
-	ParsePrefix string `eidos:"parse_prefix,default=Parse"`
+	// SentinelWord overrides the subject the parse refusal is named
+	// for — `Unrecognised` rather than `Unknown`.
+	SentinelWord string `eidos:"sentinel-word"`
 
-	// SentinelPrefix is the prefix the plugin uses to form
-	// the parse-error sentinel's identifier. Combined with
-	// the enum's type name yields `ErrUnknownStatus`.
-	// Defaults to [GoDefaultSentinelPrefix].
-	SentinelPrefix string `eidos:"sentinel_prefix,default=ErrUnknown"`
+	// NoTests suppresses the check file, leaving the surface alone.
+	//
+	// For a repository whose generated tests are written by something
+	// else. Off by default: a generated surface nothing exercises is a
+	// round trip asserted by nobody, and the checks are the cheapest
+	// place to notice a set that renders two variants alike.
+	NoTests bool `eidos:"no-tests"`
 }
 
-// Plugin is the enum generator. Zero value is unusable; go
-// through [New] so the embedded [sdk.Holder] binds to the
-// options field.
+// Plugin is the enum generator. Zero value is unusable; go through
+// [New] so the embedded [sdk.Holder] binds to the options field.
 type Plugin struct {
 	*sdk.Base
 	*sdk.Holder[Options]
 	opts Options
 }
 
-// New returns a fresh plugin instance with the options
-// holder bound. The pipeline overlays caller-supplied
-// option values via [Plugin.SetOptions] (promoted from
-// [sdk.Holder]) at Build time.
+// New returns a fresh plugin instance.
 //
-// The foundation bucket runs before the composition and
-// cross-cutting buckets, so a downstream plugin discovering
-// the emitted API can read it during its own Generate pass.
+// The foundation bucket runs ahead of composition and cross-cutting,
+// so a plugin walking the post-generation emit graph finds the
+// surfaces this pass queued.
 //
-// [Capability] is published so a consumer can declare a
-// documentary dependency on enum-API generation through its
-// own Requires list. Nothing is required in return: the
-// plugin reads source nodes only and has no upstream plugin
-// dependency.
-//
-// No template helper is registered. The templates reach only
-// the canonical `renderExpr` / `external` entries and the
-// shared Go-convention bundle, both of which the base already
-// carries — so there is nothing here for a `.tmpl` to call
-// under this plugin's name prefix.
+// [Capability] is published so a consumer can declare a documentary
+// dependency on enum generation. Nothing is required in return: the
+// plugin reads source declarations and depends on no other plugin
+// having run.
 func New() *Plugin {
 	p := &Plugin{Base: sdk.NewPlugin(Name).
-		For(goSupport()).
 		Version(Version).
 		Priority(sdk.GeneratorFoundation).
 		Provides(Capability).
 		Directives(directives()...).
+		For(goSupport()).
 		Build()}
 	p.Holder = sdk.BindOptions(&p.opts)
 	return p
 }
 
-// directives declares the `+gen:enum` schema on source enum
-// types.
+// directives declares the `+gen:enum` schema.
 func directives() []sdk.DirectiveSchema {
 	return []sdk.DirectiveSchema{
 		sdk.NewDirective(DirectiveName).
-			On(sdk.NodeKindEnum).
 			Describe(
-				"Opts the host enum type in for String / Parse / " +
-					"MarshalJSON / UnmarshalJSON generation.",
+				"Generates an enumeration's textual and validity surface — a " +
+					"renderer, a parser and its refusal, an encoding pair, the " +
+					"declared set and a validity test — plus checks over what the " +
+					"declaration says. A member the type already declares is never " +
+					"generated; `methods=off` suppresses all of them and leaves the " +
+					"checks. The negated form is rejected — removing the directive " +
+					"is the suppression.",
 			).
+			AllowedKeys(MethodsKey).
+			On(sdk.NodeKindEnum).
+			DenyNegation().
 			Build(),
 	}
 }
 
-// Variant is one rendered enum variant — the source-side
-// const identifier plus the resolved string form the
-// rendered API maps it to (via `String` / `Parse` / JSON).
+// Variant is one declared constant, projected.
 type Variant struct {
-	// ConstName is the source-side const identifier (e.g.
-	// `StatusActive`).
-	ConstName string
+	// Name is the identifier.
+	Name string
 
-	// StringValue is the rendered string form — either the
-	// auto-derived name (Name minus the enum's type prefix
-	// when [Options.StripPrefix] is true) or the
-	// `+gen:value` override.
-	StringValue string
-
-	// Ref is the [sdk.NewExternal] expression that renders
-	// as the fully-qualified constant reference from the
-	// external test package (e.g. `blog.StatusActive`).
-	// Populated only on variants destined for the test
-	// output; the primary output renders constants
-	// unqualified because it lives in the source package.
+	// Ref qualifies it, so a check routed into another package names
+	// it rather than relying on being in scope.
 	Ref *sdk.Expr
+
+	// Text is the variant's textual form as a literal, ready to
+	// render — quoted by the language rather than in the template, so
+	// the quoting rule lives beside the derivation that decides it.
+	Text string
 }
 
-// API is the plugin-defined emit kind every production-
-// output emit value reports. The matching `enum.api`
-// template renders it as the full `String` / `Parse` /
-// `MarshalJSON` / `UnmarshalJSON` surface for one source
-// enum.
+// Names are the identifiers this run's surface is declared under.
 //
-// The struct carries only language-neutral data. The
-// per-language template reaches stdlib symbols through
-// the backend's `external` funcmap entry (`{{ renderExpr
-// (external "fmt" "Sprintf") }}`); the backend's
-// `renderExpr` registers the matching import on the host
-// file's import set automatically.
+// Composed once and carried, rather than recomposed wherever one is
+// needed. The plugin derives each from a word and a type name, and a
+// second derivation at a call site is the copy that stops agreeing
+// the day a word is configured.
+type Names struct {
+	// Render, Parse, Values, Valid, Encode and Decode are the six
+	// surface members' identifiers, keyed in the same order the
+	// surface constants declare them.
+	Render, Parse, Values, Valid, Encode, Decode string
+
+	// Sentinel is the parse refusal's identifier.
+	Sentinel string
+}
+
+// byKey returns the identifier a surface key is spelled as.
+func (n Names) byKey(key string) string {
+	switch key {
+	case SurfaceRender:
+		return n.Render
+	case SurfaceParse:
+		return n.Parse
+	case SurfaceValues:
+		return n.Values
+	case SurfaceValid:
+		return n.Valid
+	case SurfaceEncode:
+		return n.Encode
+	case SurfaceDecode:
+		return n.Decode
+	default:
+		return ""
+	}
+}
+
+// API is the emit value rendered into the primary output.
 type API struct {
 	sdk.BaseEmit
+	Names
 
-	// TypeName is the source enum's type identifier
-	// (`Status`).
+	// TypeName is the enumeration's own identifier, and TypeRef
+	// qualifies it. A surface declaring members on the type can only
+	// be written in the type's own package, so the two agree — but the
+	// reference is what registers an import where a language needs one.
 	TypeName string
+	TypeRef  *sdk.Expr
 
-	// ParseName is the parse function's identifier
-	// (`ParseStatus`).
-	ParseName string
-
-	// SentinelName is the parse-error sentinel's identifier
-	// (`ErrUnknownStatus`).
-	SentinelName string
-
-	// Underlying is the enum's underlying type name as the
-	// frontend recorded it (`int`, `string`, `int64`, …), or
-	// empty when the source model declares none.
+	// PackageName is the declaring package's identifier, which
+	// prefixes the refusal's message.
 	//
-	// The rendered API is not uniform across underlying types:
-	// the `String` fallback converts the value, and a numeric
-	// conversion applied to a string-valued enum produces a file
-	// that does not compile. Carried as the source fact rather
-	// than a pre-rendered expression or a bool so the
-	// per-language template decides what a given underlying type
-	// means for its output — which is where the framework already
-	// puts language interpretation.
-	Underlying string
+	// The package rather than the type: a message is read in a log
+	// beside messages from everywhere else, and what a reader needs
+	// first is which package raised it. The type name goes in the
+	// body, where it distinguishes this refusal from its neighbours.
+	PackageName string
 
-	// FallbackConv is the type an out-of-set value converts
-	// through before the fallback prints it.
-	//
-	// The answer rather than the question, which is the
-	// opposite of what [API.Underlying] carries and is
-	// deliberate: this is the one part of the decision a
-	// template cannot take correctly. A set whose underlying
-	// type is declared in another package converts through a
-	// qualified reference, and a template composing that
-	// conversion from a name emits a file naming a package it
-	// never imported — text cannot register an import. Carried
-	// as an [sdk.Ref] so the backend's `renderType` registers
-	// one.
-	FallbackConv sdk.Ref
+	// Fallback is the type an undeclared value converts through before
+	// anything prints it, and Format is the token that prints the
+	// result faithfully. Derived together — see [sdk.EnumInfo].
+	Fallback sdk.Ref
+	Format   string
 
-	// FallbackVerb is the printf verb that renders a value of
-	// [API.FallbackConv] faithfully.
-	//
-	// Paired with FallbackConv by [sdk.EnumFallback] rather
-	// than derived beside it, because the two drift: `%d`
-	// against a set declared over `float64` renders
-	// `%!d(float64=0.5)`, and `go vet` reports it in the
-	// consuming repository, where nobody wrote it.
-	//
-	// A non-Go adapter reads FallbackConv and ignores this; a
-	// printf verb means nothing to a language without printf.
-	FallbackVerb string
+	// Form is where the variants' textual forms come from.
+	Form sdk.EnumForm
 
-	// Variants is the ordered variant list — declaration
-	// order in the source enum, so iota-based numeric
-	// values stay aligned with the rendered switch cases.
 	Variants []Variant
+
+	// generate lists the surface keys this run emits — every one the
+	// type does not already declare, or none when the directive said
+	// so.
+	generate map[string]bool
+
+	surface *sdk.Slot
+}
+
+// Emits reports whether the named surface key is this run's to write.
+func (a *API) Emits(key string) bool { return a.generate[key] }
+
+// Any reports whether anything at all is generated, which decides
+// whether the primary file is worth emitting.
+func (a *API) Any() bool { return len(a.generate) > 0 }
+
+// Textual reports that the variants' text comes from their declared
+// values rather than from their identifiers.
+//
+// A method rather than a comparison in the template, because
+// [sdk.EnumForm] is a named string type and text/template's `eq`
+// compares dynamic types before values — `eq .Form "value"` is false
+// for every enumeration, silently.
+func (a *API) Textual() bool { return a.Form == sdk.EnumFormValue }
+
+// Surface returns the slot rendered after this plugin's own
+// declarations.
+func (a *API) Surface() *sdk.Slot {
+	if a.surface == nil {
+		a.surface = sdk.NewSlot(SlotSurface, "")
+		a.surface.Owner = a
+	}
+	return a.surface
+}
+
+// Slot satisfies [sdk.SlotHost] so the backend's `slot` helper reaches
+// the region by name. An unknown name yields an empty slot rather than
+// nil, so a template asking for one this kind does not have renders
+// nothing instead of failing.
+func (a *API) Slot(name string) *sdk.Slot {
+	if name == SlotSurface {
+		return a.Surface()
+	}
+	return sdk.NewSlot(name, "")
 }
 
 // Kind returns [KindAPI].
 func (*API) Kind() sdk.Kind { return KindAPI }
 
-// Compile-time confirmation that *API satisfies
-// [sdk.EmitNode].
-var _ sdk.EmitNode = (*API)(nil)
+var (
+	_ sdk.EmitNode = (*API)(nil)
+	_ sdk.SlotHost = (*API)(nil)
+)
 
-// Tests is the plugin-defined emit kind every test-output
-// emit value reports. The matching `enum.test` template
-// renders it as the round-trip test suite that pins the
-// production API's contract.
+// Tests is the emit value rendered into the tagged check output.
 //
-// The test file lives in the `<pkg>_test` external test
-// package (the Go adapter's auto-shift for files ending in
-// `_test.go`), so source-package identifiers route through
-// [sdk.NewExternal] for cross-package qualification. The
-// per-language template reaches stdlib symbols
-// (`testing.T`, `errors.Is`, `encoding/json` helpers)
-// through the backend's `external` funcmap entry, not a
-// data-side ref.
+// The checks land in the external test package of wherever the
+// surface was routed, so nothing in the declaring package is
+// reachable unqualified.
 type Tests struct {
 	sdk.BaseEmit
+	Names
 
-	// TypeName is the source enum's type identifier (kept
-	// for rendering in test-function names / log messages).
 	TypeName string
+	TypeRef  *sdk.Expr
 
-	// TypeRef is the [sdk.NewExternal] expression that
-	// renders as the fully-qualified type reference from
-	// the external test package (e.g. `blog.Status`).
-	TypeRef *sdk.Expr
+	// ParseRef, ValuesRef and SentinelRef qualify the surface these
+	// checks drive.
+	ParseRef, ValuesRef, SentinelRef *sdk.Expr
 
-	// ParseName is the parse function's identifier.
-	ParseName string
-
-	// ParseRef is the [sdk.NewExternal] expression that
-	// renders as the fully-qualified parse function
-	// reference (e.g. `blog.ParseStatus`).
-	ParseRef *sdk.Expr
-
-	// SentinelName is the parse-error sentinel's
-	// identifier.
-	SentinelName string
-
-	// SentinelRef is the [sdk.NewExternal] expression that
-	// renders as the fully-qualified sentinel reference
-	// (e.g. `blog.ErrUnknownStatus`).
-	SentinelRef *sdk.Expr
-
-	// Variants is the variant list the test cases iterate.
-	// Each variant's [Variant.Ref] is populated for
-	// cross-package qualification.
+	Form     sdk.EnumForm
 	Variants []Variant
+
+	// ZeroName is the variant whose value is the type's zero, empty
+	// when none is, and ZeroRef is that same variant as a reference.
+	// The two cases read as opposite assertions, and which one an
+	// enumeration earns is what a check exists to tell apart.
+	//
+	// The reference is carried rather than the check rebuilding the
+	// variant by position. Declaration order and zero-ness are
+	// different questions and agree only for a set declaring its zero
+	// first — so `US Region = "us-east"; Unset Region = ""` asserted
+	// that the zero equalled US, and failed naming a variant the
+	// assertion did not mention.
+	ZeroName string
+	ZeroRef  *sdk.Expr
+
+	// UnknownText is the literal a parse-refusal probe submits, empty
+	// when the declared set already contains the marker.
+	UnknownText string
+
+	// OutOfRange is a value past the declared set as a literal, empty
+	// when none could be derived. Used to check that an undeclared
+	// value does not render as a declared one.
+	OutOfRange string
+
+	// Each reports whether the surface a check drives actually exists.
+	//
+	// Parses and Enumerates track what this run generated rather than
+	// what the type has: both are declared beside the type rather than
+	// on it, so one the author wrote is invisible to the declaration,
+	// and a check assuming it would name something that may not be
+	// there. The rest are members, so a hand-written one is visible
+	// and counts.
+	Renders, Parses, Marshals, Encodes, Validates, Enumerates bool
+
+	checks *sdk.Slot
+}
+
+// Textual reports that the variants' text comes from their declared
+// values — see [API.Textual] for why this is a method.
+func (t *Tests) Textual() bool { return t.Form == sdk.EnumFormValue }
+
+// Count returns how many variants the declaration carries, which is
+// the arity a check pins.
+func (t *Tests) Count() int { return len(t.Variants) }
+
+// Checks returns the slot rendered after this plugin's own checks.
+func (t *Tests) Checks() *sdk.Slot {
+	if t.checks == nil {
+		t.checks = sdk.NewSlot(SlotChecks, "")
+		t.checks.Owner = t
+	}
+	return t.checks
+}
+
+// Slot satisfies [sdk.SlotHost] so the backend's `slot` helper reaches
+// the region by name.
+func (t *Tests) Slot(name string) *sdk.Slot {
+	if name == SlotChecks {
+		return t.Checks()
+	}
+	return sdk.NewSlot(name, "")
 }
 
 // Kind returns [KindTests].
 func (*Tests) Kind() sdk.Kind { return KindTests }
 
-// Compile-time confirmation that *Tests satisfies
-// [sdk.EmitNode].
-var _ sdk.EmitNode = (*Tests)(nil)
+var (
+	_ sdk.EmitNode = (*Tests)(nil)
+	_ sdk.SlotHost = (*Tests)(nil)
+)
 
-// Generate walks every source enum the reader exposes and,
-// for each opted-in enum, queues one [API] contribution
-// against the primary output and one [Tests] contribution
-// against the test-tagged output. The Layout phase resolves
-// each contribution's [sdk.EmitTarget] via the per-output
-// routing pipeline; the rendered files appear alongside the
-// source enum's file by default and follow project / CLI
-// overrides otherwise.
+// Generate projects every annotated declaration into a surface and the
+// checks over it.
 //
-// Source enums without `+gen:enum` are skipped silently.
-// Annotated enums with no [sdk.EnumVariant] entries
-// surface [ErrEnumHasNoVariants] as a positioned
-// diagnostic; the run continues and the offending enum
-// drops from the output set.
+// Per package, because the language a declaration is read with is a
+// fact about the package that produced it — see [sdk.LanguageOf].
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name)
-	for e := range ctx.Reader.Enums().All() {
-		if !e.HasPositiveDirective(DirectiveName) {
+	constants := ctx.Reader.Constants().Slice()
+	unread := map[string]bool{}
+	for _, pkg := range ctx.Reader.Packages().Slice() {
+		rules, lang, ok := p.SourceOf(pkg)
+		if !ok {
+			p.report(ctx, pkg, sdk.LanguageOf(pkg), unread,
+				"are not read, so no enum surface is generated for them")
 			continue
 		}
-		if len(e.Variants) == 0 {
-			ctx.Diag.Errorf(e.Pos(), "%s: enum %q", ErrEnumHasNoVariants.Error(), e.QName())
+		er, ok := rules.(sdk.EnumRules)
+		if !ok {
+			p.report(ctx, pkg, lang, unread,
+				"describe no enumerations, so no enum surface is generated for them")
 			continue
 		}
-		underlying := golang.EnumUnderlying(e)
-		fallbackConv, fallbackVerb := golang.EnumFallback(e)
-		variants := p.collectVariants(e, underlying)
-		parseName := p.parsePrefix() + e.Name
-		sentinelName := p.sentinelPrefix() + e.Name
-
-		api := &API{
-			BaseEmit: sdk.BaseEmit{
-				OriginNode: e,
-				SetByName:  c.SetBy(),
-				SourcePos:  e.Pos(),
-			},
-			TypeName:     e.Name,
-			ParseName:    parseName,
-			SentinelName: sentinelName,
-			Underlying:   underlying,
-			FallbackConv: fallbackConv,
-			FallbackVerb: fallbackVerb,
-			Variants:     variants,
-		}
-		if err := ctx.Store.Emit().AppendOriginSlot(e, SlotName, api, c.Provenance("enum.api."+e.Name)); err != nil {
-			return fmt.Errorf("%s: append api slot: %w", Name, err)
-		}
-
-		testVariants := make([]Variant, len(variants))
-		copy(testVariants, variants)
-		for i := range testVariants {
-			testVariants[i].Ref = sdk.NewExternal(e.Package, testVariants[i].ConstName)
-		}
-		tests := &Tests{
-			BaseEmit: sdk.BaseEmit{
-				OriginNode:    e,
-				SetByName:     c.SetBy(),
-				SourcePos:     e.Pos(),
-				OutputTagName: GoTestOutputTag,
-			},
-			TypeName:     e.Name,
-			TypeRef:      sdk.NewExternal(e.Package, e.Name),
-			ParseName:    parseName,
-			ParseRef:     sdk.NewExternal(e.Package, parseName),
-			SentinelName: sentinelName,
-			SentinelRef:  sdk.NewExternal(e.Package, sentinelName),
-			Variants:     testVariants,
-		}
-		if err := ctx.Store.Emit().AppendOriginSlot(e, SlotName, tests, c.Provenance("enum.test."+e.Name)); err != nil {
-			return fmt.Errorf("%s: append test slot: %w", Name, err)
+		if err := p.generatePackage(ctx, c, pkg, rules, er, lang, constants); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// collectVariants returns the variant list for e with each
-// variant's StringValue resolved through the three-layer rule
-// documented on [Plugin.resolveStringValue].
-func (p *Plugin) collectVariants(e *sdk.Enum, underlying string) []Variant {
-	out := make([]Variant, 0, len(e.Variants))
-	for _, v := range e.Variants {
+// generatePackage queues the outputs for every annotated declaration
+// in one package.
+func (p *Plugin) generatePackage(
+	ctx *sdk.GeneratorContext, c *sdk.Provenance, pkg *sdk.Package,
+	rules sdk.SourceRules, er sdk.EnumRules, lang string, constants []*sdk.Constant,
+) error {
+	for _, e := range pkg.Enums {
+		if !e.HasPositiveDirective(DirectiveName) {
+			continue
+		}
+		info := er.EnumOf(e, constants)
+		if !usable(ctx, e, info) {
+			continue
+		}
+		names := p.namesOf(rules, lang, e.Name)
+		api := apiOf(ctx, c, e, info, names, pkg.Name)
+		MetaParse.Set(e.EnsureMeta(), names.Parse, Name)
+		MetaSentinel.Set(e.EnsureMeta(), names.Sentinel, Name)
+
+		if err := sdk.QueueEmit(
+			ctx.Store.Emit(), c, FileSlot, e, p.queued(e, api, info)...,
+		); err != nil {
+			// Wrapped even though the queue names the plugin and the
+			// slot: what it cannot name is which declaration the run was
+			// on, which is the only part a reader needs to find the line.
+			return fmt.Errorf("%s: queue %q: %w", Name, e.Name, err)
+		}
+	}
+	return nil
+}
+
+// usable reports whether the declaration is one this plugin can
+// generate a truthful surface for, reporting why when it is not.
+//
+// Each refusal is a case where generating anyway produces answers
+// that are confidently false rather than merely incomplete, which is
+// the distinction: an absent probe drops one check, and a set the
+// projection cannot see makes every check about that set a lie.
+func usable(ctx *sdk.GeneratorContext, e *sdk.Enum, info sdk.EnumInfo) bool {
+	switch {
+	case len(e.Variants) == 0:
+		ctx.Diag.Errorf(e.Pos(),
+			"%s: %q carries +gen:%s but declares no variant",
+			Name, e.QName(), DirectiveName)
+		return false
+	case len(info.Foreign) > 0:
+		// Legal, and silently wrong. Variants declared elsewhere never
+		// reach the set, so a validity test would reject a value
+		// someone declared and an arity check would pin a count that is
+		// not the truth. Reported rather than absorbed: reaching across
+		// a package boundary would make the generated set depend on
+		// which packages a run happened to include.
+		ctx.Diag.Errorf(e.Pos(),
+			"%s: %q has variants declared in %v; move them beside the type "+
+				"or the generated set will exclude them",
+			Name, e.QName(), info.Foreign)
+		return false
+	case info.Duplicate != "":
+		ctx.Diag.Errorf(e.Pos(),
+			"%s: %q renders two variants as %s; pin one with a value override",
+			Name, e.QName(), info.Duplicate)
+		return false
+	default:
+		return true
+	}
+}
+
+// apiOf projects one declaration into the primary output's value.
+func apiOf(
+	ctx *sdk.GeneratorContext, c *sdk.Provenance,
+	e *sdk.Enum, info sdk.EnumInfo, names Names, pkgName string,
+) *API {
+	return &API{
+		BaseEmit:    sdk.EmitBase(c, e),
+		Names:       names,
+		TypeName:    e.Name,
+		TypeRef:     sdk.NewExternal(e.Package, e.Name),
+		PackageName: pkgName,
+		Fallback:    info.Fallback,
+		Format:      info.FallbackFormat,
+		Form:        info.Form,
+		Variants:    variantsOf(e.Package, info),
+		generate:    generated(ctx, e, names),
+	}
+}
+
+// queued returns the emit values one declaration contributes.
+//
+// The surface is skipped when nothing is left to generate — a type
+// declaring every member already, or one that asked for none. A file
+// carrying only a generated-by header reads as a generator that
+// failed.
+func (p *Plugin) queued(e *sdk.Enum, api *API, info sdk.EnumInfo) []sdk.EmitNode {
+	var out []sdk.EmitNode
+	if api.Any() {
+		out = append(out, api)
+	}
+	if p.opts.NoTests {
+		return out
+	}
+	return append(out, testsOf(e, api, info))
+}
+
+// testsOf projects the checks over what apiOf decided to emit.
+func testsOf(e *sdk.Enum, api *API, info sdk.EnumInfo) *Tests {
+	declares := func(key string) bool { return e.MethodByName(api.byKey(key)) != nil }
+	return &Tests{
+		BaseEmit:    sdk.EmitBaseTagged(api.BaseEmit, TestOutputTag),
+		Names:       api.Names,
+		TypeName:    api.TypeName,
+		TypeRef:     api.TypeRef,
+		ParseRef:    sdk.NewExternal(e.Package, api.Parse),
+		ValuesRef:   sdk.NewExternal(e.Package, api.Values),
+		SentinelRef: sdk.NewExternal(e.Package, api.Sentinel),
+		Form:        api.Form,
+		Variants:    api.Variants,
+		ZeroName:    info.Zero,
+		ZeroRef:     zeroRef(e.Package, info.Zero),
+		UnknownText: info.UnknownText,
+		OutOfRange:  info.OutOfRange,
+		Renders:     api.Emits(SurfaceRender) || declares(SurfaceRender),
+		Parses:      api.Emits(SurfaceParse),
+		Marshals:    api.Emits(SurfaceEncode) && api.Emits(SurfaceDecode),
+		Encodes:     api.Emits(SurfaceEncode) || declares(SurfaceEncode),
+		Validates:   api.Emits(SurfaceValid) || declares(SurfaceValid),
+		Enumerates:  api.Emits(SurfaceValues),
+	}
+}
+
+// zeroRef qualifies the zero variant, or nil when the set has none.
+func zeroRef(pkg, name string) *sdk.Expr {
+	if name == "" {
+		return nil
+	}
+	return sdk.NewExternal(pkg, name)
+}
+
+// variantsOf lifts the projected variants, qualifying each.
+func variantsOf(pkg string, info sdk.EnumInfo) []Variant {
+	out := make([]Variant, 0, len(info.Variants))
+	for _, v := range info.Variants {
 		out = append(out, Variant{
-			ConstName:   v.Name,
-			StringValue: p.resolveStringValue(e.Name, underlying, v),
+			Name: v.Name,
+			Ref:  sdk.NewExternal(pkg, v.Name),
+			Text: v.Text,
 		})
 	}
 	return out
 }
 
-// resolveStringValue applies the three-layer rule, highest
-// precedence first:
+// namesOf composes the identifiers this run's surface is declared
+// under.
 //
-//  1. A per-variant `+gen:value <override>` wins outright — it is
-//     the author saying explicitly what the textual form is.
-//  2. For a string-valued enum, the declared constant value.
-//  3. Otherwise the variant's Name, with the enum's typeName prefix
-//     stripped when [Options.StripPrefix] is true.
-//
-// Layer 2 exists because for a string enum the textual form is
-// already written down. Deriving a different one from the
-// identifier loses the only thing the declaration said: a `Region`
-// declared `US Region = "us-east"` rendered its textual form as
-// `"US"`, so a value read from JSON, a database column or an HTTP
-// parameter did not parse, and one written through MarshalJSON
-// emitted `"US"` rather than the declared value.
-//
-// It is gated on the underlying type rather than on Value being
-// present. Every variant has a Value; for a numeric enum it is `1`,
-// and rendering `String()` as `"1"` would be worse than the
-// identifier. For a numeric enum the identifier is the only sensible
-// textual form.
-func (p *Plugin) resolveStringValue(typeName, underlying string, v *sdk.EnumVariant) string {
-	if override := v.Directive(sdk.ValueDirective); override != nil && len(override.Args) > 0 {
-		return override.Args[0]
+// The part order is this plugin's — a parser is named for what it does
+// and then for what it parses, a set accessor for what it holds and
+// then for what it returns — and the spelling is the language's. A
+// core concatenating the parts itself would write one language's
+// casing and word order into every other language's output.
+func (p *Plugin) namesOf(rules sdk.SourceRules, lang, typeName string) Names {
+	word := func(key, override string) string {
+		if override != "" {
+			return override
+		}
+		return p.Word(lang, key)
 	}
-	if declared, ok := declaredStringValue(underlying, v); ok {
-		return declared
+	return Names{
+		Render: rules.TypeName(word(WordRender, "")),
+		Parse:  rules.TypeName(word(WordParse, p.opts.ParseWord), typeName),
+		Values: rules.TypeName(typeName, word(WordValues, "")),
+		Valid:  rules.TypeName(word(WordValid, "")),
+		Encode: rules.TypeName(word(WordEncode, "")),
+		Decode: rules.TypeName(word(WordDecode, "")),
+		Sentinel: sentinelName(rules,
+			rules.TypeName(word(WordUnknown, p.opts.SentinelWord), typeName)),
 	}
-	if p.stripPrefix() && strings.HasPrefix(v.Name, typeName) {
-		return strings.TrimPrefix(v.Name, typeName)
-	}
-	return v.Name
 }
 
-// declaredStringValue returns the unquoted constant value of a
-// string-valued enum variant, reporting false for every other case.
+// sentinelName spells the refusal's identifier through the language's
+// own error convention where it declares one.
 //
-// [sdk.EnumVariant.Value] holds the verbatim source form — go/types'
-// ExactString — so a string constant arrives quoted (`"us-east"`,
-// eight characters) while an integer arrives bare (`1`). Using the
-// value unquoted would render `return "\"us-east\""`, which compiles
-// and is wrong, so an unquote failure falls back to the identifier
-// rather than emitting a literal nobody wrote.
-func declaredStringValue(underlying string, v *sdk.EnumVariant) (string, bool) {
-	if underlying != "string" || v.Value == "" {
-		return "", false
+// Falling back to the composed subject rather than to a prefix of this
+// plugin's choosing: `Err` is Go's convention and a core carrying it
+// would name every language's refusal the Go way. A language
+// describing no error protocol gets `UnknownStatus`, which reads as
+// what it is.
+func sentinelName(rules sdk.SourceRules, subject string) string {
+	if er, ok := rules.(sdk.ErrorRules); ok {
+		return er.SentinelName(subject)
 	}
-	unquoted, err := strconv.Unquote(v.Value)
-	if err != nil {
-		return "", false
-	}
-	return unquoted, true
+	return subject
 }
 
-// stripPrefix returns the configured StripPrefix value, or
-// the documented default (true) when the option binder has
-// not yet applied a caller-supplied value.
-func (p *Plugin) stripPrefix() bool {
-	return p.opts.StripPrefix
+// generated returns the surface keys this run writes: every one the
+// type does not already declare, unless the directive suppressed all
+// of them.
+//
+// Skipping silently rather than reporting a clash. An author who wrote
+// their own renderer meant to keep it, and a generator that refused to
+// run until they deleted it would be demanding they give up the more
+// specific statement.
+func generated(
+	ctx *sdk.GeneratorContext, e *sdk.Enum, names Names,
+) map[string]bool {
+	out := map[string]bool{}
+	if suppressed(e) {
+		return out
+	}
+	declares := func(key string) bool { return e.MethodByName(names.byKey(key)) != nil }
+	for _, key := range []string{SurfaceRender, SurfaceEncode, SurfaceValid} {
+		if !declares(key) {
+			out[key] = true
+		}
+	}
+	// The parser and the set accessor are declared beside the type
+	// rather than on it, so a same-named declaration is not something
+	// the enumeration can see. They ride with the renderer: a type
+	// keeping its own renderer almost always keeps its own parser, and
+	// generating one that shadows theirs is the worse guess.
+	if out[SurfaceRender] {
+		out[SurfaceParse] = true
+		out[SurfaceValues] = true
+	}
+	if declares(SurfaceDecode) {
+		return out
+	}
+	// The decoder is written in terms of a parser, so it needs one to
+	// exist: the generated one where this run writes it, and the
+	// author's under the same derived name where they wrote it
+	// themselves. With neither, the file would name a function nothing
+	// declares — and the encoder goes too rather than shipping half a
+	// pair, since a type that encodes as text and decodes from
+	// something else is what no author asks for.
+	switch {
+	case out[SurfaceParse], declaresParse(ctx, e, names.Parse):
+		out[SurfaceDecode] = true
+	case out[SurfaceEncode]:
+		delete(out, SurfaceEncode)
+	}
+	return out
 }
 
-// parsePrefix returns the configured ParsePrefix value or
-// the documented default.
-func (p *Plugin) parsePrefix() string {
-	if p.opts.ParsePrefix != "" {
-		return p.opts.ParsePrefix
-	}
-	return GoDefaultParsePrefix
+// declaresParse reports that the declaring package already has the
+// parse function under the name this run derives.
+//
+// Asked of the run rather than of the declaration, because the
+// function sits beside the type rather than on it. The old rule
+// guessed from the renderer instead, which gave a type keeping its own
+// renderer — and therefore its own parser — the encoder alone.
+func declaresParse(ctx *sdk.GeneratorContext, e *sdk.Enum, name string) bool {
+	_, found := ctx.Reader.Functions().Where(func(fn *sdk.Function) bool {
+		return fn.Name == name && fn.Package == e.Package
+	}).First()
+	return found
 }
 
-// sentinelPrefix returns the configured SentinelPrefix
-// value or the documented default.
-func (p *Plugin) sentinelPrefix() string {
-	if p.opts.SentinelPrefix != "" {
-		return p.opts.SentinelPrefix
+// suppressed reports whether the directive asked for no surface at
+// all.
+//
+// The last declaration wins, matching every other per-declaration key
+// in this repository. [sdk.Node.Directive] is first-wins and answers a
+// different question — whether the directive is there at all.
+func suppressed(e *sdk.Enum) bool {
+	dir := sdk.Last(e.Directives(), DirectiveName)
+	return dir != nil && dir.KV[MethodsKey] == MethodsOff
+}
+
+// report warns once per language this plugin cannot generate for.
+//
+// An unmarked package is passed over quietly: the marker names the
+// language a package was written in, so its absence means nothing
+// claimed it — a fixture, a bridge, a synthesised graph. Warning about
+// those would put a diagnostic on every unit test that builds a store
+// by hand, which is where the real warning would then go unread.
+func (p *Plugin) report(
+	ctx *sdk.GeneratorContext, pkg *sdk.Package, lang string,
+	seen map[string]bool, because string,
+) {
+	if lang == "" || seen[lang] {
+		return
 	}
-	return GoDefaultSentinelPrefix
+	seen[lang] = true
+	ctx.Diag.Warnf(pkg.Pos(),
+		"%s: declarations written in %q %s; this plugin reads: %v",
+		Name, lang, because, p.Languages())
 }

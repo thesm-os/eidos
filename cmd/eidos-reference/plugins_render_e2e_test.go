@@ -173,6 +173,156 @@ const (
 )
 `
 
+// TestPluginsRender_EnumSurface pins the members this generator grew
+// and the two branches that decide whether one is written at all.
+//
+// The set was `String` plus a JSON codec pair; it is now a text codec
+// pair, a validity test and a set accessor, each withheld where the
+// type already declares it. Withholding is the half no emit-graph
+// assertion can check: a member emitted beside a hand-written one of
+// the same name is a duplicate declaration, which only a compiler
+// reports.
+func TestPluginsRender_EnumSurface(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a set counting from zero gets the whole surface", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := storefixture.New().
+			Package("shop", "example.com/shop").
+			Enum("Status", func(e *storefixture.EnumBuilder) {
+				e.Directive(storefixture.Directive(enum.DirectiveName))
+				e.Underlying(storefixture.Named("int"))
+				e.Variant("StatusDraft", "0")
+				e.Variant("StatusActive", "1")
+				e.Variant("StatusArchived", "2")
+			})
+		gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), enum.New()).
+			WithSource(golangtest.GoFile(fixture.GoSource()))
+
+		gen.AssertVets(t)
+		gen.AssertTestsPass(t)
+
+		primary := gen.Primary(t)
+		primary.AssertContains(t, "func StatusValues() []Status")
+		primary.AssertContains(t, "func (v Status) IsValid() bool")
+		primary.AssertContains(t, "func (v Status) MarshalText() ([]byte, error)")
+		primary.AssertContains(t, "func (v *Status) UnmarshalText(text []byte) error")
+		// Text rather than JSON, which is the port's headline change:
+		// encoding/json reaches for TextMarshaler on its own and so does
+		// YAML, and it is what makes the type legal as a map key.
+		primary.AssertNotContains(t, "MarshalJSON")
+	})
+
+	t.Run("a set starting past zero asserts the opposite", func(t *testing.T) {
+		t.Parallel()
+
+		// The branch the fixture above cannot reach. An enumeration whose
+		// zero is a declared variant and one whose zero is not need
+		// opposite assertions, and a template writing one of them for
+		// both passes against exactly half its inputs.
+		fixture := storefixture.New().
+			Package("shop", "example.com/shop").
+			Enum("Level", func(e *storefixture.EnumBuilder) {
+				e.Directive(storefixture.Directive(enum.DirectiveName))
+				e.Underlying(storefixture.Named("int"))
+				e.Variant("LevelLow", "1")
+				e.Variant("LevelHigh", "2")
+			})
+		gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), enum.New()).
+			WithSource(golangtest.GoFile(fixture.GoSource()))
+
+		gen.AssertVets(t)
+		gen.AssertTestsPass(t)
+		gen.Suffixed(t, enum.GoTestSuffix).
+			AssertContains(t, "the zero value is not a declared variant")
+	})
+
+	t.Run("a hand-written member is not shadowed", func(t *testing.T) {
+		t.Parallel()
+
+		// The loud failure this branch prevents: a second `String` on one
+		// type does not compile, and the emit graph looks identical
+		// whether the branch fired or not.
+		fixture := storefixture.New().
+			Package("shop", "example.com/shop").
+			Enum("Grade", func(e *storefixture.EnumBuilder) {
+				e.Directive(storefixture.Directive(enum.DirectiveName))
+				e.Underlying(storefixture.Named("int"))
+				e.Variant("GradeLow", "0")
+				e.Variant("GradeHigh", "1")
+				e.Method("String", func(m *storefixture.MethodBuilder) {
+					m.Return(storefixture.Named("string"))
+				})
+			})
+		// Hand-written rather than projected: a projection emits shape
+		// with a stub body, and the emitted checks assert that two
+		// variants render differently — which two stubs do not.
+		gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), enum.New()).
+			WithSource(golangtest.GoFile("shop/grade.go", gradeSource))
+
+		gen.AssertCompiles(t)
+		gen.AssertVets(t)
+		gen.AssertTestsPass(t)
+
+		primary := gen.Primary(t)
+		primary.AssertNotContains(t, "func (v Grade) String() string")
+		// The parser rides with the renderer, and the encoder rides with
+		// the parser: an encoder emitted here would name a decoder
+		// written against a function nothing declares.
+		primary.AssertNotContains(t, "func ParseGrade(")
+		primary.AssertNotContains(t, "MarshalText")
+		primary.AssertContains(t, "func (v Grade) IsValid() bool")
+	})
+
+	t.Run("methods=off leaves the checks alone", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := storefixture.New().
+			Package("shop", "example.com/shop").
+			Enum("Colour", func(e *storefixture.EnumBuilder) {
+				e.Directive(storefixture.Directive(
+					enum.DirectiveName,
+					storefixture.KV(enum.MethodsKey, enum.MethodsOff),
+				))
+				e.Underlying(storefixture.Named("int"))
+				e.Variant("ColourRed", "0")
+				e.Variant("ColourBlue", "1")
+			})
+		gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), enum.New()).
+			WithSource(golangtest.GoFile(fixture.GoSource()))
+
+		// Every check that needs a generated member is withheld, which
+		// leaves the two that need none. A template that rendered the
+		// rest anyway would emit calls to methods nothing declares.
+		gen.AssertVets(t)
+		gen.AssertTestsPass(t)
+	})
+}
+
+// gradeSource is the hand-written package whose renderer the generator
+// must leave alone. Behaviour rather than shape, because the emitted
+// checks assert that two variants render distinctly.
+const gradeSource = `package shop
+
+// Grade carries its own renderer, which is what the generator has to
+// notice before it writes a second one.
+type Grade int
+
+const (
+	GradeLow Grade = iota
+	GradeHigh
+)
+
+// String is the author's, and the more specific statement.
+func (g Grade) String() string {
+	if g == GradeHigh {
+		return "high"
+	}
+	return "low"
+}
+`
+
 // TestPluginsRender_NarrowWidthSentinelFields pins the guard the
 // demoproject fixture cannot reach.
 //
@@ -237,10 +387,97 @@ type ValidationError struct {
 
 // Error names every field, because the emitted suite asserts that it
 // does — an error whose message drops a field it carries tells the
-// reader nothing the wrapped value would not.
+// reader nothing the wrapped value would not. It opens with the
+// package prefix for the same reason a sentinel does: a custom error
+// reaches the same logs and is read the same way.
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("validation: field=%s code=%d width=%d ratio=%v",
+	return fmt.Sprintf("auth: validation field=%s code=%d width=%d ratio=%v",
 		e.Field, e.Code, e.Width, e.Ratio)
+}
+`
+
+// TestPluginsRender_InheritedErrorContract pins the idiom the declared
+// method list misses entirely.
+//
+// A family of custom errors sharing one embedded base is the dominant
+// Go shape, and reading only what each member declares finds no
+// message method on any of them: the package's directive says its
+// errors are a contract and the generated file covered half of them,
+// silently. Nothing in the emit graph distinguishes that from a
+// package whose members genuinely declare nothing.
+func TestPluginsRender_InheritedErrorContract(t *testing.T) {
+	t.Parallel()
+
+	fixture := storefixture.New().
+		Package("auth", "example.com/auth").
+		Struct("BaseError", func(s *storefixture.StructBuilder) {
+			s.Field("Op", storefixture.Named("string"), nil)
+			s.Field("Cause", storefixture.Named("error"), nil)
+			s.Method("Error", func(m *storefixture.MethodBuilder) {
+				m.Return(storefixture.Named("string"))
+			})
+			s.Method("Unwrap", func(m *storefixture.MethodBuilder) {
+				m.Return(storefixture.Named("error"))
+			})
+		}).
+		Struct("NotFoundError", func(s *storefixture.StructBuilder) {
+			s.Embed(storefixture.Named("BaseError"))
+		})
+	pkg := fixture.Directive(storefixture.Directive(sentinel.DirectiveName)).PackageNode()
+
+	gen := golangtest.Render(t, backendgolang.New(), pkg, sentinel.New()).
+		WithSource(golangtest.GoFile("auth/errors.go", inheritedSource))
+
+	t.Run("the emitted suite type-checks and passes", func(t *testing.T) {
+		t.Parallel()
+		gen.AssertVets(t)
+		gen.AssertTestsPass(t)
+	})
+
+	t.Run("the inheriting type earns its own checks", func(t *testing.T) {
+		t.Parallel()
+		// The whole point: NotFoundError declares nothing, and its
+		// contract is real.
+		gen.Suffixed(t, sentinel.GoSuffix).
+			AssertContains(t, "func TestNotFoundErrorContract(")
+	})
+
+	t.Run("a cause reached through the embed is still assigned", func(t *testing.T) {
+		t.Parallel()
+		// Promotion makes the selector legal however deep the member
+		// sits, which is what lets the check be written at all — a
+		// composite-literal key could not name it.
+		gen.Suffixed(t, sentinel.GoSuffix).AssertContains(t, "got.Cause = cause")
+	})
+}
+
+// inheritedSource is the hand-written package the checks drive. The
+// base carries the whole contract and the family member declares
+// nothing, which is the shape the declared-method reading missed.
+const inheritedSource = `package auth
+
+// BaseError carries what every error in this package shares. Its
+// methods are on the pointer receiver, which is the ordinary spelling
+// and the one that decides how a check builds its subject.
+type BaseError struct {
+	Op    string
+	Cause error
+}
+
+// Error opens with the package prefix, like a sentinel's message does.
+func (e *BaseError) Error() string {
+	if e.Cause == nil {
+		return "auth: " + e.Op
+	}
+	return "auth: " + e.Op + ": " + e.Cause.Error()
+}
+
+// Unwrap exposes the cause it was given.
+func (e *BaseError) Unwrap() error { return e.Cause }
+
+// NotFoundError declares nothing and is an error all the same.
+type NotFoundError struct {
+	BaseError
 }
 `
 
@@ -311,7 +548,7 @@ func TestPluginsRender_BuilderShapes(t *testing.T) {
 		// The check that cannot pass vacuously: setting a member to the
 		// value it already holds proves nothing, so the pair is written
 		// in sequence and the second is asserted to have won.
-		gen.Suffixed(t, "_builder_test.go").AssertContains(t, "replaces what was already there")
+		gen.Suffixed(t, builder.GoTestSuffix).AssertContains(t, "replaces what was already there")
 	})
 
 	t.Run("an optional setter addresses its argument", func(t *testing.T) {

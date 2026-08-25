@@ -1,62 +1,248 @@
+{{- /* The checks over a generated enum surface.
+
+       Every assertion goes through the backend's assertion dialect —
+       `assertEqual` and friends — so the generated file depends on
+       nothing but `testing`, and a repository preferring a helper
+       library replaces the dialect rather than these templates.
+
+       One t.Run per asserted behaviour, each parallel, so a failure
+       names the property that broke rather than the function it was
+       written in. */ -}}
+
 {{- define "enum.test" -}}
-// Test{{ .TypeName }}String_RoundTrip pins the String / Parse
-// round-trip across every declared variant.
-func Test{{ .TypeName }}String_RoundTrip(t *{{ renderExpr (external "testing" "T") }}) {
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $n := .TypeName -}}
+{{ wrapDoc (printf "%s pins the declared set itself, which every other check here takes as given." (testFuncName $n "Variants")) }}
+func {{ testFuncName $n "Variants" }}(t *{{ $T }}) {
 	t.Parallel()
-	cases := []struct {
-		in  {{ renderExpr $.TypeRef }}
-		out string
-	}{
-{{- range .Variants }}
-		{ {{ renderExpr .Ref }}, {{ printf "%q" .StringValue }} },
+
+{{ template "enum.test.variants" . }}
+}
+{{- if .Parses }}
+
+{{ wrapDoc (printf "%s pins the round trip a value makes through anything that carries it as text — a log line, a JSON field, a database column." (testFuncName $n "Text")) }}
+func {{ testFuncName $n "Text" }}(t *{{ $T }}) {
+	t.Parallel()
+
+{{ template "enum.test.text" . }}
+}
 {{- end }}
-	}
-	for _, c := range cases {
-		if got := c.in.String(); got != c.out {
-			t.Errorf("%v.String() = %q, want %q", c.in, got, c.out)
-		}
-		parsed, err := {{ renderExpr $.ParseRef }}(c.out)
-		if err != nil {
-			t.Errorf("{{ .ParseName }}(%q): %v", c.out, err)
-			continue
-		}
-		if parsed != c.in {
-			t.Errorf("{{ .ParseName }}(%q) = %v, want %v", c.out, parsed, c.in)
-		}
-	}
-}
+{{- if .Encodes }}
 
-// TestParse{{ .TypeName }}_Unknown pins the {{ .SentinelName }}
-// sentinel returned for inputs that don't match any declared
-// variant.
-func TestParse{{ .TypeName }}_Unknown(t *{{ renderExpr (external "testing" "T") }}) {
+{{ wrapDoc (printf "%s pins the boundary where a value most often crosses out of the program's control." (testFuncName $n "Encoding")) }}
+func {{ testFuncName $n "Encoding" }}(t *{{ $T }}) {
 	t.Parallel()
-	_, err := {{ renderExpr $.ParseRef }}("__nonexistent__")
-	if !{{ renderExpr (external "errors" "Is") }}(err, {{ renderExpr $.SentinelRef }}) {
-		t.Fatalf("expected {{ .SentinelName }}; got %v", err)
-	}
-}
 
-// Test{{ .TypeName }}JSON_RoundTrip pins the MarshalJSON /
-// UnmarshalJSON round-trip across every declared variant.
-func Test{{ .TypeName }}JSON_RoundTrip(t *{{ renderExpr (external "testing" "T") }}) {
-	t.Parallel()
-	for _, v := range []{{ renderExpr $.TypeRef }}{
+{{ template "enum.test.encoding" . }}
+}
+{{- end }}
+{{- range (slot . "checks").Items }}
+
+{{ render . }}
+{{- end }}
+{{- end -}}
+
+{{- /* The variant list a check drives.
+
+       Through the generated accessor where there is one, so it is
+       exercised rather than merely emitted; a literal repeated here
+       would agree with itself by construction. */ -}}
+{{- define "enum.set" -}}
+{{- if .Enumerates }}
+	all := {{ renderExpr .ValuesRef }}()
+{{- else }}
+	all := []{{ renderExpr .TypeRef }}{
 {{- range .Variants }}
 		{{ renderExpr .Ref }},
 {{- end }}
-	} {
-		body, err := {{ renderExpr (external "encoding/json" "Marshal") }}(v)
-		if err != nil {
-			t.Fatalf("Marshal(%v): %v", v, err)
-		}
-		var got {{ renderExpr $.TypeRef }}
-		if err := {{ renderExpr (external "encoding/json" "Unmarshal") }}(body, &got); err != nil {
-			t.Fatalf("Unmarshal(%s): %v", body, err)
-		}
-		if got != v {
-			t.Errorf("round-trip: got %v, want %v", got, v)
-		}
 	}
-}
+{{- end }}
+{{- end -}}
+
+{{- /* What the declaration itself says: how many variants, that each
+       holds a distinct value, and — where a renderer exists — that
+       each renders distinctly and that the zero is what it claims. */ -}}
+{{- define "enum.test.variants" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $t := renderExpr .TypeRef -}}
+{{- $n := .Count -}}
+{{ template "enum.set" . }}
+
+	t.Run("declares exactly {{ $n }} variants", func(t *{{ $T }}) {
+		t.Parallel()
+		// A variant added without the handling it needs is the
+		// defect. The count is the one place a reviewer is made to
+		// notice.
+		{{ assertLen "t" "all" $n "the declared set must not change unnoticed" }}
+	})
+
+	t.Run("no two variants share a value", func(t *{{ $T }}) {
+		t.Parallel()
+		// Two names for one value make one of their branches
+		// unreachable, and the compiler has nothing to say about it.
+		seen := map[{{ $t }}]bool{}
+		for _, v := range all {
+			{{ assertFalse "t" "seen[v]" "each variant must hold a distinct value" }}
+			seen[v] = true
+		}
+	})
+{{- if .Renders }}
+{{- if .Textual }}
+
+	t.Run("every variant renders the value it declares", func(t *{{ $T }}) {
+		t.Parallel()
+		// A textual enumeration's declared value IS its textual form,
+		// and it is already written down. A derivation taking the
+		// identifier instead passes every relational check here — it
+		// round-trips against its own parser, renders distinctly and
+		// validates — while every value arriving from JSON, a column
+		// or a query parameter fails to parse. Only this comparison
+		// tells the two apart.
+{{- range .Variants }}
+		{{ assertEqual "t" (printf "%s.%s()" (renderExpr .Ref) $.Render) .Text "the declared value is the textual form" }}
+{{- end }}
+	})
+{{- end }}
+
+	t.Run("no two variants share a textual form", func(t *{{ $T }}) {
+		t.Parallel()
+		// The parser maps text back to exactly one variant, so a
+		// collision makes one of them unreachable through it.
+		seen := map[string]bool{}
+		for _, v := range all {
+			{{ assertFalse "t" (printf "seen[v.%s()]" .Render) "each variant must render distinctly" }}
+			seen[v.{{ .Render }}()] = true
+		}
+	})
+{{- end }}
+{{- if .Validates }}
+{{- if .OutOfRange }}
+
+	t.Run("a value outside the set is not valid", func(t *{{ $T }}) {
+		t.Parallel()
+		// A conversion admits any value of the underlying type, so
+		// this is the one place an undeclared value is turned away. An
+		// enumeration whose zero is itself a variant has no other
+		// check that reaches this branch.
+		{{ assertFalse "t" (printf "%s(%s).%s()" $t .OutOfRange .Valid) "an undeclared value must not be valid" }}
+	})
+{{- end }}
+
+	t.Run("every declared variant is valid", func(t *{{ $T }}) {
+		t.Parallel()
+		// A variant the validity test rejects is one the type's own
+		// surface treats as corrupt.
+		for _, v := range all {
+			{{ assertTrue "t" (printf "v.%s()" .Valid) "a declared variant must be valid" }}
+		}
+	})
+{{- if .ZeroName }}
+
+	t.Run("the zero value is {{ .ZeroName }}", func(t *{{ $T }}) {
+		t.Parallel()
+		// An unset {{ .TypeName }} means {{ .ZeroName }} rather than
+		// nothing, so a caller who forgot to set one gets a working
+		// value and no warning.
+		var zero {{ $t }}
+		{{ assertTrue "t" (printf "zero.%s()" .Valid) "the zero value is a declared variant" }}
+		{{ assertEqual "t" "zero" (renderExpr .ZeroRef) (printf "the zero value is %s" .ZeroName) }}
+	})
+{{- else }}
+
+	t.Run("the zero value is not a declared variant", func(t *{{ $T }}) {
+		t.Parallel()
+		// The declaration starts past zero, so an unset
+		// {{ .TypeName }} is invalid rather than silently meaning the
+		// first variant.
+		var zero {{ $t }}
+		{{ assertFalse "t" (printf "zero.%s()" .Valid) "the zero value must not be a variant" }}
+	})
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- /* The round trip through text, and the two probes that keep it
+       from passing vacuously. */ -}}
+{{- define "enum.test.text" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $t := renderExpr .TypeRef -}}
+{{- $parse := renderExpr .ParseRef -}}
+{{ template "enum.set" . }}
+
+	t.Run("every variant survives a text round trip", func(t *{{ $T }}) {
+		t.Parallel()
+		// A variant that renders one way and parses another is a value
+		// that leaves the process and does not come home.
+		for _, v := range all {
+			got, err := {{ $parse }}(v.{{ .Render }}())
+			{{ assertNoError "t" "err" "a declared variant must parse back" }}
+			{{ assertEqual "t" "got" "v" "the round trip must be lossless" }}
+		}
+	})
+{{- if .UnknownText }}
+
+	t.Run("text naming no variant is refused", func(t *{{ $T }}) {
+		t.Parallel()
+		// Admitting it would let an unnamed value in through the one
+		// door that exists to keep it out.
+		{{- $is := renderExpr (external "errors" "Is") }}
+		_, err := {{ $parse }}({{ .UnknownText }})
+		{{ assertTrue "t" (printf "%s(err, %s)" $is (renderExpr .SentinelRef)) "unknown text must be refused with the declared refusal" }}
+	})
+{{- end }}
+{{- if .OutOfRange }}
+
+	t.Run("a value outside the set does not render as one inside it", func(t *{{ $T }}) {
+		t.Parallel()
+		// A conversion admits any value of the underlying type. One
+		// whose fallback collided with a declared variant's text would
+		// be indistinguishable from it in a log.
+		out := {{ $t }}({{ .OutOfRange }})
+		for _, v := range all {
+			{{ assertNotEqual "t" (printf "out.%s()" .Render) (printf "v.%s()" .Render) "an undeclared value must render distinctly" }}
+		}
+	})
+{{- end }}
+{{- end -}}
+
+{{- /* The encoding boundary — the pair where both halves exist, the
+       encoder alone where only it does. */ -}}
+{{- define "enum.test.encoding" -}}
+{{- $T := renderExpr (external "testing" "T") -}}
+{{- $t := renderExpr .TypeRef -}}
+{{ template "enum.set" . }}
+
+	t.Run("every variant encodes to its textual form", func(t *{{ $T }}) {
+		t.Parallel()
+		// The encoder and the renderer must agree, or a value reads
+		// one way in a log and another on the wire.
+		for _, v := range all {
+			text, err := v.{{ .Encode }}()
+			{{ assertNoError "t" "err" "a declared variant must encode" }}
+			{{ assertEqual "t" "string(text)" (printf "v.%s()" .Render) "the encoding must match the textual form" }}
+		}
+	})
+{{- if .Marshals }}
+
+	t.Run("every variant survives an encoding round trip", func(t *{{ $T }}) {
+		t.Parallel()
+		for _, v := range all {
+			text, err := v.{{ .Encode }}()
+			{{ assertNoError "t" "err" "a declared variant must encode" }}
+			var got {{ $t }}
+			{{ assertNoError "t" (printf "got.%s(text)" .Decode) "and decode back" }}
+			{{ assertEqual "t" "got" "v" "the round trip must be lossless" }}
+		}
+	})
+{{- if .UnknownText }}
+
+	t.Run("text naming no variant is refused on decode", func(t *{{ $T }}) {
+		t.Parallel()
+		// The decoder is the boundary an unnamed value arrives at, so
+		// refusing here is what keeps it out of everything downstream.
+		var got {{ $t }}
+		{{ assertError "t" (printf "got.%s([]byte(%s))" .Decode .UnknownText) "unknown text must not decode" }}
+	})
+{{- end }}
+{{- end }}
 {{- end -}}

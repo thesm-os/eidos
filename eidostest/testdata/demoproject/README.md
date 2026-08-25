@@ -36,7 +36,7 @@ demoproject/
 | `blog.User` | `+gen:repo`, `+gen:builder` | Repo + builder without registry — verifies the directive-driven opt-in is independent per generator. |
 | `blog.Comment` | `+gen:builder` | Builder-only target; carries a generic field forcing the builder generator to render the type parameter intact. |
 | `blog.Outline` | `+gen:builder defaults=OutlineDefaults out=build/ pkg=outlinebuild` | The routing fixture: the builder lands in `blog/build` under a package name that differs from its directory, so every reference back into `blog` acquires a qualifier and the bare `defaults=` identifier has to resolve against the source package. |
-| `blog.Status` | `+gen:enum` | Typed-iota enum opted in for the production enum plugin's `String` / `Parse` / `MarshalJSON` / `UnmarshalJSON` surface and its paired test file. |
+| `blog.Status` | `+gen:enum` | Typed-iota enum opted in for the production enum plugin's textual surface — `String`, `ParseStatus` and `ErrUnknownStatus`, `StatusValues`, `IsValid`, `MarshalText` / `UnmarshalText` — and its paired file of checks. The variants carry no type prefix, which is the case where the prefix-stripping rule finds nothing to strip. |
 | `blog.LineWriter` | (none — heuristic detection) | The shape detector reaches LineWriter through signature matching alone; negative-override tests against this type verify the directive suppression path. |
 | `blog.Searcher` | `+gen:mock` | User-authored interface flagged for mocking — verifies the mock generator targets interfaces beyond the ones repogen synthesises. |
 

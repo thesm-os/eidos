@@ -1,62 +1,128 @@
+{{- /* The generated surface for one enumeration.
+
+       Every identifier comes off the emit value rather than being
+       spelled here, because the plugin composed each from a word the
+       Go binding declares — so a repository that renames one renames
+       it in the declaration and in the checks at the same time.
+
+       The two standard-library symbols are composed with the
+       backend's own `external <path> <Symbol>`, which registers the
+       import as it renders: the file imports errors and fmt exactly
+       when the branch that needs one is taken. */ -}}
+
 {{- define "enum.api" -}}
-// String returns the textual form of {{ .TypeName }}.
-func (v {{ .TypeName }}) String() string {
+{{- if .Emits "render" }}
+{{ template "enum.api.render" . }}
+{{- end }}
+{{- if .Emits "parse" }}
+{{ template "enum.api.parse" . }}
+{{- end }}
+{{- if .Emits "values" }}
+{{ template "enum.api.values" . }}
+{{- end }}
+{{- if .Emits "valid" }}
+{{ template "enum.api.valid" . }}
+{{- end }}
+{{- if .Emits "encode" }}
+{{ template "enum.api.encode" . }}
+{{- end }}
+{{- if .Emits "decode" }}
+{{ template "enum.api.decode" . }}
+{{- end }}
+{{- range (slot . "surface").Items }}
+
+{{ render . }}
+{{- end }}
+{{- end -}}
+
+{{- /* The textual form. A value outside the declared set renders as
+       itself rather than as any variant, so a corrupt value is
+       visible in a log rather than passing for a good one. */ -}}
+{{- define "enum.api.render" -}}
+{{- $t := renderExpr .TypeRef -}}
+{{- $sprintf := external "fmt" "Sprintf" -}}
+{{ wrapDoc (printf "%s returns %s's textual form.\n\nA value outside the declared set renders as itself, so a corrupt value is visible rather than indistinguishable from a declared one." .Render .TypeName) }}
+func (v {{ $t }}) {{ .Render }}() string {
 	switch v {
 {{- range .Variants }}
-	case {{ .ConstName }}:
-		return {{ printf "%q" .StringValue }}
+	case {{ renderExpr .Ref }}:
+		return {{ .Text }}
 {{- end }}
 	}
-{{- if eq .Underlying "string" }}
-	{{- /* A string enum's value is already its textual form, so an
-	       undeclared one renders as itself: compilable, and the
-	       string that failed to match is exactly what a caller
-	       needs to see. A Sprintf fallback says strictly less. */}}
+{{- if .Textual }}
 	return string(v)
 {{- else }}
-	{{- /* Conversion and verb both come from golang.EnumFallback, which
-	       pairs them. Spelling either here re-decides it, and both prior
-	       spellings were wrong in ways no render assertion can see:
-	       `int(v)` truncates a float set to its integer part and does not
-	       compile at all for one defined over another package's string
-	       type, while `%d` then prints the wrong thing for either.
-	       renderType registers the import a qualified conversion needs;
-	       a name written into the template cannot ask for one. */}}
-	return {{ renderExpr (external "fmt" "Sprintf") }}({{ printf "%q" (printf "%s(%s)" .TypeName .FallbackVerb) }}, {{ renderType .FallbackConv }}(v))
+	return {{ renderExpr $sprintf }}("{{ .TypeName }}({{ .Format }})", {{ renderType .Fallback }}(v))
 {{- end }}
 }
+{{- end -}}
 
-// {{ .SentinelName }} is returned by {{ .ParseName }} when the
-// input string doesn't match any declared variant.
-var {{ .SentinelName }} = {{ renderExpr (external "errors" "New") }}({{ printf "%q" (printf "%s: unknown %s" "enum" .TypeName) }})
+{{- /* The parser and the refusal it returns. */ -}}
+{{- define "enum.api.parse" -}}
+{{- $t := renderExpr .TypeRef -}}
+{{- $new := external "errors" "New" -}}
+{{ wrapDoc (printf "%s reports text that names no declared variant." .Sentinel) }}
+var {{ .Sentinel }} = {{ renderExpr $new }}("{{ .PackageName }}: unknown {{ .TypeName }} value")
 
-// {{ .ParseName }} parses s into a {{ .TypeName }} value, returning
-// {{ .SentinelName }} when s does not match any declared variant.
-func {{ .ParseName }}(s string) ({{ .TypeName }}, error) {
+{{ wrapDoc (printf "%s maps text back to a %s.\n\nThe inverse of %s for every declared variant, which is what lets a value survive a round trip through anything that carries it as text — a log line, a JSON field, a database column." .Parse .TypeName .Render) }}
+func {{ .Parse }}(s string) ({{ $t }}, error) {
 	switch s {
 {{- range .Variants }}
-	case {{ printf "%q" .StringValue }}:
-		return {{ .ConstName }}, nil
+	case {{ .Text }}:
+		return {{ renderExpr .Ref }}, nil
 {{- end }}
 	}
-	var zero {{ $.TypeName }}
-	return zero, {{ $.SentinelName }}
+	var zero {{ $t }}
+	return zero, {{ .Sentinel }}
 }
+{{- end -}}
 
-// MarshalJSON serialises v as the variant's textual form.
-func (v {{ .TypeName }}) MarshalJSON() ([]byte, error) {
-	return {{ renderExpr (external "encoding/json" "Marshal") }}(v.String())
-}
-
-// UnmarshalJSON parses the variant's textual form, returning
-// {{ .SentinelName }} when the decoded string is not a
-// declared variant.
-func (v *{{ .TypeName }}) UnmarshalJSON(data []byte) error {
-	var s string
-	if err := {{ renderExpr (external "encoding/json" "Unmarshal") }}(data, &s); err != nil {
-		return err
+{{- /* The declared set, so a caller iterates it without restating
+       it. */ -}}
+{{- define "enum.api.values" -}}
+{{- $t := renderExpr .TypeRef -}}
+{{ wrapDoc (printf "%s returns every declared variant in declaration order.\n\nA fresh slice per call: a package-level one would let any caller reorder or overwrite the set every other caller reads." .Values) }}
+func {{ .Values }}() []{{ $t }} {
+	return []{{ $t }}{
+{{- range .Variants }}
+		{{ renderExpr .Ref }},
+{{- end }}
 	}
-	parsed, err := {{ .ParseName }}(s)
+}
+{{- end -}}
+
+{{- /* Validity, which is the only thing standing between a
+       conversion and the rest of the program. */ -}}
+{{- define "enum.api.valid" -}}
+{{- $t := renderExpr .TypeRef -}}
+{{ wrapDoc (printf "%s reports whether v is a declared variant.\n\nA conversion admits any value of the underlying type, so this is the only thing standing between an out-of-range value and the rest of the program." .Valid) }}
+func (v {{ $t }}) {{ .Valid }}() bool {
+	switch v {
+{{- range .Variants }}
+	case {{ renderExpr .Ref }}:
+		return true
+{{- end }}
+	}
+	return false
+}
+{{- end -}}
+
+{{- /* The encoding half. */ -}}
+{{- define "enum.api.encode" -}}
+{{- $t := renderExpr .TypeRef -}}
+{{ wrapDoc (printf "%s implements [encoding.TextMarshaler].\n\nText rather than JSON: encoding/json reaches for TextMarshaler on its own and so does YAML, and it is what makes %s legal as a map key — which a JSON marshaller alone does not." .Encode .TypeName) }}
+func (v {{ $t }}) {{ .Encode }}() ([]byte, error) {
+	return []byte(v.{{ .Render }}()), nil
+}
+{{- end -}}
+
+{{- /* The decoding half, which refuses rather than admitting an
+       unnamed value. */ -}}
+{{- define "enum.api.decode" -}}
+{{- $t := renderExpr .TypeRef -}}
+{{ wrapDoc (printf "%s implements [encoding.TextUnmarshaler], refusing text that names no declared variant rather than admitting it as an unnamed value." .Decode) }}
+func (v *{{ $t }}) {{ .Decode }}(text []byte) error {
+	parsed, err := {{ .Parse }}(string(text))
 	if err != nil {
 		return err
 	}

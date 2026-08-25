@@ -10,35 +10,46 @@ import (
 	"go.thesmos.sh/eidos/sdk"
 )
 
-// GoSuffix is the per-source-basename suffix the Go adapter
-// reports through [GoOutputs]. The `_test.go` ending
-// triggers the Go backend's automatic `<pkg>_test` package
-// shift so the rendered tests live in an external test
-// package and can't accidentally read private state.
-const GoSuffix = "_sentinel_test.go"
+// GoSuffix is appended to the anchor declaration's source basename to
+// form the output filename.
+//
+// The `_test.go` ending triggers the framework's automatic
+// `<pkg>_test` package shift, so the checks drive the package the way
+// a consumer does rather than reaching inside it — which matters here
+// more than for most generators: what is being asserted is what a
+// caller can observe, and a check reaching inside the package could
+// assert things no caller can.
+const GoSuffix = "_sentinel.gen_test.go"
 
-// goTemplatesFS is the Go adapter's template tree. The
-// backend reads it once at Build time and registers every
-// `*.tmpl` under `templates/golang/` — the root the SDK's
-// DefaultTemplateDir already names, so [New] hands the tree
-// over without overriding it.
+// goTemplatesFS is the Go template tree. The backend reads it once at
+// Build time and registers every `*.tmpl` under `templates/golang/` by
+// base filename.
 //
 //go:embed templates/golang/*.tmpl
 var goTemplatesFS embed.FS
 
-// GoOutputs returns the Go adapter's output set — a single
-// `<basename>_sentinel_test.go` file per annotated source
-// package the Layout phase routes contributions to.
+// GoOutputs returns the Go output set: one file per annotated package.
+//
+// A single output, unlike the builder and the enum generator. Those
+// generate something and then check it; this one only checks, so there
+// is no production half to route separately.
 func GoOutputs() []sdk.Output {
 	return []sdk.Output{{Suffix: GoSuffix}}
 }
 
-// goSupport is everything this plugin declares for Go — its template
-// tree and the files it emits.
+// goSupport is everything this plugin declares for Go: the template
+// tree, the file it emits, and how a Go declaration is read.
 //
-// The plugin's core names no language and reads this as a pair, so a
-// second target language is a sibling file and one more For call
-// rather than an edit to what the plugin is.
+// The read side arrives with the rest through [sdkgo.Support], which
+// is what lets the plugin's core name no language: it asks the
+// declared rules which identifiers are declared errors and what
+// contract a declaration carries, and a second target language is a
+// sibling file and one more For call rather than an edit to what the
+// plugin is.
+//
+// No vocabulary, unlike the enum generator. This plugin composes no
+// identifier at all — it names what the author already declared — so
+// there is no word for a language to supply.
 func goSupport() (string, sdk.LanguageSupport) {
 	return sdkgo.Support(goTemplatesFS, GoOutputs()...)
 }

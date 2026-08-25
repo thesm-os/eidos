@@ -12,7 +12,7 @@ import (
 
 // GoSuffix is the per-source-basename trailer for the primary output.
 // Types declared in `domain.go` produce `domain_builder.go`.
-const GoSuffix = "_builder.go"
+const GoSuffix = "_builder.gen.go"
 
 // GoTestSuffix is the trailer for the tagged check output.
 //
@@ -20,7 +20,7 @@ const GoSuffix = "_builder.go"
 // `<pkg>_test` package shift, so the checks land outside the package
 // and drive the builder the way a consumer does rather than reaching
 // inside it.
-const GoTestSuffix = "_builder_test.go"
+const GoTestSuffix = "_builder.gen_test.go"
 
 // goTemplatesFS is the Go template tree. The backend reads it once at
 // Build time and registers every `*.tmpl` under `templates/golang/` by
@@ -78,5 +78,10 @@ func goWords() map[string]string {
 		WordBuilder:   "Builder",
 		WordCompanion: "Defaults",
 		WordFrom:      "From",
+		WordSet:       "With",
+		WordAppend:    "Append",
+		WordText:      "String",
+		WordEntry:     "Entry",
+		WordEntries:   "Entries",
 	}
 }

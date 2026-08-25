@@ -61,9 +61,11 @@ Three of those exist because the obvious single setter is wrong:
   address would make every caller allocate before they can say "set".
   Clearing it goes through `Mutate`.
 
-Every one of these identifiers is composed in the Go templates, not in
-the plugin. `With`, `Append`, `Entry` and the PascalCase joining them
-are Go's conventions; the core names no language.
+`With`, `Append`, `Entry` and the PascalCase joining them are Go's
+conventions, declared as words in the plugin's Go binding. The core
+composes each identifier from them without naming a language, which is
+what lets it notice two members reaching one setter before the file is
+written.
 
 ## Seeding
 
@@ -131,6 +133,17 @@ generated builder's name. A second generator reads it rather than
 re-deriving the convention — which would break the moment a run
 configures a different `suffix`.
 
+## What is refused
+
+- **A declaration with no member a builder can set.** Emitting the
+  shell would hide a type that cannot do what the directive says.
+- **Two members reaching one setter identifier.** `Data []byte` owes
+  a text-accepting setter beside its plain one, so it reaches
+  `WithDataString` — and so does a plain `DataString`. A duplicate
+  method does not compile, so the builder is broken either way; the
+  difference is whether the failure names the two members or lands in
+  the consumer's build.
+
 ## Options
 
 | Option | Default | |
@@ -149,12 +162,10 @@ name in its own convention.
   cannot take type parameters, so a check naming one in a member
   position would not compile. A declaration whose constraints admit no
   witness gets a note in place of its checks.
-- **Setter-name collisions are not detected.** A type declaring
-  `Data []byte` beside `DataString string` generates `WithDataString`
-  twice, and the file fails the consumer's build. Detecting it needs
-  the derived names in the core, which needs per-language name
-  composition — reachable through `sdk.SourceRules.TypeName`, not yet
-  wired.
 - **Entry setters are not exercised** by the generated checks. A
   sample of a keyed type is the whole collection, and the projection
   carries no sample of its key.
+- **A collision with `Build`, `Clone` or `Mutate` is not detected.**
+  Those three are spelled in the template rather than derived, so the
+  core cannot see them — and no member reaches them anyway while the
+  setter word is non-empty.

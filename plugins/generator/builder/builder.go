@@ -19,11 +19,16 @@
 // has, what a value of it looks like, which members a constructor can
 // set, how an identifier is spelled.
 //
-// Identifiers are composed in the templates, which are per-language
-// by construction. `With`, `Append`, `Entry` and the PascalCase
-// joining them are Go's conventions, and a core that concatenated
-// them would have written one language's answer into a plugin that
-// names none.
+// The identifiers are composed here and the words are not. `With`,
+// `Append`, `Entry` and the PascalCase joining them are Go's
+// conventions, declared through [sdk.LanguageSupport.Words] and joined
+// by [sdk.SourceRules.TypeName], so this file picks which parts an
+// identifier carries and in what order and never what they read as.
+//
+// Composed in the templates instead, they could not be checked: two
+// members can reach one setter, and a template writing both emits a
+// duplicate method that is reported against the consumer's build
+// rather than the declaration that caused it.
 //
 // See the package README for what each shape owes, how seeding
 // composes, what the generated checks assert, and the limits.
@@ -87,6 +92,23 @@ const (
 	// WordFrom names the seeding constructor beside the plain one —
 	// `NewUser` and `NewUserFrom`.
 	WordFrom = "from"
+
+	// WordSet names the replacing setter every member owes —
+	// `Username` gives `WithUsername`.
+	WordSet = "set"
+
+	// WordAppend names the setter that keeps what is already there,
+	// which only an ordered member owes.
+	WordAppend = "append"
+
+	// WordText names the second setter a byte sequence owes, the one
+	// taking the language's text type.
+	WordText = "text"
+
+	// WordEntry and WordEntries name the two setters a keyed member
+	// owes: one key at a time, and several at once.
+	WordEntry   = "entry"
+	WordEntries = "entries"
 )
 
 // TestOutputTag is the tag the companion check output advertises.
@@ -303,6 +325,36 @@ type Field struct {
 	// whenever the subject already held it.
 	Sample    sdk.Sample
 	Alternate sdk.Sample
+
+	// Set is the identifier the replacing setter is declared under,
+	// and the four beside it are the extra setters a shape owes —
+	// empty where it owes none.
+	//
+	// Derived here rather than composed in the template, though the
+	// words and the joining are still the language's. Two members can
+	// produce one identifier — `Data []byte` beside `DataString
+	// string` both reach `WithDataString` — and a template composing
+	// the names is a template that cannot see the second one coming:
+	// the file is emitted, and the duplicate method is reported
+	// against the consumer's build rather than against the
+	// declaration that caused it.
+	Set        string
+	Append     string
+	SetText    string
+	SetEntry   string
+	SetEntries string
+}
+
+// Names returns every identifier this member's setters are declared
+// under, in declaration order, skipping the shapes that owe none.
+func (f Field) Names() []string {
+	out := make([]string, 0, 4)
+	for _, name := range []string{f.Set, f.Append, f.SetText, f.SetEntry, f.SetEntries} {
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // Copies reports whether the member owns storage a clone must not
@@ -363,9 +415,16 @@ type Type struct {
 	// TypeName is the builder's identifier — `<Source><Suffix>`.
 	TypeName string
 
-	// SourceName is the type's own identifier, which names the
-	// constructors: `NewUser`, `NewUserFrom`.
+	// SourceName is the type's own identifier.
 	SourceName string
+
+	// CtorName and FromName are the two constructors' identifiers.
+	//
+	// Carried rather than composed in the template, because the checks
+	// carry them too — and a constructor spelled once here and once
+	// there is one a configured word can move on one side only, leaving
+	// the checks calling a function the builder never declared.
+	CtorName, FromName string
 
 	// ValueRef qualifies the type the builder constructs. A builder
 	// routed into another package cannot reach it unqualified, and
@@ -560,9 +619,9 @@ func (t *Tests) Seedable() []Field {
 		return nil
 	}
 	out := make([]Field, 0, len(t.Fields))
-	for _, f := range t.Fields {
-		if f.Shape == sdk.ShapeScalar && f.Sample.OK() {
-			out = append(out, f)
+	for i := range t.Fields {
+		if t.Fields[i].Shape == sdk.ShapeScalar && t.Fields[i].Sample.OK() {
+			out = append(out, t.Fields[i])
 		}
 	}
 	return out
@@ -616,22 +675,29 @@ func (p *Plugin) generatePackage(
 	pkg *sdk.Package, rules sdk.SourceRules, lang string,
 ) error {
 	funcs := ctx.Reader.Functions().Slice()
+	words := p.setterWords(lang)
 	for _, s := range pkg.Structs {
 		if !s.HasPositiveDirective(DirectiveName) {
 			continue
 		}
-		fields := fieldsOf(ctx, rules, s)
+		fields := fieldsOf(ctx, rules, words, s)
 		if len(fields) == 0 {
 			ctx.Diag.Errorf(s.Pos(),
 				"%s: %q carries +gen:%s but has no member a builder can set",
 				Name, s.QName(), DirectiveName)
 			continue
 		}
+		if collides(ctx, s, fields) {
+			continue
+		}
 
+		ctor := rules.ConstructorName(s.Name)
 		value := &Type{
 			BaseEmit:   sdk.EmitBase(c, s),
 			TypeName:   rules.TypeName(s.Name, p.word(lang, WordBuilder, p.opts.Suffix)),
 			SourceName: s.Name,
+			CtorName:   ctor,
+			FromName:   rules.TypeName(ctor, p.word(lang, WordFrom, "")),
 			ValueRef:   sdk.NewExternal(s.Package, s.Name),
 			TypeParams: rules.TypeParams(s),
 			TypeArgs:   rules.TypeArgs(s),
@@ -644,7 +710,7 @@ func (p *Plugin) generatePackage(
 		MetaType.Set(s.EnsureMeta(), value.TypeName, Name)
 
 		if err := sdk.QueueEmit(
-			ctx.Store.Emit(), c, FileSlot, s, p.queued(rules, lang, s, value)...,
+			ctx.Store.Emit(), c, FileSlot, s, p.queued(rules, s, value)...,
 		); err != nil {
 			// Wrapped even though the queue names the plugin and the
 			// slot: what it cannot name is which declaration the run was
@@ -656,22 +722,18 @@ func (p *Plugin) generatePackage(
 }
 
 // queued returns the emit values one declaration contributes.
-func (p *Plugin) queued(
-	rules sdk.SourceRules, lang string, s *sdk.Struct, value *Type,
-) []sdk.EmitNode {
+func (p *Plugin) queued(rules sdk.SourceRules, s *sdk.Struct, value *Type) []sdk.EmitNode {
 	if p.opts.NoTests {
 		return []sdk.EmitNode{value}
 	}
-	ctor := rules.ConstructorName(s.Name)
-	from := rules.TypeName(ctor, p.word(lang, WordFrom, ""))
 	return []sdk.EmitNode{value, &Tests{
 		BaseEmit:   sdk.EmitBaseTagged(value.BaseEmit, TestOutputTag),
 		TypeName:   value.TypeName,
 		SourceName: s.Name,
-		CtorName:   ctor,
-		FromName:   from,
-		CtorRef:    sdk.NewExternal(s.Package, ctor),
-		FromRef:    sdk.NewExternal(s.Package, from),
+		CtorName:   value.CtorName,
+		FromName:   value.FromName,
+		CtorRef:    sdk.NewExternal(s.Package, value.CtorName),
+		FromRef:    sdk.NewExternal(s.Package, value.FromName),
 		ValueRef:   sdk.NewExternal(s.Package, s.Name),
 		TypeParams: value.TypeParams,
 		// The witnesses in use position, not the declaration's own
@@ -685,13 +747,59 @@ func (p *Plugin) queued(
 	}}
 }
 
+// setterWords is this run's vocabulary for the setters a shape owes.
+//
+// Resolved once per package rather than per member: the words come
+// from the language, which is a fact about the package, and looking
+// them up per member would ask the same question once per field.
+type setterWords struct{ set, add, text, entry, entries string }
+
+// setterWords returns the words a language spells this plugin's
+// setters with.
+func (p *Plugin) setterWords(lang string) setterWords {
+	return setterWords{
+		set:     p.Word(lang, WordSet),
+		add:     p.Word(lang, WordAppend),
+		text:    p.Word(lang, WordText),
+		entry:   p.Word(lang, WordEntry),
+		entries: p.Word(lang, WordEntries),
+	}
+}
+
+// collides reports whether two members reach one setter identifier,
+// having said which two.
+//
+// Refused rather than emitted. A duplicate method does not compile, so
+// the builder is broken either way — and the difference is whether the
+// failure names the two members that caused it or lands in the
+// consumer's build of a file they did not write.
+func collides(ctx *sdk.GeneratorContext, s *sdk.Struct, fields []Field) bool {
+	seen := make(map[string]string, len(fields)*2)
+	found := false
+	for i := range fields {
+		f := &fields[i]
+		for _, name := range f.Names() {
+			if first, dup := seen[name]; dup {
+				ctx.Diag.Errorf(s.Pos(),
+					"%s: %s.%s and %s.%s both reach the setter %s; rename one or "+
+						"exclude it with %s:%q",
+					Name, s.Name, first, s.Name, f.Name, name, SkipTag, SkipValue)
+				found = true
+				continue
+			}
+			seen[name] = f.Name
+		}
+	}
+	return found
+}
+
 // fieldsOf projects every member a builder can set.
 //
 // A plain function for the reason [skipped] is: the projection
 // depends on the declaration and the language, not on how the plugin
 // was configured.
 func fieldsOf(
-	ctx *sdk.GeneratorContext, rules sdk.SourceRules, s *sdk.Struct,
+	ctx *sdk.GeneratorContext, rules sdk.SourceRules, words setterWords, s *sdk.Struct,
 ) []Field {
 	members := rules.Settable(s)
 	out := make([]Field, 0, len(members))
@@ -719,9 +827,30 @@ func fieldsOf(
 				f.DefaultIsZero = f.Declared() && strings.TrimSpace(f.Default) == zero
 			}
 		}
+		nameSetters(rules, words, &f)
 		out = append(out, f)
 	}
 	return out
+}
+
+// nameSetters spells the identifiers this member's setters are
+// declared under.
+//
+// The part order is this plugin's — the verb leads the member name,
+// and the qualifier trails the whole — and the spelling is the
+// language's, which is why each is composed through
+// [sdk.SourceRules.TypeName] rather than concatenated here.
+func nameSetters(rules sdk.SourceRules, words setterWords, f *Field) {
+	f.Set = rules.TypeName(words.set, f.Name)
+	switch {
+	case f.IsSequence():
+		f.Append = rules.TypeName(words.add, f.Name)
+	case f.IsBytes():
+		f.SetText = rules.TypeName(f.Set, words.text)
+	case f.Keyed():
+		f.SetEntry = rules.TypeName(f.Set, words.entry)
+		f.SetEntries = rules.TypeName(f.Set, words.entries)
+	}
 }
 
 // skipped reports whether the member opted out of a setter.

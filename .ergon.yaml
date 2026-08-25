@@ -179,6 +179,10 @@ checks:
         line: 95
         branch: 95
         require_branch: true
+      - path: "./lang/typescript"
+        line: 95
+        branch: 95
+        require_branch: true
       - path: "./lang/protobuf"
         line: 81
         branch: 95

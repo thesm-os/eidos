@@ -55,9 +55,9 @@ func TestRunOnDemoProject(t *testing.T) {
 		"blog/user_repo.go",
 
 		// builder targets blog.Article, blog.User, blog.Comment
-		"blog/article_builder.go",
-		"blog/user_builder.go",
-		"blog/comment_builder.go",
+		"blog/article_builder.gen.go",
+		"blog/user_builder.gen.go",
+		"blog/comment_builder.gen.go",
 
 		// registrygen targets blog.Article
 		"blog/article_registry.go",
@@ -69,17 +69,17 @@ func TestRunOnDemoProject(t *testing.T) {
 		"blog/user_mock_test.go",
 
 		// enum (multi-output) targets blog.Status — production
-		// surface in _enum.go, paired round-trip tests in
-		// _enum_test.go (auto-shifted to package blog_test).
-		"blog/status_enum.go",
-		"blog/status_enum_test.go",
+		// surface in _enum.gen.go, paired round-trip tests in
+		// _enum.gen_test.go (auto-shifted to package blog_test).
+		"blog/status_enum.gen.go",
+		"blog/status_enum.gen_test.go",
 
 		// sentinel scans the +gen:sentinel-annotated blog
 		// package for Err* vars + custom error types and emits
-		// pinned tests into a sibling _sentinel_test.go file.
+		// pinned tests into a sibling _sentinel.gen_test.go file.
 		// Anchored to auth_errors.go (the first contributing
 		// file in source order).
-		"blog/auth_errors_sentinel_test.go",
+		"blog/auth_errors_sentinel.gen_test.go",
 	} {
 		path := filepath.Join(workdir, rel)
 		if _, err := os.Stat(path); err != nil {
@@ -122,7 +122,7 @@ func TestRunOnDemoProject_GeneratedOutputCompiles(t *testing.T) {
 	}
 	// `go build ./...` skips _test.go files. Run `go vet ./...`
 	// after the build so the generator's test-side output (e.g.
-	// the sentinel plugin's _sentinel_test.go) also passes
+	// the sentinel plugin's _sentinel.gen_test.go) also passes
 	// language-level checks — vet's scanning includes _test.go
 	// files in the package compilation graph.
 	vetCmd := exec.CommandContext(t.Context(), "go", "vet", "./...")
@@ -230,10 +230,10 @@ func TestRunOnDemoProject_IsIdempotent(t *testing.T) {
 	t.Run("the enum plugin's two outputs are byte-compared across runs", func(t *testing.T) {
 		t.Parallel()
 		// enum is the fixture's only multi-output plugin: one origin
-		// fans onto two targets, and the _enum_test.go target trips
+		// fans onto two targets, and the _enum.gen_test.go target trips
 		// the external-test package shift. Longest routing path in
 		// the fixture, so the one most worth hashing.
-		assertCompared(t, first, second, "blog/status_enum.go", "blog/status_enum_test.go")
+		assertCompared(t, first, second, "blog/status_enum.gen.go", "blog/status_enum.gen_test.go")
 	})
 
 	t.Run("the sentinel plugin's output is byte-compared across runs", func(t *testing.T) {
@@ -243,7 +243,7 @@ func TestRunOnDemoProject_IsIdempotent(t *testing.T) {
 		// renames its output rather than corrupting it — the
 		// disappeared/appeared arms above are what catch that, and
 		// they are unreachable for a file neither snapshot holds.
-		assertCompared(t, first, second, "blog/auth_errors_sentinel_test.go")
+		assertCompared(t, first, second, "blog/auth_errors_sentinel.gen_test.go")
 	})
 
 	t.Run("the run leaves fixture source byte-identical", func(t *testing.T) {
