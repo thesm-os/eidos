@@ -16,7 +16,32 @@
 
        One t.Run per asserted behaviour, each parallel, so a failure
        names the property that broke rather than the function it was
-       written in. */ -}}
+       written in.
+
+       # What is deliberately not checked
+
+       A package that suppressed the prefix gets no prefix check. Every
+       string begins with the empty string, so one written against it
+       would pass for any input while reading as though the contract had
+       been examined.
+
+       Nothing checks that a sentinel survives wrapping. Identity is
+       compared before anything a type declares is consulted, so every
+       value passes — including one whose own comparison always refuses.
+       The assertion would be about the standard library rather than
+       about the package under test.
+
+       Nothing checks recovery into a target. It finds a value by
+       assignability while walking the chain, so it succeeds for any
+       type reachable through it and fails for none. What a type can
+       genuinely get wrong is its own cause, which is checked where one
+       is declared.
+
+       A type that declares both a comparison and a cause gets no
+       agreement check. The standard comparison reaches a declared error
+       by walking the chain whether or not the declared comparison was
+       consulted, so the two sides agree for every receiver form —
+       including the one the check exists to catch. */ -}}
 
 {{- define "sentinel.tests" -}}
 {{- $T := renderExpr (external "testing" "T") -}}
@@ -85,12 +110,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 			}
 		}
 	})
-{{- else }}
-
-	// No prefix check: this package suppressed it, so its messages are
-	// deliberately bare. Every string begins with the empty string, so
-	// a check written against one would pass for any input and read as
-	// though the contract had been examined.
 {{- end }}
 
 	t.Run("no two sentinels share a message", func(t *{{ $T }}) {
@@ -133,11 +152,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 		}
 	})
 
-	// No check that a sentinel survives wrapping. Identity is compared
-	// before anything a type declares is consulted, so every value
-	// passes — including one whose own comparison always refuses. The
-	// assertion would be about the standard library rather than about
-	// this package.
 {{- range .Neighbours }}
 
 	t.Run("no sentinel matches one in {{ .Name }}", func(t *{{ $T }}) {
@@ -158,10 +172,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 			}
 		}
 {{- else }}
-		// {{ .Path }} declares no error value, so there is nothing to
-		// overlap. The subtest is emitted anyway: a directive naming a
-		// package that has none should read as an empty check rather
-		// than as one that was never generated.
 		_ = all
 {{- end }}
 	})
@@ -195,10 +205,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 	})
 {{- end }}
 
-	// No recovery check. Recovery finds a value by assignability while
-	// walking the chain, so it succeeds for any type reachable through
-	// it and fails for none. What a type can genuinely get wrong is its
-	// own cause, which is checked below when it declares one.
 {{- if .Peers }}
 
 	t.Run("does not match the package's other error types", func(t *{{ $T }}) {
@@ -230,15 +236,6 @@ func {{ testFuncName .Name "Contract" }}(t *{{ $T }}) {
 			{{ assertEqual "t" (printf "%s(subject, e)" $is) "subject.Is(e)" "the standard comparison must agree with the declared one" }}
 		}
 	})
-{{- end }}
-{{- if and .Compares .Unwraps .Seed }}
-
-	// No agreement check: this type names a cause as well, so the
-	// standard comparison reaches a declared error by walking the chain
-	// whether or not the declared comparison was consulted. The two
-	// sides then agree for every receiver form, including the one the
-	// check exists to catch. What the cause itself owes is checked
-	// below.
 {{- end }}
 {{- if and .Unwraps .Cause }}
 

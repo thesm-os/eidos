@@ -15,6 +15,26 @@ omitted unless they change what a caller can rely on.
 
 ### Fixed
 
+- **A string default declared in a struct tag renders as a string.** Go's tag
+  grammar consumes one layer of quoting to delimit its own entry, so
+  `default:"localhost"` reaches the annotator as six bare characters — the
+  right literal for a number, a bool or nil, and wrong for a string. It was
+  stamped verbatim, so the generated constructor named an identifier nobody
+  declared and the consumer's build failed on a line its author never wrote.
+  Reported as [#59](https://github.com/thesm-os/eidos/issues/59).
+
+  Three answers now, in order. A name the package declares is a reference, so
+  `default:"DefaultHost"` beside a constant of that name keeps meaning the
+  constant. Otherwise the member's type decides, through the new
+  `SourceRules.LiteralFor`. A value the type cannot admit — a word in a numeric
+  member — is reported at the declaration rather than left for the consumer's
+  compiler.
+
+  The directive form is untouched: an author writing `+gen:default "localhost"`
+  writes the quotes, and nothing consumed them.
+
+### Fixed
+
 - **A directive value can name a stdlib package.** The two notations a value
   may take — a qualifier resolved against the declaring file's imports, or a
   full import path for a package imported only to feed the directive — were

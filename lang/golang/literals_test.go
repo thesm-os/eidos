@@ -309,3 +309,87 @@ func TestIsWellFormedLiteral(t *testing.T) {
 		}
 	})
 }
+
+// TestLiteralFor covers the step a tag value needs and a directive
+// value does not.
+//
+// Go's tag grammar consumes one layer of quoting to delimit its own
+// entry, so the text that reaches a consumer is the bare form an
+// author would have written unquoted. That is the right literal for a
+// number and the wrong one for a string, and the member's type is the
+// only thing that says which.
+func TestLiteralFor(t *testing.T) {
+	t.Parallel()
+
+	named := func(n string) *node.TypeRef {
+		return &node.TypeRef{TypeKind: node.TypeRefNamed, Name: n}
+	}
+
+	t.Run("a textual member quotes bare text", func(t *testing.T) {
+		t.Parallel()
+		// The case that shipped broken: stamped verbatim this names an
+		// identifier, and the consumer's build fails on a symbol
+		// nobody declared.
+		got, ok := golang.LiteralFor(named("string"), "localhost", nil)
+		if !ok || got != `"localhost"` {
+			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
+		}
+	})
+
+	t.Run("a textual member passes an already-quoted value through", func(t *testing.T) {
+		t.Parallel()
+		// An author who wrote the escaped form gets what they wrote,
+		// rather than a second layer of quoting around it.
+		got, ok := golang.LiteralFor(named("string"), `"localhost"`, nil)
+		if !ok || got != `"localhost"` {
+			t.Errorf("got (%q, %v), want the value unchanged", got, ok)
+		}
+	})
+
+	t.Run("a numeric member passes a number through", func(t *testing.T) {
+		t.Parallel()
+		got, ok := golang.LiteralFor(named("int"), "8080", nil)
+		if !ok || got != "8080" {
+			t.Errorf("got (%q, %v), want the number unchanged", got, ok)
+		}
+	})
+
+	t.Run("a numeric member refuses a word", func(t *testing.T) {
+		t.Parallel()
+		// Refused rather than quoted: a string is not a value an int
+		// admits, and the caller reports it at the declaration.
+		if _, ok := golang.LiteralFor(named("int"), "localhost!", nil); ok {
+			t.Error("an int member accepted text that is not a number")
+		}
+	})
+
+	t.Run("a numeric member keeps a named constant", func(t *testing.T) {
+		t.Parallel()
+		// A name is a reference, and the scope it resolves in is not
+		// visible here — so refusing it would reject what an author
+		// legitimately writes.
+		got, ok := golang.LiteralFor(named("int"), "MaxRetries", nil)
+		if !ok || got != "MaxRetries" {
+			t.Errorf("got (%q, %v), want the identifier unchanged", got, ok)
+		}
+	})
+
+	t.Run("a bool member takes only true or false", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.LiteralFor(named("bool"), "true", nil); !ok {
+			t.Error("a bool member refused true")
+		}
+		if _, ok := golang.LiteralFor(named("bool"), "yes", nil); ok {
+			t.Error("a bool member accepted a word that is not a bool")
+		}
+	})
+
+	t.Run("an empty value is refused whatever the type", func(t *testing.T) {
+		t.Parallel()
+		// An empty tag is not a declared default, and stamping one
+		// would be indistinguishable from having declared nothing.
+		if _, ok := golang.LiteralFor(named("string"), "", nil); ok {
+			t.Error("an empty value was accepted")
+		}
+	})
+}

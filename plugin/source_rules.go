@@ -244,6 +244,22 @@ type TypeRules interface {
 	// into a variable declared at a type parameter.
 	SubstituteRef(r emit.Ref, params []*node.TypeParam) emit.Ref
 
+	// LiteralFor renders text as a literal of t, reporting false when
+	// it cannot be one.
+	//
+	// For a value read from somewhere that has already consumed the
+	// language's own quoting — a struct tag is the case — where the
+	// bare text an author wrote is the right literal for some types and
+	// not for others. The type settles it: a textual member's value is
+	// text, so quoting it states what the type admits rather than
+	// guessing what was meant.
+	//
+	// False is the caller's signal to report at the declaration. A type
+	// the language cannot reason about passes through untouched, since
+	// a named constant or a conversion cannot be checked without the
+	// scope it resolves in.
+	LiteralFor(t *node.TypeRef, text string, r node.Resolver) (string, bool)
+
 	// ZeroLiteral returns the language's spelling of a type's zero
 	// value, and whether one could be derived.
 	//

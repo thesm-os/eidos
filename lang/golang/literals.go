@@ -213,3 +213,96 @@ type TagEntry struct {
 	// Value is the unquoted content; [StructTag] quotes it.
 	Value string
 }
+
+// LiteralFor renders text as a literal of t, reporting false when it
+// cannot be one.
+//
+// The step a value read from a struct tag needs and a value read from
+// a directive does not. Go's tag grammar consumes one layer of quoting
+// to delimit the entry, so `default:"localhost"` reads back as the
+// six bare characters an author would have written unquoted — correct
+// for a number, a bool or nil, and wrong for a string, whose stamped
+// source text still has to read as a string literal. Stamped verbatim
+// it names an identifier, and the consumer's build fails on a symbol
+// nobody declared.
+//
+// Inference rather than refusal, because the type settles it. A
+// textual member's value is text: quoting it is not a guess about what
+// the author meant but a statement of what their type admits. Where
+// the text is already a well-formed literal it is passed through, so
+// an author who wrote the escaped form gets what they wrote.
+//
+// False where the text cannot be a literal of t at all — a word in a
+// numeric member, a number in a bool. That is the caller's signal to
+// report at the declaration rather than let the consumer's compiler
+// find it in generated source.
+//
+// A type this cannot reason about passes through untouched, on the
+// same terms as [IsWellFormedLiteral]: a named constant, a conversion
+// and a package-qualified identifier are all things an author writes,
+// and none of them can be checked without the scope they resolve in.
+func LiteralFor(t *node.TypeRef, text string, r Resolver) (string, bool) {
+	if text == "" {
+		return "", false
+	}
+	switch {
+	case isTextual(t, r):
+		if isQuoted(text) {
+			return text, true
+		}
+		return Quote(text), true
+	case IsBool(t):
+		return text, text == litTrue || text == litFalse
+	case IsInteger(t):
+		_, ok := ParseIntValue(text)
+		return text, ok || namesSymbolText(text)
+	case IsNumeric(t):
+		return text, isNumericText(text) || namesSymbolText(text)
+	}
+	return text, true
+}
+
+// isTextual reports whether t's values are written as quoted text,
+// following a defined type down to what it is defined as.
+func isTextual(t *node.TypeRef, r Resolver) bool {
+	if IsString(t) {
+		return true
+	}
+	under := UnderlyingOf(t, r)
+	return under != t && IsString(under)
+}
+
+// isQuoted reports whether text is already written as a string
+// literal, in either of Go's two forms.
+//
+// An author who escaped the quotes through the tag grammar gets what
+// they wrote rather than a second layer around it.
+func isQuoted(text string) bool {
+	if len(text) < 2 {
+		return false
+	}
+	first, last := text[0], text[len(text)-1]
+	return (first == '"' && last == '"') || (first == '`' && last == '`')
+}
+
+// isNumericText reports whether text reads as a number.
+func isNumericText(text string) bool {
+	_, err := strconv.ParseFloat(text, 64)
+	return err == nil
+}
+
+// namesSymbolText reports whether text reads as an identifier rather
+// than a literal, which is what lets a numeric member take a named
+// constant — `MaxRetries`, `time.Second` — without this refusing it.
+func namesSymbolText(text string) bool {
+	for i := range len(text) {
+		c := text[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_', c == '.':
+		case c >= '0' && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return text != "" && (text[0] < '0' || text[0] > '9')
+}

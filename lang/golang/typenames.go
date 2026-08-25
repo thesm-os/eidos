@@ -57,6 +57,7 @@ const (
 // documented.
 const (
 	litNil   = "nil"
+	litTrue  = "true"
 	litFalse = "false"
 	litEmpty = `""`
 	litZero  = "0"

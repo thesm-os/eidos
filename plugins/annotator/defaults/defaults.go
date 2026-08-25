@@ -220,7 +220,7 @@ func (p *Plugin) annotatePackage(
 		// answer cannot differ between them.
 		file := rules.FileOf(pkg, s)
 		for _, f := range s.Fields {
-			p.annotateField(ctx, rules, file, s.Name, f)
+			p.annotateField(ctx, rules, pkg, file, s.Name, f)
 		}
 	}
 	// The type-level arm. A named type has no field to carry a tag,
@@ -240,7 +240,8 @@ func (p *Plugin) annotatePackage(
 // the more specific statement, and a rule letting the tag win would
 // leave no way to correct one.
 func (p *Plugin) annotateField(
-	ctx *sdk.AnnotatorContext, rules sdk.SourceRules, file *sdk.File, owner string, f *sdk.Field,
+	ctx *sdk.AnnotatorContext, rules sdk.SourceRules, pkg *sdk.Package,
+	file *sdk.File, owner string, f *sdk.Field,
 ) {
 	if value, ok := directiveValue(f.Directives()); ok {
 		stamp(ctx, rules, file, owner, f.Name, f.Pos(), f.EnsureMeta(), value, SourceDirective)
@@ -250,6 +251,12 @@ func (p *Plugin) annotateField(
 		return
 	}
 	value, tagged := rules.Tag(f, p.tagKey())
+	if tagged && value != "" {
+		value = p.tagLiteral(ctx, rules, pkg, owner, f, value)
+		if value == "" {
+			return
+		}
+	}
 	if !tagged || value == "" {
 		// An empty tag value is not a declared default. `default:""`
 		// on a string field reads as "seed this to the empty string",
@@ -260,6 +267,60 @@ func (p *Plugin) annotateField(
 		return
 	}
 	stamp(ctx, rules, file, owner, f.Name, f.Pos(), f.EnsureMeta(), value, SourceTag)
+}
+
+// tagLiteral resolves a tag's value into the source text to stamp,
+// reporting the empty string when it cannot be one.
+//
+// Three answers in order, and the order is the whole of it.
+//
+// A name the package declares is a reference: an author writing
+// `default:"DefaultHost"` beside `const DefaultHost = "localhost"`
+// means the constant, and quoting it would stamp its own spelling as
+// a string. Looked up before the type is consulted, because a textual
+// member makes both readings plausible and only one is what was
+// written.
+//
+// Otherwise the type decides, through [sdk.SourceRules.LiteralFor].
+// Go's tag grammar has already consumed one layer of quoting, so the
+// bare text is the right literal for a number and the wrong one for a
+// string — the member's type is what says which.
+//
+// A value the type cannot admit is reported here, at the declaration.
+// Stamped anyway it reaches the consumer's compiler as an error in
+// generated source, naming a line the author did not write.
+func (p *Plugin) tagLiteral(
+	ctx *sdk.AnnotatorContext, rules sdk.SourceRules, pkg *sdk.Package,
+	owner string, f *sdk.Field, value string,
+) string {
+	if declaresName(pkg, value) {
+		return value
+	}
+	literal, ok := rules.LiteralFor(f.Type, value, ctx.Reader)
+	if !ok {
+		ctx.Diag.Errorf(f.Pos(),
+			"%s: %s.%s has a %s tag of %q, which is not a value its type admits "+
+				"and names nothing this package declares",
+			Name, owner, f.Name, p.tagKey(), value)
+		return ""
+	}
+	return literal
+}
+
+// declaresName reports whether pkg declares a constant or variable
+// under this name.
+func declaresName(pkg *sdk.Package, name string) bool {
+	for _, c := range pkg.Constants {
+		if c.Name == name {
+			return true
+		}
+	}
+	for _, v := range pkg.Variables {
+		if v.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // directiveValue returns the last declared default and whether one
