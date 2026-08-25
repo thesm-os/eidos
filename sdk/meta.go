@@ -169,3 +169,46 @@ var (
 	// naming no authority.
 	ErrUnknownAuthority = meta.ErrUnknownAuthority
 )
+
+// MetaFrontend is the key every frontend stamps on the packages it
+// produces, naming the language it parsed — `"golang"`, `"protobuf"`.
+//
+// Declared here because a meta key is interned by name, and a
+// consumer that re-declares it by string forfeits the compile-time
+// link to everyone else reading it. Five packages had done exactly
+// that before this existed, each spelling `"frontend"` itself: the
+// key resolved to one singleton by luck of the shared literal, and a
+// rename in any one of them would have produced a second key that
+// reads empty from every writer.
+//
+// Read it through [LanguageOf] rather than directly, so no caller has
+// to decide separately what an unstamped package means.
+//
+//nolint:gochecknoglobals // meta key registration, immutable after init.
+var MetaFrontend = EnsureKey("frontend", StringParser)
+
+// LanguageOf returns the language pkg's declarations were written in,
+// or empty when nothing stamped one.
+//
+// The lookup an annotator makes to find the [SourceRules] that apply
+// to what it is reading:
+//
+//	rules, ok := p.Source(sdk.LanguageOf(pkg))
+//
+// The answer is a language name from the same namespace a backend
+// answers to, which is what lets one [LanguageSupport] declaration
+// carry both halves. It is *not* interchangeable with the language a
+// run renders: a run parsing Go and emitting TypeScript has both, and
+// a plugin reading a Go struct tag under the render language would be
+// applying the wrong language's rules to source.
+//
+// Empty is the honest answer for a fixture, a bridge or a synthesised
+// graph — nothing produced it, so no language claims it, and a caller
+// looking the result up finds no rules rather than the wrong ones.
+func LanguageOf(pkg *Package) string {
+	if pkg == nil {
+		return ""
+	}
+	name, _ := MetaFrontend.Get(pkg.Meta())
+	return name
+}

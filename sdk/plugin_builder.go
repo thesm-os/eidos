@@ -61,6 +61,16 @@ type LanguageSupport struct {
 	// but renders it through the backend's own kind templates, so the
 	// missing tree is deliberate rather than an omission.
 	Builtin bool
+
+	// Source is how the plugin reads declarations written in this
+	// language — see [SourceRules]. Nil for a plugin that renders the
+	// language but never reads it.
+	//
+	// Here rather than in a registry of its own because there is one
+	// namespace of language names: a frontend stamps the language it
+	// parsed and a backend answers to the same name. What differs is
+	// which language a caller looks up, not where the answer is kept.
+	Source SourceRules
 }
 
 // Builder accumulates a plugin's declarations, then freezes them into
@@ -141,6 +151,7 @@ type langData struct {
 	templates fs.FS
 	funcs     template.FuncMap
 	overrides template.FuncMap
+	source    SourceRules
 }
 
 // Build freezes the declarations into a [Base].
@@ -163,7 +174,11 @@ func (b *Builder) Build() *Base {
 		s := b.specs[lang]
 		b.validate(lang, s)
 
-		data := langData{outputs: slices.Clone(s.Outputs), overrides: s.Overrides}
+		data := langData{
+			outputs:   slices.Clone(s.Outputs),
+			overrides: s.Overrides,
+			source:    s.Source,
+		}
 		if s.Templates != nil {
 			dir := s.TemplateDir
 			if dir == "" {
@@ -293,4 +308,21 @@ func (b *Base) TemplateFuncs(lang string) template.FuncMap {
 // replaces for lang.
 func (b *Base) TemplateOverrides(lang string) template.FuncMap {
 	return maps.Clone(b.langs[lang].overrides)
+}
+
+// Source returns how the plugin reads declarations written in lang.
+//
+// The bool distinguishes "this plugin does not read that language"
+// from a language it renders but never reads, which are different
+// answers: the first is a plugin asked about something it never
+// declared, the second a deliberate nil. An annotator resolves the
+// language from the package it is looking at — see [LanguageOf] —
+// rather than from the language the run renders, because a run may
+// parse one and render another.
+func (b *Base) Source(lang string) (SourceRules, bool) {
+	d, ok := b.langs[lang]
+	if !ok || d.source == nil {
+		return nil, false
+	}
+	return d.source, true
 }

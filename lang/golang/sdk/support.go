@@ -32,6 +32,7 @@ func Support(templates embed.FS, outputs ...sdk.Output) (string, sdk.LanguageSup
 	return Language, sdk.LanguageSupport{
 		Templates: templates,
 		Outputs:   outputs,
+		Source:    source,
 	}
 }
 
@@ -42,5 +43,27 @@ func Builtin(outputs ...sdk.Output) (string, sdk.LanguageSupport) {
 	return Language, sdk.LanguageSupport{
 		Outputs: outputs,
 		Builtin: true,
+		Source:  source,
 	}
 }
+
+// Reads returns the support a plugin declares when it reads Go
+// declarations but emits nothing — an annotator, or a generator that
+// contributes only into another plugin's slots.
+//
+// The read side alone. Every constructor here carries it, because a
+// plugin that speaks Go can read Go whether or not it also renders
+// it, and a plugin left to declare the two separately is one that can
+// declare half.
+func Reads() (string, sdk.LanguageSupport) {
+	return Language, sdk.LanguageSupport{Source: source}
+}
+
+// source is the Go read-side rules every declaration above carries.
+//
+// Held once as a package value rather than constructed per call: it
+// is stateless, and the identity makes a plugin's declaration
+// comparable in a test.
+//
+//nolint:gochecknoglobals // stateless value, immutable after init.
+var source sdk.SourceRules = golang.Source{}
