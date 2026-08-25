@@ -13,6 +13,8 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+## v1.15.1 — 2026-08-25
+
 ### Breaking
 
 - **The Go fixture and Go assertions move to `lang/golang`.**
