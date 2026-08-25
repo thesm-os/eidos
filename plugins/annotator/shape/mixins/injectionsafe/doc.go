@@ -10,4 +10,9 @@
 // The recognised directive is:
 //
 //	//+gen:mixin injectionsafe
+//
+// `read=` names the callable that reads the value back. The claim is
+// about what an interpreter downstream does with the input, and the
+// only signature-level evidence is the round trip: a payload that
+// would be syntax comes back as the data it was written as.
 package injectionsafe

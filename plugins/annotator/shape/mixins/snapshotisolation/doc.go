@@ -21,4 +21,14 @@
 // The recognised directive is:
 //
 //	//+gen:mixin snapshotisolation
+//
+// `read=` names the callable a check observes through. Each anomaly
+// this model rules out — and the write skew it deliberately permits
+// — is defined by what a read sees, so naming it is what separates
+// an isolation check from a concurrency smoke test.
+//
+// It does not conjure transaction boundaries: an interface with no
+// begin/commit pair still cannot express a multi-statement
+// transaction, and a consumer needing those reads them from the `tx`
+// contract's roles.
 package snapshotisolation

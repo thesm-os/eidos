@@ -15,6 +15,25 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **Five relational mixins can name the callable a check observes through.**
+  `atomic`, `crdtmerge`, `serializable`, `snapshotisolation` and
+  `injectionsafe` each assert something about state after an operation and
+  named nothing to look at it with, so the only derivable check was that the
+  call succeeded — the smoke check under another name. Each gains `read=`, and
+  `crdtmerge` also `write=`, since its host is the merge and a check has to
+  make two replicas diverge before reconciling them.
+
+  Optional, like every partner param here: the bare form still classifies and
+  a consumer that cannot state the law without an observer declines to state
+  it. The gap was visible in the consumer's own corpus — every fixture already
+  carries the observer the directive could not name.
+
+  `xsssafe` deliberately gains nothing. Its claim is about the value the
+  callable returns, so the check inspects the answer and needs no second
+  callable. The isolation pair gain an observer and still gain no level knob:
+  a `read=` names what a check looks through, where a `level=` would let one
+  name carry both models, which is what two names exist to prevent.
+
 - **A `deleter` detector.** `Delete(ctx, key) error` and `Put(ctx, v) error` are
   the same signature, so a removal classified as a `writer` — and a law
   selecting writers derives write-then-read-back, which asserts the reverse of
