@@ -8,6 +8,8 @@ require (
 	go.thesmos.sh/eidos/lang/golang v1.15.1
 )
 
+require golang.org/x/mod v0.38.0 // indirect
+
 replace (
 	go.thesmos.sh/eidos => ..
 	go.thesmos.sh/eidos/eidostest => ../eidostest

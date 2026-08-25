@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"golang.org/x/mod/module"
 
 	"go.thesmos.sh/eidos/node"
 )
@@ -266,7 +269,7 @@ func LiteralFor(f *node.File, t *node.TypeRef, text string, r Resolver) (string,
 		if isQuoted(text) {
 			return text, true
 		}
-		if namesBoundSymbol(f, text) {
+		if namesBoundSymbol(f, text) || namesImportPathSymbol(text) {
 			return text, true
 		}
 		return Quote(text), true
@@ -279,6 +282,59 @@ func LiteralFor(f *node.File, t *node.TypeRef, text string, r Resolver) (string,
 		return text, isNumericText(text) || namesSymbolText(text)
 	}
 	return text, true
+}
+
+// namesImportPathSymbol reports whether text spells a symbol by the
+// full import path of the package declaring it.
+//
+// The notation that exists because an import written only to feed a
+// declared default is an unused import, which does not compile. A file
+// naming a constant it uses for nothing else has no qualifier to
+// resolve against, so the value carries the path itself.
+//
+// Split on the last dot, since a path may hold dots and a symbol may
+// not. Three things have to hold, where the numeric arms ask for none
+// of them, because here every candidate is also a perfectly good
+// string:
+//
+//   - The path holds a slash. `example.com` would otherwise be package
+//     `example`, and it is a hostname far more often than it is a
+//     single-segment import naming an exported `com`.
+//   - The path is one Go would accept. `https://example.com/Foo` is
+//     refused on its double slash, which is what keeps a URL a URL.
+//   - The symbol is exported, because nothing else can be named from
+//     another package at all. That is what leaves `tmpl/index.Html`
+//     ambiguous and `tmpl/index.html` plainly a filename.
+//
+// Together they are shape rather than evidence, which is why the
+// exported check is here and not on [namesBoundSymbol]: an import
+// block that binds the qualifier has already settled what the text is,
+// and a lowercase symbol under a real qualifier is a typo better
+// spelled out by the consumer's compiler than quoted into silence.
+func namesImportPathSymbol(text string) bool {
+	i := strings.LastIndex(text, ".")
+	if i <= 0 || i == len(text)-1 {
+		return false
+	}
+	path, symbol := text[:i], text[i+1:]
+	if !strings.Contains(path, "/") || !isExportedIdent(symbol) {
+		return false
+	}
+	return module.CheckImportPath(path) == nil
+}
+
+// isExportedIdent reports whether s is a Go identifier another package
+// can name.
+func isExportedIdent(s string) bool {
+	for i, r := range s {
+		switch {
+		case i == 0 && unicode.IsUpper(r):
+		case i > 0 && (r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)):
+		default:
+			return false
+		}
+	}
+	return s != ""
 }
 
 // namesBoundSymbol reports whether text names a symbol through a

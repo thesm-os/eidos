@@ -477,6 +477,60 @@ func TestLiteralFor_QualifiedText(t *testing.T) {
 		}
 	})
 
+	t.Run("a full import path is kept as a reference", func(t *testing.T) {
+		t.Parallel()
+		// The notation for a package imported for nothing else: an
+		// import written only to feed a default is unused and does not
+		// compile, so the value carries the path.
+		const ref = "example.com/seed.Region"
+		got, ok := golang.LiteralFor(importing("context"), str, ref, nil)
+		if !ok || got != ref {
+			t.Errorf("got (%q, %v), want the reference unchanged", got, ok)
+		}
+	})
+
+	t.Run("a path holding dots splits on the last one", func(t *testing.T) {
+		t.Parallel()
+		const ref = "gopkg.in/yaml.v3.Marshal"
+		got, ok := golang.LiteralFor(nil, str, ref, nil)
+		if !ok || got != ref {
+			t.Errorf("got (%q, %v), want the reference unchanged", got, ok)
+		}
+	})
+
+	t.Run("a URL is quoted", func(t *testing.T) {
+		t.Parallel()
+		// It has a slash before the last dot and an exported-looking
+		// tail, so only Go's own rule for what an import path may hold
+		// separates it: a scheme's double slash is not one.
+		const url = "https://example.com/V1"
+		got, ok := golang.LiteralFor(nil, str, url, nil)
+		if !ok || got != `"`+url+`"` {
+			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
+		}
+	})
+
+	t.Run("a filename is quoted", func(t *testing.T) {
+		t.Parallel()
+		// `tmpl/index` is a path Go would accept and the split leaves
+		// `html`, so the export rule is the whole of what keeps this
+		// text — nothing outside a package can name an unexported one.
+		got, ok := golang.LiteralFor(nil, str, "tmpl/index.html", nil)
+		if !ok || got != `"tmpl/index.html"` {
+			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
+		}
+	})
+
+	t.Run("a single-segment path stays text", func(t *testing.T) {
+		t.Parallel()
+		// `example` is a legal import path on its own, so without the
+		// slash requirement every hostname would name a package.
+		got, ok := golang.LiteralFor(nil, str, "example.Com", nil)
+		if !ok || got != `"example.Com"` {
+			t.Errorf("got (%q, %v), want a quoted literal", got, ok)
+		}
+	})
+
 	t.Run("a defined textual type resolves like the builtin", func(t *testing.T) {
 		t.Parallel()
 		// isTextual follows a defined type down to what it is defined
