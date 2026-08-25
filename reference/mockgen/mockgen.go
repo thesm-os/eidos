@@ -49,6 +49,14 @@ import (
 	"go.thesmos.sh/eidos/sdk"
 )
 
+// mockConsequence is what this generator loses to an embed that
+// contributed nothing, for the diagnostics [refconv.ReportMethodSet]
+// writes.
+var mockConsequence = refconv.Consequence{
+	Partial:    "the mock carries whatever the source had already contributed",
+	Incomplete: "a mock missing a method does not satisfy the interface it mocks",
+}
+
 // Name is the plugin's stable identifier surfaced through
 // [sdk.Plugin.Name].
 const Name = "mockgen"
@@ -224,11 +232,11 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 			// interface embeds, and does not satisfy the interface
 			// it mocks.
 			set := ctx.Reader.MethodSet(si)
-			for _, issue := range set.Issues {
-				name, _ := sdk.EmbedName(issue.Embed)
-				ctx.Diag.Errorf(si.Pos(),
-					"%s: interface %q embeds %q, which %s; the generated mock would be missing its methods",
-					Name, si.QName(), name, issue.Reason)
+			if !refconv.ReportMethodSet(ctx.Diag, set, si, Name, mockConsequence) {
+				// Skipped rather than mocked short, and not counted: a
+				// package whose only interface is declined adds no file,
+				// which is what the emitted counter below decides.
+				continue
 			}
 			p.emitForSourceInterface(pkg, si, sdk.External(si.Package, si.Name), set.Methods)
 			emitted++

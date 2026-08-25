@@ -10,6 +10,15 @@ import (
 	"go.thesmos.sh/eidos/sdk"
 )
 
+// stubConsequence is what this generator loses to an embed that
+// contributed nothing, for the diagnostics [refconv.ReportMethodSet]
+// writes. A stub is passed where the interface is expected, so a short
+// one cannot be used at all — which is why nothing is emitted for it.
+var stubConsequence = refconv.Consequence{
+	Partial:    "the stub carries whatever the source had already contributed",
+	Incomplete: "a stub missing a method does not satisfy the interface it doubles",
+}
+
 // Name is the plugin's stable identifier.
 const Name = "stubgen"
 
@@ -268,11 +277,12 @@ func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 		// embedding one — emits a stub short the embedded methods,
 		// which does not satisfy the interface it doubles.
 		set := ctx.Reader.MethodSet(iface)
-		for _, issue := range set.Issues {
-			name, _ := sdk.EmbedName(issue.Embed)
-			ctx.Diag.Errorf(iface.Pos(),
-				"%s: interface %q embeds %q, which %s; the generated stub would be missing its methods",
-				Name, iface.QName(), name, issue.Reason)
+		if !refconv.ReportMethodSet(ctx.Diag, set, iface, Name, stubConsequence) {
+			// Nothing is emitted for a set that could not be completed.
+			// Reporting and generating anyway leaves the short double on
+			// disk: the pipeline carries every phase to completion, so the
+			// backend renders it and the non-zero exit is the only sign.
+			continue
 		}
 		if len(set.Methods) == 0 {
 			ctx.Diag.Errorf(iface.Pos(),
