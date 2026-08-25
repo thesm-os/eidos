@@ -95,6 +95,12 @@ var (
 	// NewIndex is an index expression (`x[i]`).
 	NewIndex = emit.NewIndex
 
+	// NewIndexList is a multi-index expression (`T[A, B]`) — Go's
+	// instantiation of a declaration taking more than one type
+	// parameter. Distinct from NewIndex because nesting two of those
+	// spells `T[A][B]`, which parses and means something else.
+	NewIndexList = emit.NewIndexList
+
 	// NewSlice is a slice expression (`x[lo:hi:cap]`). Nil bounds
 	// render as omitted.
 	NewSlice = emit.NewSlice

@@ -116,6 +116,12 @@ var (
 	MetaSamplePackage    = emit.MetaSamplePackage
 	MetaAlternate        = emit.MetaAlternate
 	MetaAlternatePackage = emit.MetaAlternatePackage
+
+	// The witness a type parameter is instantiated at, read by
+	// [SourceRules.Witnesses] on the same terms: authored first,
+	// derived where nothing was authored.
+	MetaWitness        = emit.MetaWitness
+	MetaWitnessPackage = emit.MetaWitnessPackage
 )
 
 // The accessors over those keys, re-exported for a plugin that reads
@@ -132,6 +138,8 @@ var (
 	AuthoredAlternate   = emit.AuthoredAlternate
 	AuthoredSampleOf    = emit.AuthoredSampleOf
 	AuthoredAlternateOf = emit.AuthoredAlternateOf
+	AuthoredWitness     = emit.AuthoredWitness
+	AuthoredWitnessRef  = emit.AuthoredWitnessRef
 )
 
 // The refusal reasons, re-exported so a plugin reading one need not

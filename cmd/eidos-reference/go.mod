@@ -6,6 +6,7 @@ require (
 	go.thesmos.sh/eidos v1.15.1
 	go.thesmos.sh/eidos/bridge/protogo v1.15.1
 	go.thesmos.sh/eidos/cli v1.15.1
+	go.thesmos.sh/eidos/eidostest v1.15.1
 	go.thesmos.sh/eidos/lang/golang v1.15.1
 	go.thesmos.sh/eidos/lang/protobuf v1.15.1
 	go.thesmos.sh/eidos/plugins v1.15.1
@@ -15,7 +16,6 @@ require (
 require (
 	github.com/bufbuild/protocompile v0.14.1 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	go.thesmos.sh/eidos/eidostest v1.15.1 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect

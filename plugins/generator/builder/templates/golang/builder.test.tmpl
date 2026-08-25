@@ -9,6 +9,18 @@
        names the property that broke rather than the function it was
        written in. */ -}}
 
+{{- /* The instantiation a check names, composed from the witness
+       references rather than as text.
+
+       A witness may name another package: an author says which type a
+       parameter is instantiated at, and nothing constrains that to a
+       builtin. Only `renderType` registers the import the rendered
+       file then needs, so an instantiation built as text lands a
+       qualified name in a file that never imported it. */ -}}
+{{- define "builder.test.instantiation" -}}
+{{- if .Witnesses }}[{{ range $i, $w := .Witnesses }}{{ if $i }}, {{ end }}{{ renderType $w }}{{ end }}]{{ end }}
+{{- end -}}
+
 {{- define "builder.test" -}}
 {{- $T := renderExpr (external "testing" "T") -}}
 {{- $cmpDiff := renderExpr (external "github.com/google/go-cmp/cmp" "Diff") -}}
@@ -22,7 +34,7 @@
 {{- $diffFn := printf "%sDiff" (camel .TypeName) -}}
 {{- $b := .TypeName -}}
 {{- $src := .SourceName -}}
-{{- $ta := .TypeArgs -}}
+{{- $t := . -}}
 {{- $ctor := renderExpr .CtorRef -}}
 {{- $from := renderExpr .FromRef -}}
 {{- $v := renderExpr .ValueRef -}}
@@ -109,18 +121,18 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- $ctor := renderExpr .CtorRef -}}
 {{- $from := renderExpr .FromRef -}}
 {{- $v := renderExpr .ValueRef -}}
-{{- $ta := .TypeArgs -}}
+{{- $t := . -}}
 {{- if .Seedable }}
 	t.Run("From round-trips what it was seeded with", func(t *{{ $T }}) {
 		t.Parallel()
 		// Seeded with named values rather than a zero value: a round
 		// trip comparing a zero against itself passes against a builder
 		// that dropped every member it was given.
-		var seed {{ $v }}{{ $ta }}
+		var seed {{ $v }}{{ template "builder.test.instantiation" $t }}
 {{- range .Seedable }}
 		seed.{{ .Name }} = {{ template "builder.sample" . }}
 {{- end }}
-		got := {{ $from }}{{ $ta }}(seed).Build()
+		got := {{ $from }}{{ template "builder.test.instantiation" $t }}(seed).Build()
 {{- range .Seedable }}
 		{{ assertDeepEqual "t" $diffFn (printf "got.%s" .Name) (printf "seed.%s" .Name) "From keeps the member it was given" }}
 {{- end }}
@@ -131,7 +143,8 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 
 	t.Run("{{ .Name }} carries its declared default", func(t *{{ $T }}) {
 		t.Parallel()
-		{{ assertDeepEqual "t" $diffFn (printf "%s%s().Build().%s" $ctor $ta .Name) .Default "the constructor applies the declared default" }}
+		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().Build()
+		{{ assertDeepEqual "t" $diffFn (printf "got.%s" .Name) .Default "the constructor applies the declared default" }}
 	})
 {{- end }}
 {{- end }}{{ end }}
@@ -142,7 +155,7 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- $diffFn := printf "%sDiff" (camel .TypeName) -}}
 {{- $T := renderExpr (external "testing" "T") -}}
 {{- $ctor := renderExpr .CtorRef -}}
-{{- $ta := .TypeArgs -}}
+{{- $t := . -}}
 {{- range $f := .Fields }}
 {{- if $f.Sample.OK }}
 {{- $with := $f.Set }}
@@ -151,21 +164,21 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- if $f.IsSequence }}
 		// Spread, because the replacing setter is variadic: it takes the
 		// elements, and the sample of a sequence type is the whole thing.
-		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}...).Build()
+		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}...).Build()
 		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the sequence" }}
 {{- else if $f.Keyed }}
 		// Driven through the replacing setter rather than the entry one:
 		// a sample of a keyed type is the whole collection, and the entry
 		// setter takes a key — which this projection has no sample of.
-		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
+		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
 		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the collection" }}
 {{- else if $f.IsBytes }}
 		// Compared by length rather than by value: a byte sequence is a
 		// slice, and Go compares a slice only against nil.
-		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
+		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
 		{{ assertLen "t" (printf "got.%s" $f.Name) 1 "the setter replaces the sequence" }}
 {{- else if $f.IsOptional }}
-		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
+		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).Build()
 		{{ assertNotNil "t" (printf "got.%s" $f.Name) "the setter addresses the value it was given" }}
 {{- else }}
 		// Bound rather than written twice. A sample is an expression,
@@ -181,7 +194,7 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 		// comparison of two different types reports a difference
 		// whatever the values are.
 		var want {{ renderType $f.Type }} = {{ template "builder.sample" $f }}
-		got := {{ $ctor }}{{ $ta }}().{{ $with }}(want).Build()
+		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}(want).Build()
 		{{ assertDeepEqual "t" $diffFn (printf "got.%s" $f.Name) "want" "the setter writes what it was given" }}
 {{- end }}
 	})
@@ -194,7 +207,7 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 		// afterwards passes either way. Writing twice and asserting the
 		// second won cannot pass vacuously.
 		var want {{ renderType $f.Type }} = {{ template "builder.alternate" $f }}
-		got := {{ $ctor }}{{ $ta }}().{{ $with }}({{ template "builder.sample" $f }}).{{ $with }}(want).Build()
+		got := {{ $ctor }}{{ template "builder.test.instantiation" $t }}().{{ $with }}({{ template "builder.sample" $f }}).{{ $with }}(want).Build()
 		{{ assertDeepEqual "t" $diffFn (printf "got.%s" $f.Name) "want" "the later call wins" }}
 	})
 {{ end }}
@@ -206,13 +219,13 @@ func {{ testFuncName $b "Clone" }}(t *{{ $T }}) {
 {{- define "builder.test.clone" -}}
 {{- $T := renderExpr (external "testing" "T") -}}
 {{- $ctor := renderExpr .CtorRef -}}
-{{- $ta := .TypeArgs -}}
+{{- $t := . -}}
 {{- range $f := .Fields }}
 {{- if and $f.Copies $f.Sample.OK }}
 {{- $with := $f.Set }}
 	t.Run("{{ $f.Name }} is not shared with a clone", func(t *{{ $T }}) {
 		t.Parallel()
-		original := {{ $ctor }}{{ $ta }}()
+		original := {{ $ctor }}{{ template "builder.test.instantiation" $t }}()
 		clone := original.Clone()
 {{- if $f.Keyed }}
 		clone.{{ $with }}({{ template "builder.sample" $f }})

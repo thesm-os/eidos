@@ -208,6 +208,11 @@ type TypeRules interface {
 	// list at once: a witness for one parameter is worth nothing
 	// without one for the rest. Nil is the caller's signal that no
 	// check can name the types it would run at.
+	// A caller rendering the instantiation composes it from these
+	// rather than asking for text. A witness may name another package
+	// — an author says which type a parameter is instantiated at, and
+	// nothing constrains that to a builtin — and only the backend's
+	// type-rendering path registers the import the file then needs.
 	Witnesses(params []*node.TypeParam) []emit.Ref
 
 	// SubstituteParams returns t with each of the declaration's type
@@ -238,16 +243,6 @@ type TypeRules interface {
 	// substituting only one emits a check that writes a concrete value
 	// into a variable declared at a type parameter.
 	SubstituteRef(r emit.Ref, params []*node.TypeParam) emit.Ref
-
-	// WitnessArgs renders the witnesses in use position — `[string,
-	// int]` — or empty when there are none.
-	//
-	// Beside [TypeRules.Witnesses] rather than derived from it,
-	// because composing the list is a spelling: which brackets, which
-	// separator, and whether the arguments are written at all. A
-	// generator building the text itself writes Go's answer into
-	// every language's output.
-	WitnessArgs(params []*node.TypeParam) string
 
 	// ZeroLiteral returns the language's spelling of a type's zero
 	// value, and whether one could be derived.

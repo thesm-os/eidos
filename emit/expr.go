@@ -108,6 +108,8 @@ func (k ExprKind) String() string {
 		return "field"
 	case ExprIndex:
 		return "index"
+	case ExprIndexList:
+		return "index_list"
 	case ExprSlice:
 		return "slice"
 	case ExprBinary:
@@ -357,6 +359,18 @@ func NewField(receiver *Expr, name string) *Expr {
 // NewIndex returns an indexing expression — receiver[index].
 func NewIndex(receiver, index *Expr) *Expr {
 	return &Expr{ExprKind: ExprIndex, Receiver: receiver, IndexExpr: index}
+}
+
+// NewIndexList returns an indexing expression carrying several
+// indexes — receiver[a, b].
+//
+// Go's instantiation of a declaration taking more than one type
+// parameter. Beside [NewIndex] rather than folded into it, because
+// `T[A][B]` and `T[A, B]` both parse and mean different things — a
+// constructor that took a slice would spell the first when handed one
+// element and a caller meant the second.
+func NewIndexList(receiver *Expr, indexes ...*Expr) *Expr {
+	return &Expr{ExprKind: ExprIndexList, Receiver: receiver, Args: indexes}
 }
 
 // NewSlice returns a slice expression — receiver[low:high:cap].

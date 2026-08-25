@@ -543,9 +543,7 @@ func typeExpr(t *node.TypeRef) *emit.Expr {
 	case 0:
 		return base
 	case 1:
-		return &emit.Expr{
-			ExprKind: emit.ExprIndex, Receiver: base, IndexExpr: typeExpr(t.TypeArgs[0]),
-		}
+		return emit.NewIndex(base, typeExpr(t.TypeArgs[0]))
 	default:
 		// `T[A, B]` is one index carrying a list, which is why
 		// [emit.ExprIndexList] is a kind of its own: nesting two plain
@@ -555,7 +553,7 @@ func typeExpr(t *node.TypeRef) *emit.Expr {
 		for i, arg := range t.TypeArgs {
 			args[i] = typeExpr(arg)
 		}
-		return &emit.Expr{ExprKind: emit.ExprIndexList, Receiver: base, Args: args}
+		return emit.NewIndexList(base, args...)
 	}
 }
 

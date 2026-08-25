@@ -10,11 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"go.thesmos.sh/eidos/eidostest/pipelinetest"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
 	"go.thesmos.sh/eidos/lang/golang/golangtest"
 	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugins/annotator/sample"
+	"go.thesmos.sh/eidos/plugins/annotator/witness"
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/plugins/generator/sentinel"
@@ -838,5 +840,87 @@ func TestPluginsRender_BuilderGenerics(t *testing.T) {
 		// a projection crossing two parameters fails to compile rather
 		// than passing against the wrong one.
 		gen.Suffixed(t, builder.GoTestSuffix).AssertContains(t, "NewPair[string, int]()")
+	})
+}
+
+// TestPluginsRender_AuthoredWitness pins that an author can say what a
+// language cannot derive.
+//
+// A witness is derivable only where the constraint's type set is
+// knowable without loading the package that declares it. A parameter
+// bounded by anything further gets none, and a declaration with no
+// witnesses gets no checks at all — a generated check is an ordinary
+// function, and one cannot take type parameters.
+//
+// The constraint below is exactly that case: `constraints.Ordered`
+// names a package the generator never read, so the derivation refuses
+// and the directive is the only thing that can answer.
+func TestPluginsRender_AuthoredWitness(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, authored bool) *pipelinetest.Pipeline {
+		t.Helper()
+		fixture := gofixture.New().
+			Package("sorted", "example.com/sorted").
+			Struct("Bag", func(s *gofixture.StructBuilder) {
+				s.Directive(gofixture.Directive("builder"))
+				if authored {
+					s.Directive(gofixture.Directive("witness", gofixture.KV("T", "int")))
+				}
+				s.TypeParam("T", gofixture.Bound("constraints.Ordered"))
+				s.Field("Items", gofixture.Slice(gofixture.TypeParamRef("T")), nil)
+				s.Field("Label", gofixture.Named("string"), nil)
+			})
+		return golangtest.Driver(t, backendgolang.New(), fixture.PackageNode(), builder.New()).
+			WithAnnotator(witness.New()).
+			Build().
+			Run("./...")
+	}
+
+	t.Run("without the directive the checks are withheld", func(t *testing.T) {
+		t.Parallel()
+		// The honest outcome, and the one the note in the rendered file
+		// explains: there is no way to name the types a check would run
+		// at, so nothing is written rather than something that cannot
+		// compile.
+		out := golangtest.Rendered(t, build(t, false)).
+			WithRequire(cmpModule, moduleDir(t, cmpModule))
+		out.Suffixed(t, builder.GoTestSuffix).AssertContains(t, "is not generated")
+	})
+
+	t.Run("a witness naming another package is instantiated and imported", func(t *testing.T) {
+		t.Parallel()
+		// The half that was silently wrong: substituted from the bare
+		// name, `time.Duration` became an unqualified `Duration`, which
+		// the resolver cannot find — so every member of that parameter
+		// was refused a value and lost its checks with no diagnostic.
+		fixture := gofixture.New().
+			Package("sorted", "example.com/sorted").
+			File("bag.go", func(f *gofixture.FileBuilder) { f.Import("time") }).
+			Struct("Bag", func(s *gofixture.StructBuilder) {
+				s.Directive(gofixture.Directive("builder"))
+				s.Directive(gofixture.Directive("witness", gofixture.KV("T", "time.Duration")))
+				s.TypeParam("T", gofixture.Bound("constraints.Ordered"))
+				s.Field("Span", gofixture.TypeParamRef("T"), nil)
+			})
+		out := golangtest.Rendered(t,
+			golangtest.Driver(t, backendgolang.New(), fixture.PackageNode(), builder.New()).
+				WithAnnotator(witness.New()).
+				Build().
+				Run("./..."),
+		).WithRequire(cmpModule, moduleDir(t, cmpModule))
+
+		src := out.Suffixed(t, builder.GoTestSuffix)
+		src.AssertContains(t, "NewBag[time.Duration]()")
+		src.AssertContains(t, "WithSpan writes Span")
+	})
+
+	t.Run("with the directive the checks are written and pass", func(t *testing.T) {
+		t.Parallel()
+		out := golangtest.Rendered(t, build(t, true)).
+			WithRequire(cmpModule, moduleDir(t, cmpModule))
+		src := out.Suffixed(t, builder.GoTestSuffix)
+		src.AssertContains(t, "NewBag[int]()")
+		src.AssertContains(t, "WithLabel writes Label")
 	})
 }

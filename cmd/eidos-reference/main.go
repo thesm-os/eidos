@@ -45,6 +45,7 @@ import (
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/defaults"
 	"go.thesmos.sh/eidos/plugins/annotator/sample"
+	"go.thesmos.sh/eidos/plugins/annotator/witness"
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/plugins/generator/sentinel"
@@ -173,6 +174,11 @@ func defaultPlugins() []plugin.Plugin {
 		// sees rather than adding an output of their own.
 		defaults.New(),
 		sample.New(),
+		// The third of the same kind: what a language cannot derive,
+		// an author names. This one answers for a generic
+		// declaration's parameters, which decide whether any check
+		// over it can be written at all.
+		witness.New(),
 
 		// Generators (foundation bucket) — emit baseline output
 		// other generators may compose against.

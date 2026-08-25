@@ -41,12 +41,23 @@ var WitnessPalette = []string{"string", "int", "bool", "float64", "int64", "uint
 // in place of the checks — there is no way to name the types they
 // would run at.
 func Witnesses(params []*node.TypeParam) []emit.Ref {
-	if len(params) == 0 || len(params) > len(WitnessPalette) {
+	if len(params) == 0 {
 		return nil
 	}
 	out := make([]emit.Ref, 0, len(params))
 	for i, p := range params {
-		if p == nil || !AdmitsAnyBasicType(p.Constraint) {
+		if p == nil {
+			return nil
+		}
+		// The author's answer first. A constraint whose type set needs
+		// the declaring package loaded cannot be reasoned about here at
+		// all, so a derivation is not a second opinion — it is the only
+		// other thing there is, and it has nothing to say.
+		if ref, ok := emit.AuthoredWitnessRef(p.Meta()); ok {
+			out = append(out, ref)
+			continue
+		}
+		if i >= len(WitnessPalette) || !AdmitsAnyBasicType(p.Constraint) {
 			return nil
 		}
 		out = append(out, emit.Builtin(WitnessPalette[i]))
@@ -54,26 +65,67 @@ func Witnesses(params []*node.TypeParam) []emit.Ref {
 	return out
 }
 
-// WitnessNames returns the derived witnesses as bare type names.
+// WitnessNames returns the witnesses as bare type names.
+//
+// Read off the chosen references rather than off [WitnessPalette],
+// which answers only for the derived case: an authored witness is
+// whatever the author named, and a list assumed positional reported
+// `string` for a parameter instantiated at something else.
+//
+// The name alone, so a qualified witness appears here unqualified.
+// That is enough for the callers that substitute a type into a source
+// walk, and not enough to render — see [WitnessUse].
 func WitnessNames(params []*node.TypeParam) []string {
 	refs := Witnesses(params)
 	if len(refs) == 0 {
 		return nil
 	}
-	return WitnessPalette[:len(refs)]
+	out := make([]string, len(refs))
+	for i, r := range refs {
+		out[i] = refName(r)
+	}
+	return out
 }
 
-// WitnessUse renders the derived witnesses in use position —
-// `[string, int]` — or the empty string when there are none, so a
-// template appends it unconditionally.
-//
-// Safe to build as text because every witness is a builtin: its
-// rendered form is its name, so nothing here names a package the
-// rendered file would have to import.
-func WitnessUse(params []*node.TypeParam) string {
-	names := WitnessNames(params)
-	if len(names) == 0 {
+// refName returns a reference's bare identifier.
+func refName(r emit.Ref) string {
+	switch v := r.(type) {
+	case *emit.BuiltinRef:
+		return v.Name
+	case *emit.ExternalRef:
+		return v.Name
+	default:
 		return ""
+	}
+}
+
+// WitnessUse renders the witnesses in use position — `[string, int]`
+// — or the empty string when there are none, so a template appends it
+// unconditionally.
+//
+// Text, and therefore only for a witness whose spelling needs no
+// import. That held while every witness came from [WitnessPalette],
+// which is builtins throughout; an authored one may name another
+// package, and a qualified name built as text lands in a file that
+// never imported it.
+//
+// A template rendering an instantiation should compose it from the
+// references instead — [Witnesses] returns them, and the backend's
+// `renderType` is what registers the import. This remains for the
+// callers that only need the spelling, and reports the empty string
+// where any witness carries a package rather than emitting one that
+// cannot be resolved.
+func WitnessUse(params []*node.TypeParam) string {
+	refs := Witnesses(params)
+	if len(refs) == 0 {
+		return ""
+	}
+	names := make([]string, len(refs))
+	for i, r := range refs {
+		if ext, qualified := r.(*emit.ExternalRef); qualified && ext.Package != "" {
+			return ""
+		}
+		names[i] = refName(r)
 	}
 	return "[" + strings.Join(names, ", ") + "]"
 }
@@ -297,21 +349,39 @@ func SubstituteParamsNode(t *node.TypeRef, params []*node.TypeParam) *node.TypeR
 	if t == nil || len(params) == 0 {
 		return t
 	}
-	names := WitnessNames(params)
-	if len(names) == 0 {
+	refs := Witnesses(params)
+	if len(refs) == 0 {
 		return t
 	}
 	by := make(map[string]*node.TypeRef, len(params))
 	for i, p := range params {
 		if p != nil {
-			// Named rather than a parameter reference, and builtin by
-			// construction: every entry of [WitnessPalette] is one,
-			// which is what lets the rewritten reference answer the
-			// predicates that gate on [node.TypeRef.IsBuiltin].
-			by[p.Name] = &node.TypeRef{TypeKind: node.TypeRefNamed, Name: names[i]}
+			by[p.Name] = witnessNode(refs[i])
 		}
 	}
 	return substituteNode(t, by, maxResolveDepth)
+}
+
+// witnessNode lifts a witness back into the source model, so the
+// questions that read a declared type can be asked about it.
+//
+// The package rides along, which is the whole of why this reads the
+// reference rather than the name. A derived witness is a builtin and
+// has none; an authored one may name `time.Duration`, and rewritten
+// as a bare `Duration` it names a type the resolver cannot find — so
+// the member is refused a value and loses its checks, quietly, for the
+// declarations this feature exists to serve.
+func witnessNode(r emit.Ref) *node.TypeRef {
+	if ext, qualified := r.(*emit.ExternalRef); qualified {
+		return &node.TypeRef{
+			TypeKind: node.TypeRefNamed, Package: ext.Package, Name: ext.Name,
+		}
+	}
+	// Named rather than a parameter reference, and unqualified: a
+	// derived witness is an entry of [WitnessPalette], every one of
+	// which is a builtin — which is what lets the rewritten reference
+	// answer the predicates that gate on [node.TypeRef.IsBuiltin].
+	return &node.TypeRef{TypeKind: node.TypeRefNamed, Name: refName(r)}
 }
 
 // substituteNode is [SubstituteParamsNode] with the recursion budget

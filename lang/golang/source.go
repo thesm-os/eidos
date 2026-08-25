@@ -213,12 +213,6 @@ func (Source) ZeroLiteral(t *node.TypeRef, r Resolver) (string, bool) {
 	return ZeroLiteralFor(t, r)
 }
 
-// WitnessArgs renders the derived witnesses in use position —
-// `[string, int]` — or empty when there are none.
-func (Source) WitnessArgs(params []*node.TypeParam) string {
-	return WitnessUse(params)
-}
-
 // EnumOf projects a Go enum into the neutral vocabulary.
 //
 // The optional half of the read side, and the reason it is optional:

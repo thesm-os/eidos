@@ -526,11 +526,16 @@ type Tests struct {
 	ValueRef *sdk.Expr
 
 	TypeParams []*sdk.EmitTypeParam
-	TypeArgs   string
 
 	// Witnesses are the concrete types the checks instantiate at,
 	// empty for a plain declaration and for one whose constraints
 	// admit none — the latter gets a note in place of its checks.
+	//
+	// References rather than the rendered `[string, int]` a template
+	// once appended as text. An authored witness may name another
+	// package, and only `renderType` registers the import the file
+	// then needs — so the text form landed a qualified name in a file
+	// that never imported it.
 	Witnesses []sdk.Ref
 
 	Fields []Field
@@ -739,10 +744,11 @@ func (p *Plugin) queued(rules sdk.SourceRules, s *sdk.Struct, value *Type) []sdk
 		FromRef:    sdk.NewExternal(s.Package, value.FromName),
 		ValueRef:   sdk.NewExternal(s.Package, s.Name),
 		TypeParams: value.TypeParams,
-		// The witnesses in use position, not the declaration's own
-		// parameter list: a check is an ordinary function and has to
-		// name concrete types where the declaration named parameters.
-		TypeArgs:  rules.WitnessArgs(s.TypeParams),
+		// The witnesses, not the declaration's own parameter list: a
+		// check is an ordinary function and has to name concrete types
+		// where the declaration named parameters. The template renders
+		// them, which is what registers an import for a witness naming
+		// another package.
 		Witnesses: rules.Witnesses(s.TypeParams),
 		Fields:    testFields(rules, s, value.Fields),
 		Seeded:    value.Seeded(),

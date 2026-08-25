@@ -21,6 +21,7 @@ func TestExprKind_String(t *testing.T) {
 		{"Ident", emit.ExprIdent, "ident"},
 		{"Field", emit.ExprField, "field"},
 		{"Index", emit.ExprIndex, "index"},
+		{"IndexList", emit.ExprIndexList, "index_list"},
 		{"Slice", emit.ExprSlice, "slice"},
 		{"Binary", emit.ExprBinary, "binary"},
 		{"Unary", emit.ExprUnary, "unary"},
@@ -447,5 +448,39 @@ func TestNewRawExpr(t *testing.T) {
 			t.Fatalf("ExprKind mismatch: %s", e.ExprKind)
 		}
 		assertEqualString(t, e.RawText, "foo + bar")
+	})
+}
+
+// TestNewIndexList covers the constructor for a multi-argument
+// instantiation.
+//
+// Beside [emit.NewIndex] rather than folded into it, because
+// `T[A][B]` and `T[A, B]` both parse and mean different things — the
+// two forms are one field apart if a single constructor carries both.
+func TestNewIndexList(t *testing.T) {
+	t.Parallel()
+
+	t.Run("carries every index on Args", func(t *testing.T) {
+		t.Parallel()
+		got := emit.NewIndexList(
+			emit.NewIdent("Pair"), emit.NewIdent("string"), emit.NewIdent("int"),
+		)
+		if got.ExprKind != emit.ExprIndexList {
+			t.Errorf("kind = %v, want index_list", got.ExprKind)
+		}
+		if len(got.Args) != 2 {
+			t.Fatalf("Args = %v, want both indexes", got.Args)
+		}
+		if got.IndexExpr != nil {
+			t.Error("the single-index field was populated too; a reader would see both forms")
+		}
+	})
+
+	t.Run("keeps the receiver it was given", func(t *testing.T) {
+		t.Parallel()
+		recv := emit.NewIdent("Pair")
+		if got := emit.NewIndexList(recv, emit.NewIdent("string")); got.Receiver != recv {
+			t.Error("the receiver was copied rather than kept")
+		}
 	})
 }

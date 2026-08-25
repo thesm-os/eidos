@@ -13,6 +13,39 @@ omitted unless they change what a caller can rely on.
 
 ## Unreleased
 
+### Added
+
+- **`+gen:witness` names the type a parameter is instantiated at.** A generated
+  check is an ordinary function and cannot take type parameters, so a language
+  derives concrete types where the constraint's type set is knowable without
+  loading the package that declares it — in Go, `any` and `comparable`. A
+  parameter bounded by anything further got no witness, and the whole
+  declaration got no checks: a note in the rendered file where its tests should
+  be.
+
+  ```go
+  //+gen:witness T=int
+  //+gen:builder
+  type Sorted[T constraints.Ordered] struct{ Items []T }
+  ```
+
+  One `<param>=<type>` pair per parameter, stamped on the parameter itself and
+  preferred by `SourceRules.Witnesses` over anything derived — the arrangement
+  `+gen:sample` uses, so every consumer that asks a language which types to
+  instantiate at gets the authored answer without knowing the plugin exists. A
+  bare name is used as written; a qualified name or import path reaches
+  elsewhere and registers its import.
+
+### Changed
+
+- **`SourceRules` no longer answers `WitnessArgs`.** It rendered the
+  instantiation as text, which was safe only while every witness was a builtin.
+  An authored one may name another package, and only the backend's
+  type-rendering path registers the import — so a caller composes the
+  instantiation from `Witnesses` instead. The method had no callers left and
+  returned the empty string for a qualified witness, which a generator could not
+  tell from having no witnesses at all.
+
 ### Fixed
 
 - **A generic declaration's builder gets checks with bodies in them.** The test
