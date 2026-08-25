@@ -613,3 +613,142 @@ func TestFileOf(t *testing.T) {
 		}
 	})
 }
+
+// ResolveValue tells the two notations apart, and passes a literal
+// through.
+//
+// The split is on opposite dots, so a value read with the wrong rule
+// resolves against something — silently, and to the wrong symbol.
+func TestResolveValue(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a source qualifier resolves against the file's imports", func(t *testing.T) {
+		t.Parallel()
+		pkg, symbol, err := golang.ResolveValue(resolveFile(), "pb.Event")
+		if err != nil {
+			t.Fatalf("ResolveValue(pb.Event): %v", err)
+		}
+		if pkg != "example.com/gen/shopv1" || symbol != "Event" {
+			t.Errorf("got (%q, %q), want the aliased import and its symbol", pkg, symbol)
+		}
+	})
+
+	t.Run("a full path splits from the right", func(t *testing.T) {
+		t.Parallel()
+		pkg, symbol, err := golang.ResolveValue(resolveFile(), "gopkg.in/yaml.v3.Marshal")
+		if err != nil {
+			t.Fatalf("ResolveValue: %v", err)
+		}
+		if pkg != "gopkg.in/yaml.v3" || symbol != "Marshal" {
+			t.Errorf("got (%q, %q); the dots before the last belong to the path", pkg, symbol)
+		}
+	})
+
+	t.Run("a full path needs no import in the file", func(t *testing.T) {
+		t.Parallel()
+		pkg, _, err := golang.ResolveValue(&node.File{}, "example.com/seed.Region")
+		if err != nil {
+			t.Fatalf("an import written only for a directive would not compile: %v", err)
+		}
+		if pkg != "example.com/seed" {
+			t.Errorf("got %q, want the path as written", pkg)
+		}
+	})
+
+	t.Run("a literal passes through untouched", func(t *testing.T) {
+		t.Parallel()
+		for _, lit := range []string{`"localhost"`, "8080", "nil", "true", "0.75", ".5"} {
+			pkg, symbol, err := golang.ResolveValue(resolveFile(), lit)
+			if err != nil {
+				t.Errorf("ResolveValue(%s): %v", lit, err)
+				continue
+			}
+			if pkg != "" || symbol != lit {
+				t.Errorf("ResolveValue(%s) = (%q, %q), want the literal verbatim", lit, pkg, symbol)
+			}
+		}
+	})
+
+	t.Run("a bare identifier names no package", func(t *testing.T) {
+		t.Parallel()
+		pkg, symbol, err := golang.ResolveValue(resolveFile(), "MaxRetries")
+		if err != nil {
+			t.Fatalf("ResolveValue(MaxRetries): %v", err)
+		}
+		if pkg != "" || symbol != "MaxRetries" {
+			t.Errorf("got (%q, %q), want the identifier and no package", pkg, symbol)
+		}
+	})
+
+	t.Run("an unbound qualifier says how to write it instead", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := golang.ResolveValue(&node.File{}, "seed.Region")
+		if err == nil {
+			t.Fatal("an unresolvable qualifier must not resolve to a guess")
+		}
+		if !strings.Contains(err.Error(), "<import/path>.Region") {
+			t.Errorf("the remedy has to be in the message, got: %v", err)
+		}
+	})
+
+	t.Run("an unterminated literal is refused here", func(t *testing.T) {
+		t.Parallel()
+		if _, _, err := golang.ResolveValue(resolveFile(), `"unterminated`); err == nil {
+			t.Error("an unbalanced quote fails as a syntax error nowhere near the directive")
+		}
+	})
+}
+
+// Companion finds the seed function beside a type, and refuses one
+// that only shares its name.
+func TestCompanion(t *testing.T) {
+	t.Parallel()
+
+	user := func(name, pkg string, params []*node.Param, returns []*node.Return) *node.Function {
+		return &node.Function{Name: name, Package: pkg, Params: params, Returns: returns}
+	}
+	returnsUser := []*node.Return{{Type: &node.TypeRef{Name: "User"}}}
+
+	t.Run("finds the conventional name in the same package", func(t *testing.T) {
+		t.Parallel()
+		funcs := []*node.Function{user("UserDefaults", "example.com/app", nil, returnsUser)}
+		ref := golang.Companion(funcs, "example.com/app", "User", "Defaults")
+		ext, ok := ref.(*emit.ExternalRef)
+		if !ok || ext.Name != "UserDefaults" || ext.Package != "example.com/app" {
+			t.Fatalf("Companion = %#v, want the package-qualified seed function", ref)
+		}
+	})
+
+	t.Run("refuses one that takes arguments", func(t *testing.T) {
+		t.Parallel()
+		params := []*node.Param{{Name: "seed", Type: &node.TypeRef{Name: "int"}}}
+		funcs := []*node.Function{user("UserDefaults", "example.com/app", params, returnsUser)}
+		if ref := golang.Companion(funcs, "example.com/app", "User", "Defaults"); ref != nil {
+			t.Error("calling a colliding function emits a constructor that does not compile")
+		}
+	})
+
+	t.Run("refuses one returning another type", func(t *testing.T) {
+		t.Parallel()
+		other := []*node.Return{{Type: &node.TypeRef{Name: "Config"}}}
+		funcs := []*node.Function{user("UserDefaults", "example.com/app", nil, other)}
+		if ref := golang.Companion(funcs, "example.com/app", "User", "Defaults"); ref != nil {
+			t.Error("a seed has to produce the type it seeds")
+		}
+	})
+
+	t.Run("ignores a same-named function in another package", func(t *testing.T) {
+		t.Parallel()
+		funcs := []*node.Function{user("UserDefaults", "example.com/other", nil, returnsUser)}
+		if ref := golang.Companion(funcs, "example.com/app", "User", "Defaults"); ref != nil {
+			t.Error("the convention is beside the type, not anywhere in the run")
+		}
+	})
+
+	t.Run("an unnamed type has no companion", func(t *testing.T) {
+		t.Parallel()
+		if ref := golang.Companion(nil, "example.com/app", "", "Defaults"); ref != nil {
+			t.Error("a suffix alone names nothing")
+		}
+	})
+}

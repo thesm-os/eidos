@@ -421,3 +421,134 @@ func PkgPathOf(n node.Node) string {
 func SubjectRef(origin node.Node, name string) emit.Ref {
 	return RefFor(name, PkgPathOf(origin))
 }
+
+// ResolveValue splits a value written in a directive into the package
+// it names and the symbol within it, reporting an empty package for a
+// plain literal.
+//
+// The step above [RefForQualified] and [ResolveQualified], which
+// answer for one notation each and cannot tell which they were
+// handed. Both notations are things authors write, for reasons that
+// do not overlap:
+//
+//	time.Second                     -> resolved against f's import block
+//	example.com/seed.DefaultRegion  -> a full import path, needing no import
+//	gopkg.in/yaml.v3.Marshal        -> also a path; the earlier dots are its
+//	"localhost"                     -> a literal, passed through untouched
+//
+// They split on opposite dots and that is the whole distinction. An
+// import path may hold dots, so the full-path form splits from the
+// right; a Go qualifier is one identifier and cannot hold one, so the
+// source form splits from the left. Reading source text with the
+// right-hand rule manufactures a qualifier that is not an identifier.
+// A slash before the last dot picks the first: no qualifier holds
+// one, and every path worth writing in a directive does.
+//
+// The second notation exists because an import written only to feed a
+// directive is an unused import, which does not compile. Without it a
+// value can only name a package the file already uses for real code.
+//
+// A nil file resolves no qualifier at all, which is what a
+// positionless declaration gets: [ErrUnresolvedQualifier] rather than
+// a guess against some other file's imports.
+func ResolveValue(f *node.File, value string) (pkg, symbol string, err error) {
+	if malformed := IsWellFormedLiteral(value); malformed != nil {
+		return "", "", fmt.Errorf("%q: %w", value, malformed)
+	}
+	if !namesSymbol(value) {
+		return "", value, nil
+	}
+	ref, err := resolveValueRef(f, value)
+	if err != nil {
+		return "", "", err
+	}
+	ext, ok := ref.(*emit.ExternalRef)
+	if !ok {
+		// A bare identifier — a constant the declaring package owns. It
+		// renders as itself and registers no import, which is what an
+		// empty source package asks [RefFor] for: whichever file later
+		// renders the value is not known here.
+		return "", value, nil
+	}
+	return ext.Package, ext.Name, nil
+}
+
+// resolveValueRef hands value to whichever rule its notation calls
+// for, and improves the diagnostic for the case authors hit most.
+func resolveValueRef(f *node.File, value string) (emit.Ref, error) {
+	if dot := strings.LastIndex(value, "."); dot > 0 && strings.Contains(value[:dot], "/") {
+		ref, err := RefForQualified(value, "")
+		if err != nil {
+			return nil, fmt.Errorf("%q: %w", value, err)
+		}
+		return ref, nil
+	}
+	ref, err := ResolveQualified(f, value, "")
+	switch {
+	case errors.Is(err, ErrUnresolvedQualifier):
+		// The full-path form is the way out of this, and an author who
+		// reached for a qualifier has no reason to know it exists.
+		_, symbol := QualifierOf(value)
+		return nil, fmt.Errorf(
+			"%q: %w; write the full path as <import/path>.%s if the package "+
+				"is imported only for this directive", value, err, symbol,
+		)
+	case err != nil:
+		return nil, fmt.Errorf("%q: %w", value, err)
+	}
+	return ref, nil
+}
+
+// namesSymbol reports whether value reads as a symbol rather than as
+// a literal. A quoted string or a number can hold a dot without
+// naming anything.
+//
+// A leading dot is a number too: `.5` is a legal Go float literal and
+// Go's own scanner reads it as one. Reading it as a qualifier splits
+// it into an empty qualifier and the symbol `5`, which matches every
+// un-aliased import — so the first import in the file wins and the
+// generated value says `http.5`.
+func namesSymbol(value string) bool {
+	if value == "" || value[0] == '"' || value[0] == '`' {
+		return false
+	}
+	c := value[0]
+	return (c < '0' || c > '9') && c != '-' && c != '+' && c != '.'
+}
+
+// Companion returns the `<typeName><suffix>` function declared in pkg,
+// or nil where none is — or where the one found is a different
+// function that happens to collide.
+//
+// The convention a generator reaches for when a value can be seeded
+// from source the consumer already wrote: `UserDefaults()` beside
+// `User`. The suffix is a parameter because the convention belongs to
+// whichever directive spells it, while the walk does not.
+//
+// The signature is checked rather than only the name. A `UserDefaults`
+// taking arguments, or returning something else, is a different
+// function, and calling it emits a file the consumer cannot compile —
+// a failure attributed to the generator rather than to the collision.
+//
+// Takes the function slice rather than a store handle, on the same
+// terms as [ForeignVariants]: the caller keeps its reader and this
+// package stays below it.
+func Companion(funcs []*node.Function, pkg, typeName, suffix string) emit.Ref {
+	if typeName == "" {
+		return nil
+	}
+	name := typeName + suffix
+	for _, fn := range funcs {
+		if fn == nil || fn.Name != name || fn.Package != pkg {
+			continue
+		}
+		if len(fn.Params) != 0 || len(fn.Returns) != 1 {
+			return nil
+		}
+		if r := fn.Returns[0].Type; r == nil || r.Name != typeName {
+			return nil
+		}
+		return emit.External(pkg, name)
+	}
+	return nil
+}

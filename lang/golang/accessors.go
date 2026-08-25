@@ -332,11 +332,26 @@ func GoImport(p *node.Package) (string, bool) {
 // Tag names are not known until a field is read, so the keys are
 // registered dynamically under [MetaTagPrefix]; this resolves the
 // same singleton a stamping frontend used.
+//
+// Answered as the union, on the same terms as every type predicate
+// here: the stamp where a frontend supplied one, the field's own tag
+// string otherwise. Neither half suffices alone. A stamp-only answer
+// reads false on every graph no Go frontend produced — a fixture, a
+// bridge, a synthesised node — all of which carry the tag verbatim on
+// [node.Field.Tag] and stamp nothing, so a generator keying on a tag
+// would silently find none and emit output for a declaration that
+// asked for something else.
 func Tag(f *node.Field, name string) (string, bool) {
 	if name == "" {
 		return "", false
 	}
-	return meta.EnsureKey(MetaTagPrefix+name, meta.StringParser).Get(bagOf(f))
+	if value, ok := meta.EnsureKey(MetaTagPrefix+name, meta.StringParser).Get(bagOf(f)); ok {
+		return value, true
+	}
+	if f == nil {
+		return "", false
+	}
+	return TagValue(f.Tag, name)
 }
 
 // Tags returns every struct-tag entry stamped on f, keyed by tag

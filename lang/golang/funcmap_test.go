@@ -189,6 +189,7 @@ func bundles() []template.FuncMap {
 		golang.ShapeFuncMap(),
 		golang.EmbedFuncMap(),
 		golang.GenericsFuncMap(),
+		golang.AssertFuncMap(),
 	}
 }
 

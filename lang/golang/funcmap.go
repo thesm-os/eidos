@@ -167,7 +167,7 @@ func AllFuncMap() template.FuncMap {
 	for _, bundle := range []template.FuncMap{
 		SigFuncMap(), QueryFuncMap(), ConventionFuncMap(),
 		EnumFuncMap(), ShapeFuncMap(), EmbedFuncMap(),
-		GenericsFuncMap(),
+		GenericsFuncMap(), AssertFuncMap(),
 	} {
 		maps.Copy(out, bundle)
 	}

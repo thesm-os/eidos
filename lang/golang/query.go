@@ -135,6 +135,17 @@ func ErrorReturn(returns []*node.Return) *node.Return {
 	return returns[i]
 }
 
+// HasError reports whether the signature returns the builtin error.
+//
+// The question a classifier asks, beside [ErrorSlot] for the one that
+// needs the position and [ErrorReturn] for the one that needs the
+// slot. Spelled out because it is asked far more often than either,
+// and `ErrorSlot(returns) >= 0` at every such site is a comparison a
+// reader has to decode back into the question it answers.
+func HasError(returns []*node.Return) bool {
+	return ErrorSlot(returns) >= 0
+}
+
 // StripError returns every return slot except the first error, in
 // declaration order.
 //
