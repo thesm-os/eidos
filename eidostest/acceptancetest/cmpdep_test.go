@@ -46,17 +46,27 @@ func requireCmp(t *testing.T, dir string) {
 
 // moduleDir returns where the go toolchain has module unpacked, so a
 // replace can name a directory rather than a version to fetch.
+//
+// Downloaded first, because the directory is empty until the module is
+// extracted and nothing else here extracts it: go-cmp reaches this
+// module as an indirect requirement, so a build that never needed it
+// leaves the cache without it and `go list` answers with a module it
+// knows and a path that does not exist. That is what CI hit while a
+// developer machine with a warm cache passed.
 func moduleDir(t *testing.T, module string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
+	if out, err := exec.CommandContext(ctx, "go", "mod", "download", module).CombinedOutput(); err != nil {
+		t.Fatalf("acceptancetest: downloading %s: %v\n%s", module, err, out)
+	}
 	out, err := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Dir}}", module).Output()
 	if err != nil {
 		t.Fatalf("acceptancetest: locating %s: %v", module, err)
 	}
 	dir := strings.TrimSpace(string(out))
 	if dir == "" {
-		t.Fatalf("acceptancetest: %s reports no directory; is it required by this module?", module)
+		t.Fatalf("acceptancetest: %s reports no directory even after download", module)
 	}
 	return dir
 }

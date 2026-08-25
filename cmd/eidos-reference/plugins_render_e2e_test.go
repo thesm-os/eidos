@@ -739,17 +739,27 @@ const cmpModule = "github.com/google/go-cmp"
 // build with a network error rather than a compile one. Asking this
 // module where its own copy lives is what turns that into a replace
 // the sandbox can follow.
+//
+// Downloaded first, because the directory is empty until the module is
+// extracted and nothing else here extracts it: go-cmp reaches this
+// module as an indirect requirement, so a build that never needed it
+// leaves the cache without it and `go list` answers with a module it
+// knows and a path that does not exist. A developer machine with a
+// warm cache passes either way, which is why CI was the first to say so.
 func moduleDir(t *testing.T, module string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
+	if out, err := exec.CommandContext(ctx, "go", "mod", "download", module).CombinedOutput(); err != nil {
+		t.Fatalf("downloading %s: %v\n%s", module, err, out)
+	}
 	out, err := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Dir}}", module).Output()
 	if err != nil {
 		t.Fatalf("locating %s: %v", module, err)
 	}
 	dir := strings.TrimSpace(string(out))
 	if dir == "" {
-		t.Fatalf("%s reports no directory; is it in this module's requirements?", module)
+		t.Fatalf("%s reports no directory even after download", module)
 	}
 	return dir
 }
