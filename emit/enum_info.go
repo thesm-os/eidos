@@ -149,13 +149,3 @@ type EnumInfo struct {
 	// turn out to declare.
 	OutOfRange string
 }
-
-// Declares reports whether the set declares a variant named name.
-func (e EnumInfo) Declares(name string) bool {
-	for _, v := range e.Variants {
-		if v.Name == name {
-			return true
-		}
-	}
-	return false
-}

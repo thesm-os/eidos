@@ -274,3 +274,76 @@ type corruptCache struct{}
 
 func (corruptCache) Get(string) ([]byte, bool) { return []byte("{not json"), true }
 func (corruptCache) Put(string, []byte) error  { return nil }
+
+// A conversion that fails stops the unit rather than the run's
+// caching.
+//
+// The error is the frontend's own — a source file that will not parse,
+// a resolver that could not reach an import — and it reaches the
+// caller unchanged, because what to do about it is the frontend's
+// decision and not this one's.
+func TestCacheLoad_ConvertErrorReachesTheCaller(t *testing.T) {
+	t.Parallel()
+
+	err := plugin.CacheLoad(loadCtx(t, cache.NewDisk(t.TempDir()), "fp"), "fe", "1", "u",
+		func() (string, error) { return "same", nil },
+		func() ([]*node.Package, error) { return nil, stubError("cannot convert") },
+	)
+	if err == nil {
+		t.Fatal("a failed conversion reported success")
+	}
+	if err.Error() != "cannot convert" {
+		t.Errorf("got %v; the frontend's own error should reach the caller unwrapped", err)
+	}
+}
+
+// A package the store refuses is reported rather than swallowed.
+//
+// Two units resolving to one package path is the case: the second
+// AddPackage fails, and a run that ignored it would carry a graph
+// missing declarations nothing said were dropped.
+func TestCacheLoad_StoreRefusalIsReported(t *testing.T) {
+	t.Parallel()
+
+	ctx := loadCtx(t, cache.NewNone(), "fp")
+	load := func(unit string) error {
+		return plugin.CacheLoad(ctx, "fe", "1", unit,
+			func() (string, error) { return unit, nil },
+			func() ([]*node.Package, error) { return pkg("a"), nil },
+		)
+	}
+	if err := load("one"); err != nil {
+		t.Fatalf("first unit: %v", err)
+	}
+	if err := load("two"); err == nil {
+		t.Error("a second package at the same path was accepted silently")
+	}
+}
+
+// A cache that refuses the write does not fail the run.
+//
+// The graph is already in the store and the output is correct; the
+// only consequence is that the next run converts again. Failing here
+// would turn a full disk into a broken build.
+func TestCacheLoad_WriteFailureWarnsRatherThanFails(t *testing.T) {
+	t.Parallel()
+
+	ctx := loadCtx(t, refusingCache{}, "fp")
+	err := plugin.CacheLoad(ctx, "fe", "1", "u",
+		func() (string, error) { return "same", nil },
+		func() ([]*node.Package, error) { return pkg("a"), nil },
+	)
+	if err != nil {
+		t.Fatalf("a refused write failed the run: %v", err)
+	}
+	if ctx.Diag.Count(diag.Warn) == 0 {
+		t.Error("a refused write should say so; a run that caches nothing and " +
+			"reports nothing looks like one that is caching")
+	}
+}
+
+// refusingCache accepts nothing and returns nothing.
+type refusingCache struct{}
+
+func (refusingCache) Get(string) ([]byte, bool) { return nil, false }
+func (refusingCache) Put(string, []byte) error  { return stubError("disk full") }

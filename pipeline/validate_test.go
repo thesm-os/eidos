@@ -264,3 +264,29 @@ func TestValidate_TerminatesOnASelfReferentialType(t *testing.T) {
 	}}
 	runWith(t, &node.Package{Name: "x", Path: "x", Structs: []*node.Struct{self}})
 }
+
+// A node reachable twice is visited once.
+//
+// The walk descends into type references and a graph is not a tree: a
+// declaration reached through two paths would otherwise have its
+// directives validated twice, and an author would read one mistake
+// reported as two.
+func TestValidate_VisitsEachNodeOnce(t *testing.T) {
+	t.Parallel()
+
+	// One field, shared by two structs. Artificial, and the cheapest
+	// expression of what a real graph does through its type references.
+	shared := &node.Field{
+		Name:     "ID",
+		BaseNode: node.BaseNode{DirectiveList: []*directive.Directive{dir("scoped", 1)}},
+	}
+	d := runWith(t, &node.Package{Name: "x", Path: "x", Structs: []*node.Struct{
+		{Name: "A", Package: "x", Fields: []*node.Field{shared}},
+		{Name: "B", Package: "x", Fields: []*node.Field{shared}},
+	}}, directive.NewSchema("scoped").On(kind.Kind(node.KindPackage)).Build())
+
+	if got := errorsFrom(d); len(got) != 1 {
+		t.Errorf("got %d reports, want 1: one mistake read as two sends the "+
+			"author looking for a second", len(got))
+	}
+}

@@ -86,15 +86,3 @@ type ErrorMember struct {
 	// `042`.
 	Verbatim bool
 }
-
-// Writable reports whether any member carries a value a check can
-// write, which is what decides whether the message check is worth
-// emitting.
-func (e ErrorInfo) Writable() bool {
-	for _, m := range e.Members {
-		if m.Sample.OK() {
-			return true
-		}
-	}
-	return false
-}

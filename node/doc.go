@@ -19,7 +19,7 @@
 //     because every frontend writes it and every bridge reads it, and
 //     a key is interned by name — so each of them spelling the string
 //     itself, as all three did, holds only while they keep agreeing.
-//     See [MetaFrontend] and [FrontendOf].
+//     See [MetaFrontend].
 //   - [directive.Directive] values are parsed from source comments
 //     and attached per node; the directive package's validator
 //     enforces schemas against them.

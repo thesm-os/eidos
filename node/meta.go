@@ -49,17 +49,3 @@ import "go.thesmos.sh/eidos/core/meta"
 //
 //nolint:gochecknoglobals // meta key registration, immutable after init.
 var MetaFrontend = meta.EnsureKey("frontend", meta.StringParser)
-
-// FrontendOf returns the language pkg's declarations were written in,
-// or empty when nothing stamped one.
-//
-// An unstamped package is ordinary input rather than a defect — a
-// fixture, a bridge, a synthesised graph — so the absent answer is the
-// empty string and each caller decides what to do with it.
-func FrontendOf(pkg *Package) string {
-	if pkg == nil {
-		return ""
-	}
-	name, _ := MetaFrontend.Get(pkg.Meta())
-	return name
-}

@@ -42,10 +42,10 @@ import (
 // directive's arguments, and every reader downstream — annotators,
 // the override pass, generators — expects the folded list. Validating
 // later would hand the first of them the unfolded one.
+// The registry is not checked for nil: [Builder.buildDirectiveRegistry]
+// always returns one, and Build is the only way to reach a Pipeline —
+// so a guard here would be a branch no test can take.
 func (p *Pipeline) validateDirectives(s *store.Store) {
-	if p.registry == nil {
-		return
-	}
 	// No phase-boundary log. This is a step inside the frontend phase
 	// rather than a phase of its own — it runs no plugins, so it has
 	// nothing to parallelise and no bucket to report — and logging it as

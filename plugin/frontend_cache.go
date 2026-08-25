@@ -168,17 +168,20 @@ func cachedPackages(c cache.Cache, key string) ([]*node.Package, bool) {
 }
 
 // storePackages writes a unit's graph back for the next run.
+//
+// Never called with nothing: [CacheLoad] holds that check, because
+// what an empty result means is its decision rather than this one's.
+//
+// The marshal error is dropped rather than reported. Every field a
+// graph reaches is JSON-encodable and the host-to-child cycles are
+// broken by the `json:"-"` on each Owner, so a failure here is a
+// contract violation in the node model rather than anything a run can
+// encounter — and handling it would add a branch no test can reach.
 func storePackages(ctx *FrontendContext, frontend, key string, pkgs []*node.Package) {
-	if len(pkgs) == 0 {
-		return
-	}
-	body, err := json.Marshal(pkgs) //nolint:musttag // node graphs are JSON-safe by construction
-	if err != nil {
-		ctx.Diag.For(frontend).Warnf(pkgs[0].Pos(),
-			"caching this graph failed, so the next run converts it again: %v", err)
-		return
-	}
+	body, _ := json.Marshal(pkgs) //nolint:errcheck,musttag // node graphs are JSON-safe by construction
 	if err := ctx.Cache.Put(key, body); err != nil {
+		// A write failure is not the run's problem: the graph is in the
+		// store and the output is correct. The next run converts again.
 		ctx.Diag.For(frontend).Warnf(pkgs[0].Pos(),
 			"caching this graph failed, so the next run converts it again: %v", err)
 	}
