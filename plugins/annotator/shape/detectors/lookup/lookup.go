@@ -4,6 +4,7 @@
 package lookup
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -24,7 +25,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 850,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -34,19 +35,19 @@ func Detector() shape.Detector {
 // bare bool sentinel. No error return. The metadata type is
 // stamped via [MetaType] alongside the universal triple.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	keys := shape.GoStripContext(params)
+	params, returns := golang.Callable(n)
+	keys := golang.StripContext(params)
 	if len(keys) != 1 || len(returns) != 3 {
 		return shape.Match{}, false
 	}
-	if !shape.GoIsBool(returns[2].Type) {
+	if !golang.IsBool(returns[2].Type) {
 		return shape.Match{}, false
 	}
 	return shape.Match{
-		KeyType:   shape.QName(keys[0].Type),
-		ValueType: shape.QName(returns[0].Type),
+		KeyType:   golang.QName(keys[0].Type),
+		ValueType: golang.QName(returns[0].Type),
 		StringStamps: []shape.StringStamp{
-			{Key: MetaType, Value: shape.QName(returns[1].Type)},
+			{Key: MetaType, Value: golang.QName(returns[1].Type)},
 		},
 	}, true
 }

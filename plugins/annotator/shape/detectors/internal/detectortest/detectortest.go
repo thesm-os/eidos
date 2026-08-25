@@ -15,17 +15,11 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
-
-// frontendMarker mirrors the umbrella plugin's package-level
-// frontend lookup so fixtures can stamp the marker on the test
-// package's meta bag.
-//
-//nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // RunFn wires fn into a single-function "x" package, stamps the
 // "golang" frontend marker, runs the umbrella shape plugin
@@ -156,7 +150,7 @@ func runUmbrella(t *testing.T, det shape.Detector, pkg *sdk.Package) {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
+	sdk.MetaFrontend.Set(pkg.EnsureMeta(), golang.Language, "test")
 
 	p := shape.New().Detectors(det)
 	ctx := &sdk.AnnotatorContext{

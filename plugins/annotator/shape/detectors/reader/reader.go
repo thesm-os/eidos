@@ -4,6 +4,7 @@
 package reader
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -23,7 +24,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 420,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -40,12 +41,12 @@ func Detector() shape.Detector {
 // deterministic re-read from it, and a parameter with no equality
 // makes all three vacuous rather than false.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	if !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	if !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	keys := shape.GoStripContext(params)
-	values := shape.GoStripError(returns)
+	keys := golang.StripContext(params)
+	values := golang.StripErrorTypes(returns)
 	if len(keys) != 1 || len(values) != 1 {
 		return shape.Match{}, false
 	}
@@ -53,8 +54,8 @@ func detectGolang(n sdk.Node) (shape.Match, bool) {
 		return shape.Match{}, false
 	}
 	return shape.Match{
-		KeyType:   shape.QName(keys[0].Type),
-		ValueType: shape.QName(values[0]),
+		KeyType:   golang.QName(keys[0].Type),
+		ValueType: golang.QName(values[0]),
 	}, true
 }
 
@@ -66,33 +67,21 @@ func detectGolang(n sdk.Node) (shape.Match, bool) {
 // `interface{ Read(...) }` re-reads to the zero value, so a
 // same-key-same-value assertion passes without testing anything.
 //
-// Two limits are deliberate.
+// Narrower than [golang.Keyable], which answers Go's own
+// comparability question. This one adds the anonymous-interface
+// refusal, which is a statement about what a *reader key* means
+// rather than about what Go permits: an inline interface compares
+// fine and still makes the assertions the stamp licenses vacuous.
+// A named interface — `io.Reader` being the common case — is opaque
+// to both, since the node model records a package and an identifier
+// and nothing about what they resolve to.
 //
-// It is narrower than the problem: a *named* interface, `io.Reader`
-// being the common case, is opaque here. The node IR records a
-// package and an identifier and nothing about what they resolve to,
-// so it still detects as a reader. Closing that needs the frontend
-// to stamp interface-ness on the ref; this covers the inline form
-// only, and the check is written so that adding the named case is a
-// single clause here.
-//
-// It is broader than strictly necessary: interface values compare
-// fine when their dynamic types do, so a lookup keyed on
-// `interface{ String() string }` is legitimate and refused anyway.
-// That trade is intentional. Refusing a valid key costs a missing
-// stamp, which a `+gen:shape` directive can restore; accepting an
-// invalid one costs a wrong stamp that downstream tooling acts on
-// with no signal that anything is off.
+// Refusing a valid key costs a missing stamp, which a `+gen:shape`
+// directive restores; accepting an invalid one costs a wrong stamp
+// that downstream tooling acts on with no signal anything is off.
 func keyable(t *sdk.TypeRef) bool {
-	if t == nil {
+	if t == nil || t.IsAnonInterface() {
 		return false
 	}
-	switch {
-	case t.IsSlice(), t.IsMap(), t.IsFunc():
-		return false
-	case t.IsAnonInterface():
-		return false
-	default:
-		return true
-	}
+	return golang.Keyable(t)
 }

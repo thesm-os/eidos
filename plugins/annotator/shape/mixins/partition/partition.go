@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -87,7 +88,7 @@ func validateAxis(attachments []shape.MixinAttachment) []shape.MixinViolation {
 		if !given || axis == "" {
 			continue
 		}
-		hostParams, _ := shape.GoCallable(attached.Host)
+		hostParams, _ := golang.Callable(attached.Host)
 		if !hasParam(hostParams, axis) {
 			out = append(out, shape.MixinViolation{
 				Host: attached.Host,
@@ -151,7 +152,7 @@ func partnerParams(host sdk.Node, qname string) ([]*sdk.Param, bool) {
 		if sibling == nil || owner+"."+sibling.Name != qname {
 			continue
 		}
-		params, _ := shape.GoCallable(sibling)
+		params, _ := golang.Callable(sibling)
 		return params, true
 	}
 	return nil, false

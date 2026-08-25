@@ -5,11 +5,16 @@
 // signatures (free functions and methods) into named shapes that
 // downstream generators consume. The package owns the universal
 // contract — the shape triple plus the contract- and mixin-axis
-// keys, the `+gen:shape` directive, the umbrella [Plugin], and the
-// lazy Go-language helpers — but knows nothing about any
-// individual shape. Each shape (Reader,
-// Writer, Lifecycle, …) lives in its own sub-package alongside
-// this one and exports a [Detector] the consumer composes in.
+// keys, the `+gen:shape` directive and the umbrella [Plugin] — but
+// knows nothing about any individual shape. Each shape (Reader,
+// Writer, Lifecycle, …) lives in its own sub-package alongside this
+// one and exports a [Detector] the consumer composes in.
+//
+// Signature primitives are not part of that contract. A detector
+// composes its query from the language package its [DetectFunc] is
+// registered under — [go.thesmos.sh/eidos/lang/golang] for Go —
+// which is where every Go-speaking part of a pipeline already reads
+// the same questions from.
 //
 // # The contract
 //
@@ -35,21 +40,24 @@
 //	    return shape.Detector{
 //	        Name: "reader",
 //	        Detect: map[string]shape.DetectFunc{
-//	            "golang":   detectGolang,
-//	            "protobuf": detectProtobuf,
-//	            "rust":     detectRust,
+//	            golang.Language:     detectGolang,
+//	            protobuf.Language:   detectProtobuf,
 //	        },
 //	    }
 //	}
 //
-// The umbrella plugin reads each package's `frontend` marker meta
-// and dispatches to the matching [DetectFunc]. That key is a
-// string carrying the producing frontend's plugin name
-// (`"golang"`, `"protobuf"`); the frontend stamps it, this package
-// only reads it, and it is bound here through [sdk.EnsureKey]
-// rather than imported because the frontends live in other
-// modules. Sources from frontends without a registered entry are
-// silently skipped — permissive by construction.
+// The umbrella plugin asks each package what language it was written
+// in through [sdk.LanguageOf] and dispatches to the matching
+// [DetectFunc]. The answer is the name the producing frontend
+// stamped, which is the same namespace a backend answers to — so the
+// key is spelled through the language package's own constant rather
+// than as a literal, and a detector cannot register under a name no
+// frontend produces and then silently never run.
+//
+// Declarations in a language with no registered entry are skipped
+// without stamping — permissive by construction, because a catalog
+// covering one language should not fail a run that also parses
+// another.
 //
 // # Composition
 //
@@ -161,10 +169,26 @@
 //
 // # Traversal
 //
-// The plugin implements the framework's per-callable visitor
-// hooks ([plugin.MethodHook] and [plugin.FunctionHook]) so the
-// pipeline's single annotator walk covers every callable; there
-// is no plugin-local tree traversal.
+// [Plugin.Annotate] walks the packages the [sdk.StoreReader] exposes
+// and dispatches over every callable each one holds.
+//
+// Through the Reader rather than the framework's [sdk.Walk] helper,
+// which iterates the store directly: reads the Reader captures
+// compose the plugin's cache key, and a read that goes around it is
+// one the cache cannot invalidate on — the source changes, the
+// fingerprint does not, and the next run serves stamps derived from
+// declarations that have since moved.
+//
+// Per package rather than over the store's flat buckets, because the
+// language a declaration is read with is a fact about the package
+// that produced it; walking packages hands each callable its
+// language on the way past.
+//
+// All four method-carrying declarations are covered. A struct and an
+// interface are the obvious two, and Go attaches methods to any
+// defined type — so `type Weekday int` carries them on an
+// [sdk.Alias], and the same declaration moves them onto an
+// [sdk.Enum] the moment a const block coalesces it.
 //
 // # Where the boundary sits
 //
@@ -173,10 +197,9 @@
 //
 //   - It owns the `+gen:shape` directive schema and the override
 //     pre-stamp pass.
-//   - It receives every callable through the framework's
-//     [plugin.Walk] hook dispatcher.
-//   - It looks up the per-frontend [DetectFunc] for the package's
-//     source language.
+//   - It reaches every callable in every package the run loaded.
+//   - It looks up the [DetectFunc] for the language the package was
+//     written in.
 //   - It applies the already-stamped skip.
 //   - It stamps the three meta keys on a positive [Match].
 //

@@ -327,12 +327,13 @@ func (b *Builder) Enum(name string, fn func(*EnumBuilder)) *Builder {
 // [AliasBuilder.True] to mark the declaration as an alias
 // (`type X = Y`) rather than a definition (`type X Y`).
 func (b *Builder) Alias(name string, fn func(*AliasBuilder)) *Builder {
+	file := declFile(b.pkg.Name, name)
 	a := &node.Alias{
-		BaseNode: node.BaseNode{SourcePos: position.Pos{File: declFile(b.pkg.Name, name)}},
+		BaseNode: node.BaseNode{SourcePos: position.Pos{File: file}},
 		Name:     name,
 		Package:  b.pkg.Path,
 	}
-	ab := &AliasBuilder{a: a}
+	ab := &AliasBuilder{a: a, pkgPath: b.pkg.Path, file: file}
 	if fn != nil {
 		fn(ab)
 	}

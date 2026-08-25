@@ -26,17 +26,11 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
-
-// frontendMarker mirrors the umbrella plugin's package-private
-// frontend lookup key so fixtures stamp the marker on test
-// packages without re-implementing the lookup.
-//
-//nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // AssertIdentity fails the test when c does not match the
 // expected name + roles. Use as the canonical body of every
@@ -100,7 +94,7 @@ func RunPipeline(t *testing.T, c shape.Contract, pkg *sdk.Package) []sdk.Diag {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
+	sdk.MetaFrontend.Set(pkg.EnsureMeta(), golang.Language, "test")
 
 	umbrella := shape.New().Contracts(c)
 	sink := diag.New()

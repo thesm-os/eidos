@@ -4,6 +4,7 @@
 package readernoerror
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -17,7 +18,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 400,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -25,14 +26,14 @@ func Detector() shape.Detector {
 // detectGolang accepts a callable with exactly one non-context
 // parameter and exactly one non-error return.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	keys := shape.GoStripContext(params)
-	values := shape.GoStripError(returns)
+	params, returns := golang.Callable(n)
+	keys := golang.StripContext(params)
+	values := golang.StripErrorTypes(returns)
 	if len(keys) != 1 || len(returns) != 1 || len(values) != 1 {
 		return shape.Match{}, false
 	}
 	return shape.Match{
-		KeyType:   shape.QName(keys[0].Type),
-		ValueType: shape.QName(values[0]),
+		KeyType:   golang.QName(keys[0].Type),
+		ValueType: golang.QName(values[0]),
 	}, true
 }

@@ -6,6 +6,7 @@ package closer
 import (
 	"slices"
 
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -39,7 +40,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: Priority,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -50,11 +51,11 @@ func detectGolang(n sdk.Node) (shape.Match, bool) {
 	if !slices.Contains(Names, callableName(n)) {
 		return shape.Match{}, false
 	}
-	params, returns := shape.GoCallable(n)
+	params, returns := golang.Callable(n)
 	if len(params) != 0 || len(returns) != 1 {
 		return shape.Match{}, false
 	}
-	if !shape.GoHasError(returns) {
+	if !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
 	return shape.Match{}, true

@@ -4,6 +4,7 @@
 package batchreader
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -17,7 +18,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 950,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -26,28 +27,28 @@ func Detector() shape.Detector {
 // parameter is a trailing variadic `...K`, and whose only
 // non-error return is a slice `[]V`.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	if !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	if !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	values := shape.GoStripError(returns)
+	values := golang.StripErrorTypes(returns)
 	if len(values) != 1 {
 		return shape.Match{}, false
 	}
-	elem := shape.GoSliceElem(values[0])
+	elem := golang.SliceElem(values[0])
 	if elem == nil {
 		return shape.Match{}, false
 	}
-	args := shape.GoStripContext(params)
+	args := golang.StripContext(params)
 	if len(args) != 1 {
 		return shape.Match{}, false
 	}
-	variadic := shape.GoTrailingVariadic(args)
+	variadic := golang.TrailingVariadic(args)
 	if variadic == nil {
 		return shape.Match{}, false
 	}
 	return shape.Match{
-		KeyType:   shape.QName(variadic.Type),
-		ValueType: shape.QName(elem),
+		KeyType:   golang.QName(variadic.Type),
+		ValueType: golang.QName(elem),
 	}, true
 }

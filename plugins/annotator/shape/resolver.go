@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -258,17 +259,16 @@ func (r *Resolver) callableScope(host sdk.Node) resolveScope {
 // an unloaded package stamps unvalidated and the generated file's
 // compile is the loud failure; silence here is not a pass.
 func (r *Resolver) memberScope(host sdk.Node) resolveScope {
-	params, returns := GoCallable(host)
-	_ = params
-	results := GoStripError(returns)
+	_, returns := golang.Callable(host)
+	results := golang.StripErrorTypes(returns)
 	if len(results) == 0 {
 		return nil
 	}
 	answered := results[0]
-	if elem := GoPointerElem(answered); elem != nil {
+	if elem := golang.PointerElem(answered); elem != nil {
 		answered = elem
 	}
-	owner := QName(answered)
+	owner := golang.QName(answered)
 	methods := r.typeMethods[owner]
 	if owner == "" || len(methods) == 0 {
 		// Nil rather than the empty scope, which always misses and

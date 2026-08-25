@@ -4,6 +4,7 @@
 package multiaggregator
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -24,7 +25,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 600,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -34,17 +35,17 @@ func Detector() shape.Detector {
 // error. The full non-error return list is stamped via
 // [ValueTypes] so consumers can recover every value type.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	if len(shape.GoStripContext(params)) != 0 || !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	if len(golang.StripContext(params)) != 0 || !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	values := shape.GoStripError(returns)
+	values := golang.StripErrorTypes(returns)
 	if len(values) < 2 {
 		return shape.Match{}, false
 	}
 	qnames := make([]string, len(values))
 	for i, v := range values {
-		qnames[i] = shape.QName(v)
+		qnames[i] = golang.QName(v)
 	}
 	return shape.Match{
 		ValueType: qnames[0],

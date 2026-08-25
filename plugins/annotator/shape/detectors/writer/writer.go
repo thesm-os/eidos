@@ -4,6 +4,7 @@
 package writer
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -23,7 +24,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 500,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -48,16 +49,16 @@ func Detector() shape.Detector {
 // its types under the wrong label is recoverable, which the
 // previous behaviour was not.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	if !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	if !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	values := shape.GoStripContext(params)
-	results := shape.GoStripError(returns)
+	values := golang.StripContext(params)
+	results := golang.StripErrorTypes(returns)
 	if len(values) != 1 || len(results) != 0 {
 		return shape.Match{}, false
 	}
 	return shape.Match{
-		ValueType: shape.QName(values[0].Type),
+		ValueType: golang.QName(values[0].Type),
 	}, true
 }

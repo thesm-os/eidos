@@ -18,13 +18,11 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
 )
-
-//nolint:gochecknoglobals // test-side singleton mirroring plugin's lookup
-var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)
 
 // AssertIdentity fails the test when m does not match the
 // expected name + params. Use as the canonical body of every
@@ -91,7 +89,7 @@ func RunPipeline(t *testing.T, m shape.Mixin, fn *sdk.Function) *sdk.Bag {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
+	sdk.MetaFrontend.Set(pkg.EnsureMeta(), golang.Language, "test")
 
 	p := shape.New().Mixins(m)
 	ctx := &sdk.AnnotatorContext{
@@ -116,7 +114,7 @@ func RunWithResolver(t *testing.T, m shape.Mixin, pkg *sdk.Package) {
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
+	sdk.MetaFrontend.Set(pkg.EnsureMeta(), golang.Language, "test")
 
 	p := shape.New().Mixins(m)
 	ctx := &sdk.AnnotatorContext{
@@ -168,7 +166,7 @@ func RunWithValidator(t *testing.T, m shape.Mixin, pkg *sdk.Package) []sdk.Diag 
 	if err := s.Nodes().AddPackage(pkg); err != nil {
 		t.Fatalf("AddPackage: %v", err)
 	}
-	frontendMarker.Set(pkg.EnsureMeta(), "golang", "test")
+	sdk.MetaFrontend.Set(pkg.EnsureMeta(), golang.Language, "test")
 
 	umbrella := shape.New().Mixins(m)
 	sink := diag.New()

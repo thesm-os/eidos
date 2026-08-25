@@ -6,6 +6,7 @@ package deleter
 import (
 	"slices"
 
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -44,7 +45,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: Priority,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -60,16 +61,16 @@ func detectGolang(n sdk.Node) (shape.Match, bool) {
 	if !slices.Contains(Names, callableName(n)) {
 		return shape.Match{}, false
 	}
-	params, returns := shape.GoCallable(n)
-	if !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	if !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	keys := shape.GoStripContext(params)
-	results := shape.GoStripError(returns)
+	keys := golang.StripContext(params)
+	results := golang.StripErrorTypes(returns)
 	if len(keys) != 1 || len(results) != 0 {
 		return shape.Match{}, false
 	}
-	return shape.Match{KeyType: shape.QName(keys[0].Type)}, true
+	return shape.Match{KeyType: golang.QName(keys[0].Type)}, true
 }
 
 // callableName returns the declared name of a function or method, and

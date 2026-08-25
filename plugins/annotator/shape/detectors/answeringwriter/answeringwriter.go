@@ -4,6 +4,7 @@
 package answeringwriter
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -26,7 +27,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: Priority,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -53,12 +54,12 @@ func Detector() shape.Detector {
 // from the other direction: a permissive rule at a higher priority
 // claimed reads and labelled the key as the written value.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	if !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	if !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	values := shape.GoStripContext(params)
-	results := shape.GoStripError(returns)
+	values := golang.StripContext(params)
+	results := golang.StripErrorTypes(returns)
 	if len(values) != 1 || len(results) != 1 {
 		return shape.Match{}, false
 	}
@@ -66,8 +67,8 @@ func detectGolang(n sdk.Node) (shape.Match, bool) {
 	if param == nil || param.Package == "" {
 		return shape.Match{}, false
 	}
-	written := shape.QName(param)
-	if written != shape.QName(results[0]) {
+	written := golang.QName(param)
+	if written != golang.QName(results[0]) {
 		return shape.Match{}, false
 	}
 	return shape.Match{ValueType: written}, true

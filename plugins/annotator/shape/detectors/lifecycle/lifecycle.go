@@ -4,6 +4,7 @@
 package lifecycle
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -23,7 +24,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 200,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -32,12 +33,12 @@ func Detector() shape.Detector {
 // a single `context.Context` parameter and a single `error`
 // return, with no other parameters or returns.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	if !shape.GoHasContext(params) || !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	if !golang.HasContext(params) || !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	rest := shape.GoStripContext(params)
-	results := shape.GoStripError(returns)
+	rest := golang.StripContext(params)
+	results := golang.StripErrorTypes(returns)
 	if len(rest) != 0 || len(results) != 0 {
 		return shape.Match{}, false
 	}

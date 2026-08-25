@@ -4,6 +4,7 @@
 package mutator
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -17,7 +18,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 300,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -27,17 +28,17 @@ func Detector() shape.Detector {
 // the `*V` pointer wrapping when present so the stamped value
 // type names the underlying element.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
+	params, returns := golang.Callable(n)
 	if len(returns) != 0 {
 		return shape.Match{}, false
 	}
-	values := shape.GoStripContext(params)
+	values := golang.StripContext(params)
 	if len(values) != 1 {
 		return shape.Match{}, false
 	}
 	valueType := values[0].Type
-	if elem := shape.GoPointerElem(valueType); elem != nil {
+	if elem := golang.PointerElem(valueType); elem != nil {
 		valueType = elem
 	}
-	return shape.Match{ValueType: shape.QName(valueType)}, true
+	return shape.Match{ValueType: golang.QName(valueType)}, true
 }

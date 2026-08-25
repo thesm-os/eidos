@@ -70,10 +70,18 @@ const DirectiveName sdk.DirectiveName = "shape"
 const ContractDirectiveName sdk.DirectiveName = "contract"
 
 // DetectFunc is the per-language detection signature. The umbrella
-// plugin hands every callable (a [*sdk.Function] or
-// [*sdk.Method]) to the function; detectors type-assert as
-// needed (typically through [GoCallable]) and use the lazy
-// helpers in this package to compose queries.
+// plugin hands every callable (a [*sdk.Function] or [*sdk.Method])
+// to the function, which composes its query from the language's own
+// vocabulary — a Go detector destructures through
+// [go.thesmos.sh/eidos/lang/golang.Callable] and asks with the
+// predicates beside it.
+//
+// The vocabulary is the language package's, not this one's. Shape
+// once carried its own Go helpers, and they answered by Go spelling
+// alone where `lang/golang` answers as the union of the frontend's
+// `go.*` stamp and the spelling — so a named error type the frontend
+// had already identified read as not-an-error, and every detector
+// keyed on it declined without saying why.
 //
 // A `(Match{}, false)` return is the permissive skip — the next
 // registered detector gets a turn. Detectors return it freely.
@@ -85,9 +93,12 @@ type DetectFunc func(n sdk.Node) (Match, bool)
 // these from their public API; the consumer composes them into
 // the umbrella plugin via [Plugin.Detectors].
 //
-// A shape that supports only Go registers `{"golang": detectGo}`;
-// adding language support is purely additive — register the new
-// frontend key alongside.
+// A shape that supports only Go registers
+// `{golang.Language: detectGolang}`; adding a language is purely
+// additive — register the new key alongside. The key is spelled
+// through the language package's own constant rather than as a
+// literal, so a detector cannot register under a name no frontend
+// stamps and then silently never run.
 type Detector struct {
 	// Name is the canonical shape name stamped on a positive hit
 	// (e.g. `"reader"`). Owned by the registering shape package
@@ -104,9 +115,10 @@ type Detector struct {
 	// places the detector at the end of the dispatch order.
 	Priority int
 
-	// Detect maps a frontend marker (`"golang"`, `"protobuf"`, …)
-	// to the per-language detection function. Sources from any
-	// frontend not in this map are skipped without stamping.
+	// Detect maps the language a package was written in — the name
+	// its frontend stamped, read through [sdk.LanguageOf] — to the
+	// detection function for that language. Declarations in any
+	// language not in this map are skipped without stamping.
 	Detect map[string]DetectFunc
 }
 
@@ -158,52 +170,61 @@ type ListStamp struct {
 	Value []string
 }
 
-// Plugin is the umbrella shape plugin. One instance per pipeline
-// owns both the `+gen:shape` and `+gen:contract` directive schemas
-// and dispatches to every registered per-shape [Detector] +
-// per-contract [Contract] during the framework's annotator walk.
+// Options carries the plugin's user-tunable settings.
 //
-// The merged design means consumers register one plugin
-// regardless of how many shapes or contracts their pipeline
-// recognises, and the framework's "one owner per directive" rule
-// is satisfied by construction.
+// The plugin has no behaviour toggles today: what it recognises comes
+// from the registered vocabulary, and what it stamps comes from the
+// source. The struct exists so a future setting lands without
+// changing the plugin's options surface.
+type Options struct{}
+
+// Plugin is the umbrella shape plugin. One instance per pipeline
+// owns the `+gen:shape`, `+gen:contract` and `+gen:mixin` directive
+// schemas and dispatches to every registered [Detector], [Contract]
+// and [Mixin].
+//
+// The merged design means consumers register one plugin regardless of
+// how many shapes, contracts or mixins their pipeline recognises, and
+// the framework's "one owner per directive" rule is satisfied by
+// construction.
+//
+// Zero value is unusable; go through [New] so the embedded
+// [sdk.Holder] binds to the options field.
+//
+// # Concurrency
+//
+// The vocabulary is written by the registration methods during
+// wiring and read by every Annotate afterwards. Nothing locks and
+// nothing mutates once the pipeline is built — in particular no
+// per-run state lives here, so two runs sharing one plugin cannot
+// see each other's work.
 type Plugin struct {
 	*sdk.Base
+	*sdk.Holder[Options]
+	opts Options
 
 	detectors []Detector
 	contracts map[string]Contract
 	mixins    map[string]Mixin
-
-	// frontByMethod / frontByFunc map callable pointers to the
-	// frontend marker stamped on their containing package.
-	// Populated in [Plugin.BeforeNodes]; consumed by the per-
-	// callable hooks so dispatch resolves the source language in
-	// O(1) without depending on the optional
-	// [sdk.Method.Owner] back-pointer. Reset every Annotate
-	// call — per-run state, not cross-run cache.
-	frontByMethod map[*sdk.Method]string
-	frontByFunc   map[*sdk.Function]string
 }
 
-// New returns an umbrella [Plugin] with no shapes registered.
+// New returns an umbrella [Plugin] with no vocabulary registered.
 // Configure it through [Plugin.Detectors], [Plugin.Contracts] and
-// [Plugin.Mixins] before passing to the pipeline:
+// [Plugin.Mixins] before passing it to the pipeline:
 //
 //	pipe.WithAnnotator(shape.New().
 //	    Detectors(reader.Detector(), writer.Detector()).
 //	    Contracts(persister.Contract(), saga.Contract()),
 //	)
 //
-// Detector iteration order is the registration order; the first
-// positive match wins. Honour ordering for shapes that overlap
-// (e.g. Deleter must claim its signature before Writer falls
-// back). Contract registration order is irrelevant — contracts
-// are indexed by name.
+// A plugin registering nothing stamps nothing, which is a legitimate
+// configuration — a pipeline wanting contracts and no structural
+// shapes. Take [go.thesmos.sh/eidos/plugins/annotator/shape/full.New]
+// for the whole catalog rather than assembling one by hand.
 //
-// The shape-detection bucket is where the merged plugin belongs
-// because it runs every directive override and every detector in
-// one pass, so override and detection share a single priority
-// band.
+// The shape-detection bucket is where the merged plugin belongs: it
+// runs every directive override and every detector in one pass, so
+// override and detection share a single priority band.
 //
 // Nothing is provided or required. The annotator publishes its
 // results as metadata keys rather than as a named capability, so
@@ -213,23 +234,39 @@ type Plugin struct {
 // registering the three shape plugins individually a hard error
 // rather than a caller's choice. Both still have to be *answered*,
 // because [sdk.CapabilityProvider] is all-or-nothing — declaring a
-// bucket alone fails the pipeline's type assertion and collapses
-// the plugin into the default bucket, discarding the ordering the
-// bucket was declared to express. [sdk.Base] answers all three
-// together, which is what makes that failure unreachable.
+// bucket alone fails the pipeline's type assertion and collapses the
+// plugin into the default bucket, discarding the ordering the bucket
+// was declared to express. [sdk.Base] answers all three together,
+// which is what makes that failure unreachable.
+//
+// No language is declared through [sdk.Builder.For]. This plugin
+// ships no templates and emits no file, and the language a
+// declaration is read with is the [Detector.Detect] key — which the
+// registered detectors own, not the umbrella. Declaring Go here would
+// claim a language on behalf of a vocabulary that might carry none.
 func New() *Plugin {
-	return &Plugin{Base: sdk.NewPlugin(PluginName).
-		Version(Version).
-		Priority(sdk.AnnotatorShape).
-		Directives(directives()...).
-		Build()}
+	p := &Plugin{
+		Base: sdk.NewPlugin(PluginName).
+			Version(Version).
+			Priority(sdk.AnnotatorShape).
+			Directives(directives()...).
+			Build(),
+		contracts: map[string]Contract{},
+		mixins:    map[string]Mixin{},
+	}
+	p.Holder = sdk.BindOptions(&p.opts)
+	return p
 }
 
-// Detectors registers one or more per-shape signature detectors
-// with the plugin and sorts the cumulative list by [Detector.Priority]
-// (descending) so the first-positive-match cascade honours the
-// catalog ordering regardless of registration order. Returns the
-// plugin so calls chain.
+// Detectors registers one or more per-shape signature detectors and
+// sorts the cumulative list by [Detector.Priority] (descending) so
+// the first-positive-match cascade honours the catalog ordering
+// regardless of registration order. Returns the plugin so calls
+// chain.
+//
+// The sort is what stops a permissive shape claiming a signature a
+// more specific one owns — Writer before Deleter being the case the
+// catalog encodes.
 func (p *Plugin) Detectors(ds ...Detector) *Plugin {
 	p.detectors = append(p.detectors, ds...)
 	sort.SliceStable(p.detectors, func(i, j int) bool {
@@ -238,34 +275,24 @@ func (p *Plugin) Detectors(ds ...Detector) *Plugin {
 	return p
 }
 
-// Contracts registers one or more named contracts with the
-// plugin. Returns the plugin so calls chain.
+// Contracts registers one or more named contracts. Returns the
+// plugin so calls chain.
 //
 // Contracts are looked up by [Contract.Name] when the
-// `+gen:contract` directive is parsed; registering two contracts
-// under the same name overwrites the earlier registration in
-// favour of the latest call.
+// `+gen:contract` directive is read; registering two under one name
+// takes the later, which makes a call chain a correction rather than
+// a conflict.
 func (p *Plugin) Contracts(cs ...Contract) *Plugin {
-	if p.contracts == nil {
-		p.contracts = make(map[string]Contract, len(cs))
-	}
 	for _, c := range cs {
 		p.contracts[c.Name] = c
 	}
 	return p
 }
 
-// Mixins registers one or more named mixins with the plugin.
-// Returns the plugin so calls chain.
-//
-// Mixins are looked up by [Mixin.Name] when the `+gen:mixin`
-// directive is parsed; registering two mixins under the same
-// name overwrites the earlier registration in favour of the
-// latest call.
+// Mixins registers one or more named mixins. Returns the plugin so
+// calls chain. Looked up by [Mixin.Name], with the same later-wins
+// rule contracts follow.
 func (p *Plugin) Mixins(ms ...Mixin) *Plugin {
-	if p.mixins == nil {
-		p.mixins = make(map[string]Mixin, len(ms))
-	}
 	for _, m := range ms {
 		p.mixins[m.Name] = m
 	}
@@ -345,53 +372,61 @@ func directives() []sdk.DirectiveSchema {
 	}
 }
 
-// Annotate delegates to the framework's annotator walk via
-// [sdk.Walk]. The plugin only implements the hook methods the
-// walker invokes — there is no plugin-local node-tree traversal,
-// so the pipeline's single pass over the store covers every
-// callable.
+// Annotate dispatches detection over every callable, package by
+// package.
+//
+// Read through [sdk.StoreReader] rather than the framework's
+// [sdk.Walk] helper, which iterates the store directly. Reads the
+// Reader captures compose the plugin's cache key; a read that goes
+// around it is one the cache cannot invalidate on, so a source change
+// leaves the fingerprint identical and the next run serves stamps
+// derived from declarations that have since moved. Nothing reports
+// it — the output is stale and looks current.
+//
+// Per package rather than over the flat buckets, because the language
+// a declaration is read with is a fact about the package that
+// produced it. Walking the packages hands each callable its language
+// on the way past; the flat buckets do not, which is why this
+// previously needed two callable-to-language maps built on the plugin
+// once per run — per-run state on a value every phase shares.
+//
+// Interface methods carry a nil [sdk.Method.Receiver]; detectors that
+// care about the receiver shape handle the absence explicitly.
+//
+// All four method-carrying declarations are walked. A struct and an
+// interface are the obvious two; the other two are the ones a walk
+// written from memory forgets. Go attaches methods to any defined
+// type, so `type Weekday int` carries them on an [sdk.Alias] — and
+// when a const block turns that same declaration into an [sdk.Enum],
+// they move to the enum instead. Missing either leaves a callable
+// unclassified with nothing to say it was skipped.
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
-	return sdk.Walk(ctx, p)
-}
-
-// BeforeNodes builds the callable-to-frontend lookup maps once
-// per Annotate call. Walking each [sdk.Package]'s own struct /
-// interface / function slices avoids relying on the optional
-// [sdk.Method.Owner] back-pointer the per-method buckets
-// otherwise need to resolve a method's containing package.
-func (p *Plugin) BeforeNodes(ctx *sdk.AnnotatorContext) {
-	p.frontByMethod = make(map[*sdk.Method]string)
-	p.frontByFunc = make(map[*sdk.Function]string)
-	ctx.Reader.Packages().Each(func(pkg *sdk.Package) {
-		front, _ := frontendMarker.Get(pkg.Meta())
+	for _, pkg := range ctx.Reader.Packages().Slice() {
+		lang := sdk.LanguageOf(pkg)
 		for _, s := range pkg.Structs {
-			for _, m := range s.Methods {
-				p.frontByMethod[m] = front
-			}
+			p.handleMethods(ctx, s.Methods, lang)
 		}
 		for _, i := range pkg.Interfaces {
-			for _, m := range i.Methods {
-				p.frontByMethod[m] = front
-			}
+			p.handleMethods(ctx, i.Methods, lang)
+		}
+		for _, e := range pkg.Enums {
+			p.handleMethods(ctx, e.Methods, lang)
+		}
+		for _, a := range pkg.Aliases {
+			p.handleMethods(ctx, a.Methods, lang)
 		}
 		for _, fn := range pkg.Functions {
-			p.frontByFunc[fn] = front
+			p.handle(ctx, fn, fn.EnsureMeta(), fn.Directives(), lang)
 		}
-	})
+	}
+	return nil
 }
 
-// OnMethod dispatches detection over every method in the store
-// (struct- and interface-declared alike). Interface methods carry
-// a nil [sdk.Method.Receiver]; detectors that care about the
-// receiver shape must handle the absence explicitly.
-func (p *Plugin) OnMethod(ctx *sdk.AnnotatorContext, m *sdk.Method) {
-	p.handle(ctx, m, m.EnsureMeta(), m.Directives(), p.frontByMethod[m])
-}
-
-// OnFunction dispatches detection over every free function in the
-// store.
-func (p *Plugin) OnFunction(ctx *sdk.AnnotatorContext, fn *sdk.Function) {
-	p.handle(ctx, fn, fn.EnsureMeta(), fn.Directives(), p.frontByFunc[fn])
+// handleMethods dispatches over one declaration's method set.
+func (p *Plugin) handleMethods(ctx *sdk.AnnotatorContext, ms []*sdk.Method, lang string) {
+	for _, m := range ms {
+		p.handle(ctx, m, m.EnsureMeta(), m.Directives(), lang)
+	}
 }
 
 // handle is the per-callable pipeline. Contract and mixin
@@ -498,17 +533,3 @@ func stamp(bag *sdk.Bag, m Match, setBy string) {
 		s.Key.Set(bag, s.Value, setBy)
 	}
 }
-
-// frontendMarker is the cross-frontend provenance key every
-// frontend stamps on its produced packages — the value carries
-// the producing frontend's plugin name (`"golang"`,
-// `"protobuf"`). [Plugin.BeforeNodes] reads it to pick the
-// per-language detector.
-//
-// Declared here rather than imported from `frontend/protobuf`
-// (which is in a different module) or `frontend/golang` (same
-// reason) — [sdk.EnsureKey] returns the canonical singleton
-// regardless of which package registered it first.
-//
-//nolint:gochecknoglobals // cross-package registry-singleton key
-var frontendMarker = sdk.EnsureKey("frontend", sdk.StringParser)

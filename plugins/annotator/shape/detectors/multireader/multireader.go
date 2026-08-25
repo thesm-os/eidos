@@ -4,6 +4,7 @@
 package multireader
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -24,7 +25,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 650,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -34,21 +35,21 @@ func Detector() shape.Detector {
 // trailing error. The full non-error return list is stamped via
 // [ValueTypes] so consumers can recover every value type.
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	keys := shape.GoStripContext(params)
-	if len(keys) != 1 || !shape.GoHasError(returns) {
+	params, returns := golang.Callable(n)
+	keys := golang.StripContext(params)
+	if len(keys) != 1 || !golang.HasError(returns) {
 		return shape.Match{}, false
 	}
-	values := shape.GoStripError(returns)
+	values := golang.StripErrorTypes(returns)
 	if len(values) < 2 {
 		return shape.Match{}, false
 	}
 	qnames := make([]string, len(values))
 	for i, v := range values {
-		qnames[i] = shape.QName(v)
+		qnames[i] = golang.QName(v)
 	}
 	return shape.Match{
-		KeyType:   shape.QName(keys[0].Type),
+		KeyType:   golang.QName(keys[0].Type),
 		ValueType: qnames[0],
 		ListStamps: []shape.ListStamp{
 			{Key: ValueTypes, Value: qnames},

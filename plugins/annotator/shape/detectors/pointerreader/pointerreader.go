@@ -4,6 +4,7 @@
 package pointerreader
 
 import (
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -17,7 +18,7 @@ func Detector() shape.Detector {
 		Name:     Name,
 		Priority: 450,
 		Detect: map[string]shape.DetectFunc{
-			"golang": detectGolang,
+			golang.Language: detectGolang,
 		},
 	}
 }
@@ -25,17 +26,17 @@ func Detector() shape.Detector {
 // detectGolang accepts a callable with exactly one non-context
 // parameter and exactly one pointer-typed return (no error).
 func detectGolang(n sdk.Node) (shape.Match, bool) {
-	params, returns := shape.GoCallable(n)
-	keys := shape.GoStripContext(params)
+	params, returns := golang.Callable(n)
+	keys := golang.StripContext(params)
 	if len(keys) != 1 || len(returns) != 1 {
 		return shape.Match{}, false
 	}
-	elem := shape.GoPointerElem(returns[0].Type)
+	elem := golang.PointerElem(returns[0].Type)
 	if elem == nil {
 		return shape.Match{}, false
 	}
 	return shape.Match{
-		KeyType:   shape.QName(keys[0].Type),
-		ValueType: shape.QName(elem),
+		KeyType:   golang.QName(keys[0].Type),
+		ValueType: golang.QName(elem),
 	}, true
 }

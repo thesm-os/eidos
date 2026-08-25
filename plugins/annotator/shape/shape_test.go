@@ -9,6 +9,8 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
+	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -660,26 +662,26 @@ func readerMethod(name string) *sdk.Method {
 }
 
 // testReaderDetector returns a Detector that recognises the reader
-// pattern in Go callables. The body deliberately uses the
-// package's lazy helpers so the helper API is exercised end-to-end
-// through the dispatch path.
+// pattern in Go callables. The body deliberately composes the
+// shared Go query vocabulary so the dispatch path is exercised the
+// way a real detector writes it.
 func testReaderDetector() shape.Detector {
 	return shape.Detector{
 		Name: "reader",
 		Detect: map[string]shape.DetectFunc{
-			"golang": func(n sdk.Node) (shape.Match, bool) {
-				params, returns := shape.GoCallable(n)
-				if !shape.GoHasContext(params) || !shape.GoHasError(returns) {
+			golang.Language: func(n sdk.Node) (shape.Match, bool) {
+				params, returns := golang.Callable(n)
+				if !golang.HasContext(params) || !golang.HasError(returns) {
 					return shape.Match{}, false
 				}
-				rest := shape.GoStripContext(params)
-				vals := shape.GoStripError(returns)
+				rest := golang.StripContext(params)
+				vals := golang.StripErrorTypes(returns)
 				if len(rest) != 1 || len(vals) != 1 {
 					return shape.Match{}, false
 				}
 				return shape.Match{
-					KeyType:   shape.QName(rest[0].Type),
-					ValueType: shape.QName(vals[0]),
+					KeyType:   golang.QName(rest[0].Type),
+					ValueType: golang.QName(vals[0]),
 				}, true
 			},
 		},
@@ -775,4 +777,103 @@ const langGolang = "golang"
 func TestShapeConformance(t *testing.T) {
 	t.Parallel()
 	plugintest.RunSuite(t, shape.New())
+}
+
+// Every declaration that can carry a method is walked.
+//
+// Go attaches methods to any defined type, so the set is wider than
+// the obvious two: a `type Weekday int` carries them on an alias, and
+// the same declaration moves them onto an enum the moment a const
+// block coalesces it. A walk covering only structs and interfaces
+// leaves those callables unclassified with nothing to say they were
+// skipped — which is invisible until a consumer asks the graph a
+// question the missing stamp was meant to answer.
+func TestAnnotateReachesEveryMethodCarrier(t *testing.T) {
+	t.Parallel()
+
+	// A nullary bare-error method, which the lifecycle-free reader
+	// detector below classifies wherever it is declared.
+	nullaryError := func(m *storefixture.MethodBuilder) {
+		m.Return(storefixture.Named("error"))
+	}
+
+	fixture := storefixture.New().
+		Struct("Store", func(s *storefixture.StructBuilder) {
+			s.Method("OnStruct", nullaryError)
+		}).
+		Interface("Port", func(i *storefixture.InterfaceBuilder) {
+			i.Method("OnInterface", nullaryError)
+		}).
+		Enum("Status", func(e *storefixture.EnumBuilder) {
+			e.Underlying(storefixture.Named("int"))
+			e.Variant("StatusActive", "0")
+			e.Method("OnEnum", nullaryError)
+		}).
+		Alias("Weekday", func(a *storefixture.AliasBuilder) {
+			a.Target(storefixture.Named("int"))
+			a.Method("OnAlias", nullaryError)
+		})
+
+	s := fixture.Build()
+	pkg := fixture.PackageNode()
+	sdk.MetaFrontend.Set(pkg.EnsureMeta(), golang.Language, "test")
+
+	p := shape.New().Detectors(shape.Detector{
+		Name: "closer",
+		Detect: map[string]shape.DetectFunc{
+			golang.Language: func(n sdk.Node) (shape.Match, bool) {
+				params, returns := golang.Callable(n)
+				return shape.Match{}, len(params) == 0 && golang.HasError(returns)
+			},
+		},
+	})
+	ctx := &sdk.AnnotatorContext{Store: s, Reader: store.NewReader(s), Diag: diag.New()}
+	if err := p.Annotate(ctx); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+
+	for _, tc := range []struct {
+		carrier string
+		method  string
+	}{
+		{"struct", "OnStruct"},
+		{"interface", "OnInterface"},
+		{"enum", "OnEnum"},
+		{"named type", "OnAlias"},
+	} {
+		t.Run("stamps a method on a "+tc.carrier, func(t *testing.T) {
+			t.Parallel()
+			m := methodNamed(t, pkg, tc.method)
+			if got := shape.Get(m.Meta()); got != "closer" {
+				t.Errorf("%s.Meta() shape = %q, want %q — the walk skipped this carrier",
+					tc.method, got, "closer")
+			}
+		})
+	}
+}
+
+// methodNamed finds a method by name across every carrier a package
+// holds, so the lookup cannot itself encode the omission under test.
+func methodNamed(t *testing.T, pkg *sdk.Package, name string) *sdk.Method {
+	t.Helper()
+	var all []*sdk.Method
+	for _, s := range pkg.Structs {
+		all = append(all, s.Methods...)
+	}
+	for _, i := range pkg.Interfaces {
+		all = append(all, i.Methods...)
+	}
+	for _, e := range pkg.Enums {
+		all = append(all, e.Methods...)
+	}
+	for _, a := range pkg.Aliases {
+		all = append(all, a.Methods...)
+	}
+	for _, m := range all {
+		if m.Name == name {
+			return m
+		}
+	}
+	t.Fatalf("fixture declares no method %q", name)
+	return nil
 }

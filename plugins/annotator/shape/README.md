@@ -145,6 +145,7 @@ constructor:
 package mything
 
 import (
+    "go.thesmos.sh/eidos/lang/golang"
     "go.thesmos.sh/eidos/node"
     "go.thesmos.sh/eidos/plugins/annotator/shape"
 )
@@ -156,22 +157,29 @@ func Detector() shape.Detector {
         Name:     Name,
         Priority: 600,
         Detect: map[string]shape.DetectFunc{
-            "golang": detectGolang,
+            golang.Language: detectGolang,
         },
     }
 }
 
 func detectGolang(n node.Node) (shape.Match, bool) {
-    params, returns := shape.GoCallable(n)
+    params, returns := golang.Callable(n)
     if !matches(params, returns) {
         return shape.Match{}, false
     }
     return shape.Match{
-        KeyType:   shape.QName(params[1].Type),
-        ValueType: shape.QName(returns[0]),
+        KeyType:   golang.QName(params[1].Type),
+        ValueType: golang.QName(returns[0]),
     }, true
 }
 ```
+
+The query vocabulary is the language package's. `lang/golang`
+answers every signature question a Go detector asks —
+`Callable`, `StripContext`, `HasError`, `StripErrorTypes`,
+`SliceElem`, `IsBool`, `QName` — and its predicates answer as the
+union of the frontend's `go.*` stamp and the Go spelling, which a
+copy written against the spelling alone cannot do.
 
 The umbrella plugin handles every other concern — directive
 override (`+gen:shape mything`), already-stamped guard, meta
@@ -260,12 +268,17 @@ plugins/annotator/shape/
   resolver.go         — refinement-bucket sibling-name rewriter
   validator.go        — validation-bucket invariant checker
   meta.go             — universal MetaShape / MetaKeyType / MetaValueType
-  helpers_go.go       — Go-flavoured signature primitives detectors compose
+  param.go            — Param / ParamKind / role scoping
 
-  detectors/<name>/   — per-shape signature detectors (20 today)
-  contracts/<name>/   — per-contract protocol declarations (24 today)
-  mixins/<name>/      — per-mixin behavioural decorations (28 today)
+  detectors/<name>/   — per-shape signature detectors (23 today)
+  contracts/<name>/   — per-contract protocol declarations (26 today)
+  mixins/<name>/      — per-mixin behavioural decorations (60 today)
+  ids/                — every catalog name and param key as a constant
 ```
+
+Signature primitives are not here. A Go detector composes its
+query from `lang/golang`, which every Go-speaking part of a
+pipeline already shares.
 
 The umbrella library has no opinion on the shape, contract, or
 mixin vocabulary — the vocabulary is the union of registered
