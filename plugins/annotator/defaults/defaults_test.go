@@ -322,6 +322,40 @@ func TestMalformedValueIsReported(t *testing.T) {
 	})
 }
 
+// A package nothing marked is read, not skipped.
+//
+// The marker names the language a frontend parsed, and plenty of
+// ordinary input carries none: a synthesised graph, a bridge, a
+// fixture. Skipping those stamps nothing, which a reader cannot tell
+// from a declaration that declared no default — and the whole point of
+// the stamp is that the two are distinguishable.
+//
+// Distinct from a package marked with a language this plugin does not
+// read, below: that one names something, and being told the name is
+// what makes the diagnostic worth raising.
+func TestUnmarkedPackageIsRead(t *testing.T) {
+	t.Parallel()
+
+	s, diags := runAs(t, declaredBothWays(), "")
+
+	t.Run("its declarations are stamped", func(t *testing.T) {
+		t.Parallel()
+		if got := defaults.DefaultOf(fieldBag(t, s, "Config", "Port")); got != "8080" {
+			t.Errorf("DefaultOf = %q, want the tag's 8080", got)
+		}
+	})
+
+	t.Run("nothing is reported", func(t *testing.T) {
+		t.Parallel()
+		// Warning about an unmarked package would put a diagnostic on
+		// every unit test that builds a store by hand, which is where
+		// the real warning would then go unread.
+		if len(diags) != 0 {
+			t.Errorf("reported %v over an unmarked package", diags)
+		}
+	})
+}
+
 // A language the plugin cannot read is reported, not skipped.
 //
 // Silence here is the failure: every default in those packages goes

@@ -199,9 +199,15 @@ func directives() []sdk.DirectiveSchema {
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 	unhandled := map[string]bool{}
 	for _, pkg := range ctx.Reader.Packages().Slice() {
-		lang := sdk.LanguageOf(pkg)
-		rules, known := p.Source(lang)
-		if !known {
+		// SourceOf rather than a lookup on the marked language, for the
+		// reason the sample annotator gives: a package nothing marked is
+		// ordinary input — a synthesised graph, a bridge, a fixture —
+		// and asking for the marked language alone skips every one of
+		// them. Skipping is indistinguishable from a declaration that
+		// declared no default, which is the answer this plugin exists
+		// to make distinguishable.
+		rules, lang, ok := p.SourceOf(pkg)
+		if !ok {
 			p.reportUnhandled(ctx, pkg, lang, unhandled)
 			continue
 		}

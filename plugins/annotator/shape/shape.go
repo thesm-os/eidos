@@ -405,8 +405,20 @@ func directives() []sdk.DirectiveSchema {
 // they move to the enum instead. Missing either leaves a callable
 // unclassified with nothing to say it was skipped.
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
+	sole := p.soleDetectorLanguage()
 	for _, pkg := range ctx.Reader.Packages().Slice() {
 		lang := sdk.LanguageOf(pkg)
+		if lang == "" {
+			// A package nothing marked is ordinary input — a
+			// synthesised graph, a bridge, a fixture — and the empty
+			// name matches no detector, so every callable in it came
+			// back unclassified with nothing to say it was skipped.
+			// Falling back to the one language the catalogue answers
+			// for is the rule [sdk.Base.SourceOf] applies for a plugin
+			// declaring language support; this one declares none,
+			// because it renders nothing, so it reads its detectors.
+			lang = sole
+		}
 		for _, s := range pkg.Structs {
 			p.handleMethods(ctx, s.Methods, lang)
 		}
@@ -424,6 +436,31 @@ func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 		}
 	}
 	return nil
+}
+
+// soleDetectorLanguage returns the one language every registered
+// detector answers for, or empty where they answer for none or for
+// several.
+//
+// Several is the honest refusal rather than a guess: a catalogue
+// covering two languages gives an unmarked package no reason to be
+// read as either, and picking one would classify a declaration under
+// rules written for the other. A wrong stamp is acted on downstream,
+// which is worse than none.
+func (p *Plugin) soleDetectorLanguage() string {
+	seen := make(map[string]struct{}, 1)
+	for _, d := range p.detectors {
+		for lang := range d.Detect {
+			seen[lang] = struct{}{}
+		}
+	}
+	if len(seen) != 1 {
+		return ""
+	}
+	for lang := range seen {
+		return lang
+	}
+	return ""
 }
 
 // handleMethods dispatches over one declaration's method set.

@@ -259,13 +259,20 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 		}
 	})
 
-	t.Run("package without a frontend marker is skipped", func(t *testing.T) {
+	t.Run("package without a frontend marker falls back to the sole language", func(t *testing.T) {
 		t.Parallel()
+		// Nothing claimed the package, which is what a synthesised
+		// graph, a bridge and a fixture all look like. The empty name
+		// matches no detector, so this was skipped in silence — and a
+		// callable that came back unclassified reads exactly like
+		// source the detectors do not apply to.
+		//
+		// Distinct from the rust case below, where a frontend DID
+		// claim the package and named something this catalogue does
+		// not cover. That one is still skipped: being told the name is
+		// what makes the refusal informed rather than a guess.
 		fn := readerFunc("Get")
 		s := store.New()
-		// Package added without stamping the frontend marker
-		// — the detector map has no entry under "" so the
-		// callable is permissively skipped.
 		if err := s.Nodes().AddPackage(&sdk.Package{
 			Name: "x", Path: "x",
 			Functions: []*sdk.Function{fn},
@@ -273,8 +280,8 @@ func TestPlugin_DetectorDispatch(t *testing.T) {
 			t.Fatalf("AddPackage: %v", err)
 		}
 		runAnnotateAgainst(t, shape.New().Detectors(testReaderDetector()), s)
-		if shape.IsStamped(fn.Meta()) {
-			t.Fatalf("callable stamped despite missing frontend marker: shape=%q", shape.Get(fn.Meta()))
+		if !shape.IsStamped(fn.Meta()) {
+			t.Fatal("an unmarked package left its callable unclassified")
 		}
 	})
 
