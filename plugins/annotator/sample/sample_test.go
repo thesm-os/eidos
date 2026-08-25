@@ -8,8 +8,8 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	sampleplugin "go.thesmos.sh/eidos/plugins/annotator/sample"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -31,14 +31,14 @@ func TestConformance(t *testing.T) {
 				Name: "empty store",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().Build()
+					return gofixture.New().Build()
 				},
 			},
 			{
 				Name: "package with no annotated types",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().
+					return gofixture.New().
 						Package("blog", "example.com/blog").
 						Build()
 				},
@@ -48,9 +48,9 @@ func TestConformance(t *testing.T) {
 }
 
 // annotated runs the plugin over a package configured by fn.
-func annotated(t *testing.T, fn func(*storefixture.Builder)) (*sdk.Store, *diag.Sink) {
+func annotated(t *testing.T, fn func(*gofixture.Builder)) (*sdk.Store, *diag.Sink) {
 	t.Helper()
-	b := storefixture.New().Package("blog", "example.com/blog")
+	b := gofixture.New().Package("blog", "example.com/blog")
 	fn(b)
 	s := b.Build()
 	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
@@ -83,10 +83,10 @@ func TestEitherHalfStandsAlone(t *testing.T) {
 
 	t.Run("the positional names the first value", func(t *testing.T) {
 		t.Parallel()
-		s, d := annotated(t, func(b *storefixture.Builder) {
-			b.Struct("Account", func(sb *storefixture.StructBuilder) {
-				sb.Directive(storefixture.Directive(
-					sampleplugin.DirectiveName, storefixture.Arg("NewTestAccount"),
+		s, d := annotated(t, func(b *gofixture.Builder) {
+			b.Struct("Account", func(sb *gofixture.StructBuilder) {
+				sb.Directive(gofixture.Directive(
+					sampleplugin.DirectiveName, gofixture.Arg("NewTestAccount"),
 				))
 			})
 		})
@@ -101,11 +101,11 @@ func TestEitherHalfStandsAlone(t *testing.T) {
 
 	t.Run("the key names the second", func(t *testing.T) {
 		t.Parallel()
-		s, _ := annotated(t, func(b *storefixture.Builder) {
-			b.Struct("Account", func(sb *storefixture.StructBuilder) {
-				sb.Directive(storefixture.Directive(
+		s, _ := annotated(t, func(b *gofixture.Builder) {
+			b.Struct("Account", func(sb *gofixture.StructBuilder) {
+				sb.Directive(gofixture.Directive(
 					sampleplugin.DirectiveName,
-					storefixture.KV(sampleplugin.AlternateKey, "OtherAccount"),
+					gofixture.KV(sampleplugin.AlternateKey, "OtherAccount"),
 				))
 			})
 		})
@@ -123,9 +123,9 @@ func TestEitherHalfStandsAlone(t *testing.T) {
 func TestEmptyDirectiveIsReported(t *testing.T) {
 	t.Parallel()
 
-	s, d := annotated(t, func(b *storefixture.Builder) {
-		b.Struct("Account", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(sampleplugin.DirectiveName))
+	s, d := annotated(t, func(b *gofixture.Builder) {
+		b.Struct("Account", func(sb *gofixture.StructBuilder) {
+			sb.Directive(gofixture.Directive(sampleplugin.DirectiveName))
 		})
 	})
 	if value, alternate := stampedOn(t, s, "Account"); value.OK() || alternate.OK() {
@@ -145,10 +145,10 @@ func TestEmptyDirectiveIsReported(t *testing.T) {
 func TestBareNameResolvesAgainstItsOwnPackage(t *testing.T) {
 	t.Parallel()
 
-	s, _ := annotated(t, func(b *storefixture.Builder) {
-		b.Struct("Account", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(
-				sampleplugin.DirectiveName, storefixture.Arg("NewTestAccount"),
+	s, _ := annotated(t, func(b *gofixture.Builder) {
+		b.Struct("Account", func(sb *gofixture.StructBuilder) {
+			sb.Directive(gofixture.Directive(
+				sampleplugin.DirectiveName, gofixture.Arg("NewTestAccount"),
 			))
 		})
 	})
@@ -169,10 +169,10 @@ func TestBareNameResolvesAgainstItsOwnPackage(t *testing.T) {
 func TestInterfacesAreAnnotated(t *testing.T) {
 	t.Parallel()
 
-	s, _ := annotated(t, func(b *storefixture.Builder) {
-		b.Interface("Writer", func(ib *storefixture.InterfaceBuilder) {
-			ib.Directive(storefixture.Directive(
-				sampleplugin.DirectiveName, storefixture.Arg("NewFakeWriter"),
+	s, _ := annotated(t, func(b *gofixture.Builder) {
+		b.Interface("Writer", func(ib *gofixture.InterfaceBuilder) {
+			ib.Directive(gofixture.Directive(
+				sampleplugin.DirectiveName, gofixture.Arg("NewFakeWriter"),
 			))
 		})
 	})

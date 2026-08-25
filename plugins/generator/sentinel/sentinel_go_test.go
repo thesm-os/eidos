@@ -8,8 +8,8 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	sentinelplugin "go.thesmos.sh/eidos/plugins/generator/sentinel"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -26,11 +26,11 @@ import (
 // declaration against an expected contract is an ordinary test.
 
 // annotated builds a package carrying the directive, configured by fn.
-func annotated(t *testing.T, fn func(*storefixture.Builder)) *sdk.Store {
+func annotated(t *testing.T, fn func(*gofixture.Builder)) *sdk.Store {
 	t.Helper()
-	b := storefixture.New().Package("blog", "example.com/blog")
+	b := gofixture.New().Package("blog", "example.com/blog")
 	fn(b)
-	b.Directive(storefixture.Directive(sentinelplugin.DirectiveName))
+	b.Directive(gofixture.Directive(sentinelplugin.DirectiveName))
 	s := b.Build()
 	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
 	return s
@@ -70,7 +70,7 @@ func typed(t *testing.T, tests *sentinelplugin.Tests, name string) sentinelplugi
 func TestFindsDeclaredErrorValues(t *testing.T) {
 	t.Parallel()
 
-	tests, _ := run(t, annotated(t, func(b *storefixture.Builder) {
+	tests, _ := run(t, annotated(t, func(b *gofixture.Builder) {
 		b.Variable("ErrNotFound", nil)
 		b.Variable("ErrConflict", nil)
 		b.Variable("DefaultTimeout", nil)
@@ -106,21 +106,21 @@ func TestFindsDeclaredErrorValues(t *testing.T) {
 func TestInheritedContractIsFound(t *testing.T) {
 	t.Parallel()
 
-	tests, _ := run(t, annotated(t, func(b *storefixture.Builder) {
-		b.Struct("BaseError", func(sb *storefixture.StructBuilder) {
-			sb.Field("Cause", storefixture.Named("error"), nil)
-			sb.Method("Error", func(mb *storefixture.MethodBuilder) {
-				mb.Return(storefixture.Named("string"))
+	tests, _ := run(t, annotated(t, func(b *gofixture.Builder) {
+		b.Struct("BaseError", func(sb *gofixture.StructBuilder) {
+			sb.Field("Cause", gofixture.Named("error"), nil)
+			sb.Method("Error", func(mb *gofixture.MethodBuilder) {
+				mb.Return(gofixture.Named("string"))
 			})
-			sb.Method("Unwrap", func(mb *storefixture.MethodBuilder) {
-				mb.Return(storefixture.Named("error"))
+			sb.Method("Unwrap", func(mb *gofixture.MethodBuilder) {
+				mb.Return(gofixture.Named("error"))
 			})
 		})
-		b.Struct("NotFoundError", func(sb *storefixture.StructBuilder) {
-			sb.Embed(storefixture.Pointer(storefixture.PkgNamed(
+		b.Struct("NotFoundError", func(sb *gofixture.StructBuilder) {
+			sb.Embed(gofixture.Pointer(gofixture.PkgNamed(
 				"example.com/blog", "BaseError",
 			)))
-			sb.Field("Key", storefixture.Named("string"), nil)
+			sb.Field("Key", gofixture.Named("string"), nil)
 		})
 	}))
 	if tests == nil {
@@ -171,9 +171,9 @@ func TestInheritedContractIsFound(t *testing.T) {
 func TestNonErrorTypesAreDeclined(t *testing.T) {
 	t.Parallel()
 
-	tests, d := run(t, annotated(t, func(b *storefixture.Builder) {
-		b.Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Field("Title", storefixture.Named("string"), nil)
+	tests, d := run(t, annotated(t, func(b *gofixture.Builder) {
+		b.Struct("Article", func(sb *gofixture.StructBuilder) {
+			sb.Field("Title", gofixture.Named("string"), nil)
 		})
 	}))
 
@@ -199,19 +199,19 @@ func TestNonErrorTypesAreDeclined(t *testing.T) {
 func TestOptionalHalvesAreDetected(t *testing.T) {
 	t.Parallel()
 
-	tests, _ := run(t, annotated(t, func(b *storefixture.Builder) {
-		b.Struct("WrapError", func(sb *storefixture.StructBuilder) {
-			sb.Field("Cause", storefixture.Named("error"), nil)
-			sb.Method("Error", func(mb *storefixture.MethodBuilder) {
-				mb.Return(storefixture.Named("string"))
+	tests, _ := run(t, annotated(t, func(b *gofixture.Builder) {
+		b.Struct("WrapError", func(sb *gofixture.StructBuilder) {
+			sb.Field("Cause", gofixture.Named("error"), nil)
+			sb.Method("Error", func(mb *gofixture.MethodBuilder) {
+				mb.Return(gofixture.Named("string"))
 			})
-			sb.Method("Unwrap", func(mb *storefixture.MethodBuilder) {
-				mb.Return(storefixture.Named("error"))
+			sb.Method("Unwrap", func(mb *gofixture.MethodBuilder) {
+				mb.Return(gofixture.Named("error"))
 			})
 		})
-		b.Struct("PlainError", func(sb *storefixture.StructBuilder) {
-			sb.Method("Error", func(mb *storefixture.MethodBuilder) {
-				mb.Return(storefixture.Named("string"))
+		b.Struct("PlainError", func(sb *gofixture.StructBuilder) {
+			sb.Method("Error", func(mb *gofixture.MethodBuilder) {
+				mb.Return(gofixture.Named("string"))
 			})
 		})
 	}))
@@ -258,7 +258,7 @@ func TestPrefixResolution(t *testing.T) {
 	t.Parallel()
 
 	withDirective := func(dir *directive.Directive) *sdk.Store {
-		b := storefixture.New().Package("blog", "example.com/blog")
+		b := gofixture.New().Package("blog", "example.com/blog")
 		b.Variable("ErrNotFound", nil)
 		b.Directive(dir)
 		s := b.Build()
@@ -269,7 +269,7 @@ func TestPrefixResolution(t *testing.T) {
 	t.Run("the package name by default", func(t *testing.T) {
 		t.Parallel()
 		tests, _ := run(t, withDirective(
-			storefixture.Directive(sentinelplugin.DirectiveName),
+			gofixture.Directive(sentinelplugin.DirectiveName),
 		))
 		if tests.Prefix != "blog: " {
 			t.Errorf("Prefix = %q, want the package's own name", tests.Prefix)
@@ -278,9 +278,9 @@ func TestPrefixResolution(t *testing.T) {
 
 	t.Run("the directive's value where one is given", func(t *testing.T) {
 		t.Parallel()
-		tests, _ := run(t, withDirective(storefixture.Directive(
+		tests, _ := run(t, withDirective(gofixture.Directive(
 			sentinelplugin.DirectiveName,
-			storefixture.KV(sentinelplugin.PrefixKey, "app"),
+			gofixture.KV(sentinelplugin.PrefixKey, "app"),
 		)))
 		if tests.Prefix != "app: " {
 			t.Errorf("Prefix = %q, want the declared override", tests.Prefix)
@@ -289,9 +289,9 @@ func TestPrefixResolution(t *testing.T) {
 
 	t.Run("suppressed rather than empty", func(t *testing.T) {
 		t.Parallel()
-		tests, _ := run(t, withDirective(storefixture.Directive(
+		tests, _ := run(t, withDirective(gofixture.Directive(
 			sentinelplugin.DirectiveName,
-			storefixture.KV(sentinelplugin.PrefixKey, sentinelplugin.PrefixOff),
+			gofixture.KV(sentinelplugin.PrefixKey, sentinelplugin.PrefixOff),
 		)))
 		// Every string begins with the empty string, so a check written
 		// against one passes for any input and reads as though the
@@ -306,11 +306,11 @@ func TestPrefixResolution(t *testing.T) {
 func TestSelfOverlapIsRefused(t *testing.T) {
 	t.Parallel()
 
-	b := storefixture.New().Package("blog", "example.com/blog")
+	b := gofixture.New().Package("blog", "example.com/blog")
 	b.Variable("ErrNotFound", nil)
-	b.Directive(storefixture.Directive(sentinelplugin.DirectiveName))
-	b.Directive(storefixture.Directive(
-		sentinelplugin.NoOverlapName, storefixture.Arg("example.com/blog"),
+	b.Directive(gofixture.Directive(sentinelplugin.DirectiveName))
+	b.Directive(gofixture.Directive(
+		sentinelplugin.NoOverlapName, gofixture.Arg("example.com/blog"),
 	))
 	s := b.Build()
 	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")

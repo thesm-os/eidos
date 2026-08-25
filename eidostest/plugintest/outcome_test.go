@@ -15,7 +15,7 @@ import (
 // TestBuildFixtureStoreRecovering pins that a fixture whose own
 // construction panics fails one subtest instead of the test binary.
 //
-// storefixture.Build panics deliberately on anything the store
+// A fixture builder panics deliberately on anything the store
 // rejects, so a mistyped fixture arrives as a panic. Unrecovered it
 // escaped the subtest and took every sibling subtest — and every
 // sibling Test in the package — down with it, which is the worst
@@ -27,7 +27,7 @@ func TestBuildFixtureStoreRecovering(t *testing.T) {
 	t.Run("a panicking fixture is reported as an error", func(t *testing.T) {
 		t.Parallel()
 		s, err := plugintest.BuildFixtureStoreRecovering(func() *store.Store {
-			panic("storefixture: build failed: duplicate qualified name")
+			panic("gofixture: build failed: duplicate qualified name")
 		})
 		if err == nil {
 			t.Fatalf("a panicking fixture must surface as an error, got store=%v err=nil", s)

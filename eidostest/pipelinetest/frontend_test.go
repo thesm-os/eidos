@@ -6,8 +6,8 @@ package pipelinetest_test
 import (
 	"testing"
 
+	"go.thesmos.sh/eidos/eidostest/internal/nodefixture"
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -24,10 +24,7 @@ func TestFromNodes(t *testing.T) {
 
 	t.Run("Load adds every supplied package on the first call", func(t *testing.T) {
 		t.Parallel()
-		pkg := storefixture.New().
-			Package("users", "example.com/users").
-			Struct("User", nil).
-			PackageNode()
+		pkg := nodefixture.PackageIn("users", "example.com/users", "User")
 
 		fe := pipelinetest.FromNodes(pkg)
 		s := store.New()
@@ -41,7 +38,7 @@ func TestFromNodes(t *testing.T) {
 
 	t.Run("Load is idempotent across repeated invocations", func(t *testing.T) {
 		t.Parallel()
-		pkg := storefixture.New().Struct("S", nil).PackageNode()
+		pkg := nodefixture.Package("S")
 		fe := pipelinetest.FromNodes(pkg)
 		s := store.New()
 
@@ -58,7 +55,7 @@ func TestFromNodes(t *testing.T) {
 
 	t.Run("Load propagates AddPackage errors", func(t *testing.T) {
 		t.Parallel()
-		pkg := storefixture.New().Struct("Dup", nil).PackageNode()
+		pkg := nodefixture.Package("Dup")
 		fe := pipelinetest.FromNodes(pkg, pkg)
 		s := store.New()
 
@@ -69,8 +66,8 @@ func TestFromNodes(t *testing.T) {
 
 	t.Run("accepts multiple packages", func(t *testing.T) {
 		t.Parallel()
-		a := storefixture.New().Package("a", "example.com/a").Struct("A", nil).PackageNode()
-		b := storefixture.New().Package("b", "example.com/b").Struct("B", nil).PackageNode()
+		a := nodefixture.PackageIn("a", "example.com/a", "A")
+		b := nodefixture.PackageIn("b", "example.com/b", "B")
 
 		fe := pipelinetest.FromNodes(a, b)
 		s := store.New()

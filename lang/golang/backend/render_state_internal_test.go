@@ -88,11 +88,11 @@ func TestOverrideableFuncNames_MirroredByConformanceSuite(t *testing.T) {
 		t.Parallel()
 
 		// extrasFuncMap layers golang.FuncMap on top of the entries
-		// this package owns. Only the owned half is mirrored: the
-		// suite seeds the shared bundle from lang/golang directly,
-		// which is importable from both sides, and copying it into a
-		// mirror would make a third place for the same names to
-		// disagree.
+		// this package owns, and only the owned half is compared
+		// here. The shared bundle has a mirror of its own, guarded
+		// beside it by TestFuncMap_MirroredByConformanceSuite in
+		// lang/golang — so folding it in would assert the same names
+		// twice and report both when one moved.
 		want := slices.Sorted(maps.Keys(backendOwnedExtras()))
 		got := plugintest.OverrideableTemplateFuncNames()
 		if slices.Equal(got, want) {

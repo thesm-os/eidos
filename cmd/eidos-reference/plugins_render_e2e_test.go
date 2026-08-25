@@ -6,9 +6,9 @@ package main
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/eidostest/golangtest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/plugins/annotator/sample"
 	"go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/plugins/generator/enum"
@@ -43,11 +43,11 @@ import (
 func TestPluginsRender_StringValuedEnum(t *testing.T) {
 	t.Parallel()
 
-	fixture := storefixture.New().
+	fixture := gofixture.New().
 		Package("shop", "example.com/shop").
-		Enum("Region", func(e *storefixture.EnumBuilder) {
-			e.Directive(storefixture.Directive("enum"))
-			e.Underlying(storefixture.Named("string"))
+		Enum("Region", func(e *gofixture.EnumBuilder) {
+			e.Directive(gofixture.Directive("enum"))
+			e.Underlying(gofixture.Named("string"))
 			e.Variant("RegionUS", `"us-east"`)
 			e.Variant("RegionEU", `"eu-west"`)
 		})
@@ -100,11 +100,11 @@ func TestPluginsRender_NonIntegerEnumUnderlying(t *testing.T) {
 		// prints Ratio(0.5) as "Ratio(0)". The output is wrong and
 		// nothing in the toolchain says so, which is why this is
 		// asserted on the method body rather than left to a build.
-		fixture := storefixture.New().
+		fixture := gofixture.New().
 			Package("shop", "example.com/shop").
-			Enum("Ratio", func(e *storefixture.EnumBuilder) {
-				e.Directive(storefixture.Directive("enum"))
-				e.Underlying(storefixture.Named("float64"))
+			Enum("Ratio", func(e *gofixture.EnumBuilder) {
+				e.Directive(gofixture.Directive("enum"))
+				e.Underlying(gofixture.Named("float64"))
 				e.Variant("RatioHalf", "0.5")
 				e.Variant("RatioFull", "1")
 			})
@@ -124,12 +124,12 @@ func TestPluginsRender_NonIntegerEnumUnderlying(t *testing.T) {
 		// `int(v)` applied to a string-defined type does not compile,
 		// and the string branch does not catch it because the enum's
 		// underlying type is spelled `Name`, not `string`.
-		fixture := storefixture.New().
+		fixture := gofixture.New().
 			Package("shop", "example.com/shop").
 			Import("example.com/cfg").
-			Enum("Tier", func(e *storefixture.EnumBuilder) {
-				e.Directive(storefixture.Directive("enum"))
-				e.Underlying(storefixture.PkgNamed("example.com/cfg", "Name"))
+			Enum("Tier", func(e *gofixture.EnumBuilder) {
+				e.Directive(gofixture.Directive("enum"))
+				e.Underlying(gofixture.PkgNamed("example.com/cfg", "Name"))
 				e.Variant("TierFree", `"free"`)
 				e.Variant("TierPaid", `"paid"`)
 			})
@@ -189,11 +189,11 @@ func TestPluginsRender_EnumSurface(t *testing.T) {
 	t.Run("a set counting from zero gets the whole surface", func(t *testing.T) {
 		t.Parallel()
 
-		fixture := storefixture.New().
+		fixture := gofixture.New().
 			Package("shop", "example.com/shop").
-			Enum("Status", func(e *storefixture.EnumBuilder) {
-				e.Directive(storefixture.Directive(enum.DirectiveName))
-				e.Underlying(storefixture.Named("int"))
+			Enum("Status", func(e *gofixture.EnumBuilder) {
+				e.Directive(gofixture.Directive(enum.DirectiveName))
+				e.Underlying(gofixture.Named("int"))
 				e.Variant("StatusDraft", "0")
 				e.Variant("StatusActive", "1")
 				e.Variant("StatusArchived", "2")
@@ -222,11 +222,11 @@ func TestPluginsRender_EnumSurface(t *testing.T) {
 		// zero is a declared variant and one whose zero is not need
 		// opposite assertions, and a template writing one of them for
 		// both passes against exactly half its inputs.
-		fixture := storefixture.New().
+		fixture := gofixture.New().
 			Package("shop", "example.com/shop").
-			Enum("Level", func(e *storefixture.EnumBuilder) {
-				e.Directive(storefixture.Directive(enum.DirectiveName))
-				e.Underlying(storefixture.Named("int"))
+			Enum("Level", func(e *gofixture.EnumBuilder) {
+				e.Directive(gofixture.Directive(enum.DirectiveName))
+				e.Underlying(gofixture.Named("int"))
 				e.Variant("LevelLow", "1")
 				e.Variant("LevelHigh", "2")
 			})
@@ -245,15 +245,15 @@ func TestPluginsRender_EnumSurface(t *testing.T) {
 		// The loud failure this branch prevents: a second `String` on one
 		// type does not compile, and the emit graph looks identical
 		// whether the branch fired or not.
-		fixture := storefixture.New().
+		fixture := gofixture.New().
 			Package("shop", "example.com/shop").
-			Enum("Grade", func(e *storefixture.EnumBuilder) {
-				e.Directive(storefixture.Directive(enum.DirectiveName))
-				e.Underlying(storefixture.Named("int"))
+			Enum("Grade", func(e *gofixture.EnumBuilder) {
+				e.Directive(gofixture.Directive(enum.DirectiveName))
+				e.Underlying(gofixture.Named("int"))
 				e.Variant("GradeLow", "0")
 				e.Variant("GradeHigh", "1")
-				e.Method("String", func(m *storefixture.MethodBuilder) {
-					m.Return(storefixture.Named("string"))
+				e.Method("String", func(m *gofixture.MethodBuilder) {
+					m.Return(gofixture.Named("string"))
 				})
 			})
 		// Hand-written rather than projected: a projection emits shape
@@ -279,14 +279,14 @@ func TestPluginsRender_EnumSurface(t *testing.T) {
 	t.Run("methods=off leaves the checks alone", func(t *testing.T) {
 		t.Parallel()
 
-		fixture := storefixture.New().
+		fixture := gofixture.New().
 			Package("shop", "example.com/shop").
-			Enum("Colour", func(e *storefixture.EnumBuilder) {
-				e.Directive(storefixture.Directive(
+			Enum("Colour", func(e *gofixture.EnumBuilder) {
+				e.Directive(gofixture.Directive(
 					enum.DirectiveName,
-					storefixture.KV(enum.MethodsKey, enum.MethodsOff),
+					gofixture.KV(enum.MethodsKey, enum.MethodsOff),
 				))
-				e.Underlying(storefixture.Named("int"))
+				e.Underlying(gofixture.Named("int"))
 				e.Variant("ColourRed", "0")
 				e.Variant("ColourBlue", "1")
 			})
@@ -335,21 +335,21 @@ func (g Grade) String() string {
 func TestPluginsRender_NarrowWidthSentinelFields(t *testing.T) {
 	t.Parallel()
 
-	fixture := storefixture.New().
+	fixture := gofixture.New().
 		Package("auth", "example.com/auth").
-		Struct("ValidationError", func(s *storefixture.StructBuilder) {
-			s.Field("Code", storefixture.Named("int32"), nil)
-			s.Field("Width", storefixture.Named("int8"), nil)
-			s.Field("Ratio", storefixture.Named("float64"), nil)
-			s.Field("Field", storefixture.Named("string"), nil)
+		Struct("ValidationError", func(s *gofixture.StructBuilder) {
+			s.Field("Code", gofixture.Named("int32"), nil)
+			s.Field("Width", gofixture.Named("int8"), nil)
+			s.Field("Ratio", gofixture.Named("float64"), nil)
+			s.Field("Field", gofixture.Named("string"), nil)
 			// Error() is what marks the struct a custom error type;
 			// without it the plugin declines it and emits nothing.
-			s.Method("Error", func(m *storefixture.MethodBuilder) {
-				m.Return(storefixture.Named("string"))
+			s.Method("Error", func(m *gofixture.MethodBuilder) {
+				m.Return(gofixture.Named("string"))
 			})
 		})
 	// The directive is package-scoped, not per-type.
-	pkg := fixture.Directive(storefixture.Directive(sentinel.DirectiveName)).PackageNode()
+	pkg := fixture.Directive(gofixture.Directive(sentinel.DirectiveName)).PackageNode()
 
 	// Hand-written rather than projected: the emitted suite exercises
 	// behaviour, and a projection emits shape with panicking bodies.
@@ -414,22 +414,22 @@ func (e *ValidationError) Error() string {
 func TestPluginsRender_AuthoredSample(t *testing.T) {
 	t.Parallel()
 
-	fixture := storefixture.New().
+	fixture := gofixture.New().
 		Package("shop", "example.com/shop").
-		Interface("Notifier", func(i *storefixture.InterfaceBuilder) {
-			i.Directive(storefixture.Directive(
+		Interface("Notifier", func(i *gofixture.InterfaceBuilder) {
+			i.Directive(gofixture.Directive(
 				sample.DirectiveName,
-				storefixture.Arg("NewFakeNotifier"),
-				storefixture.KV(sample.AlternateKey, "NewOtherNotifier"),
+				gofixture.Arg("NewFakeNotifier"),
+				gofixture.KV(sample.AlternateKey, "NewOtherNotifier"),
 			))
-			i.Method("Notify", func(m *storefixture.MethodBuilder) {
-				m.Return(storefixture.Named("error"))
+			i.Method("Notify", func(m *gofixture.MethodBuilder) {
+				m.Return(gofixture.Named("error"))
 			})
 		}).
-		Struct("Order", func(s *storefixture.StructBuilder) {
-			s.Directive(storefixture.Directive(builder.DirectiveName))
-			s.Field("ID", storefixture.Named("string"), nil)
-			s.Field("Notify", storefixture.PkgNamed("example.com/shop", "Notifier"), nil)
+		Struct("Order", func(s *gofixture.StructBuilder) {
+			s.Directive(gofixture.Directive(builder.DirectiveName))
+			s.Field("ID", gofixture.Named("string"), nil)
+			s.Field("Notify", gofixture.PkgNamed("example.com/shop", "Notifier"), nil)
 		})
 
 	gen := golangtest.Driver(t, backendgolang.New(), fixture.PackageNode(), builder.New()).
@@ -501,22 +501,22 @@ func NewOtherNotifier() Notifier { return fakeNotifier{name: "other"} }
 func TestPluginsRender_InheritedErrorContract(t *testing.T) {
 	t.Parallel()
 
-	fixture := storefixture.New().
+	fixture := gofixture.New().
 		Package("auth", "example.com/auth").
-		Struct("BaseError", func(s *storefixture.StructBuilder) {
-			s.Field("Op", storefixture.Named("string"), nil)
-			s.Field("Cause", storefixture.Named("error"), nil)
-			s.Method("Error", func(m *storefixture.MethodBuilder) {
-				m.Return(storefixture.Named("string"))
+		Struct("BaseError", func(s *gofixture.StructBuilder) {
+			s.Field("Op", gofixture.Named("string"), nil)
+			s.Field("Cause", gofixture.Named("error"), nil)
+			s.Method("Error", func(m *gofixture.MethodBuilder) {
+				m.Return(gofixture.Named("string"))
 			})
-			s.Method("Unwrap", func(m *storefixture.MethodBuilder) {
-				m.Return(storefixture.Named("error"))
+			s.Method("Unwrap", func(m *gofixture.MethodBuilder) {
+				m.Return(gofixture.Named("error"))
 			})
 		}).
-		Struct("NotFoundError", func(s *storefixture.StructBuilder) {
-			s.Embed(storefixture.Named("BaseError"))
+		Struct("NotFoundError", func(s *gofixture.StructBuilder) {
+			s.Embed(gofixture.Named("BaseError"))
 		})
-	pkg := fixture.Directive(storefixture.Directive(sentinel.DirectiveName)).PackageNode()
+	pkg := fixture.Directive(gofixture.Directive(sentinel.DirectiveName)).PackageNode()
 
 	gen := golangtest.Render(t, backendgolang.New(), pkg, sentinel.New()).
 		WithSource(golangtest.GoFile("auth/errors.go", inheritedSource))
@@ -587,20 +587,20 @@ type NotFoundError struct {
 func TestPluginsRender_BuilderShapes(t *testing.T) {
 	t.Parallel()
 
-	fixture := storefixture.New().
+	fixture := gofixture.New().
 		Package("shop", "example.com/shop").
-		Struct("Order", func(s *storefixture.StructBuilder) {
-			s.Directive(storefixture.Directive("builder"))
-			s.Field("ID", storefixture.Named("string"), nil)
-			s.Field("Lines", storefixture.Slice(storefixture.Named("string")), nil)
-			s.Field("Payload", storefixture.Slice(storefixture.Named("byte")), nil)
-			s.Field("Totals", storefixture.Map(
-				storefixture.Named("string"), storefixture.Named("int"),
+		Struct("Order", func(s *gofixture.StructBuilder) {
+			s.Directive(gofixture.Directive("builder"))
+			s.Field("ID", gofixture.Named("string"), nil)
+			s.Field("Lines", gofixture.Slice(gofixture.Named("string")), nil)
+			s.Field("Payload", gofixture.Slice(gofixture.Named("byte")), nil)
+			s.Field("Totals", gofixture.Map(
+				gofixture.Named("string"), gofixture.Named("int"),
 			), nil)
-			s.Field("Seen", storefixture.Map(
-				storefixture.Named("string"), storefixture.AnonStruct(nil, nil),
+			s.Field("Seen", gofixture.Map(
+				gofixture.Named("string"), gofixture.AnonStruct(nil, nil),
 			), nil)
-			s.Field("Note", storefixture.Pointer(storefixture.Named("string")), nil)
+			s.Field("Note", gofixture.Pointer(gofixture.Named("string")), nil)
 		})
 
 	gen := golangtest.Render(t, backendgolang.New(), fixture.PackageNode(), builder.New()).

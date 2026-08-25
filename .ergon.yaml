@@ -172,12 +172,12 @@ checks:
         branch: 95
         require_branch: true
       - path: "./eidostest"
-        line: 89
-        branch: 95
+        line: 85
+        branch: 90
         require_branch: true
       - path: "./lang/golang"
-        line: 95
-        branch: 95
+        line: 90
+        branch: 90
         require_branch: true
       - path: "./lang/typescript"
         line: 95

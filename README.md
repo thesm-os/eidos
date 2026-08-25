@@ -264,6 +264,8 @@ lang/                 everything eidos knows about a language, one module
   lang/golang/frontend/   Go AST → node graph + go.* metadata
   lang/golang/backend/    Go renderer: templates, funcmap, ImportSet, gofmt
   lang/golang/sdk/        base a Go-generating plugin embeds
+  lang/golang/golangtest/ assertions over generated Go, and the fixture
+                          builders that produce the graph to generate from
   lang/protobuf/frontend/ proto3 descriptors → node graph (no backend:
                           proto is read, never written)
 
@@ -286,11 +288,12 @@ cmd/eidos-reference/  demonstration binary wiring the in-tree plugin ensemble
 
 docaudit/             package-doc vs implemented meta-key audit
 
-eidostest/            test harnesses for downstream authors:
+eidostest/            test harnesses for downstream authors, none of which
+                      knows a language — a Go plugin pairs them with
+                      lang/golang/golangtest:
   eidostest/pipelinetest/  generic pipeline harness, golden-file diffing
-  eidostest/storefixture/  typed source-graph builders
   eidostest/plugintest/    plugin-author conformance suite
-  eidostest/frontendtest/  frontend-author harness (language-neutral)
+  eidostest/frontendtest/  frontend-author harness
   eidostest/backendtest/   backend-author emit-injection harness
   eidostest/acceptancetest/ in-tree black-box harness over the reference binary
 

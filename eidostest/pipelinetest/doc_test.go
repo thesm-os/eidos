@@ -25,7 +25,7 @@ import (
 // This is the middle layer of the three-layer surface the package
 // docblock describes — enough pipeline to exercise routing and a
 // real render pass, no source parsing. A plugin unit test that only
-// needs a populated store stops at [storefixture]; a test that needs
+// needs a populated store stops at a language fixture; a test that needs
 // a production frontend against real source graduates to
 // [frontendtest].
 //

@@ -11,11 +11,11 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/position"
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	langgo "go.thesmos.sh/eidos/lang/golang"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/reference/mockgen"
 	"go.thesmos.sh/eidos/reference/repogen"
@@ -43,7 +43,7 @@ func TestConformance(t *testing.T) {
 					Name: "package with no annotated interfaces",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Interface("Plain", nil).
 							Build()
 					},
@@ -52,9 +52,9 @@ func TestConformance(t *testing.T) {
 					Name: "package with one mock-annotated interface",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
-							Interface("Reader", func(i *storefixture.InterfaceBuilder) {
-								i.Directive(storefixture.Directive("mock"))
+						return gofixture.New().
+							Interface("Reader", func(i *gofixture.InterfaceBuilder) {
+								i.Directive(gofixture.Directive("mock"))
 							}).
 							Build()
 					},
@@ -87,62 +87,62 @@ const modulePath = "example.com/app"
 // cost a minute: a struct routed through repogen (so the emit-side
 // mock path has an interface to consume), an interface with named,
 // anonymous, variadic and void method forms, and a generic interface.
-func fixtureBuilder() *storefixture.Builder {
-	return storefixture.New().
+func fixtureBuilder() *gofixture.Builder {
+	return gofixture.New().
 		Package("users", modulePath+"/users").
 		// repogen synthesises `UserRepository` on the emit side, which
 		// is what gives mockgen's emit-side entry point something to
 		// mock — the composition the plugin exists for.
-		Struct("User", func(s *storefixture.StructBuilder) {
-			s.Directive(storefixture.Directive("repo"))
-			s.Field("ID", storefixture.Named("string"), nil)
+		Struct("User", func(s *gofixture.StructBuilder) {
+			s.Directive(gofixture.Directive("repo"))
+			s.Field("ID", gofixture.Named("string"), nil)
 		}).
-		Interface("UserStore", func(i *storefixture.InterfaceBuilder) {
-			i.Directive(storefixture.Directive("mock"))
-			i.Method("Get", func(m *storefixture.MethodBuilder) {
-				m.Param("ctx", storefixture.PkgNamed("context", "Context"))
-				m.Param("id", storefixture.Named("string"))
-				m.Return(storefixture.Named("string"))
-				m.Return(storefixture.Named("error"))
+		Interface("UserStore", func(i *gofixture.InterfaceBuilder) {
+			i.Directive(gofixture.Directive("mock"))
+			i.Method("Get", func(m *gofixture.MethodBuilder) {
+				m.Param("ctx", gofixture.PkgNamed("context", "Context"))
+				m.Param("id", gofixture.Named("string"))
+				m.Return(gofixture.Named("string"))
+				m.Return(gofixture.Named("error"))
 			})
 			// An unnamed parameter drives the `arg<N>` fallback the
 			// dispatch body needs to reference it.
-			i.Method("Put", func(m *storefixture.MethodBuilder) {
-				m.Param("", storefixture.Named("string"))
-				m.Return(storefixture.Named("error"))
+			i.Method("Put", func(m *gofixture.MethodBuilder) {
+				m.Param("", gofixture.Named("string"))
+				m.Return(gofixture.Named("error"))
 			})
 			// A parameter named for the receiver letter: the receiver is
 			// disambiguated against the signature, or the parameter
 			// shadows it and `<recv>.PutFunc` resolves against a string.
-			i.Method("Shadow", func(m *storefixture.MethodBuilder) {
-				m.Param("u", storefixture.Named("string"))
-				m.Return(storefixture.Named("error"))
+			i.Method("Shadow", func(m *gofixture.MethodBuilder) {
+				m.Param("u", gofixture.Named("string"))
+				m.Return(gofixture.Named("error"))
 			})
 			// A declared `arg0` beside an anonymous parameter: the
 			// fallback for the second collides with the first unless the
 			// identifiers are uniquified across the whole list.
-			i.Method("Collide", func(m *storefixture.MethodBuilder) {
-				m.Param("arg0", storefixture.Named("string"))
-				m.Param("", storefixture.Named("string"))
-				m.Return(storefixture.Named("error"))
+			i.Method("Collide", func(m *gofixture.MethodBuilder) {
+				m.Param("arg0", gofixture.Named("string"))
+				m.Param("", gofixture.Named("string"))
+				m.Return(gofixture.Named("error"))
 			})
 			// A void method drives the no-return dispatch branch.
 			i.Method("Close", nil)
 			// A variadic method is the shape that compiles either way
 			// and satisfies the interface only one of them: see the
 			// satisfaction assertion in satisfactionFile.
-			i.Method("Log", func(m *storefixture.MethodBuilder) {
-				m.Param("format", storefixture.Named("string"))
-				m.Variadic("args", storefixture.Named("any"))
+			i.Method("Log", func(m *gofixture.MethodBuilder) {
+				m.Param("format", gofixture.Named("string"))
+				m.Variadic("args", gofixture.Named("any"))
 			})
 		}).
-		Interface("Cache", func(i *storefixture.InterfaceBuilder) {
-			i.Directive(storefixture.Directive("mock"))
-			i.TypeParam("T", storefixture.Constraint(storefixture.Named("any")))
-			i.Method("Load", func(m *storefixture.MethodBuilder) {
-				m.Param("key", storefixture.Named("string"))
-				m.Return(storefixture.Named("T"))
-				m.Return(storefixture.Named("bool"))
+		Interface("Cache", func(i *gofixture.InterfaceBuilder) {
+			i.Directive(gofixture.Directive("mock"))
+			i.TypeParam("T", gofixture.Constraint(gofixture.Named("any")))
+			i.Method("Load", func(m *gofixture.MethodBuilder) {
+				m.Param("key", gofixture.Named("string"))
+				m.Return(gofixture.Named("T"))
+				m.Return(gofixture.Named("bool"))
 			})
 		})
 }
@@ -433,9 +433,9 @@ func TestGenerate_Suppression(t *testing.T) {
 
 	t.Run("a negated directive suppresses the whole mock", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().
-			Interface("Skipped", func(i *storefixture.InterfaceBuilder) {
-				i.Directive(storefixture.Directive("mock", storefixture.Negated()))
+		s := gofixture.New().
+			Interface("Skipped", func(i *gofixture.InterfaceBuilder) {
+				i.Directive(gofixture.Directive("mock", gofixture.Negated()))
 				i.Method("Do", nil)
 			}).
 			Build()
@@ -446,12 +446,12 @@ func TestGenerate_Suppression(t *testing.T) {
 
 	t.Run("a negated directive on one method drops only that method", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().
-			Interface("Partial", func(i *storefixture.InterfaceBuilder) {
-				i.Directive(storefixture.Directive("mock"))
+		s := gofixture.New().
+			Interface("Partial", func(i *gofixture.InterfaceBuilder) {
+				i.Directive(gofixture.Directive("mock"))
 				i.Method("Kept", nil)
-				i.Method("Dropped", func(m *storefixture.MethodBuilder) {
-					m.Directive(storefixture.Directive("mock", storefixture.Negated()))
+				i.Method("Dropped", func(m *gofixture.MethodBuilder) {
+					m.Directive(gofixture.Directive("mock", gofixture.Negated()))
 				})
 			}).
 			Build()
@@ -533,13 +533,13 @@ func TestGenerate_DeclinesAGenericConstraint(t *testing.T) {
 
 	constraintStore := func(t *testing.T) *sdk.Store {
 		t.Helper()
-		return storefixture.New().
+		return gofixture.New().
 			Package("cfg", "example.com/cfg").
-			Interface("Numeric", func(i *storefixture.InterfaceBuilder) {
+			Interface("Numeric", func(i *gofixture.InterfaceBuilder) {
 				i.Pos(position.At("cfg/types.go", 1, 1))
-				i.Directive(storefixture.Directive(mockgen.DirectiveName))
-				i.Embed(storefixture.Named("int"))
-				i.Embed(storefixture.Named("int64"))
+				i.Directive(gofixture.Directive(mockgen.DirectiveName))
+				i.Embed(gofixture.Named("int"))
+				i.Embed(gofixture.Named("int64"))
 				// The frontend's stamp. `interface{ int | int64 }` and
 				// `interface{ error }` are one shape in the model, and
 				// only the frontend holds what separates them.

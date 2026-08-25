@@ -168,7 +168,7 @@ import (
     "testing"
 
     "go.thesmos.sh/eidos/eidostest/plugintest"
-    "go.thesmos.sh/eidos/eidostest/storefixture"
+    "go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
     "go.thesmos.sh/eidos/sdk"
     "myco/reporepo"
 )
@@ -188,7 +188,7 @@ func TestConformance(t *testing.T) {
                 Name: "package with Repo-suffixed structs",
                 BuildStore: func(t *testing.T) *sdk.Store {
                     t.Helper()
-                    return storefixture.New().
+                    return gofixture.New().
                         Package("shop", "example.com/shop").
                         Struct("UserRepo", nil).
                         Struct("OrderRepo", nil).

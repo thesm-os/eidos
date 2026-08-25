@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/kind"
+	"go.thesmos.sh/eidos/eidostest/internal/nodefixture"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
@@ -33,20 +33,14 @@ func TestRunGeneratorSuite_PassesForWellFormedGenerator(t *testing.T) {
 				Name: "package with one struct",
 				BuildStore: func(t *testing.T) *store.Store {
 					t.Helper()
-					return storefixture.New().
-						Struct("User", nil).
-						Build()
+					return nodefixture.Store("User")
 				},
 			},
 			{
 				Name: "package with three structs",
 				BuildStore: func(t *testing.T) *store.Store {
 					t.Helper()
-					return storefixture.New().
-						Struct("User", nil).
-						Struct("Order", nil).
-						Struct("Invoice", nil).
-						Build()
+					return nodefixture.Store("User", "Order", "Invoice")
 				},
 			},
 		},
@@ -69,8 +63,8 @@ func TestRunGeneratorSuite_RejectsPanickingGenerator(t *testing.T) {
 // two-run comparison.
 func TestRunGeneratorSuite_RejectsNonDeterministicGenerator(t *testing.T) {
 	t.Parallel()
-	s1 := storefixture.New().Struct("User", nil).Build()
-	s2 := storefixture.New().Struct("User", nil).Build()
+	s1 := nodefixture.Store("User")
+	s2 := nodefixture.Store("User")
 	g := &flappingGenerator{name: "flap"}
 	fake := newFakeT()
 	plugintest.AssertGenerateIsDeterministic(fake, g, s1, s2)
@@ -82,7 +76,7 @@ func TestRunGeneratorSuite_RejectsNonDeterministicGenerator(t *testing.T) {
 // source side of the store fails the node-count check.
 func TestRunGeneratorSuite_RejectsSourceMutator(t *testing.T) {
 	t.Parallel()
-	s := storefixture.New().Struct("User", nil).Build()
+	s := nodefixture.Store("User")
 	g := &sourceMutatingGenerator{name: "mutate"}
 	fake := newFakeT()
 	plugintest.AssertGenerateLeavesSourceNodesUnchanged(fake, g, s)
@@ -96,11 +90,11 @@ func TestRunGeneratorSuite_FailsOnDuplicateFixtureName(t *testing.T) {
 	fixtures := []plugintest.GeneratorFixture{
 		{Name: "dup", BuildStore: func(t *testing.T) *store.Store {
 			t.Helper()
-			return storefixture.New().Build()
+			return nodefixture.Store()
 		}},
 		{Name: "dup", BuildStore: func(t *testing.T) *store.Store {
 			t.Helper()
-			return storefixture.New().Build()
+			return nodefixture.Store()
 		}},
 	}
 	fake := newFakeT()
@@ -125,7 +119,7 @@ func TestAssertEmittedTagsAreDeclared(t *testing.T) {
 
 	t.Run("an undeclared output tag is rejected", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().Struct("User", nil).Build()
+		s := nodefixture.Store("User")
 		g := &slotCompanionGenerator{
 			name:    "companion",
 			tag:     "nowhere",
@@ -140,7 +134,7 @@ func TestAssertEmittedTagsAreDeclared(t *testing.T) {
 
 	t.Run("a declared output tag passes silently", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().Struct("User", nil).Build()
+		s := nodefixture.Store("User")
 		g := &slotCompanionGenerator{
 			name:    "companion",
 			tag:     companionTag,
@@ -166,7 +160,7 @@ func TestAssertEmittedTagsAreDeclared(t *testing.T) {
 		// decl must carry an explicit tag" intent — and drops the decl.
 		// Whitelisting the empty tag made the tag most decls carry the
 		// one tag the check could never fail on.
-		s := storefixture.New().Struct("User", nil).Build()
+		s := nodefixture.Store("User")
 		g := &slotCompanionGenerator{
 			name:    "companion",
 			outputs: []plugin.Output{{Tag: companionTag, Suffix: "_companion_test.go"}},
@@ -195,7 +189,7 @@ func TestAssertOutputPackagesTolerateMissingTags(t *testing.T) {
 
 	t.Run("an implementor that assumes its tag routed is rejected", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().Struct("User", nil).Build()
+		s := nodefixture.Store("User")
 		g := &slotCompanionGenerator{name: "companion", tag: companionTag, newItem: newNaiveCompanion}
 		fake := newFakeT()
 		plugintest.AssertOutputPackagesTolerateMissingTags(fake, g, s)
@@ -208,7 +202,7 @@ func TestAssertOutputPackagesTolerateMissingTags(t *testing.T) {
 
 	t.Run("an implementor that checks before using the entry passes silently", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().Struct("User", nil).Build()
+		s := nodefixture.Store("User")
 		g := &slotCompanionGenerator{name: "companion", tag: companionTag, newItem: newTolerantCompanion}
 		fake := newFakeT()
 		plugintest.AssertOutputPackagesTolerateMissingTags(fake, g, s)
@@ -220,7 +214,7 @@ func TestAssertOutputPackagesTolerateMissingTags(t *testing.T) {
 
 	t.Run("a contribution that implements no setter is skipped silently", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().Struct("User", nil).Build()
+		s := nodefixture.Store("User")
 		g := &slotCompanionGenerator{name: "companion", tag: companionTag, newItem: newTaggedCompanion}
 		fake := newFakeT()
 		plugintest.AssertOutputPackagesTolerateMissingTags(fake, g, s)
@@ -543,8 +537,8 @@ func (g *flappingSlotGenerator) Generate(ctx *plugin.GeneratorContext) error {
 // empty slices and passed whatever the generator did.
 func TestRunGeneratorSuite_RejectsFlappingSlotContribution(t *testing.T) {
 	t.Parallel()
-	s1 := storefixture.New().Struct("User", nil).Build()
-	s2 := storefixture.New().Struct("User", nil).Build()
+	s1 := nodefixture.Store("User")
+	s2 := nodefixture.Store("User")
 	fake := newFakeT()
 	plugintest.AssertGenerateIsDeterministic(fake, &flappingSlotGenerator{name: "flap-slot"}, s1, s2)
 	assertFakeMentions(t, fake, "not deterministic")
@@ -596,7 +590,7 @@ func (*misattributingGenerator) Generate(ctx *plugin.GeneratorContext) error {
 // carry the emitting plugin's own identifier.
 func TestRunGeneratorSuite_RejectsForeignSetBy(t *testing.T) {
 	t.Parallel()
-	s := storefixture.New().Struct("User", nil).Build()
+	s := nodefixture.Store("User")
 	fake := newFakeT()
 	plugintest.AssertEmitValuesAreAttributed(fake, &misattributingGenerator{name: "mis"}, s)
 	assertFakeMentions(t, fake, "some-other-plugin")

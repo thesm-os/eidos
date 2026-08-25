@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	enumplugin "go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -25,14 +25,14 @@ import (
 // against an expected projection is an ordinary test.
 
 // fixture is a store holding one annotated enum, configured by fn.
-func fixture(t *testing.T, underlying string, fn func(*storefixture.EnumBuilder)) *sdk.Store {
+func fixture(t *testing.T, underlying string, fn func(*gofixture.EnumBuilder)) *sdk.Store {
 	t.Helper()
-	b := storefixture.New().
+	b := gofixture.New().
 		Package("blog", "example.com/blog").
-		Enum("Status", func(eb *storefixture.EnumBuilder) {
-			eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
+		Enum("Status", func(eb *gofixture.EnumBuilder) {
+			eb.Directive(gofixture.Directive(enumplugin.DirectiveName))
 			if underlying != "" {
-				eb.Underlying(storefixture.Named(underlying))
+				eb.Underlying(gofixture.Named(underlying))
 			}
 			fn(eb)
 		})
@@ -66,7 +66,7 @@ func run(t *testing.T, s *sdk.Store) (*enumplugin.API, *enumplugin.Tests, *diag.
 // numeric is the common fixture: three variants counting from zero.
 func numeric(t *testing.T) (*enumplugin.API, *enumplugin.Tests) {
 	t.Helper()
-	api, checks, _ := run(t, fixture(t, "int", func(eb *storefixture.EnumBuilder) {
+	api, checks, _ := run(t, fixture(t, "int", func(eb *gofixture.EnumBuilder) {
 		eb.Variant("StatusDraft", "0")
 		eb.Variant("StatusActive", "1")
 		eb.Variant("StatusArchived", "2")
@@ -119,7 +119,7 @@ func TestNumericTextComesFromTheIdentifier(t *testing.T) {
 func TestTextualEnumKeepsItsDeclaredValue(t *testing.T) {
 	t.Parallel()
 
-	api, _, _ := run(t, fixture(t, "string", func(eb *storefixture.EnumBuilder) {
+	api, _, _ := run(t, fixture(t, "string", func(eb *gofixture.EnumBuilder) {
 		eb.Variant("RegionUS", `"us-east"`)
 		eb.Variant("RegionEU", `"eu-west"`)
 	}))
@@ -178,7 +178,7 @@ func TestZeroVariantIsFoundByValue(t *testing.T) {
 
 	t.Run("a set declaring its zero last still finds it", func(t *testing.T) {
 		t.Parallel()
-		_, checks, _ := run(t, fixture(t, "string", func(eb *storefixture.EnumBuilder) {
+		_, checks, _ := run(t, fixture(t, "string", func(eb *gofixture.EnumBuilder) {
 			eb.Variant("RegionUS", `"us-east"`)
 			eb.Variant("RegionUnset", `""`)
 		}))
@@ -190,7 +190,7 @@ func TestZeroVariantIsFoundByValue(t *testing.T) {
 
 	t.Run("a set with no zero says so", func(t *testing.T) {
 		t.Parallel()
-		_, checks, _ := run(t, fixture(t, "int", func(eb *storefixture.EnumBuilder) {
+		_, checks, _ := run(t, fixture(t, "int", func(eb *gofixture.EnumBuilder) {
 			eb.Variant("StatusActive", "1")
 			eb.Variant("StatusArchived", "2")
 		}))
@@ -228,11 +228,11 @@ func TestProbesAreDerivedFromTheSet(t *testing.T) {
 func TestExistingMembersAreNotShadowed(t *testing.T) {
 	t.Parallel()
 
-	api, checks, _ := run(t, fixture(t, "int", func(eb *storefixture.EnumBuilder) {
+	api, checks, _ := run(t, fixture(t, "int", func(eb *gofixture.EnumBuilder) {
 		eb.Variant("StatusDraft", "0")
 		eb.Variant("StatusActive", "1")
-		eb.Method("String", func(mb *storefixture.MethodBuilder) {
-			mb.Return(storefixture.Named("string"))
+		eb.Method("String", func(mb *gofixture.MethodBuilder) {
+			mb.Return(gofixture.Named("string"))
 		})
 	}))
 
@@ -270,10 +270,10 @@ func TestExistingMembersAreNotShadowed(t *testing.T) {
 func TestEncodingPairTravelsTogether(t *testing.T) {
 	t.Parallel()
 
-	api, _, _ := run(t, fixture(t, "int", func(eb *storefixture.EnumBuilder) {
+	api, _, _ := run(t, fixture(t, "int", func(eb *gofixture.EnumBuilder) {
 		eb.Variant("StatusDraft", "0")
-		eb.Method("String", func(mb *storefixture.MethodBuilder) {
-			mb.Return(storefixture.Named("string"))
+		eb.Method("String", func(mb *gofixture.MethodBuilder) {
+			mb.Return(gofixture.Named("string"))
 		})
 	}))
 
@@ -290,20 +290,20 @@ func TestEncodingPairTravelsTogether(t *testing.T) {
 func TestDeclaredParserEarnsTheDecoder(t *testing.T) {
 	t.Parallel()
 
-	b := storefixture.New().
+	b := gofixture.New().
 		Package("blog", "example.com/blog").
-		Enum("Status", func(eb *storefixture.EnumBuilder) {
-			eb.Directive(storefixture.Directive(enumplugin.DirectiveName))
-			eb.Underlying(storefixture.Named("int"))
+		Enum("Status", func(eb *gofixture.EnumBuilder) {
+			eb.Directive(gofixture.Directive(enumplugin.DirectiveName))
+			eb.Underlying(gofixture.Named("int"))
 			eb.Variant("StatusDraft", "0")
-			eb.Method("String", func(mb *storefixture.MethodBuilder) {
-				mb.Return(storefixture.Named("string"))
+			eb.Method("String", func(mb *gofixture.MethodBuilder) {
+				mb.Return(gofixture.Named("string"))
 			})
 		}).
-		Function("ParseStatus", func(fb *storefixture.FunctionBuilder) {
-			fb.Param("s", storefixture.Named("string"))
-			fb.Return(storefixture.Named("Status"))
-			fb.Return(storefixture.Named("error"))
+		Function("ParseStatus", func(fb *gofixture.FunctionBuilder) {
+			fb.Param("s", gofixture.Named("string"))
+			fb.Return(gofixture.Named("Status"))
+			fb.Return(gofixture.Named("error"))
 		})
 	s := b.Build()
 	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
@@ -319,10 +319,10 @@ func TestDeclaredParserEarnsTheDecoder(t *testing.T) {
 func TestMethodsOffKeepsOnlyTheChecks(t *testing.T) {
 	t.Parallel()
 
-	api, checks, _ := run(t, fixture(t, "int", func(eb *storefixture.EnumBuilder) {
-		eb.Directive(storefixture.Directive(
+	api, checks, _ := run(t, fixture(t, "int", func(eb *gofixture.EnumBuilder) {
+		eb.Directive(gofixture.Directive(
 			enumplugin.DirectiveName,
-			storefixture.KV(enumplugin.MethodsKey, enumplugin.MethodsOff),
+			gofixture.KV(enumplugin.MethodsKey, enumplugin.MethodsOff),
 		))
 		eb.Variant("StatusDraft", "0")
 	}))
@@ -349,7 +349,7 @@ func TestMethodsOffKeepsOnlyTheChecks(t *testing.T) {
 func TestCollidingTextIsRefused(t *testing.T) {
 	t.Parallel()
 
-	api, _, d := run(t, fixture(t, "string", func(eb *storefixture.EnumBuilder) {
+	api, _, d := run(t, fixture(t, "string", func(eb *gofixture.EnumBuilder) {
 		eb.Variant("RegionUS", `"us-east"`)
 		eb.Variant("RegionUSA", `"us-east"`)
 	}))
@@ -374,7 +374,7 @@ func TestCollidingTextIsRefused(t *testing.T) {
 func TestEmptySetIsReported(t *testing.T) {
 	t.Parallel()
 
-	api, _, d := run(t, fixture(t, "int", func(*storefixture.EnumBuilder) {}))
+	api, _, d := run(t, fixture(t, "int", func(*gofixture.EnumBuilder) {}))
 	if api != nil {
 		t.Error("nothing should be queued for a declaration that was refused")
 	}
@@ -388,7 +388,7 @@ func TestEmptySetIsReported(t *testing.T) {
 func TestPublishesItsSurfaceNames(t *testing.T) {
 	t.Parallel()
 
-	s := fixture(t, "int", func(eb *storefixture.EnumBuilder) {
+	s := fixture(t, "int", func(eb *gofixture.EnumBuilder) {
 		eb.Variant("StatusDraft", "0")
 	})
 	if _, _, _ = run(t, s); true {

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/authgen"
 	"go.thesmos.sh/eidos/reference/metricgen"
 	"go.thesmos.sh/eidos/reference/middlewaregen"
@@ -56,7 +56,7 @@ func TestConformance(t *testing.T) {
 				Name: "package with nothing this plugin handles",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().Struct("Plain", nil).Build()
+					return gofixture.New().Struct("Plain", nil).Build()
 				},
 			},
 		})
@@ -72,11 +72,11 @@ func TestConformance(t *testing.T) {
 // then have to address separately.
 func handlerPkg(t *testing.T, names ...string) *sdk.Package {
 	t.Helper()
-	fixture := storefixture.New()
+	fixture := gofixture.New()
 	for i, name := range names {
-		fixture.Struct(name, func(s *storefixture.StructBuilder) {
+		fixture.Struct(name, func(s *gofixture.StructBuilder) {
 			s.Pos(sdk.Pos{File: "users.go", Line: i + 1})
-			s.Directive(storefixture.Directive(middlewaregen.DirectiveName))
+			s.Directive(gofixture.Directive(middlewaregen.DirectiveName))
 		})
 	}
 	return fixture.PackageNode()

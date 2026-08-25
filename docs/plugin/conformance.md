@@ -124,7 +124,7 @@ plugintest.AnnotatorFixture{
     Name: "package with three structs",
     BuildStore: func(t *testing.T) *sdk.Store {
         t.Helper()
-        return storefixture.New().
+        return gofixture.New().
             Struct("User", nil).
             Struct("Order", nil).
             Struct("Invoice", nil).
@@ -135,6 +135,11 @@ plugintest.AnnotatorFixture{
 
 Each fixture's `BuildStore` is called once per subtest; return a
 fresh store each call.
+
+`gofixture` is `go.thesmos.sh/eidos/lang/golang/golangtest/gofixture`,
+which builds Go declarations. The suites take a store and never ask
+what produced it, so a plugin targeting another language substitutes
+that language's fixture and every check above still applies.
 
 ### `RunGeneratorSuite(t, generator, fixtures)`
 

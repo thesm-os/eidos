@@ -9,7 +9,7 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/shapewriter"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -38,7 +38,7 @@ func TestConformance(t *testing.T) {
 					Name: "package with no relevant structs",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("Plain", nil).
 							Build()
 					},
@@ -47,7 +47,7 @@ func TestConformance(t *testing.T) {
 					Name: "package with three structs",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("User", nil).
 							Struct("Order", nil).
 							Struct("Invoice", nil).
@@ -145,19 +145,19 @@ func implementsWriter(v any) bool {
 
 // writeMethod adds the canonical io.Writer signature —
 // Write([]byte) (int, error) — to the struct under construction.
-func writeMethod(b *storefixture.StructBuilder) {
-	b.Method("Write", func(m *storefixture.MethodBuilder) {
-		m.Param("p", storefixture.Slice(storefixture.Named("byte")))
-		m.Return(storefixture.Named("int"))
-		m.Return(storefixture.Named("error"))
+func writeMethod(b *gofixture.StructBuilder) {
+	b.Method("Write", func(m *gofixture.MethodBuilder) {
+		m.Param("p", gofixture.Slice(gofixture.Named("byte")))
+		m.Return(gofixture.Named("int"))
+		m.Return(gofixture.Named("error"))
 	})
 }
 
 // annotate runs the plugin over a one-struct fixture and returns
 // the struct so the test can read the stamped meta back.
-func annotate(t *testing.T, build func(*storefixture.StructBuilder)) *sdk.Struct {
+func annotate(t *testing.T, build func(*gofixture.StructBuilder)) *sdk.Struct {
 	t.Helper()
-	s := storefixture.New().Struct("Sink", build).Build()
+	s := gofixture.New().Struct("Sink", build).Build()
 	p := shapewriter.New()
 	if err := p.Annotate(&sdk.AnnotatorContext{
 		Store: s, Reader: store.NewReader(s), Diag: diag.New(),
@@ -186,7 +186,7 @@ func TestOnStruct_WriterDetection(t *testing.T) {
 
 	cases := []struct {
 		name  string
-		build func(*storefixture.StructBuilder)
+		build func(*gofixture.StructBuilder)
 		// goShape is the same signature written as real Go. The
 		// compiler's verdict on it is the expected verdict.
 		goShape any
@@ -198,11 +198,11 @@ func TestOnStruct_WriterDetection(t *testing.T) {
 		},
 		{
 			name: "named result slots do not change the method set",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Write", func(m *storefixture.MethodBuilder) {
-					m.Param("p", storefixture.Slice(storefixture.Named("byte")))
-					m.NamedReturn("n", storefixture.Named("int"))
-					m.NamedReturn("err", storefixture.Named("error"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Write", func(m *gofixture.MethodBuilder) {
+					m.Param("p", gofixture.Slice(gofixture.Named("byte")))
+					m.NamedReturn("n", gofixture.Named("int"))
+					m.NamedReturn("err", gofixture.Named("error"))
 				})
 			},
 			goShape: namedReturnWriter{},
@@ -214,54 +214,54 @@ func TestOnStruct_WriterDetection(t *testing.T) {
 		},
 		{
 			name: "a Write taking the wrong parameter type is rejected",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Write", func(m *storefixture.MethodBuilder) {
-					m.Param("s", storefixture.Named("string"))
-					m.Return(storefixture.Named("int"))
-					m.Return(storefixture.Named("error"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Write", func(m *gofixture.MethodBuilder) {
+					m.Param("s", gofixture.Named("string"))
+					m.Return(gofixture.Named("int"))
+					m.Return(gofixture.Named("error"))
 				})
 			},
 			goShape: stringParamWriter{},
 		},
 		{
 			name: "a Write returning the wrong types is rejected",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Write", func(m *storefixture.MethodBuilder) {
-					m.Param("p", storefixture.Slice(storefixture.Named("byte")))
-					m.Return(storefixture.Named("error"))
-					m.Return(storefixture.Named("int"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Write", func(m *gofixture.MethodBuilder) {
+					m.Param("p", gofixture.Slice(gofixture.Named("byte")))
+					m.Return(gofixture.Named("error"))
+					m.Return(gofixture.Named("int"))
 				})
 			},
 			goShape: swappedReturnWriter{},
 		},
 		{
 			name: "a Write with the wrong arity is rejected",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Write", func(m *storefixture.MethodBuilder) {
-					m.Param("p", storefixture.Slice(storefixture.Named("byte")))
-					m.Return(storefixture.Named("error"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Write", func(m *gofixture.MethodBuilder) {
+					m.Param("p", gofixture.Slice(gofixture.Named("byte")))
+					m.Return(gofixture.Named("error"))
 				})
 			},
 			goShape: shortReturnWriter{},
 		},
 		{
 			name: "a non-Write method of the right shape is ignored",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Emit", func(m *storefixture.MethodBuilder) {
-					m.Param("p", storefixture.Slice(storefixture.Named("byte")))
-					m.Return(storefixture.Named("int"))
-					m.Return(storefixture.Named("error"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Emit", func(m *gofixture.MethodBuilder) {
+					m.Param("p", gofixture.Slice(gofixture.Named("byte")))
+					m.Return(gofixture.Named("int"))
+					m.Return(gofixture.Named("error"))
 				})
 			},
 			goShape: renamedWriter{},
 		},
 		{
 			name: "byte's uint8 alias is accepted",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Write", func(m *storefixture.MethodBuilder) {
-					m.Param("p", storefixture.Slice(storefixture.Named("uint8")))
-					m.Return(storefixture.Named("int"))
-					m.Return(storefixture.Named("error"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Write", func(m *gofixture.MethodBuilder) {
+					m.Param("p", gofixture.Slice(gofixture.Named("uint8")))
+					m.Return(gofixture.Named("int"))
+					m.Return(gofixture.Named("error"))
 				})
 			},
 			goShape: aliasWriter{},
@@ -270,11 +270,11 @@ func TestOnStruct_WriterDetection(t *testing.T) {
 			// `...byte` records the element type, so the parameter is
 			// not a slice and the heuristic rejects it on type alone.
 			name: "a variadic byte parameter is rejected",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Write", func(m *storefixture.MethodBuilder) {
-					m.Variadic("p", storefixture.Named("byte"))
-					m.Return(storefixture.Named("int"))
-					m.Return(storefixture.Named("error"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Write", func(m *gofixture.MethodBuilder) {
+					m.Variadic("p", gofixture.Named("byte"))
+					m.Return(gofixture.Named("int"))
+					m.Return(gofixture.Named("error"))
 				})
 			},
 			goShape: variadicByteWriter{},
@@ -284,11 +284,11 @@ func TestOnStruct_WriterDetection(t *testing.T) {
 			// nothing but the variadic marker distinguishes it from the
 			// canonical signature.
 			name: "a variadic slice parameter is rejected",
-			build: func(b *storefixture.StructBuilder) {
-				b.Method("Write", func(m *storefixture.MethodBuilder) {
-					m.Variadic("p", storefixture.Slice(storefixture.Named("byte")))
-					m.Return(storefixture.Named("int"))
-					m.Return(storefixture.Named("error"))
+			build: func(b *gofixture.StructBuilder) {
+				b.Method("Write", func(m *gofixture.MethodBuilder) {
+					m.Variadic("p", gofixture.Slice(gofixture.Named("byte")))
+					m.Return(gofixture.Named("int"))
+					m.Return(gofixture.Named("error"))
 				})
 			},
 			goShape: variadicSliceWriter{},
@@ -322,7 +322,7 @@ func TestOnStruct_DirectiveOverridesHeuristic(t *testing.T) {
 
 	t.Run("a negated directive suppresses a real match", func(t *testing.T) {
 		t.Parallel()
-		s := annotate(t, func(b *storefixture.StructBuilder) {
+		s := annotate(t, func(b *gofixture.StructBuilder) {
 			writeMethod(b)
 			b.Directive(&sdk.Directive{Name: shapewriter.DirectiveName, Negated: true})
 		})
@@ -338,7 +338,7 @@ func TestOnStruct_DirectiveOverridesHeuristic(t *testing.T) {
 
 	t.Run("a positive directive forces detection without a Write method", func(t *testing.T) {
 		t.Parallel()
-		s := annotate(t, func(b *storefixture.StructBuilder) {
+		s := annotate(t, func(b *gofixture.StructBuilder) {
 			b.Directive(&sdk.Directive{Name: shapewriter.DirectiveName})
 		})
 		if detected, _ := shapewriter.Detected.Get(s.Meta()); !detected {

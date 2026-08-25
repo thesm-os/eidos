@@ -8,7 +8,7 @@ import (
 
 	"go.thesmos.sh/eidos/bridge/protogo"
 	"go.thesmos.sh/eidos/core/meta"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
@@ -21,8 +21,8 @@ import (
 // meta bag — so every field-level rule below goes through it.
 func fieldOf(t *testing.T, typ *node.TypeRef, prep func(*node.Field)) *node.Field {
 	t.Helper()
-	s := protoStore(t, func(b *storefixture.Builder) {
-		b.Struct("Msg", func(sb *storefixture.StructBuilder) {
+	s := protoStore(t, func(b *gofixture.Builder) {
+		b.Struct("Msg", func(sb *gofixture.StructBuilder) {
 			sb.Field("user_id", typ, nil)
 		})
 	})
@@ -45,7 +45,7 @@ func TestAnnotate_Idempotency(t *testing.T) {
 
 	t.Run("a pre-stamped go.name on a field is preserved", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Named("string"), func(f *node.Field) {
+		f := fieldOf(t, gofixture.Named("string"), func(f *node.Field) {
 			protogo.MetaGoName.Set(f.EnsureMeta(), "CustomerRef", "manual")
 		})
 		if got, _ := protogo.MetaGoName.Get(f.Meta()); got != "CustomerRef" {
@@ -55,7 +55,7 @@ func TestAnnotate_Idempotency(t *testing.T) {
 
 	t.Run("a field with no pre-stamped go.name is translated", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Named("string"), nil)
+		f := fieldOf(t, gofixture.Named("string"), nil)
 		if got, _ := protogo.MetaGoName.Get(f.Meta()); got != "UserID" {
 			t.Fatalf("go.name = %q, want UserID", got)
 		}
@@ -63,7 +63,7 @@ func TestAnnotate_Idempotency(t *testing.T) {
 
 	t.Run("a pre-stamped go.type on a field type is preserved", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Named("string"), func(f *node.Field) {
+		f := fieldOf(t, gofixture.Named("string"), func(f *node.Field) {
 			protogo.MetaGoType.Set(f.Type.EnsureMeta(), "json.RawMessage", "manual")
 		})
 		if got, _ := protogo.MetaGoType.Get(f.Type.Meta()); got != "json.RawMessage" {
@@ -75,10 +75,10 @@ func TestAnnotate_Idempotency(t *testing.T) {
 		t.Parallel()
 		// The interface walk reaches TypeRefs directly rather than
 		// through a field, so it carries its own idempotency guard.
-		s := protoStore(t, func(b *storefixture.Builder) {
-			b.Interface("Greeter", func(i *storefixture.InterfaceBuilder) {
-				i.Method("Say", func(m *storefixture.MethodBuilder) {
-					m.Param("name", storefixture.Named("string"))
+		s := protoStore(t, func(b *gofixture.Builder) {
+			b.Interface("Greeter", func(i *gofixture.InterfaceBuilder) {
+				i.Method("Say", func(m *gofixture.MethodBuilder) {
+					m.Param("name", gofixture.Named("string"))
 				})
 			})
 		})
@@ -100,7 +100,7 @@ func TestAnnotate_OptionalWrap(t *testing.T) {
 
 	t.Run("an optional scalar field is stamped as a pointer", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Named("string"), func(f *node.Field) {
+		f := fieldOf(t, gofixture.Named("string"), func(f *node.Field) {
 			frontend.MetaFieldOptional.Set(f.EnsureMeta(), true, "test")
 		})
 		if got, _ := protogo.MetaGoType.Get(f.Type.Meta()); got != "*string" {
@@ -110,7 +110,7 @@ func TestAnnotate_OptionalWrap(t *testing.T) {
 
 	t.Run("a non-optional scalar field is stamped bare", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Named("string"), nil)
+		f := fieldOf(t, gofixture.Named("string"), nil)
 		if got, _ := protogo.MetaGoType.Get(f.Type.Meta()); got != "string" {
 			t.Fatalf("go.type = %q, want string", got)
 		}
@@ -127,7 +127,7 @@ func TestAnnotate_UntranslatableTypes(t *testing.T) {
 
 	// named is a message reference — deliberately outside the scalar
 	// and well-known tables, so it composes to nothing.
-	named := func() *node.TypeRef { return storefixture.Named("OtherMessage") }
+	named := func() *node.TypeRef { return gofixture.Named("OtherMessage") }
 
 	t.Run("a bare message reference is not stamped", func(t *testing.T) {
 		t.Parallel()
@@ -139,7 +139,7 @@ func TestAnnotate_UntranslatableTypes(t *testing.T) {
 
 	t.Run("a slice of message references is not stamped", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Slice(named()), nil)
+		f := fieldOf(t, gofixture.Slice(named()), nil)
 		if got, ok := protogo.MetaGoType.Get(f.Type.Meta()); ok {
 			t.Fatalf("go.type = %q, want no stamp for a slice of messages", got)
 		}
@@ -147,7 +147,7 @@ func TestAnnotate_UntranslatableTypes(t *testing.T) {
 
 	t.Run("a map with an untranslatable value is not stamped", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Map(storefixture.Named("string"), named()), nil)
+		f := fieldOf(t, gofixture.Map(gofixture.Named("string"), named()), nil)
 		if got, ok := protogo.MetaGoType.Get(f.Type.Meta()); ok {
 			t.Fatalf("go.type = %q, want no stamp for a map of messages", got)
 		}
@@ -155,7 +155,7 @@ func TestAnnotate_UntranslatableTypes(t *testing.T) {
 
 	t.Run("a map with an untranslatable key is not stamped", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Map(named(), storefixture.Named("string")), nil)
+		f := fieldOf(t, gofixture.Map(named(), gofixture.Named("string")), nil)
 		if got, ok := protogo.MetaGoType.Get(f.Type.Meta()); ok {
 			t.Fatalf("go.type = %q, want no stamp for a map keyed by a message", got)
 		}
@@ -163,7 +163,7 @@ func TestAnnotate_UntranslatableTypes(t *testing.T) {
 
 	t.Run("a slice of scalars is stamped", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Slice(storefixture.Named("int32")), nil)
+		f := fieldOf(t, gofixture.Slice(gofixture.Named("int32")), nil)
 		if got, _ := protogo.MetaGoType.Get(f.Type.Meta()); got != "[]int32" {
 			t.Fatalf("go.type = %q, want []int32", got)
 		}
@@ -180,7 +180,7 @@ func TestAnnotate_PointerAndDegenerateComposites(t *testing.T) {
 
 	t.Run("a pointer to a scalar is stamped with a pointer spelling", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Pointer(storefixture.Named("int64")), nil)
+		f := fieldOf(t, gofixture.Pointer(gofixture.Named("int64")), nil)
 		if got, _ := protogo.MetaGoType.Get(f.Type.Meta()); got != "*int64" {
 			t.Fatalf("go.type = %q, want *int64", got)
 		}
@@ -188,7 +188,7 @@ func TestAnnotate_PointerAndDegenerateComposites(t *testing.T) {
 
 	t.Run("a pointer to a message reference is not stamped", func(t *testing.T) {
 		t.Parallel()
-		f := fieldOf(t, storefixture.Pointer(storefixture.Named("OtherMessage")), nil)
+		f := fieldOf(t, gofixture.Pointer(gofixture.Named("OtherMessage")), nil)
 		if got, ok := protogo.MetaGoType.Get(f.Type.Meta()); ok {
 			t.Fatalf("go.type = %q, want no stamp for a pointer to a message", got)
 		}

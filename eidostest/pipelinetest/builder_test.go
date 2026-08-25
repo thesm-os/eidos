@@ -16,8 +16,8 @@ import (
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/opt"
 	"go.thesmos.sh/eidos/core/position"
+	"go.thesmos.sh/eidos/eidostest/internal/nodefixture"
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/emit/builder"
 	"go.thesmos.sh/eidos/node"
@@ -84,7 +84,7 @@ func headerPipeline(tb testing.TB) *pipelinetest.Pipeline {
 // struct carries an origin position. The position is load-bearing:
 // alongside-source layout routes generated output next to the file
 // its origin came from, so a positionless struct has nowhere to
-// land. Built by hand rather than through [storefixture] so the
+// land. Built by hand rather than through [nodefixture] so the
 // routing assertions below stay independent of that package's own
 // defaults.
 func routableSource() *node.Package {
@@ -245,7 +245,7 @@ func TestBuilder_WithFrontend(t *testing.T) {
 
 	t.Run("registered frontend reaches the underlying pipeline", func(t *testing.T) {
 		t.Parallel()
-		pkg := storefixture.New().Struct("S", nil).PackageNode()
+		pkg := nodefixture.Package("S")
 		p := pipelinetest.New(t).
 			WithFrontend(pipelinetest.FromNodes(pkg)).
 			WithBackend(minimalBackend()).

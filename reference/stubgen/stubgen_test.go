@@ -12,11 +12,11 @@ import (
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/opt"
 	"go.thesmos.sh/eidos/core/position"
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	langgo "go.thesmos.sh/eidos/lang/golang"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/reference/stubgen"
 	"go.thesmos.sh/eidos/sdk"
@@ -43,18 +43,18 @@ func TestConformance(t *testing.T) {
 				Name: "package with no annotated interface",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().Interface("Plain", nil).Build()
+					return gofixture.New().Interface("Plain", nil).Build()
 				},
 			},
 			{
 				Name: "annotated interface with one method",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().
-						Interface("Store", func(i *storefixture.InterfaceBuilder) {
-							i.Directive(storefixture.Directive("stub"))
-							i.Method("Close", func(m *storefixture.MethodBuilder) {
-								m.Return(storefixture.Named("error"))
+					return gofixture.New().
+						Interface("Store", func(i *gofixture.InterfaceBuilder) {
+							i.Directive(gofixture.Directive("stub"))
+							i.Method("Close", func(m *gofixture.MethodBuilder) {
+								m.Return(gofixture.Named("error"))
 							})
 						}).
 						Build()
@@ -192,8 +192,8 @@ func TestGenerate_QueuesBothOutputs(t *testing.T) {
 
 	t.Run("an interface without the directive is skipped", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().
-			Interface("Plain", func(i *storefixture.InterfaceBuilder) {
+		s := gofixture.New().
+			Interface("Plain", func(i *gofixture.InterfaceBuilder) {
 				i.Method("Do", nil)
 			}).
 			Build()
@@ -209,9 +209,9 @@ func TestGenerate_AnnotatedButEmptyIsReported(t *testing.T) {
 	// A double with nothing to stand in for is a mistake. Emitting an
 	// empty struct would compile and hide it, so the plugin reports
 	// and skips instead.
-	s := storefixture.New().
-		Interface("Empty", func(i *storefixture.InterfaceBuilder) {
-			i.Directive(storefixture.Directive("stub"))
+	s := gofixture.New().
+		Interface("Empty", func(i *gofixture.InterfaceBuilder) {
+			i.Directive(gofixture.Directive("stub"))
 		}).
 		Build()
 
@@ -256,40 +256,40 @@ func TestGenerate_SuffixOption(t *testing.T) {
 // shape added here is exercised by both rather than by whichever
 // fixture the author happened to edit. The Go the generated double
 // is built against is projected from this same builder by
-// [storefixture.Builder.GoSource], so a signature changed here
+// [gofixture.Builder.GoSource], so a signature changed here
 // cannot leave a hand-written support package behind.
-func storeBuilder() *storefixture.Builder {
-	return storefixture.New().
-		Interface("Store", func(i *storefixture.InterfaceBuilder) {
-			i.Directive(storefixture.Directive("stub"))
-			i.Method("Get", func(m *storefixture.MethodBuilder) {
-				m.Param("ctx", storefixture.PkgNamed("context", "Context"))
-				m.Param("id", storefixture.Named("string"))
-				m.NamedReturn("item", storefixture.Named("string"))
-				m.NamedReturn("err", storefixture.Named("error"))
+func storeBuilder() *gofixture.Builder {
+	return gofixture.New().
+		Interface("Store", func(i *gofixture.InterfaceBuilder) {
+			i.Directive(gofixture.Directive("stub"))
+			i.Method("Get", func(m *gofixture.MethodBuilder) {
+				m.Param("ctx", gofixture.PkgNamed("context", "Context"))
+				m.Param("id", gofixture.Named("string"))
+				m.NamedReturn("item", gofixture.Named("string"))
+				m.NamedReturn("err", gofixture.Named("error"))
 			})
-			i.Method("List", func(m *storefixture.MethodBuilder) {
-				m.Return(storefixture.Slice(storefixture.Named("string")))
-				m.Return(storefixture.Named("error"))
+			i.Method("List", func(m *gofixture.MethodBuilder) {
+				m.Return(gofixture.Slice(gofixture.Named("string")))
+				m.Return(gofixture.Named("error"))
 			})
 			// A variadic tail: dropping the marker produces a double
 			// that compiles and satisfies nothing.
-			i.Method("Put", func(m *storefixture.MethodBuilder) {
-				m.Param("id", storefixture.Named("string"))
-				m.Variadic("opts", storefixture.Named("string"))
-				m.Return(storefixture.Named("error"))
+			i.Method("Put", func(m *gofixture.MethodBuilder) {
+				m.Param("id", gofixture.Named("string"))
+				m.Variadic("opts", gofixture.Named("string"))
+				m.Return(gofixture.Named("error"))
 			})
 			// A parameter spelled like the receiver identifier the
 			// stub type's name would otherwise yield.
-			i.Method("Recv", func(m *storefixture.MethodBuilder) {
-				m.Param("s", storefixture.Named("string"))
-				m.Return(storefixture.Named("error"))
+			i.Method("Recv", func(m *gofixture.MethodBuilder) {
+				m.Param("s", gofixture.Named("string"))
+				m.Return(gofixture.Named("error"))
 			})
 			// Unnamed parameters, which the source is free to leave
 			// out and the generated body cannot.
-			i.Method("Anon", func(m *storefixture.MethodBuilder) {
-				m.Param("", storefixture.Named("int"))
-				m.Param("", storefixture.Named("string"))
+			i.Method("Anon", func(m *gofixture.MethodBuilder) {
+				m.Param("", gofixture.Named("int"))
+				m.Param("", gofixture.Named("string"))
 			})
 			i.Method("Close", nil)
 		})
@@ -397,16 +397,16 @@ func TestGenerate_EmbeddedMethodsAreDoubled(t *testing.T) {
 	// interface embedding it.
 	embedding := func(t *testing.T, declared ...string) *sdk.Store {
 		t.Helper()
-		b := storefixture.New().
-			Interface("Reader", func(i *storefixture.InterfaceBuilder) {
+		b := gofixture.New().
+			Interface("Reader", func(i *gofixture.InterfaceBuilder) {
 				i.Method("Read", nil)
 			})
-		b = b.Interface("ReadCloser", func(i *storefixture.InterfaceBuilder) {
-			i.Directive(storefixture.Directive("stub"))
+		b = b.Interface("ReadCloser", func(i *gofixture.InterfaceBuilder) {
+			i.Directive(gofixture.Directive("stub"))
 			for _, m := range declared {
 				i.Method(m, nil)
 			}
-			i.Embed(storefixture.PkgNamed("example.com/test", "Reader"))
+			i.Embed(gofixture.PkgNamed("example.com/test", "Reader"))
 		})
 		return b.Build()
 	}
@@ -680,13 +680,13 @@ func TestGenerate_DeclinesAGenericConstraint(t *testing.T) {
 
 	constraintStore := func(t *testing.T) *sdk.Store {
 		t.Helper()
-		b := storefixture.New().
+		b := gofixture.New().
 			Package("cfg", "example.com/cfg").
-			Interface("Numeric", func(i *storefixture.InterfaceBuilder) {
+			Interface("Numeric", func(i *gofixture.InterfaceBuilder) {
 				i.Pos(position.At("cfg/types.go", 1, 1))
-				i.Directive(storefixture.Directive(stubgen.DirectiveName))
-				i.Embed(storefixture.Named("int"))
-				i.Embed(storefixture.Named("int64"))
+				i.Directive(gofixture.Directive(stubgen.DirectiveName))
+				i.Embed(gofixture.Named("int"))
+				i.Embed(gofixture.Named("int64"))
 				// The frontend's stamp, which is the only thing that
 				// separates this from `interface{ error }` — one shape
 				// in the model, and only one of them is a type set.

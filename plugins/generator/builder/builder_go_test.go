@@ -8,8 +8,8 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/plugins/annotator/defaults"
 	builderplugin "go.thesmos.sh/eidos/plugins/generator/builder"
 	"go.thesmos.sh/eidos/sdk"
@@ -27,7 +27,7 @@ import (
 
 // project drives Generate over one annotated struct and returns the
 // builder it queued.
-func project(t *testing.T, configure func(*storefixture.StructBuilder)) *builderplugin.Type {
+func project(t *testing.T, configure func(*gofixture.StructBuilder)) *builderplugin.Type {
 	t.Helper()
 	value, _ := projectBoth(t, configure)
 	return value
@@ -35,13 +35,13 @@ func project(t *testing.T, configure func(*storefixture.StructBuilder)) *builder
 
 // projectBoth returns the builder and the checks queued beside it.
 func projectBoth(
-	t *testing.T, configure func(*storefixture.StructBuilder),
+	t *testing.T, configure func(*gofixture.StructBuilder),
 ) (*builderplugin.Type, *builderplugin.Tests) {
 	t.Helper()
-	b := storefixture.New().
+	b := gofixture.New().
 		Package("blog", "example.com/blog").
-		Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
+		Struct("Article", func(sb *gofixture.StructBuilder) {
+			sb.Directive(gofixture.Directive(builderplugin.DirectiveName))
 			configure(sb)
 		})
 	s := b.Build()
@@ -94,17 +94,17 @@ func fieldNamed(t *testing.T, value *builderplugin.Type, name string) builderplu
 func TestProjectionClassifiesGoTypes(t *testing.T) {
 	t.Parallel()
 
-	value := project(t, func(sb *storefixture.StructBuilder) {
-		sb.Field("Title", storefixture.Named("string"), nil)
-		sb.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
-		sb.Field("Body", storefixture.Slice(storefixture.Named("byte")), nil)
-		sb.Field("Meta", storefixture.Map(
-			storefixture.Named("string"), storefixture.Named("int"),
+	value := project(t, func(sb *gofixture.StructBuilder) {
+		sb.Field("Title", gofixture.Named("string"), nil)
+		sb.Field("Tags", gofixture.Slice(gofixture.Named("string")), nil)
+		sb.Field("Body", gofixture.Slice(gofixture.Named("byte")), nil)
+		sb.Field("Meta", gofixture.Map(
+			gofixture.Named("string"), gofixture.Named("int"),
 		), nil)
-		sb.Field("Seen", storefixture.Map(
-			storefixture.Named("string"), storefixture.AnonStruct(nil, nil),
+		sb.Field("Seen", gofixture.Map(
+			gofixture.Named("string"), gofixture.AnonStruct(nil, nil),
 		), nil)
-		sb.Field("Author", storefixture.Pointer(storefixture.Named("string")), nil)
+		sb.Field("Author", gofixture.Pointer(gofixture.Named("string")), nil)
 	})
 
 	for _, tc := range []struct {
@@ -136,9 +136,9 @@ func TestProjectionClassifiesGoTypes(t *testing.T) {
 func TestSetIsRecognisedBeforeMapping(t *testing.T) {
 	t.Parallel()
 
-	value := project(t, func(sb *storefixture.StructBuilder) {
-		sb.Field("Seen", storefixture.Map(
-			storefixture.Named("string"), storefixture.AnonStruct(nil, nil),
+	value := project(t, func(sb *gofixture.StructBuilder) {
+		sb.Field("Seen", gofixture.Map(
+			gofixture.Named("string"), gofixture.AnonStruct(nil, nil),
 		), nil)
 	})
 	f := fieldNamed(t, value, "Seen")
@@ -162,10 +162,10 @@ func TestSetIsRecognisedBeforeMapping(t *testing.T) {
 func TestProjectionLiftsInnerTypes(t *testing.T) {
 	t.Parallel()
 
-	value := project(t, func(sb *storefixture.StructBuilder) {
-		sb.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
-		sb.Field("Meta", storefixture.Map(
-			storefixture.Named("string"), storefixture.Named("int"),
+	value := project(t, func(sb *gofixture.StructBuilder) {
+		sb.Field("Tags", gofixture.Slice(gofixture.Named("string")), nil)
+		sb.Field("Meta", gofixture.Map(
+			gofixture.Named("string"), gofixture.Named("int"),
 		), nil)
 	})
 
@@ -191,9 +191,9 @@ func TestSkipTag(t *testing.T) {
 
 	t.Run("the documented value excludes the member", func(t *testing.T) {
 		t.Parallel()
-		value := project(t, func(sb *storefixture.StructBuilder) {
-			sb.Field("Title", storefixture.Named("string"), nil)
-			sb.Field("Internal", storefixture.Named("string"), func(fb *storefixture.FieldBuilder) {
+		value := project(t, func(sb *gofixture.StructBuilder) {
+			sb.Field("Title", gofixture.Named("string"), nil)
+			sb.Field("Internal", gofixture.Named("string"), func(fb *gofixture.FieldBuilder) {
 				fb.Tag("`builder:\"-\"`")
 			})
 		})
@@ -206,8 +206,8 @@ func TestSkipTag(t *testing.T) {
 
 	t.Run("any other value keeps the member", func(t *testing.T) {
 		t.Parallel()
-		value := project(t, func(sb *storefixture.StructBuilder) {
-			sb.Field("Title", storefixture.Named("string"), func(fb *storefixture.FieldBuilder) {
+		value := project(t, func(sb *gofixture.StructBuilder) {
+			sb.Field("Title", gofixture.Named("string"), func(fb *gofixture.FieldBuilder) {
 				fb.Tag("`builder:\"skip\"`")
 			})
 		})
@@ -225,11 +225,11 @@ func TestSkipTag(t *testing.T) {
 func TestDeclaredDefaults(t *testing.T) {
 	t.Parallel()
 
-	withDefault := func(v string) func(*storefixture.StructBuilder) {
-		return func(sb *storefixture.StructBuilder) {
-			sb.Field("Retries", storefixture.Named("int"), func(fb *storefixture.FieldBuilder) {
-				fb.Directive(storefixture.Directive(
-					defaults.DirectiveName, storefixture.Arg(v),
+	withDefault := func(v string) func(*gofixture.StructBuilder) {
+		return func(sb *gofixture.StructBuilder) {
+			sb.Field("Retries", gofixture.Named("int"), func(fb *gofixture.FieldBuilder) {
+				fb.Directive(gofixture.Directive(
+					defaults.DirectiveName, gofixture.Arg(v),
 				))
 			})
 		}
@@ -268,11 +268,11 @@ func TestDeclaredDefaults(t *testing.T) {
 func TestPublishesItsTypeName(t *testing.T) {
 	t.Parallel()
 
-	b := storefixture.New().
+	b := gofixture.New().
 		Package("blog", "example.com/blog").
-		Struct("Article", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Title", storefixture.Named("string"), nil)
+		Struct("Article", func(sb *gofixture.StructBuilder) {
+			sb.Directive(gofixture.Directive(builderplugin.DirectiveName))
+			sb.Field("Title", gofixture.Named("string"), nil)
 		})
 	s := b.Build()
 	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
@@ -298,8 +298,8 @@ func TestPublishesItsTypeName(t *testing.T) {
 func TestChecksAreEmittedBeside(t *testing.T) {
 	t.Parallel()
 
-	_, checks := projectBoth(t, func(sb *storefixture.StructBuilder) {
-		sb.Field("Title", storefixture.Named("string"), nil)
+	_, checks := projectBoth(t, func(sb *gofixture.StructBuilder) {
+		sb.Field("Title", gofixture.Named("string"), nil)
 	})
 	if checks == nil {
 		t.Fatal("no checks queued; a builder nothing exercises is asserted by nobody")
@@ -333,12 +333,12 @@ func TestChecksAreEmittedBeside(t *testing.T) {
 func TestSetterNameCollisionIsRefused(t *testing.T) {
 	t.Parallel()
 
-	b := storefixture.New().
+	b := gofixture.New().
 		Package("blog", "example.com/blog").
-		Struct("Payload", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-			sb.Field("Data", storefixture.Slice(storefixture.Named("byte")), nil)
-			sb.Field("DataString", storefixture.Named("string"), nil)
+		Struct("Payload", func(sb *gofixture.StructBuilder) {
+			sb.Directive(gofixture.Directive(builderplugin.DirectiveName))
+			sb.Field("Data", gofixture.Slice(gofixture.Named("byte")), nil)
+			sb.Field("DataString", gofixture.Named("string"), nil)
 		})
 	s := b.Build()
 	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
@@ -373,9 +373,9 @@ func TestSetterNameCollisionIsRefused(t *testing.T) {
 func TestDistinctMembersAreNotRefused(t *testing.T) {
 	t.Parallel()
 
-	value := project(t, func(sb *storefixture.StructBuilder) {
-		sb.Field("Data", storefixture.Slice(storefixture.Named("byte")), nil)
-		sb.Field("Note", storefixture.Named("string"), nil)
+	value := project(t, func(sb *gofixture.StructBuilder) {
+		sb.Field("Data", gofixture.Slice(gofixture.Named("byte")), nil)
+		sb.Field("Note", gofixture.Named("string"), nil)
 	})
 
 	for _, tc := range []struct{ member, want string }{
@@ -407,10 +407,10 @@ func TestDistinctMembersAreNotRefused(t *testing.T) {
 func TestEmptyDeclarationIsReported(t *testing.T) {
 	t.Parallel()
 
-	b := storefixture.New().
+	b := gofixture.New().
 		Package("blog", "example.com/blog").
-		Struct("Empty", func(sb *storefixture.StructBuilder) {
-			sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
+		Struct("Empty", func(sb *gofixture.StructBuilder) {
+			sb.Directive(gofixture.Directive(builderplugin.DirectiveName))
 		})
 	s := b.Build()
 	sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")
@@ -443,10 +443,10 @@ func TestConformance_Golang(t *testing.T) {
 				Name: "un-annotated struct emits nothing",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().
+					return gofixture.New().
 						Package("blog", "example.com/blog").
-						Struct("Article", func(sb *storefixture.StructBuilder) {
-							sb.Field("Title", storefixture.Named("string"), nil)
+						Struct("Article", func(sb *gofixture.StructBuilder) {
+							sb.Field("Title", gofixture.Named("string"), nil)
 						}).
 						Build()
 				},
@@ -455,17 +455,17 @@ func TestConformance_Golang(t *testing.T) {
 				Name: "annotated struct across every shape",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					b := storefixture.New().
+					b := gofixture.New().
 						Package("blog", "example.com/blog").
-						Struct("Article", func(sb *storefixture.StructBuilder) {
-							sb.Directive(storefixture.Directive(builderplugin.DirectiveName))
-							sb.Field("Title", storefixture.Named("string"), nil)
-							sb.Field("Tags", storefixture.Slice(storefixture.Named("string")), nil)
-							sb.Field("Body", storefixture.Slice(storefixture.Named("byte")), nil)
-							sb.Field("Meta", storefixture.Map(
-								storefixture.Named("string"), storefixture.Named("int"),
+						Struct("Article", func(sb *gofixture.StructBuilder) {
+							sb.Directive(gofixture.Directive(builderplugin.DirectiveName))
+							sb.Field("Title", gofixture.Named("string"), nil)
+							sb.Field("Tags", gofixture.Slice(gofixture.Named("string")), nil)
+							sb.Field("Body", gofixture.Slice(gofixture.Named("byte")), nil)
+							sb.Field("Meta", gofixture.Map(
+								gofixture.Named("string"), gofixture.Named("int"),
 							), nil)
-							sb.Field("Author", storefixture.Pointer(storefixture.Named("string")), nil)
+							sb.Field("Author", gofixture.Pointer(gofixture.Named("string")), nil)
 						})
 					s := b.Build()
 					sdk.MetaFrontend.Set(b.PackageNode().EnsureMeta(), golang.Language, "test")

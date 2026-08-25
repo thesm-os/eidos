@@ -10,10 +10,10 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/opt"
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/debugweaver"
 	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/sdk"
@@ -45,14 +45,14 @@ func TestConformance(t *testing.T) {
 					Name: "empty package",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().Build()
+						return gofixture.New().Build()
 					},
 				},
 				{
 					Name: "package with a struct",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("User", nil).
 							Build()
 					},
@@ -288,20 +288,20 @@ func wovenTrace(t *testing.T, n sdk.EmitNode) *debugweaver.Trace {
 }
 
 // hostBuilder is the annotated struct the woven output is generated
-// from, and — through [storefixture.Builder.GoSource] — the package
+// from, and — through [gofixture.Builder.GoSource] — the package
 // it is compiled against.
 //
 // repogen names `User` in every signature it emits, so nothing this
 // plugin contributes can be compiled without the declaration. One
 // builder supplies both halves so a field or a name changed here
 // cannot leave a second, hand-written spelling behind.
-func hostBuilder() *storefixture.Builder {
-	return storefixture.New().
-		Struct("User", func(s *storefixture.StructBuilder) {
+func hostBuilder() *gofixture.Builder {
+	return gofixture.New().
+		Struct("User", func(s *gofixture.StructBuilder) {
 			s.Docs("User is the type the generated repository stores.")
 			s.Pos(sdk.Pos{File: "user.go", Line: 1})
-			s.Directive(storefixture.Directive(repogen.DirectiveName))
-			s.Field("ID", storefixture.Named("string"), nil)
+			s.Directive(gofixture.Directive(repogen.DirectiveName))
+			s.Field("ID", gofixture.Named("string"), nil)
 		})
 }
 

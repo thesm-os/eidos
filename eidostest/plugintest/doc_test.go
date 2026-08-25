@@ -6,8 +6,9 @@ package plugintest_test
 import (
 	"testing"
 
+	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/store"
 )
 
@@ -49,12 +50,30 @@ func ExampleRunSuite() {
 			Name: "one annotated struct",
 			BuildStore: func(t *testing.T) *store.Store {
 				t.Helper()
-				return storefixture.New().
-					Struct("User", func(s *storefixture.StructBuilder) {
-						s.Directive(storefixture.Directive("fixture"))
-						s.Field("ID", storefixture.Named("string"), nil)
-					}).
-					Build()
+				// Built from node values directly, because the suites
+				// are language-neutral and a fixture builder is not:
+				// a Go plugin's own test reaches for
+				// `lang/golang/golangtest/gofixture`, and a plugin
+				// targeting another language for its equivalent.
+				s := store.New()
+				if err := s.Nodes().AddPackage(&node.Package{
+					Name: "test",
+					Path: "example.com/test",
+					Structs: []*node.Struct{{
+						BaseNode: node.BaseNode{
+							DirectiveList: []*directive.Directive{{Name: "fixture"}},
+						},
+						Name:    "User",
+						Package: "example.com/test",
+						Fields: []*node.Field{{
+							Name: "ID",
+							Type: &node.TypeRef{TypeKind: node.TypeRefNamed, Name: "string"},
+						}},
+					}},
+				}); err != nil {
+					t.Fatalf("fixture store: %v", err)
+				}
+				return s
 			},
 		}})
 	}

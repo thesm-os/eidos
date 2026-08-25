@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/meta"
+	"go.thesmos.sh/eidos/eidostest/internal/nodefixture"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/store"
@@ -40,20 +40,14 @@ func TestRunAnnotatorSuite_PassesForWellFormedAnnotator(t *testing.T) {
 				Name: "package with one struct",
 				BuildStore: func(t *testing.T) *store.Store {
 					t.Helper()
-					return storefixture.New().
-						Struct("User", nil).
-						Build()
+					return nodefixture.Store("User")
 				},
 			},
 			{
 				Name: "package with three structs",
 				BuildStore: func(t *testing.T) *store.Store {
 					t.Helper()
-					return storefixture.New().
-						Struct("User", nil).
-						Struct("Order", nil).
-						Struct("Invoice", nil).
-						Build()
+					return nodefixture.Store("User", "Order", "Invoice")
 				},
 			},
 		},
@@ -84,7 +78,7 @@ func TestRunAnnotatorSuite_RejectsPanickingAnnotator(t *testing.T) {
 // value on each call fails on the second-pass comparison.
 func TestRunAnnotatorSuite_RejectsNonIdempotentAnnotator(t *testing.T) {
 	t.Parallel()
-	s := storefixture.New().Struct("User", nil).Build()
+	s := nodefixture.Store("User")
 	a := &flappingAnnotator{name: "flap"}
 	fake := newFakeT()
 	plugintest.AssertAnnotateIsIdempotent(fake, a, s)
@@ -96,7 +90,7 @@ func TestRunAnnotatorSuite_RejectsNonIdempotentAnnotator(t *testing.T) {
 // source-side store fails the node-count check.
 func TestRunAnnotatorSuite_RejectsAnnotatorThatAddsNodes(t *testing.T) {
 	t.Parallel()
-	s := storefixture.New().Struct("User", nil).Build()
+	s := nodefixture.Store("User")
 	a := &nodeAddingAnnotator{name: "adder"}
 	fake := newFakeT()
 	plugintest.AssertAnnotateLeavesNodeCountUnchanged(fake, a, s)
@@ -110,7 +104,7 @@ func TestRunAnnotatorSuite_RejectsAnnotatorThatAddsNodes(t *testing.T) {
 // recovery wrapper).
 func TestRunAnnotatorSuite_RejectsAnnotatorReturningError(t *testing.T) {
 	t.Parallel()
-	s := storefixture.New().Struct("User", nil).Build()
+	s := nodefixture.Store("User")
 	a := &erroringAnnotator{name: "errr", err: errors.New("boom")}
 	fake := newFakeT()
 	plugintest.AssertAnnotateDoesNotPanic(fake, a, s)
@@ -125,11 +119,11 @@ func TestRunAnnotatorSuite_FailsOnDuplicateFixtureName(t *testing.T) {
 	fixtures := []plugintest.AnnotatorFixture{
 		{Name: "dup", BuildStore: func(t *testing.T) *store.Store {
 			t.Helper()
-			return storefixture.New().Build()
+			return nodefixture.Store()
 		}},
 		{Name: "dup", BuildStore: func(t *testing.T) *store.Store {
 			t.Helper()
-			return storefixture.New().Build()
+			return nodefixture.Store()
 		}},
 	}
 	fake := newFakeT()
@@ -286,8 +280,8 @@ func TestRunAnnotatorSuite_RejectsCountDerivedStamp(t *testing.T) {
 		fake := newFakeT()
 		plugintest.AssertAnnotateIsDeterministic(
 			fake, a,
-			storefixture.New().Struct("User", nil).Build(),
-			storefixture.New().Struct("User", nil).Build(),
+			nodefixture.Store("User"),
+			nodefixture.Store("User"),
 		)
 		assertFakeMentions(t, fake, "annotator is not idempotent")
 	})
@@ -299,7 +293,7 @@ func TestRunAnnotatorSuite_RejectsCountDerivedStamp(t *testing.T) {
 		a := &countingAnnotator{name: "counting"}
 		fake := newFakeT()
 		captureFatal(func() {
-			plugintest.AssertAnnotateIsIdempotent(fake, a, storefixture.New().Struct("User", nil).Build())
+			plugintest.AssertAnnotateIsIdempotent(fake, a, nodefixture.Store("User"))
 		})
 		if fake.failed {
 			t.Fatalf("idempotency was expected to pass a count-derived stamp: %v", fake.errs)

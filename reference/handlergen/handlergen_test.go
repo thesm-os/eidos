@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/auditgen"
 	"go.thesmos.sh/eidos/reference/authgen"
 	"go.thesmos.sh/eidos/reference/errorgen"
@@ -58,7 +58,7 @@ func TestConformance(t *testing.T) {
 				Name: "package with nothing this plugin handles",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().Struct("Plain", nil).Build()
+					return gofixture.New().Struct("Plain", nil).Build()
 				},
 			},
 		})
@@ -66,14 +66,14 @@ func TestConformance(t *testing.T) {
 }
 
 // handlerBuilder is the annotated struct every render fixture drives,
-// and — through [storefixture.Builder.GoSource] — the declaration the
+// and — through [gofixture.Builder.GoSource] — the declaration the
 // generated handler is compiled against.
-func handlerBuilder() *storefixture.Builder {
-	return storefixture.New().
-		Struct("Orders", func(s *storefixture.StructBuilder) {
+func handlerBuilder() *gofixture.Builder {
+	return gofixture.New().
+		Struct("Orders", func(s *gofixture.StructBuilder) {
 			s.Docs("Orders is the annotated struct the fixture stamps.")
 			s.Pos(sdk.Pos{File: "orders.go", Line: 1})
-			s.Directive(storefixture.Directive(handlergen.DirectiveName))
+			s.Directive(gofixture.Directive(handlergen.DirectiveName))
 		})
 }
 

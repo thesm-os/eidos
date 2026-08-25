@@ -12,15 +12,15 @@ import (
 )
 
 // sliceRef returns a [node.TypeRef] of the given element type —
-// the inline equivalent of storefixture.Slice. Kept local so
-// the package stays a leaf with no cross-module test
-// dependencies.
+// the inline equivalent of gofixture.Slice. Kept local so this
+// package stays a leaf: gofixture sits under golangtest, which
+// imports it back.
 func sliceRef(elem *node.TypeRef) *node.TypeRef {
 	return &node.TypeRef{TypeKind: node.TypeRefSlice, Elem: elem}
 }
 
 // mapRef returns a [node.TypeRef] of the given key+value types
-// — the inline equivalent of storefixture.Map.
+// — the inline equivalent of gofixture.Map.
 func mapRef(k, v *node.TypeRef) *node.TypeRef {
 	return &node.TypeRef{TypeKind: node.TypeRefMap, MapKey: k, MapValue: v}
 }

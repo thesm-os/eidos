@@ -6,10 +6,13 @@ package golang_test
 import (
 	"bytes"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"text/template"
 
+	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
@@ -512,4 +515,70 @@ func TestTemplateEnumAdapters(t *testing.T) {
 			t.Errorf("TemplateOutOfRange = %q, want empty", got)
 		}
 	})
+}
+
+// TestFuncMap_MirroredByConformanceSuite pins [golang.FuncMap] to the
+// copy of its key set that [plugintest] keeps.
+//
+// The suite seeds these names as stubs so a plugin template calling
+// `isSlice` or `selfType` — helpers the Go backend provides at render
+// and the templates documentation tells authors to use — parses
+// clean. It used to seed them by calling FuncMap directly, which is
+// the arrangement anyone would pick: one set, no copy, nothing to
+// drift.
+//
+// That import made the module requirement mutual. This module needs
+// the conformance suite for its own tests, so it requires `eidostest`;
+// `eidostest` importing this package back closed the loop, and a
+// consumer of a third module gets neither `replace` and resolves the
+// pair to a version that was never tagged. The suite now mirrors the
+// names, and this is what watches the mirror.
+//
+// It lives here rather than in `eidostest` because this is the side
+// that can read the authoritative bundle, which is the same reason
+// the two backend-owned mirrors are guarded from `lang/golang/backend`.
+func TestFuncMap_MirroredByConformanceSuite(t *testing.T) {
+	t.Parallel()
+
+	// Guard the guard: two empty sets compare equal, so an emptied
+	// side would report green over nothing.
+	t.Run("both sets are non-empty", func(t *testing.T) {
+		t.Parallel()
+		if n := len(golang.FuncMap()); n == 0 {
+			t.Errorf("FuncMap is empty; the drift check below would be vacuous")
+		}
+		if n := len(plugintest.CanonicalTemplateFuncNames()); n == 0 {
+			t.Errorf("the conformance mirror is empty; the drift check below would be vacuous")
+		}
+	})
+
+	t.Run("the conformance mirror matches FuncMap's keys", func(t *testing.T) {
+		t.Parallel()
+
+		want := slices.Sorted(maps.Keys(golang.FuncMap()))
+		got := plugintest.CanonicalTemplateFuncNames()
+		if slices.Equal(got, want) {
+			return
+		}
+		t.Errorf(
+			"plugintest.CanonicalTemplateFuncNames() has drifted from FuncMap;\n"+
+				"  provided here but unseeded by the suite: %v\n"+
+				"  seeded by the suite but not provided here: %v\n"+
+				"update canonicalFuncNames in eidostest/plugintest/framework.go to match",
+			namesMissingFrom(want, got), namesMissingFrom(got, want),
+		)
+	})
+}
+
+// namesMissingFrom returns the elements of a that b does not contain,
+// in a's order, so the drift report names each direction separately
+// instead of leaving two full sets for the reader to diff by eye.
+func namesMissingFrom(a, b []string) []string {
+	var out []string
+	for _, v := range a {
+		if !slices.Contains(b, v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }

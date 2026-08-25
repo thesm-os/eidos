@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/tracegen"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -48,7 +48,7 @@ func TestConformance(t *testing.T) {
 				Name: "package with nothing this plugin handles",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().Struct("Plain", nil).Build()
+					return gofixture.New().Struct("Plain", nil).Build()
 				},
 			},
 		})

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
+	"go.thesmos.sh/eidos/eidostest/internal/nodefixture"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 )
 
 // TestFrameworkChecks_EveryCheckNamesAKnownViolation pins that every
@@ -209,7 +209,7 @@ func TestErroringPlugins_AreCaught(t *testing.T) {
 		captureFatal(func() {
 			plugintest.AssertGenerateCarriesNoErrors(fake, plugintest.ErroringGenerator(),
 				plugintest.GeneratorFixture{Name: "one struct"},
-				storefixture.New().Struct("User", nil).Build())
+				nodefixture.Store("User"))
 		})
 
 		if !fake.failed {
@@ -226,7 +226,7 @@ func TestErroringPlugins_AreCaught(t *testing.T) {
 		captureFatal(func() {
 			plugintest.AssertAnnotateCarriesNoErrors(fake, plugintest.ErroringAnnotator(),
 				plugintest.AnnotatorFixture{Name: "one struct"},
-				storefixture.New().Struct("User", nil).Build())
+				nodefixture.Store("User"))
 		})
 
 		if !fake.failed {
@@ -318,7 +318,7 @@ func TestPositionlessDiagnostics_AreCaught(t *testing.T) {
 		captureFatal(func() {
 			plugintest.AssertGenerateDiagnosticsArePositioned(fake, plugintest.ErroringGenerator(),
 				plugintest.GeneratorFixture{Name: "one struct"},
-				storefixture.New().Struct("User", nil).Build())
+				nodefixture.Store("User"))
 		})
 
 		if !fake.failed {
@@ -334,7 +334,7 @@ func TestPositionlessDiagnostics_AreCaught(t *testing.T) {
 		captureFatal(func() {
 			plugintest.AssertGenerateDiagnosticsArePositioned(fake, plugintest.ErroringGenerator(),
 				plugintest.GeneratorFixture{Name: "one struct", AllowsPositionlessDiagnostics: true},
-				storefixture.New().Struct("User", nil).Build())
+				nodefixture.Store("User"))
 		})
 
 		if fake.failed {
@@ -349,7 +349,7 @@ func TestPositionlessDiagnostics_AreCaught(t *testing.T) {
 		captureFatal(func() {
 			plugintest.AssertGenerateDiagnosticsArePositioned(fake, &positionedWarner{name: "warner"},
 				plugintest.GeneratorFixture{Name: "one struct"},
-				storefixture.New().Struct("User", nil).Build())
+				nodefixture.Store("User"))
 		})
 
 		if fake.failed {
@@ -374,7 +374,7 @@ func TestFixturePlugin_PassesTheDiagnosticChecks(t *testing.T) {
 			plugintest.AssertGenerateEmptyStoreCarriesNoErrors(fake, plugintest.NewFixturePlugin())
 			plugintest.AssertGenerateCarriesNoErrors(fake, plugintest.NewFixturePlugin(),
 				plugintest.GeneratorFixture{Name: "one struct"},
-				storefixture.New().Struct("User", nil).Build())
+				nodefixture.Store("User"))
 		})
 
 		if fake.failed {
@@ -389,7 +389,7 @@ func TestFixturePlugin_PassesTheDiagnosticChecks(t *testing.T) {
 		captureFatal(func() {
 			plugintest.AssertGenerateDiagnosticsArePositioned(fake, plugintest.NewFixturePlugin(),
 				plugintest.GeneratorFixture{Name: "one struct"},
-				storefixture.New().Struct("User", nil).Build())
+				nodefixture.Store("User"))
 		})
 
 		if fake.failed {

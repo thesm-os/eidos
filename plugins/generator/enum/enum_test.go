@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	enumplugin "go.thesmos.sh/eidos/plugins/generator/enum"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -37,14 +37,14 @@ func TestConformance(t *testing.T) {
 					Name: "empty store",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().Build()
+						return gofixture.New().Build()
 					},
 				},
 				{
 					Name: "package with no annotated enums",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Package("blog", "example.com/blog").
 							Build()
 					},

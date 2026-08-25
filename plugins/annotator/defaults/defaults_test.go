@@ -10,8 +10,8 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/plugins/annotator/defaults"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -24,12 +24,12 @@ import (
 // plugin picks its rules from it, so a fixture without one exercises
 // the unread-language path instead of whatever the case meant to test.
 // [runAs] is the knob for cases that want that path.
-func run(t *testing.T, b *storefixture.Builder) (*sdk.Store, []sdk.Diag) {
+func run(t *testing.T, b *gofixture.Builder) (*sdk.Store, []sdk.Diag) {
 	t.Helper()
 	return runAs(t, b, golang.Language)
 }
 
-func runAs(t *testing.T, b *storefixture.Builder, lang string) (*sdk.Store, []sdk.Diag) {
+func runAs(t *testing.T, b *gofixture.Builder, lang string) (*sdk.Store, []sdk.Diag) {
 	t.Helper()
 	s := b.Build()
 	pkg := b.PackageNode()
@@ -77,7 +77,7 @@ func TestConformance(t *testing.T) {
 				Name: "empty store",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().Build()
+					return gofixture.New().Build()
 				},
 			},
 			{
@@ -93,24 +93,24 @@ func TestConformance(t *testing.T) {
 
 // declaredBothWays is the canonical fixture: one directive, one tag,
 // one field carrying both, and one carrying neither.
-func declaredBothWays() *storefixture.Builder {
-	return storefixture.New().
-		Struct("Config", func(s *storefixture.StructBuilder) {
-			s.Field("Host", storefixture.Named("string"), func(f *storefixture.FieldBuilder) {
-				f.Directive(storefixture.Directive(
-					defaults.DirectiveName, storefixture.Arg(`"localhost"`),
+func declaredBothWays() *gofixture.Builder {
+	return gofixture.New().
+		Struct("Config", func(s *gofixture.StructBuilder) {
+			s.Field("Host", gofixture.Named("string"), func(f *gofixture.FieldBuilder) {
+				f.Directive(gofixture.Directive(
+					defaults.DirectiveName, gofixture.Arg(`"localhost"`),
 				))
 			})
-			s.Field("Port", storefixture.Named("int"), func(f *storefixture.FieldBuilder) {
+			s.Field("Port", gofixture.Named("int"), func(f *gofixture.FieldBuilder) {
 				f.Tag("`default:\"8080\"`")
 			})
-			s.Field("Retries", storefixture.Named("int"), func(f *storefixture.FieldBuilder) {
+			s.Field("Retries", gofixture.Named("int"), func(f *gofixture.FieldBuilder) {
 				f.Tag("`default:\"1\"`")
-				f.Directive(storefixture.Directive(
-					defaults.DirectiveName, storefixture.Arg("5"),
+				f.Directive(gofixture.Directive(
+					defaults.DirectiveName, gofixture.Arg("5"),
 				))
 			})
-			s.Field("Plain", storefixture.Named("string"), nil)
+			s.Field("Plain", gofixture.Named("string"), nil)
 		})
 }
 
@@ -174,11 +174,11 @@ func TestExplicitZeroIsDeclared(t *testing.T) {
 	for _, zero := range []string{"0", "nil", "false", `""`} {
 		t.Run("stamps "+zero, func(t *testing.T) {
 			t.Parallel()
-			s, _ := run(t, storefixture.New().
-				Struct("T", func(sb *storefixture.StructBuilder) {
-					sb.Field("F", storefixture.Named("int"), func(f *storefixture.FieldBuilder) {
-						f.Directive(storefixture.Directive(
-							defaults.DirectiveName, storefixture.Arg(zero),
+			s, _ := run(t, gofixture.New().
+				Struct("T", func(sb *gofixture.StructBuilder) {
+					sb.Field("F", gofixture.Named("int"), func(f *gofixture.FieldBuilder) {
+						f.Directive(gofixture.Directive(
+							defaults.DirectiveName, gofixture.Arg(zero),
 						))
 					})
 				}))
@@ -195,11 +195,11 @@ func TestQualifiedValue(t *testing.T) {
 
 	t.Run("a full path splits into package and symbol", func(t *testing.T) {
 		t.Parallel()
-		s, _ := run(t, storefixture.New().
-			Struct("T", func(sb *storefixture.StructBuilder) {
-				sb.Field("Region", storefixture.Named("string"), func(f *storefixture.FieldBuilder) {
-					f.Directive(storefixture.Directive(defaults.DirectiveName,
-						storefixture.Arg("example.com/seed.DefaultRegion")))
+		s, _ := run(t, gofixture.New().
+			Struct("T", func(sb *gofixture.StructBuilder) {
+				sb.Field("Region", gofixture.Named("string"), func(f *gofixture.FieldBuilder) {
+					f.Directive(gofixture.Directive(defaults.DirectiveName,
+						gofixture.Arg("example.com/seed.DefaultRegion")))
 				})
 			}))
 		bag := fieldBag(t, s, "T", "Region")
@@ -224,11 +224,11 @@ func TestQualifiedValue(t *testing.T) {
 func TestMalformedValueIsReported(t *testing.T) {
 	t.Parallel()
 
-	s, diags := run(t, storefixture.New().
-		Struct("T", func(sb *storefixture.StructBuilder) {
-			sb.Field("F", storefixture.Named("string"), func(f *storefixture.FieldBuilder) {
-				f.Directive(storefixture.Directive(
-					defaults.DirectiveName, storefixture.Arg(`"unterminated`),
+	s, diags := run(t, gofixture.New().
+		Struct("T", func(sb *gofixture.StructBuilder) {
+			sb.Field("F", gofixture.Named("string"), func(f *gofixture.FieldBuilder) {
+				f.Directive(gofixture.Directive(
+					defaults.DirectiveName, gofixture.Arg(`"unterminated`),
 				))
 			})
 		}))

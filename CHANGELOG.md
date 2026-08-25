@@ -15,6 +15,23 @@ omitted unless they change what a caller can rely on.
 
 ### Breaking
 
+- **The Go fixture and Go assertions move to `lang/golang`.**
+  `eidostest/storefixture` is now `lang/golang/golangtest/gofixture`, and
+  `eidostest/golangtest` is now `lang/golang/golangtest`. Package names follow
+  the directories, so `storefixture.New()` becomes `gofixture.New()`. Nothing
+  else about either API changes.
+
+  They moved because `eidostest` requiring `lang/golang` and `lang/golang`
+  requiring `eidostest` is a cycle, and a consumer of a third module gets
+  neither module's `replace` — so `lang/typescript` resolved the pair to a
+  version that was never tagged and would not build. The fixture builds Go's
+  type grammar and projects it back to Go source, so `lang/golang` is where it
+  belongs; what is left in `eidostest` names no language at all.
+
+  A Go plugin's test changes one import path per file. A plugin targeting
+  another language now has a seam it did not have: the conformance suites take
+  a `store.Store` and never ask what produced it.
+
 - **Language support is grouped by language, one module apiece.**
   `frontend/golang`, `backend/golang` and `sdk/golang` now live under
   `lang/golang/{frontend,backend,sdk}`, and `frontend/protobuf` under

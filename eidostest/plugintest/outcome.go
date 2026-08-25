@@ -33,9 +33,10 @@ var (
 	ErrProbeReturnedError = errors.New("plugintest: plugin returned an error")
 
 	// ErrFixtureBuildPanicked wraps a panic escaping a fixture's own
-	// BuildStore. [storefixture.Builder.Build] panics deliberately on
-	// anything the store rejects, so a mistyped fixture reaches the
-	// suite as a panic rather than an error.
+	// BuildStore. A fixture builder typically panics rather than
+	// returns on anything the store rejects — a duplicate qualified
+	// name is builder misuse, not test data — so a mistyped fixture
+	// reaches the suite as a panic rather than an error.
 	ErrFixtureBuildPanicked = errors.New("plugintest: fixture BuildStore panicked")
 )
 
@@ -52,8 +53,8 @@ func probeVerb(err error) string {
 // an error wrapping [ErrFixtureBuildPanicked].
 //
 // Without the recover, one malformed fixture takes down the whole test
-// binary: `storefixture.Build` panics on any state `AddPackage`
-// rejects, the panic escapes the subtest, and every sibling subtest —
+// binary: a builder panics on a state `AddPackage` rejects, the panic
+// escapes the subtest, and every sibling subtest —
 // and every sibling `Test` in the same package — never runs. Recovering
 // turns that into one failed subtest naming the fixture.
 //

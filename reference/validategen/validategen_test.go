@@ -6,11 +6,11 @@ package validategen_test
 import (
 	"testing"
 
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/handlergen"
 	"go.thesmos.sh/eidos/reference/validategen"
 	"go.thesmos.sh/eidos/sdk"
@@ -52,7 +52,7 @@ func TestConformance(t *testing.T) {
 				Name: "package with nothing this plugin handles",
 				BuildStore: func(t *testing.T) *sdk.Store {
 					t.Helper()
-					return storefixture.New().Struct("Plain", nil).Build()
+					return gofixture.New().Struct("Plain", nil).Build()
 				},
 			},
 		})
@@ -68,12 +68,12 @@ const subject = "Orders"
 // The position is load-bearing: Layout composes a generated file's name
 // as `<origin-basename><plugin-suffix>`, so `orders.go` is what turns
 // this plugin's `_validate.go` suffix into `orders_validate.go`.
-func handlerBuilder(extra ...*sdk.Directive) *storefixture.Builder {
-	return storefixture.New().
-		Struct("Orders", func(s *storefixture.StructBuilder) {
+func handlerBuilder(extra ...*sdk.Directive) *gofixture.Builder {
+	return gofixture.New().
+		Struct("Orders", func(s *gofixture.StructBuilder) {
 			s.Docs("Orders is the annotated type the ensemble generates from.")
 			s.Pos(sdk.Pos{File: "orders.go", Line: 1})
-			s.Directive(storefixture.Directive(handlergen.DirectiveName))
+			s.Directive(gofixture.Directive(handlergen.DirectiveName))
 			for _, d := range extra {
 				s.Directive(d)
 			}
@@ -229,8 +229,8 @@ func TestRender_RoutedValidatorQualifiesItsSubject(t *testing.T) {
 	t.Parallel()
 
 	pkg := handlerBuilder(
-		storefixture.RouteTo(validategen.Name, "validation", "validation"),
-		storefixture.RouteTo(handlergen.Name, "api", "api"),
+		gofixture.RouteTo(validategen.Name, "validation", "validation"),
+		gofixture.RouteTo(handlergen.Name, "api", "api"),
 	).PackageNode()
 	gen := golangtest.Rendered(t, render(t, pkg))
 

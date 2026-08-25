@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	langgo "go.thesmos.sh/eidos/lang/golang"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/repogen"
 	"go.thesmos.sh/eidos/sdk"
 )
@@ -40,7 +40,7 @@ func TestConformance(t *testing.T) {
 					Name: "package with no annotated structs",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("Plain", nil).
 							Build()
 					},
@@ -49,10 +49,10 @@ func TestConformance(t *testing.T) {
 					Name: "package with one repo-annotated struct",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
-							Struct("User", func(s *storefixture.StructBuilder) {
-								s.Directive(storefixture.Directive("repo"))
-								s.Field("ID", storefixture.Named("string"), nil)
+						return gofixture.New().
+							Struct("User", func(s *gofixture.StructBuilder) {
+								s.Directive(gofixture.Directive("repo"))
+								s.Field("ID", gofixture.Named("string"), nil)
 							}).
 							Build()
 					},
@@ -61,15 +61,15 @@ func TestConformance(t *testing.T) {
 					Name: "package with three repo-annotated structs",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
-							Struct("User", func(s *storefixture.StructBuilder) {
-								s.Directive(storefixture.Directive("repo"))
+						return gofixture.New().
+							Struct("User", func(s *gofixture.StructBuilder) {
+								s.Directive(gofixture.Directive("repo"))
 							}).
-							Struct("Order", func(s *storefixture.StructBuilder) {
-								s.Directive(storefixture.Directive("repo"))
+							Struct("Order", func(s *gofixture.StructBuilder) {
+								s.Directive(gofixture.Directive("repo"))
 							}).
-							Struct("Invoice", func(s *storefixture.StructBuilder) {
-								s.Directive(storefixture.Directive("repo"))
+							Struct("Invoice", func(s *gofixture.StructBuilder) {
+								s.Directive(gofixture.Directive("repo"))
 							}).
 							Build()
 					},
@@ -407,12 +407,12 @@ func TestRender_OneFilePerSourceStruct(t *testing.T) {
 func render(t *testing.T, opts map[string]string, names ...string) *golangtest.Generated {
 	t.Helper()
 
-	fixture := storefixture.New()
+	fixture := gofixture.New()
 	for _, name := range names {
-		fixture.Struct(name, func(s *storefixture.StructBuilder) {
+		fixture.Struct(name, func(s *gofixture.StructBuilder) {
 			s.Docs(name + " is a source struct carrying +gen:repo.")
-			s.Directive(storefixture.Directive(repogen.DirectiveName))
-			s.Field("ID", storefixture.Named("string"), nil)
+			s.Directive(gofixture.Directive(repogen.DirectiveName))
+			s.Field("ID", gofixture.Named("string"), nil)
 		})
 	}
 

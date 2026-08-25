@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/registrygen"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -39,14 +39,14 @@ func TestConformance(t *testing.T) {
 					Name: "empty package",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().Build()
+						return gofixture.New().Build()
 					},
 				},
 				{
 					Name: "package with a struct",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("Plain", nil).
 							Build()
 					},
@@ -84,9 +84,9 @@ func TestGenerate_AppendsRegistration(t *testing.T) {
 
 	t.Run("one registration per annotated struct", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().
-			Struct("User", func(b *storefixture.StructBuilder) {
-				b.Directive(storefixture.Directive("register"))
+		s := gofixture.New().
+			Struct("User", func(b *gofixture.StructBuilder) {
+				b.Directive(gofixture.Directive("register"))
 			}).
 			Struct("Plain", nil).
 			Build()
@@ -114,7 +114,7 @@ func TestGenerate_AppendsRegistration(t *testing.T) {
 
 	t.Run("a struct without the directive contributes nothing", func(t *testing.T) {
 		t.Parallel()
-		s := storefixture.New().Struct("Plain", nil).Build()
+		s := gofixture.New().Struct("Plain", nil).Build()
 		if got := pending(t, s); len(got) != 0 {
 			t.Errorf("unannotated struct should contribute nothing, got %d", len(got))
 		}
@@ -130,18 +130,18 @@ func TestGenerate_AppendsRegistration(t *testing.T) {
 // basename to compose a filename from; and one unannotated struct is
 // present so "registers everything it sees" and "registers what was
 // asked for" are distinguishable outcomes.
-func blogBuilder() *storefixture.Builder {
-	register := func(s *storefixture.StructBuilder, file string, line int) {
+func blogBuilder() *gofixture.Builder {
+	register := func(s *gofixture.StructBuilder, file string, line int) {
 		s.Pos(sdk.Pos{File: file, Line: line})
-		s.Directive(storefixture.Directive(sdk.DirectiveName(registrygen.DirectiveName)))
+		s.Directive(gofixture.Directive(sdk.DirectiveName(registrygen.DirectiveName)))
 	}
-	return storefixture.New().
-		Struct("Article", func(s *storefixture.StructBuilder) { register(s, "blog.go", 3) }).
-		Struct("Author", func(s *storefixture.StructBuilder) { register(s, "blog.go", 9) }).
-		Struct("Plain", func(s *storefixture.StructBuilder) {
+	return gofixture.New().
+		Struct("Article", func(s *gofixture.StructBuilder) { register(s, "blog.go", 3) }).
+		Struct("Author", func(s *gofixture.StructBuilder) { register(s, "blog.go", 9) }).
+		Struct("Plain", func(s *gofixture.StructBuilder) {
 			s.Pos(sdk.Pos{File: "blog.go", Line: 15})
 		}).
-		Struct("Comment", func(s *storefixture.StructBuilder) { register(s, "comment.go", 3) })
+		Struct("Comment", func(s *gofixture.StructBuilder) { register(s, "comment.go", 3) })
 }
 
 // renderRegistry drives a full pipeline over [blogBuilder] and adopts

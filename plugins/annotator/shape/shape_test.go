@@ -9,8 +9,8 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/lang/golang"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 	"go.thesmos.sh/eidos/sdk"
 	"go.thesmos.sh/eidos/store"
@@ -793,24 +793,24 @@ func TestAnnotateReachesEveryMethodCarrier(t *testing.T) {
 
 	// A nullary bare-error method, which the lifecycle-free reader
 	// detector below classifies wherever it is declared.
-	nullaryError := func(m *storefixture.MethodBuilder) {
-		m.Return(storefixture.Named("error"))
+	nullaryError := func(m *gofixture.MethodBuilder) {
+		m.Return(gofixture.Named("error"))
 	}
 
-	fixture := storefixture.New().
-		Struct("Store", func(s *storefixture.StructBuilder) {
+	fixture := gofixture.New().
+		Struct("Store", func(s *gofixture.StructBuilder) {
 			s.Method("OnStruct", nullaryError)
 		}).
-		Interface("Port", func(i *storefixture.InterfaceBuilder) {
+		Interface("Port", func(i *gofixture.InterfaceBuilder) {
 			i.Method("OnInterface", nullaryError)
 		}).
-		Enum("Status", func(e *storefixture.EnumBuilder) {
-			e.Underlying(storefixture.Named("int"))
+		Enum("Status", func(e *gofixture.EnumBuilder) {
+			e.Underlying(gofixture.Named("int"))
 			e.Variant("StatusActive", "0")
 			e.Method("OnEnum", nullaryError)
 		}).
-		Alias("Weekday", func(a *storefixture.AliasBuilder) {
-			a.Target(storefixture.Named("int"))
+		Alias("Weekday", func(a *gofixture.AliasBuilder) {
+			a.Target(gofixture.Named("int"))
 			a.Method("OnAlias", nullaryError)
 		})
 

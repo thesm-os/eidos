@@ -9,10 +9,7 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
-require (
-	go.thesmos.sh/eidos/lang/golang v1.14.1 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-)
+require golang.org/x/sync v0.22.0 // indirect
 
 replace (
 	go.thesmos.sh/eidos => ../..

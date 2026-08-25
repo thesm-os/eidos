@@ -127,10 +127,7 @@
 //	    plugintest.RunGeneratorSuite(t, p, []plugintest.GeneratorFixture{{
 //	        Name: "single struct with +gen:my",
 //	        BuildStore: func(t *testing.T) *store.Store {
-//	            return storefixture.New().
-//	                Struct("User", func(s *storefixture.StructBuilder) {
-//	                    s.Directive(storefixture.Directive("my"))
-//	                }).Build()
+//	            return storeWithAnnotatedUser(t)
 //	        },
 //	    }})
 //	    plugintest.RunOptionsSuite(t, p, plugintest.OptionsFixture{
@@ -138,6 +135,13 @@
 //	        UnknownKey: "no_such_key",
 //	    })
 //	}
+//
+// BuildStore returns a populated [store.Store] and the suite asks
+// nothing about how it was built — which is what keeps these checks
+// usable by a plugin targeting any language. A Go plugin populates
+// one through `lang/golang/golangtest/gofixture`; ExampleRunSuite
+// builds one from [node] values directly, so the neutral path is the
+// one a reader sees first.
 //
 // Plugin authors invoke whichever suites apply; the framework
 // emits no implicit calls. Subtests scope the suite's checks so

@@ -16,7 +16,6 @@ import (
 	"text/template"
 
 	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/plugin"
 )
 
@@ -911,6 +910,37 @@ var overrideableFuncNames = []string{
 	"zeroVariant",
 }
 
+// canonicalFuncNames mirrors `lang/golang`'s FuncMap — the shared
+// Go-conventions bundle every Go backend merges into its overrideable
+// half.
+//
+// The third mirror, and the one that was avoided longest. The other
+// two copy a set only a backend can read; this one copies a set that
+// sits in `lang/golang`, which any package can import, so seeding it
+// directly was both possible and obviously better.
+//
+// It stopped being possible when the import became a module cycle.
+// `lang/golang` needs this suite for its own conformance tests, so it
+// requires `eidostest`; this package importing `lang/golang` back made
+// the requirement mutual, and a consumer of a third module — which
+// gets neither module's `replace` — resolves that pair to a version
+// that was never tagged and fails to build. Mirroring is what breaks
+// the cycle. `lang/golang` owns the drift test.
+var canonicalFuncNames = []string{
+	"elemType",
+	"exportedFields",
+	"fieldType",
+	"isByteSlice",
+	"isExported",
+	"isMap",
+	"isSlice",
+	"mapKeyType",
+	"mapValType",
+	"selfType",
+	"typeArgs",
+	"typeParams",
+}
+
 // OverrideableTemplateFuncNames returns the backend funcmap names a
 // plugin may legally register over, as a fresh slice.
 // Not the argument [AssertTemplateFuncsResolve] takes — this is one
@@ -927,6 +957,15 @@ func OverrideableTemplateFuncNames() []string { return slices.Clone(overrideable
 // Not the argument [AssertTemplateFuncsResolve] takes — this is the
 // canonical half only. [ReservedTemplateFuncs] is that argument.
 func ReservedTemplateFuncNames() []string { return slices.Clone(reservedFuncNames) }
+
+// CanonicalTemplateFuncNames returns the shared Go-conventions
+// funcmap names this suite seeds for [ConformanceLanguage], sorted.
+//
+// Exported for the drift test in `lang/golang`, which is the side that
+// can read the bundle. A name added to it and not here
+// is a name a plugin's template may call and the suite reports as
+// unresolved — a false failure against a template that renders.
+func CanonicalTemplateFuncNames() []string { return slices.Clone(canonicalFuncNames) }
 
 // assertTemplateFuncsAvoidReservedNames pins that a
 // [plugin.TemplateProvider] neither registers nor overrides a name the
@@ -1200,7 +1239,7 @@ func reservedFuncMap(lang string) template.FuncMap {
 		fm[name] = func(_ ...any) any { return nil }
 	}
 	if lang == ConformanceLanguage {
-		for name := range golang.FuncMap() {
+		for _, name := range canonicalFuncNames {
 			fm[name] = func(_ ...any) any { return nil }
 		}
 		for _, name := range overrideableFuncNames {

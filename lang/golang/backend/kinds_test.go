@@ -9,11 +9,11 @@ import (
 
 	"go.thesmos.sh/eidos/core/kind"
 	"go.thesmos.sh/eidos/core/position"
-	"go.thesmos.sh/eidos/eidostest/golangtest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	"go.thesmos.sh/eidos/emit"
 	emitbuilder "go.thesmos.sh/eidos/emit/builder"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 )
@@ -63,9 +63,9 @@ func (g *kindsGenerator) Generate(ctx *plugin.GeneratorContext) error {
 // fixturePkg is one annotated interface carrying a position, so
 // Layout composes a filename rather than a bare suffix.
 func fixturePkg() *node.Package {
-	return storefixture.New().
+	return gofixture.New().
 		Package("cfg", "example.com/cfg").
-		Interface("Store", func(i *storefixture.InterfaceBuilder) {
+		Interface("Store", func(i *gofixture.InterfaceBuilder) {
 			i.Pos(position.At("cfg/store.go", 1, 1))
 			i.Method("Get", nil)
 		}).

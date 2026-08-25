@@ -9,7 +9,7 @@ import (
 	"go.thesmos.sh/eidos/bridge/protogo"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/lang/protobuf/frontend"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/store"
@@ -45,14 +45,14 @@ func TestConformance(t *testing.T) {
 					Name: "empty package",
 					BuildStore: func(t *testing.T) *store.Store {
 						t.Helper()
-						return storefixture.New().Build()
+						return gofixture.New().Build()
 					},
 				},
 				{
 					Name: "package with one struct",
 					BuildStore: func(t *testing.T) *store.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("User", nil).
 							Build()
 					},
@@ -61,7 +61,7 @@ func TestConformance(t *testing.T) {
 					Name: "package with three structs",
 					BuildStore: func(t *testing.T) *store.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("User", nil).
 							Struct("Order", nil).
 							Struct("Invoice", nil).
@@ -76,9 +76,9 @@ func TestConformance(t *testing.T) {
 // protoStore returns a store whose single package carries the
 // proto frontend marker, so the bridge treats it as translatable.
 // build populates the package.
-func protoStore(t *testing.T, build func(*storefixture.Builder)) *store.Store {
+func protoStore(t *testing.T, build func(*gofixture.Builder)) *store.Store {
 	t.Helper()
-	b := storefixture.New().Package("pb", "example.com/pb")
+	b := gofixture.New().Package("pb", "example.com/pb")
 	frontend.MetaFrontend.Set(b.PackageNode().EnsureMeta(), frontend.FrontendName, "test")
 	if build != nil {
 		build(b)
@@ -104,15 +104,15 @@ func TestAnnotate_TranslatesRPCSignatureTypes(t *testing.T) {
 	// field-aware struct walk.
 	newStore := func(t *testing.T) *store.Store {
 		t.Helper()
-		return protoStore(t, func(b *storefixture.Builder) {
-			b.Interface("Greeter", func(i *storefixture.InterfaceBuilder) {
-				i.Method("Say", func(m *storefixture.MethodBuilder) {
-					m.Param("name", storefixture.Named("string"))
-					m.Param("tags", storefixture.Slice(storefixture.Named("string")))
-					m.Param("attrs", storefixture.Map(
-						storefixture.Named("string"), storefixture.Named("int32"),
+		return protoStore(t, func(b *gofixture.Builder) {
+			b.Interface("Greeter", func(i *gofixture.InterfaceBuilder) {
+				i.Method("Say", func(m *gofixture.MethodBuilder) {
+					m.Param("name", gofixture.Named("string"))
+					m.Param("tags", gofixture.Slice(gofixture.Named("string")))
+					m.Param("attrs", gofixture.Map(
+						gofixture.Named("string"), gofixture.Named("int32"),
 					))
-					m.Return(storefixture.Named("bool"))
+					m.Return(gofixture.Named("bool"))
 				})
 			})
 		})
@@ -147,10 +147,10 @@ func TestAnnotate_WellKnownTypes(t *testing.T) {
 
 	t.Run("a well-known ref gets both a Go type and its import", func(t *testing.T) {
 		t.Parallel()
-		s := protoStore(t, func(b *storefixture.Builder) {
-			b.Interface("Clock", func(i *storefixture.InterfaceBuilder) {
-				i.Method("Now", func(m *storefixture.MethodBuilder) {
-					ref := storefixture.Named("Timestamp")
+		s := protoStore(t, func(b *gofixture.Builder) {
+			b.Interface("Clock", func(i *gofixture.InterfaceBuilder) {
+				i.Method("Now", func(m *gofixture.MethodBuilder) {
+					ref := gofixture.Named("Timestamp")
 					frontend.MetaWellKnown.Set(ref.EnsureMeta(), "Timestamp", "test")
 					m.Return(ref)
 				})
@@ -174,10 +174,10 @@ func TestAnnotate_WellKnownTypes(t *testing.T) {
 		t.Parallel()
 		// Named message / enum refs are deliberately not stamped:
 		// the backend renders them through emit.External instead.
-		s := protoStore(t, func(b *storefixture.Builder) {
-			b.Interface("Svc", func(i *storefixture.InterfaceBuilder) {
-				i.Method("Get", func(m *storefixture.MethodBuilder) {
-					m.Return(storefixture.Named("Outer.Inner"))
+		s := protoStore(t, func(b *gofixture.Builder) {
+			b.Interface("Svc", func(i *gofixture.InterfaceBuilder) {
+				i.Method("Get", func(m *gofixture.MethodBuilder) {
+					m.Return(gofixture.Named("Outer.Inner"))
 				})
 			})
 		})

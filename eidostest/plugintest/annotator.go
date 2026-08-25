@@ -24,8 +24,8 @@ import (
 // independent value each call — annotators mutate the store's
 // meta state, and a shared store would leak state between
 // subtests. The store should contain whichever source-side
-// decls the annotator's stamping logic targets (typically built
-// via the [storefixture.Builder] helpers).
+// decls the annotator's stamping logic targets, built through
+// whichever fixture the annotator's target language provides.
 type AnnotatorFixture struct {
 	// Name labels the fixture in subtest paths and failure
 	// messages. Required and unique within a single

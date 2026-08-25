@@ -151,8 +151,8 @@ var (
 //
 // A plugin never makes one; the pipeline owns the graph and hands it
 // over on the phase context. A plugin's tests make one constantly,
-// and [eidostest/storefixture] is the path worth taking — it builds
-// the declarations too. This is for the case that has none: a test
+// and `lang/golang/golangtest/gofixture` is the path worth taking for
+// a Go plugin — it builds the declarations too. This is for the case that has none: a test
 // pinning what a plugin does with an empty graph, which is the
 // conformance suites' first fixture and a real shape a run reaches.
 //

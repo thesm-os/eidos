@@ -12,8 +12,9 @@
 // The eidostest surface has three layers, each appropriate to a
 // different scope of test:
 //
-//   - Unit: drive a single plugin's Annotate / Generate using a
-//     [storefixture.Builder]-produced [store.Store]. No pipeline.
+//   - Unit: drive a single plugin's Annotate / Generate against a
+//     [store.Store] the test populates itself, through whichever
+//     fixture its target language provides. No pipeline.
 //   - Synthetic pipeline: drive multiple phases with a fully wired
 //     pipeline whose frontend is [FromNodes]. This package.
 //   - Full pipeline: drive a production frontend against testdata
@@ -22,11 +23,7 @@
 // # Synthetic pipeline shape
 //
 //	p := pipelinetest.New(t).
-//	    WithFrontend(pipelinetest.FromNodes(storefixture.New().
-//	        Struct("User", func(s *storefixture.StructBuilder) {
-//	            s.Directive(storefixture.Directive("repo"))
-//	            s.Field("ID", storefixture.Named("string"), nil)
-//	        }).PackageNode())).
+//	    WithFrontend(pipelinetest.FromNodes(users)).
 //	    WithGenerator(repogen.New()).
 //	    WithBackend(backend.New()).
 //	    Build().
@@ -39,6 +36,13 @@
 // The rendered basename is the origin's basename plus the emitting
 // plugin's declared filename suffix — `user.go` plus repogen's
 // `_repo.go`. A plugin's suffix, not the harness, decides it.
+//
+// `users` is a [node.Package] — a struct named User carrying the
+// `repo` directive. Where it came from is the caller's business:
+// [FromNodes] takes nodes and asks nothing about the language that
+// produced them, so a plugin targeting Go builds it through
+// `lang/golang/golangtest/gofixture` and one targeting another
+// language through that language's equivalent.
 //
 // # Failure semantics
 //

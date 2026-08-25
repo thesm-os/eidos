@@ -9,11 +9,11 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/opt"
-	"go.thesmos.sh/eidos/eidostest/golangtest"
 	"go.thesmos.sh/eidos/eidostest/pipelinetest"
 	"go.thesmos.sh/eidos/eidostest/plugintest"
-	"go.thesmos.sh/eidos/eidostest/storefixture"
 	backendgolang "go.thesmos.sh/eidos/lang/golang/backend"
+	"go.thesmos.sh/eidos/lang/golang/golangtest"
+	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/reference/auditweaver"
 	"go.thesmos.sh/eidos/reference/debugweaver"
 	"go.thesmos.sh/eidos/reference/repogen"
@@ -43,14 +43,14 @@ func TestConformance(t *testing.T) {
 					Name: "empty package",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().Build()
+						return gofixture.New().Build()
 					},
 				},
 				{
 					Name: "package with a struct",
 					BuildStore: func(t *testing.T) *sdk.Store {
 						t.Helper()
-						return storefixture.New().
+						return gofixture.New().
 							Struct("User", nil).
 							Build()
 					},
@@ -265,13 +265,13 @@ func wovenCall(t *testing.T, n sdk.EmitNode) (pkg, fn string, args []string) {
 // repoBuilder builds one struct carrying +gen:repo, which makes
 // repogen emit a struct whose methods have bodies — the host shape a
 // prebody weaver needs.
-func repoBuilder() *storefixture.Builder {
-	return storefixture.New().
-		Struct("User", func(s *storefixture.StructBuilder) {
+func repoBuilder() *gofixture.Builder {
+	return gofixture.New().
+		Struct("User", func(s *gofixture.StructBuilder) {
 			s.Docs("User is the domain type repogen builds a repository around.")
 			s.Pos(sdk.Pos{File: "user.go", Line: 1})
-			s.Directive(storefixture.Directive(repogen.DirectiveName))
-			s.Field("ID", storefixture.Named("string"), nil)
+			s.Directive(gofixture.Directive(repogen.DirectiveName))
+			s.Field("ID", gofixture.Named("string"), nil)
 		})
 }
 
