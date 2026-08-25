@@ -15,6 +15,18 @@ omitted unless they change what a caller can rely on.
 
 ### Added
 
+- **`lang/golang/sdk` re-exports the assertion dialect's entry names.** The
+  package exists so a plugin's Go binding need not import the language package
+  beside it, and it already re-exported `Language` for that reason — but a
+  plugin replacing the dialect has to name the entries it replaces, and those
+  were only in `lang/golang`. So the one activity the extension point is
+  documented for was the one that had to reach past the façade.
+
+  `FuncNeedsDiffHelper` is among them rather than apart: a replacement that
+  answers the equality entries and forgets it leaves the generated file
+  declaring a comparison helper nothing calls, importing whatever that helper
+  names.
+
 - **`needsDiffHelper` lets a replaced dialect drop what it does not use.** The
   builder's generated tests declare a file-level comparison helper and call it
   from every deep-equality check, which is right for the shipped dialect: the

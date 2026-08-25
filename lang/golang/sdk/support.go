@@ -15,6 +15,33 @@ import (
 // beside this one.
 const Language = golang.Language
 
+// The assertion dialect's entry names, re-exported for the same
+// reason [Language] is.
+//
+// Replacing the dialect is a plugin-author activity — it is the case
+// [sdk.ImportAwareFuncs] documents itself as existing for — and a
+// plugin doing it has to name the entries it replaces. Without these
+// it reaches past this façade into the language package to do so,
+// which is the import this package exists to remove.
+//
+// [FuncNeedsDiffHelper] belongs with them rather than apart: a
+// replacement that answers the equality entries and forgets this one
+// leaves the generated file declaring a comparison helper nothing
+// calls, and importing whatever that helper names.
+const (
+	FuncAssertEqual     = golang.FuncAssertEqual
+	FuncAssertDeepEqual = golang.FuncAssertDeepEqual
+	FuncAssertNotEqual  = golang.FuncAssertNotEqual
+	FuncAssertTrue      = golang.FuncAssertTrue
+	FuncAssertFalse     = golang.FuncAssertFalse
+	FuncAssertNil       = golang.FuncAssertNil
+	FuncAssertNotNil    = golang.FuncAssertNotNil
+	FuncAssertLen       = golang.FuncAssertLen
+	FuncAssertNoError   = golang.FuncAssertNoError
+	FuncAssertError     = golang.FuncAssertError
+	FuncNeedsDiffHelper = golang.FuncNeedsDiffHelper
+)
+
 // Support returns the [sdk.LanguageSupport] a Go-generating plugin
 // declares, pre-filled with Go's own funcmap bundle.
 //
