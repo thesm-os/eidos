@@ -67,6 +67,76 @@ func TestAssertComparisons(t *testing.T) {
 	})
 }
 
+// TestAssertOperandsCarryingBraces covers the operand shape that
+// reached a consumer's build.
+//
+// The composite literal arrived through the builder generator, but
+// nothing about the defect was its: every entry in this file composes
+// its condition into an `if` header, so any caller comparing against a
+// struct value got source that did not parse. Fixed here rather than
+// at the one call site, which is why the cases below drive the dialect
+// directly.
+//
+// [parses] is what makes each of these an assertion rather than a
+// string comparison — the failure mode is source that will not
+// compile, and only a parser reports that.
+func TestAssertOperandsCarryingBraces(t *testing.T) {
+	t.Parallel()
+
+	t.Run("equal against a composite literal parses", func(t *testing.T) {
+		t.Parallel()
+		got := golang.AssertEqual("t", "got.Home",
+			`domain.Address{Street: "test-home"}`, "the setter writes what it was given")
+		if !strings.Contains(got, `if got.Home != (domain.Address{Street: "test-home"}) {`) {
+			t.Errorf("the literal must be parenthesised in the header, got:\n%s", got)
+		}
+		parses(t, got)
+	})
+
+	t.Run("not-equal against a composite literal parses", func(t *testing.T) {
+		t.Parallel()
+		parses(t, golang.AssertNotEqual("t", "a", "pkg.T{}", "differs from the zero value"))
+	})
+
+	t.Run("a literal on the left is parenthesised too", func(t *testing.T) {
+		t.Parallel()
+		// Which side carries the literal is the caller's choice, and
+		// the header rejects it in either position.
+		parses(t, golang.AssertEqual("t", "pkg.T{}", "want", "the zero value round-trips"))
+	})
+
+	t.Run("an empty composite literal parses", func(t *testing.T) {
+		t.Parallel()
+		parses(t, golang.AssertEqual("t", "got", "Address{}", "starts zero"))
+	})
+
+	t.Run("an operand carrying no brace is left alone", func(t *testing.T) {
+		t.Parallel()
+		// Parenthesising everything would also have parsed. Generated
+		// checks are read by whoever has to fix the failure, so the
+		// ordinary comparison keeps its ordinary spelling.
+		got := golang.AssertEqual("t", "got", "want", "round-trips")
+		if strings.Contains(got, "(got)") || strings.Contains(got, "(want)") {
+			t.Errorf("a plain operand gained parentheses it did not need, got:\n%s", got)
+		}
+	})
+
+	t.Run("the nil comparisons are unaffected", func(t *testing.T) {
+		t.Parallel()
+		for _, got := range []string{
+			golang.AssertNil("t", "err", "returns no error"),
+			golang.AssertNotNil("t", "v", "returns a value"),
+			golang.AssertNoError("t", "err", "succeeds"),
+			golang.AssertError("t", "err", "refuses"),
+		} {
+			if strings.Contains(got, "(nil)") {
+				t.Errorf("nil gained parentheses it did not need, got:\n%s", got)
+			}
+			parses(t, got)
+		}
+	})
+}
+
 // TestAssertDeepEqual covers the form a member `==` cannot serve.
 func TestAssertDeepEqual(t *testing.T) {
 	t.Parallel()

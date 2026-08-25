@@ -119,8 +119,15 @@ func AssertEqual(t, got, want, msg string) string {
 // looking for one changed field in two walls of text — which is the
 // problem the diff exists to solve.
 func AssertDeepEqual(t, diff, got, want, msg string) string {
-	return ifThen(cmp(reportVar+" := "+diff+"("+want+", "+got+"); "+reportVar, "!=", `""`),
-		reportf(t, methodErrorf, msg+" (-want +got)", "%s", reportVar))
+	// Composed directly rather than through [cmp]. The left side here
+	// is an init statement, not an operand, and cmp's header guard
+	// would parenthesise the whole of it — which does not parse. The
+	// guard is unnecessary either way: every operand sits inside the
+	// call's parentheses, where a composite literal is unambiguous.
+	return ifThen(
+		reportVar+" := "+diff+"("+want+", "+got+"); "+reportVar+` != ""`,
+		reportf(t, methodErrorf, msg+" (-want +got)", "%s", reportVar),
+	)
 }
 
 // reportVar names the local a deep-equality check binds its diff to.
@@ -200,9 +207,49 @@ func ifThen(cond, body string) string {
 	return "if " + cond + " {\n" + body + "\n}"
 }
 
-// cmp joins two operands with an operator.
+// cmp joins two operands with an operator, parenthesising either one
+// that carries a composite literal.
+//
+// Go will not parse a composite literal whose type is a plain
+// identifier in the header of an `if`, `for` or `switch` — the
+// literal's opening brace is ambiguous with the block's — so
+//
+//	if got.Home != domain.Address{Street: "x"} {
+//
+// stops at `expected ';', found '{'`. Every condition in this file
+// reaches an `if` header through [ifThen] and an operand is whatever
+// the calling template rendered, so a generator comparing against a
+// struct value emitted a file that did not parse. What reached a
+// consumer's build was the builder generator's, but nothing about the
+// defect was its: any caller passing a literal got the same file.
+//
+// [AssertDeepEqual] is the answer to the wider problem this is one
+// symptom of — Go refuses `==` outright on a struct holding a slice,
+// which no amount of parenthesising helps. This keeps the operator
+// form correct for the cases it does serve.
+//
+// [AssertTrue] and [AssertFalse] need nothing here: both already wrap
+// the whole condition, which they do for the unrelated reason that
+// `!a == b` negates the left operand alone.
 func cmp(left, op, right string) string {
-	return left + " " + op + " " + right
+	return headerSafe(left) + " " + op + " " + headerSafe(right)
+}
+
+// headerSafe parenthesises an operand that would not parse in a
+// statement header. See [cmp] for what does not parse and why.
+//
+// The brace is the character that creates the ambiguity, so it is
+// what this looks for rather than the expression's parsed shape. A
+// parenthesised operand is legal wherever the bare one was, so a
+// false positive — a string literal that happens to contain a brace —
+// costs one pair of parentheses in generated output. Missing a real
+// one costs a file that does not build, with the parse error pointing
+// at generated source the author did not write.
+func headerSafe(operand string) string {
+	if !strings.Contains(operand, "{") {
+		return operand
+	}
+	return "(" + operand + ")"
 }
 
 // The two ways a generated check reports. Named rather than spelled

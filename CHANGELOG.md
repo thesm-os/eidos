@@ -36,6 +36,14 @@ omitted unless they change what a caller can rely on.
   rather than reporting it, and a func comparer, because cmp reports two
   non-nil funcs as different even when they are the same func.
 
+- **The Go assertion dialect emits source that parses whatever it is
+  given.** `assertEqual` and `assertNotEqual` composed their comparison
+  straight into an `if` header, so an operand carrying a composite literal
+  produced a file the toolchain rejected before compiling it. Fixed in the
+  dialect rather than at the one call site that hit it: the builder generator
+  is where it reached a consumer, but any caller comparing against a struct
+  value got the same file.
+
 ### Added
 
 - **`assertDeepEqual` joins the Go assertion dialect.** The structural
