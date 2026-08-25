@@ -906,6 +906,7 @@ var overrideableFuncNames = []string{
 	"witnessNames",
 	"witnessUse",
 	"witnesses",
+	"wrapDoc",
 	"zeroLiteral",
 	"zeroVariant",
 }

@@ -152,6 +152,7 @@ func ConventionFuncMap() template.FuncMap {
 		"sentinelSubject":   TemplateSentinelSubject,
 		"parseFuncName":     ParseFuncName,
 		"doc":               Doc,
+		"wrapDoc":           WrapDoc,
 		"deprecatedDoc":     DeprecatedDoc,
 	}
 }

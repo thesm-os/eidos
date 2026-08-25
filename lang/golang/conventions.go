@@ -235,6 +235,72 @@ const sentinelPrefix = "Err"
 // `Parse<Type>`.
 func ParseFuncName(typeName string) string { return "Parse" + ExportedName(typeName) }
 
+// DocWidth is the column a rendered doc comment wraps its text at,
+// excluding the `// ` marker.
+//
+// Not a rule Go states — gofmt leaves comments exactly as written,
+// which is the whole reason this exists — but the width the standard
+// library and this repository read at. A generated comment noticeably
+// wider than its neighbours is the first thing that marks a file as
+// machine-written.
+const DocWidth = 72
+
+// WrapDoc renders text as a `//`-prefixed comment block wrapped at
+// [DocWidth].
+//
+// For a docblock naming a symbol the generator derived. A template
+// wrapping its own prose has to guess the identifier's length while
+// writing it, and the guess is wrong for every declaration of a
+// different name: a builder for `Comment` left one line short and one
+// at 86 columns, and gofmt rewraps neither. Handing the paragraph over
+// whole moves the wrap to after the substitution, where the length is
+// known.
+//
+// Paragraphs are separated by a blank line in the input and by a bare
+// `//` in the output. A word wider than the limit takes a line of its
+// own rather than being broken, since the only words that reach that
+// length here are identifiers and import paths — and a broken one
+// stops being a link godoc resolves.
+func WrapDoc(text string) string {
+	var out []string
+	for i, para := range strings.Split(strings.TrimSpace(text), "\n\n") {
+		if i > 0 {
+			out = append(out, "//")
+		}
+		out = append(out, wrapParagraph(para)...)
+	}
+	return strings.Join(out, "\n")
+}
+
+// wrapParagraph renders one paragraph as `// `-prefixed lines.
+//
+// Greedy: a word goes on the current line while it fits and starts a
+// new one otherwise, which is what the surrounding hand-written
+// comments read like. Anything cleverer would wrap a generated
+// paragraph differently from the one an author wrote beside it.
+func wrapParagraph(para string) []string {
+	var out []string
+	line := ""
+	for word := range strings.FieldsSeq(para) {
+		switch {
+		case line == "":
+			line = word
+		case len(line)+1+len(word) <= DocWidth:
+			line += " " + word
+		default:
+			out = append(out, "// "+line)
+			line = word
+		}
+	}
+	if line != "" {
+		out = append(out, "// "+line)
+	}
+	if len(out) == 0 {
+		return []string{"//"}
+	}
+	return out
+}
+
 // Doc renders a doc comment that satisfies godoc's opening
 // convention.
 //

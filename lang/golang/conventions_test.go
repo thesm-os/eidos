@@ -682,3 +682,70 @@ func TestHasTagOption_Absent(t *testing.T) {
 		}
 	})
 }
+
+// A docblock naming a derived identifier wraps after the substitution,
+// not before it.
+//
+// The defect: a template wrapping its own prose has to guess the
+// identifier's length while writing it, and the guess is wrong for
+// every declaration of a different name. A builder for `Comment` left
+// one line short and one at 86 columns, and gofmt rewraps neither.
+func TestWrapDoc(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no line exceeds the width", func(t *testing.T) {
+		t.Parallel()
+		got := golang.WrapDoc(
+			"CommentBuilder constructs values. Every setter returns the " +
+				"builder, so calls chain. A builder is a value under construction " +
+				"and is not safe for concurrent use; [CommentBuilder.Clone] is how " +
+				"one becomes two.",
+		)
+		for line := range strings.SplitSeq(got, "\n") {
+			if len(line) > golang.DocWidth+len("// ") {
+				t.Errorf("line is %d columns, want at most %d: %q",
+					len(line), golang.DocWidth+3, line)
+			}
+		}
+	})
+
+	t.Run("every line carries the comment marker", func(t *testing.T) {
+		t.Parallel()
+		for line := range strings.SplitSeq(golang.WrapDoc("one two three"), "\n") {
+			if !strings.HasPrefix(line, "//") {
+				t.Errorf("line %q is not a comment; a template pasting this into "+
+					"source would emit it as code", line)
+			}
+		}
+	})
+
+	t.Run("a blank line separates paragraphs", func(t *testing.T) {
+		t.Parallel()
+		// godoc reads a blank comment line as a paragraph break, so a
+		// helper that dropped it would run a summary into its body and
+		// leave the symbol with a four-sentence first line.
+		got := golang.WrapDoc("First paragraph.\n\nSecond paragraph.")
+		if !strings.Contains(got, "\n//\n") {
+			t.Errorf("got %q, want the paragraphs separated by a bare marker", got)
+		}
+	})
+
+	t.Run("an over-long word takes a line of its own", func(t *testing.T) {
+		t.Parallel()
+		// The words that reach that length here are identifiers and
+		// import paths, and a broken one stops being a link godoc
+		// resolves.
+		long := strings.Repeat("x", golang.DocWidth+10)
+		if got := golang.WrapDoc("see " + long); !strings.Contains(got, "// "+long) {
+			t.Errorf("got %q, want the long word intact on its own line", got)
+		}
+	})
+
+	t.Run("empty text renders nothing", func(t *testing.T) {
+		t.Parallel()
+		if got := golang.WrapDoc("   \n  "); got != "//" {
+			t.Errorf("got %q; a symbol with nothing to say still needs a "+
+				"well-formed comment rather than a bare prefix with a space", got)
+		}
+	})
+}
