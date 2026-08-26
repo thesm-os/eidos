@@ -36,6 +36,7 @@ reasoning lives in the docblock of whatever the line names.
 - **`lang/typescript`** is the TypeScript language adapter: the conventions package with the `ts.*` metadata vocabulary, a tree-sitter frontend, a canonical-template backend, and a plugin sdk whose `Support` / `Builtin` / `Reads` mirror Go's.
 - **`typescript.Source` answers the optional rule sets** — `EnumRules`, `SigRules` and `ErrorRules` — so a generator that asks by assertion works over TypeScript declarations rather than generating its degraded form.
 - **`lang/typescript/typescripttest` and `tsfixture`** are the TypeScript counterparts to `golangtest` / `gofixture`: a store fixture with a `TSSource` projection, structural assertions over generated output, `tsc`-backed type-check and satisfaction assertions, and a `node --test` gate for generated suites.
+- **`EIDOS_TYPESCRIPT_TOOLCHAIN` turns `typescripttest`'s tsc and Node skips into failures**, so a job that installed the toolchain reports a broken install rather than quietly checking nothing.
 - **`node.Interface` and `emit.Interface` carry a field list** (ADR-0008): a TypeScript interface declares properties alongside methods, with `FieldByName` / `FieldsWith` on both sides and a `FieldsSlot` on emit. Go frontends never populate it.
 - **`emit/builder.InterfaceBuilder.Field`** declares a property on an emit interface — the model, walk and slots carried fields while the fluent builder could not spell one.
 - **The TypeScript backend renders the declaration-level `ts.*` vocabulary**: visibility, `static`, `abstract`, accessors, optional methods, overload signatures (in place of the derived one), index and construct signatures, `const enum`, type-parameter defaults, and initialisers on variables and constants — an initialised binding drops `declare`.
@@ -51,6 +52,7 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Fixed
 
+- **A directive denying keys still takes `out=` / `pkg=` / `tag=`.** The routing widening reached `AllowedKeys` and not `DenyKeys`, so a generator declaring no options of its own had the framework's overrides reported as "accepts no keys" and honoured by the router anyway.
 - **A string default declared in a struct tag renders as a string** ([#59](https://github.com/thesm-os/eidos/issues/59)). Go's tag grammar eats one layer of quoting, so `default:"localhost"` was stamped verbatim and named an identifier nobody declared.
 - **A tag default may still name a symbol** ([#60](https://github.com/thesm-os/eidos/issues/60)). `LiteralFor` takes the declaring file: a qualifier the import block binds stays a reference, as does a full import path whose symbol is exported, and everything else on a textual member is quoted.
 - **A directive value can name a stdlib package** ([#58](https://github.com/thesm-os/eidos/issues/58)). The two notations were told apart by a slash before the last dot, which no single-segment path has; the import block decides now, with the path form as the fallback.
