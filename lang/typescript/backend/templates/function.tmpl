@@ -1,3 +1,4 @@
 {{- define "emit.function" -}}
-{{ renderDocs .Docs }}{{ exported . }}declare function {{ ident .Name }}{{ renderTypeParams .TypeParams }}({{ renderParams .Params }}): {{ renderReturn .Returns }};
-{{ end -}}
+{{ renderDocs .Docs }}{{ range overloadLines . }}{{ . }}
+{{ else }}{{ exported . }}declare function {{ ident .Name }}{{ renderTypeParams .TypeParams }}({{ renderParams .Params }}): {{ renderReturn .Returns }};
+{{ end }}{{ end -}}

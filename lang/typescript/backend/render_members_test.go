@@ -127,16 +127,21 @@ func TestRenderMethodSignatures(t *testing.T) {
 		}
 	})
 
-	t.Run("an async method carries the keyword", func(t *testing.T) {
+	t.Run("an async method does not carry the keyword", func(t *testing.T) {
 		t.Parallel()
+		// `async` is illegal on an interface method and in an ambient
+		// class alike — it says how a body produces its result, and a
+		// declaration has no body. The Promise return type is the
+		// contract a caller sees either way.
 		m := &emit.Method{Name: "load", Returns: []*emit.Return{{Type: emit.Builtin("string")}}}
 		typescript.MetaAsync.Set(m.EnsureMeta(), true, "test")
 
 		got := render(t, pkgWith(&emit.Interface{
 			Name: "R", Target: target, Methods: []*emit.Method{m},
 		}))
-		if !strings.Contains(line(t, got, "load"), "async load(") {
-			t.Fatalf("signature = %q, want the async keyword", line(t, got, "load"))
+		if strings.Contains(line(t, got, "load"), "async") {
+			t.Fatalf("signature = %q; async on a declaration is invalid TypeScript",
+				line(t, got, "load"))
 		}
 	})
 }
@@ -265,14 +270,18 @@ func TestRenderHeritage(t *testing.T) {
 func TestRenderDeclarationKinds(t *testing.T) {
 	t.Parallel()
 
-	t.Run("a class renders from a struct", func(t *testing.T) {
+	t.Run("a class renders as an ambient declaration", func(t *testing.T) {
 		t.Parallel()
+		// This backend renders no bodies, and a bodiless method in a
+		// plain class is TS2391 while an uninitialised property is
+		// TS2564 under strict — so `declare` is the only spelling whose
+		// output type-checks as written.
 		got := render(t, pkgWith(&emit.Struct{
 			Name: "User", Target: target,
 			Fields: []*emit.Field{{Name: "id", Type: emit.Builtin("string")}},
 		}))
-		if !strings.Contains(got, "export class User {") {
-			t.Fatalf("class missing:\n%s", got)
+		if !strings.Contains(got, "export declare class User {") {
+			t.Fatalf("class missing or not ambient:\n%s", got)
 		}
 	})
 

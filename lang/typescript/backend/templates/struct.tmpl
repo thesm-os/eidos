@@ -1,5 +1,5 @@
 {{- define "emit.struct" -}}
-{{ renderDocs .Docs }}{{ exported . }}class {{ ident .Name }}{{ renderTypeParams .TypeParams }}{{ renderHeritage . }} {
+{{ renderDocs .Docs }}{{ exported . }}declare {{ abstractKw . }}class {{ ident .Name }}{{ renderTypeParams .TypeParams }}{{ renderHeritage . }} {
 {{- $members := renderMembers . }}{{ if $members }}
 {{ indent $members }}
 {{- end }}

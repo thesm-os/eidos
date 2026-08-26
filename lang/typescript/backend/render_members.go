@@ -39,11 +39,12 @@ func (s *renderState) member(f *emit.Field) (string, error) {
 
 	var b strings.Builder
 	b.WriteString(renderDocs(f.Docs()))
+	b.WriteString(modifiers(f))
 
 	if ro, _ := typescript.MetaReadonly.Get(f.Meta()); ro {
 		b.WriteString("readonly ")
 	}
-	b.WriteString(typescript.PropertyKey(f.Name))
+	b.WriteString(memberName(f, f.Name))
 
 	// `?` and `| undefined` are different claims: an optional
 	// property may be absent from an object entirely, where a
@@ -96,10 +97,33 @@ func (s *renderState) method(m *emit.Method) (string, error) {
 
 	var b strings.Builder
 	b.WriteString(renderDocs(m.Docs()))
-	if async, _ := typescript.MetaAsync.Get(m.Meta()); async {
-		b.WriteString("async ")
+
+	// An overloaded callable renders its overload signatures and not
+	// the derived one: the overloads are what a caller may use, and the
+	// implementation signature exists only to cover them — which is a
+	// body fact, and this backend renders declarations. TypeScript
+	// resolves a call against the signatures top-down, so source order
+	// is preserved.
+	if overloads, ok := typescript.MetaOverloads.Get(m.Meta()); ok && len(overloads) > 0 {
+		mods := modifiers(m)
+		for _, o := range overloads {
+			b.WriteString(mods + o.Text + ";\n")
+		}
+		return b.String(), nil
 	}
-	b.WriteString(typescript.PropertyKey(m.Name))
+
+	// MetaAsync is deliberately not rendered. `async` is illegal on an
+	// interface method and in an ambient class alike — it describes how
+	// a body produces its result, and a declaration has no body. The
+	// Promise return type is the contract a caller sees either way.
+	b.WriteString(modifiers(m))
+	if accessor, ok := typescript.MetaAccessor.Get(m.Meta()); ok && accessor != "" {
+		b.WriteString(accessor + " ")
+	}
+	b.WriteString(memberName(m, m.Name))
+	if opt, _ := typescript.MetaOptional.Get(m.Meta()); opt {
+		b.WriteString("?")
+	}
 	b.WriteString(typeParams)
 	b.WriteString("(" + params + ")")
 	if ret != "" {
@@ -107,6 +131,45 @@ func (s *renderState) method(m *emit.Method) (string, error) {
 	}
 	b.WriteString(";\n")
 	return b.String(), nil
+}
+
+// modifiers spells the member keywords a declaration carries, in the
+// order the grammar requires: accessibility, then static, then
+// abstract.
+//
+// Visibility renders whatever was stamped, `public` included — the
+// key's own contract is that absent and public are distinguishable
+// precisely so a backend does not invent a keyword the author
+// omitted, which means one that was stamped was written.
+// [typescript.VisibilityHard] is not a keyword at all; the `#` rides
+// the name, which [memberName] handles.
+func modifiers(n emit.Node) string {
+	var b strings.Builder
+	v, ok := typescript.MetaVisibility.Get(n.Meta())
+	if ok && v != "" && v != typescript.VisibilityHard {
+		b.WriteString(v + " ")
+	}
+	if static, _ := typescript.MetaStatic.Get(n.Meta()); static {
+		b.WriteString("static ")
+	}
+	if abstract, _ := typescript.MetaAbstract.Get(n.Meta()); abstract {
+		b.WriteString("abstract ")
+	}
+	return b.String()
+}
+
+// memberName spells a member's name, carrying the `#` of a
+// hard-private member.
+//
+// The marker is part of the name rather than a modifier, and it has
+// to bypass [typescript.PropertyKey]: `#x` is not a well-formed
+// identifier, so the key helper would quote it — and `'#x'` declares
+// a public property whose name contains a hash.
+func memberName(n emit.Node, name string) string {
+	if v, ok := typescript.MetaVisibility.Get(n.Meta()); ok && v == typescript.VisibilityHard {
+		return "#" + typescript.Ident(strings.TrimPrefix(name, "#"))
+	}
+	return typescript.PropertyKey(name)
 }
 
 // renderParams spells a parameter list.
@@ -183,6 +246,13 @@ func (s *renderState) renderTypeParams(params []*emit.TypeParam) (string, error)
 			return "", err
 		} else if bound != "" {
 			part += " extends " + bound
+		}
+		// The default is verbatim source text — the `= string` in
+		// `<T = string>` — because a default is a type expression the
+		// model holds no structure for, and the author's spelling is
+		// the only faithful one.
+		if def, ok := typescript.MetaTypeParamDefault.Get(p.Meta()); ok && def != "" {
+			part += " = " + def
 		}
 		parts = append(parts, part)
 	}

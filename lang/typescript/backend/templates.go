@@ -35,7 +35,8 @@ func placeholders() template.FuncMap {
 		"render", "renderType", "renderDocs", "renderMembers", "renderMethods",
 		"renderParams", "renderReturn", "renderTypeParams", "renderHeritage",
 		"renderVariants", "quote", "ident", "propKey", "exported", "indent",
-		"camel", "pascal", "scream", "meta", "metaBool",
+		"abstractKw", "constKw", "signatures", "renderInit", "annotation",
+		"overloadLines", "camel", "pascal", "scream", "meta", "metaBool",
 	}
 	out := make(template.FuncMap, len(names))
 	for _, n := range names {

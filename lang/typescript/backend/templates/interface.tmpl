@@ -1,5 +1,8 @@
 {{- define "emit.interface" -}}
 {{ renderDocs .Docs }}{{ exported . }}interface {{ ident .Name }}{{ renderTypeParams .TypeParams }}{{ renderHeritage . }} {
+{{- $sigs := signatures . }}{{ if $sigs }}
+{{ indent $sigs }}
+{{- end }}
 {{- $members := renderMembers . }}{{ if $members }}
 {{ indent $members }}
 {{- end }}

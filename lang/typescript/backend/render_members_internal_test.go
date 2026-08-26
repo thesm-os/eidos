@@ -103,8 +103,10 @@ func TestMemberModifiers(t *testing.T) {
 		}
 	})
 
-	t.Run("an async method is spelled", func(t *testing.T) {
+	t.Run("async is a body fact and is not spelled", func(t *testing.T) {
 		t.Parallel()
+		// Illegal on an interface method and in an ambient class alike;
+		// the Promise return type is the declaration's contract.
 		m := &emit.Method{Name: "load", Returns: []*emit.Return{{Type: emit.Builtin("string")}}}
 		typescript.MetaAsync.Set(m.EnsureMeta(), true, "test")
 
@@ -112,7 +114,7 @@ func TestMemberModifiers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("method: %v", err)
 		}
-		if got != "async load(): string;\n" {
+		if got != "load(): string;\n" {
 			t.Fatalf("method = %q", got)
 		}
 	})

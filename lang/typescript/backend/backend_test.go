@@ -9,6 +9,7 @@ import (
 
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/eidostest/backendtest"
+	"go.thesmos.sh/eidos/eidostest/plugintest"
 	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/lang/typescript"
 	"go.thesmos.sh/eidos/lang/typescript/backend"
@@ -58,6 +59,10 @@ func pkgWith(decls ...emit.Node) *emit.Package {
 			p.Aliases = append(p.Aliases, v)
 		case *emit.Constant:
 			p.Constants = append(p.Constants, v)
+		case *emit.Variable:
+			p.Variables = append(p.Variables, v)
+		case *emit.Function:
+			p.Functions = append(p.Functions, v)
 		}
 	}
 	return p
@@ -298,5 +303,92 @@ func TestExportedMarker(t *testing.T) {
 		if !strings.Contains(got, "interface Internal") {
 			t.Errorf("declaration missing entirely:\n%s", got)
 		}
+	})
+}
+
+// TestConformance runs the framework's plugin-conformance suite
+// against this backend, plus the per-role byte-stability and
+// diagnostic-discipline checks over representative emit fixtures —
+// the deterministic-render contract byte-identical CI rebuilds and
+// manifest hashing stand on.
+func TestConformance(t *testing.T) {
+	t.Parallel()
+
+	t.Run("framework contracts", func(t *testing.T) {
+		t.Parallel()
+		plugintest.RunSuite(t, backend.New())
+	})
+
+	t.Run("backend contracts", func(t *testing.T) {
+		t.Parallel()
+		plugintest.RunBackendSuite(
+			t,
+			backend.New(),
+			[]plugintest.BackendFixture{
+				{
+					Name: "one interface in one module",
+					BuildEmitPackages: func(t *testing.T) []*emit.Package {
+						t.Helper()
+						return []*emit.Package{{
+							Name: "demo",
+							Path: "./demo",
+							Interfaces: []*emit.Interface{{
+								Name:    "User",
+								Package: "demo",
+								Fields: []*emit.Field{
+									{Name: "id", Type: emit.Builtin("string")},
+								},
+								Target: emit.Target{
+									Dir:      "demo",
+									Filename: "user.gen.ts",
+								},
+							}},
+						}}
+					},
+					Command: "test-fixture",
+				},
+				{
+					Name: "every declaration kind in one module",
+					BuildEmitPackages: func(t *testing.T) []*emit.Package {
+						t.Helper()
+						tgt := emit.Target{Dir: "demo", Filename: "all.gen.ts"}
+						return []*emit.Package{{
+							Name: "demo",
+							Path: "./demo",
+							Interfaces: []*emit.Interface{{
+								Name: "I", Package: "demo", Target: tgt,
+								Methods: []*emit.Method{{
+									Name:    "get",
+									Returns: []*emit.Return{{Type: emit.Builtin("string")}},
+								}},
+							}},
+							Structs: []*emit.Struct{{
+								Name: "C", Package: "demo", Target: tgt,
+								Fields: []*emit.Field{{Name: "x", Type: emit.Builtin("int")}},
+							}},
+							Enums: []*emit.Enum{{
+								Name: "E", Package: "demo", Target: tgt,
+								Variants: []*emit.EnumVariant{{Name: "A"}},
+							}},
+							Aliases: []*emit.Alias{{
+								Name: "T", File: tgt, Target: emit.Builtin("string"),
+							}},
+							Functions: []*emit.Function{{
+								Name: "f", Package: "demo", Target: tgt,
+							}},
+							Constants: []*emit.Constant{{
+								Name: "K", Package: "demo", Target: tgt,
+								Type: emit.Builtin("int"), Value: emit.NewLiteralInt(1),
+							}},
+							Variables: []*emit.Variable{{
+								Name: "v", Package: "demo", Target: tgt,
+								Type: emit.Builtin("string"),
+							}},
+						}}
+					},
+					Command: "test-fixture",
+				},
+			},
+		)
 	})
 }

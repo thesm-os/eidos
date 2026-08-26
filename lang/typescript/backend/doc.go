@@ -38,6 +38,45 @@
 // than on every run, which is a real reduction against the Go
 // backend and is worth knowing.
 //
+// # Declarations, not bodies
+//
+// The backend renders no statement and no method body, which decides
+// the class spelling: a bodiless method in a plain class is TS2391
+// and an uninitialised property TS2564, so every class is `declare`d.
+// Runtime constructs the expression renderer can spell trivially —
+// an enum member's value, a constant's initialiser — are spelled, and
+// the initialised form drops `declare` because an ambient declaration
+// admits none.
+//
+// # The ts.* vocabulary, and what becomes of it here
+//
+// Rendered: visibility (whatever was stamped, `public` included — a
+// stamped key is one the author wrote), `static`, `abstract`,
+// `readonly`, `?` on properties, parameters and methods, `get`/`set`
+// accessors, `#` hard-private names, overload signatures (in place of
+// the derived signature — the implementation's is a body fact),
+// index and construct signatures, `const enum`, type-parameter
+// defaults, and initialisers on variables and constants.
+//
+// Absorbed before this backend runs: the union / intersection / tuple
+// markers, operator and literal type text, nullability and mapped
+// types all ride the ref shapes [typescript.FromNode] projects, and
+// the import-graph keys (re-exports, specifiers, type-only) describe
+// the source module graph rather than the emit graph.
+//
+// Not rendered, deliberately:
+//
+//   - `async` and generators: illegal on an interface method and in
+//     an ambient class alike. Both say how a body produces its
+//     result; the Promise or iterator return type is the contract.
+//   - Decorators: runtime metadata on runtime classes, which an
+//     ambient declaration cannot carry.
+//   - Definite assignment (`!`): an assertion about a body's
+//     initialisation order, rejected in ambient contexts.
+//   - `export default` and namespaces: authoring-style facts the
+//     graph records for readers; generated modules use named exports
+//     at the top level.
+//
 // # Imports
 //
 // The package keeps its own import set rather than using
