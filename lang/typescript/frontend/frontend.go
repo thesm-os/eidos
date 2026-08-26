@@ -4,6 +4,7 @@
 package frontend
 
 import (
+	"errors"
 	"path/filepath"
 	"sync"
 
@@ -88,6 +89,15 @@ func (f *Frontend) Load(ctx *plugin.FrontendContext) error {
 	ps := ctx.Diag.For(FrontendName)
 
 	files, err := expandPattern(ctx.Pattern, opts)
+	// A tree holding no TypeScript is an ordinary outcome for a
+	// frontend registered beside others — the Go sources the pattern
+	// matched are some other frontend's business — so no-match is
+	// silence here, the treatment the protobuf frontend gives it. The
+	// loader still reports [ErrNoMatch] to a direct caller, for whom
+	// "nothing to do" and a typo'd pattern deserve telling apart.
+	if errors.Is(err, ErrNoMatch) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

@@ -224,8 +224,15 @@ func TestFrontendLoad(t *testing.T) {
 		}
 	})
 
-	t.Run("a pattern matching nothing is an error not a silent no-op", func(t *testing.T) {
+	t.Run("a pattern matching nothing is silence, not an error", func(t *testing.T) {
 		t.Parallel()
+		// The multi-frontend contract, and a change of mind recorded:
+		// this frontend runs registered beside the Go and protobuf
+		// ones, and the Go sources a pattern matched are some other
+		// frontend's business. Erroring here failed every polyglot
+		// run over a tree with no TypeScript in it. The loader still
+		// reports ErrNoMatch to a direct caller — see the loader tests
+		// for the typo-versus-empty distinction that preserves.
 		root := project(t, map[string]string{"a.ts": "export interface A {}\n"})
 		f := frontend.New()
 		if err := f.SetOptions(opt.New(f.OptionsSchema(), map[string]string{"dir": root})); err != nil {
@@ -236,8 +243,8 @@ func TestFrontendLoad(t *testing.T) {
 			Registry: directive.NewRegistry(), Parser: directive.DefaultParser(),
 			Cache: cache.NewNone(), Pattern: "./nonexistent/...",
 		})
-		if err == nil {
-			t.Fatal("a pattern matching nothing was accepted")
+		if err != nil {
+			t.Fatalf("a no-match pattern errored: %v", err)
 		}
 	})
 
