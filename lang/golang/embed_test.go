@@ -814,3 +814,135 @@ func TestPromotedMethodsThroughAnInterface(t *testing.T) {
 		}
 	})
 }
+
+func TestStructOf(t *testing.T) {
+	t.Parallel()
+
+	base := &node.Struct{Name: "Base", Package: "x", Fields: []*node.Field{field("ID", builtinRef("string"))}}
+	iface := &node.Interface{Name: "Store", Package: "x"}
+	r := mapResolver{"x.Base": base, "x.Store": iface}
+
+	t.Run("resolves a named reference to its struct", func(t *testing.T) {
+		t.Parallel()
+		got, ok := golang.StructOf(namedTypeRef("x", "Base"), r)
+		if !ok || got != base {
+			t.Fatalf("StructOf = %v, %v; want the Base declaration", got, ok)
+		}
+	})
+
+	t.Run("a declaration that is not a struct is no struct", func(t *testing.T) {
+		t.Parallel()
+		// False rather than a wrong answer: an interface resolves fine
+		// and has no members to aim at.
+		if got, ok := golang.StructOf(namedTypeRef("x", "Store"), r); ok {
+			t.Fatalf("StructOf(interface) = %v, true", got)
+		}
+	})
+
+	t.Run("a type the run never loaded is no struct", func(t *testing.T) {
+		t.Parallel()
+		// The smaller answer. A run over one package cannot see a type
+		// declared in another, and guessing from the name would make
+		// the same source answer differently under a wider run.
+		if _, ok := golang.StructOf(namedTypeRef("elsewhere", "Base"), r); ok {
+			t.Fatal("StructOf resolved a type nothing loaded")
+		}
+	})
+
+	t.Run("a pointer is not followed", func(t *testing.T) {
+		t.Parallel()
+		// `*T` and `T` differ where the caller is deciding what to
+		// emit, so the strip is the caller's to ask for.
+		ptr := &node.TypeRef{TypeKind: node.TypeRefPointer, Elem: namedTypeRef("x", "Base")}
+		if _, ok := golang.StructOf(ptr, r); ok {
+			t.Fatal("StructOf followed a pointer")
+		}
+		if got, ok := golang.StructOf(golang.Deref(ptr), r); !ok || got != base {
+			t.Fatalf("StructOf(Deref(ptr)) = %v, %v; want the Base declaration", got, ok)
+		}
+	})
+
+	t.Run("no reference and no resolver report nothing", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.StructOf(nil, r); ok {
+			t.Error("StructOf(nil) resolved something")
+		}
+		if _, ok := golang.StructOf(namedTypeRef("x", "Base"), nil); ok {
+			t.Error("StructOf with no resolver resolved something")
+		}
+	})
+}
+
+func TestMemberField(t *testing.T) {
+	t.Parallel()
+
+	base := &node.Struct{
+		Name: "Base", Package: "x",
+		Fields: []*node.Field{field("Version", builtinRef("int")), field("secret", builtinRef("string"))},
+	}
+	user := &node.Struct{
+		Name: "User", Package: "x",
+		Fields: []*node.Field{field("Name", builtinRef("string")), field("age", builtinRef("int"))},
+		Embeds: []*node.Embed{embed("x", "Base", false)},
+	}
+	r := mapResolver{"x.Base": base}
+
+	t.Run("answers a declared member's type", func(t *testing.T) {
+		t.Parallel()
+		got, ok := golang.MemberField(user, "Name", r)
+		if !ok || got.Name != "string" {
+			t.Fatalf("MemberField = %v, %v; want string", got, ok)
+		}
+	})
+
+	t.Run("reaches a promoted member", func(t *testing.T) {
+		t.Parallel()
+		// Promotion is what makes the emitted selector legal: `u.Version`
+		// compiles, so a lookup reading only what the source typed would
+		// refuse to aim at a member the source can reach.
+		got, ok := golang.MemberField(user, "Version", r)
+		if !ok || got.Name != "int" {
+			t.Fatalf("MemberField = %v, %v; want int", got, ok)
+		}
+	})
+
+	t.Run("an unexported member is not reachable", func(t *testing.T) {
+		t.Parallel()
+		// Visible to the declaring package and to nothing else, so a
+		// generated file routed elsewhere naming one does not compile.
+		if _, ok := golang.MemberField(user, "age", r); ok {
+			t.Error("MemberField answered for a declared unexported member")
+		}
+		if _, ok := golang.MemberField(user, "secret", r); ok {
+			t.Error("MemberField answered for a promoted unexported member")
+		}
+	})
+
+	t.Run("a name nothing carries is false", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.MemberField(user, "Nonesuch", r); ok {
+			t.Error("MemberField answered for a member nobody declared")
+		}
+	})
+
+	t.Run("a member behind an unresolvable embed is false", func(t *testing.T) {
+		t.Parallel()
+		// The limit the docblock states. This is indistinguishable from
+		// "no such member" here, and ExportedFieldSet is what tells the
+		// two apart — asserted together so the pair cannot drift.
+		if _, ok := golang.MemberField(user, "Version", mapResolver{}); ok {
+			t.Fatal("MemberField reached through an embed nothing resolved")
+		}
+		_, problems := golang.ExportedFieldSet(user, mapResolver{})
+		if !slices.Contains(reasons(problems), golang.NotLoaded) {
+			t.Fatalf("ExportedFieldSet problems = %v, want it to report the embed", reasons(problems))
+		}
+	})
+
+	t.Run("no struct is no member", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.MemberField(nil, "Name", r); ok {
+			t.Error("MemberField(nil) answered")
+		}
+	})
+}

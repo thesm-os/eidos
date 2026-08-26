@@ -23,6 +23,7 @@ reasoning lives in the docblock of whatever the line names.
 ### Added
 
 - **`sdk.SigRules`** is an optional rules interface answering `SigOf` and `IsConstraint`, so a generator that doubles a contract asks its declared rules for a signature rather than wrapping its own Source. Found by assertion, like `EnumRules` and `ErrorRules` ([#62](https://github.com/thesm-os/eidos/issues/62)).
+- **`golang.StructOf` and `golang.MemberField`** ([#64](https://github.com/thesm-os/eidos/issues/64)) resolve a type reference to the struct declaring it and find an exported member by name with promotion honoured — the two steps a generator aiming emitted code at a member re-derived for itself. Both re-exported from `lang/golang/sdk`.
 - **`golang.ReportMethodSet` and `golang.Consequence`** report every embed that contributed nothing to a resolved method set and say whether the result is usable, through a narrow `Reporter` port `ctx.Diag` already satisfies.
 - **`golang.UnexportedName`** lowers an identifier's leading rune, completing the pair `ExportedName` opened. Rune-aware, and distinct from `naming.Camel`, which converts the whole identifier and so does not round-trip.
 - **`+gen:witness T=int`** names the concrete type a generic parameter is instantiated at, so a declaration whose constraint no language can reason about still gets checks.

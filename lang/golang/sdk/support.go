@@ -117,6 +117,28 @@ func ReportMethodSet(
 	return golang.ReportMethodSet(r, set, iface, plugin, why)
 }
 
+// StructOf resolves a type reference to the struct declaring it,
+// false for anything else — including a type this run never loaded.
+//
+// The reader a plugin is handed is the [sdk.Resolver] to pass; see
+// resolver.go for why no adapter is needed.
+func StructOf(t *sdk.TypeRef, r sdk.Resolver) (*sdk.Struct, bool) {
+	return golang.StructOf(t, r)
+}
+
+// MemberField finds an exported member by name and answers its
+// declared type, promoted members included.
+//
+// The pair a generator aiming emitted code at a struct's members
+// needs, re-exported for the reason [ReportMethodSet] is: both encode
+// Go's own rules — that a selector reaches a promoted member, and
+// that a generated file in another package cannot name an unexported
+// one — so neither belongs on [sdk.SourceRules], and without them
+// here a plugin reaches past this façade to spell them.
+func MemberField(s *sdk.Struct, name string, r sdk.Resolver) (*sdk.TypeRef, bool) {
+	return golang.MemberField(s, name, r)
+}
+
 // source is the Go read-side rules every declaration above carries.
 //
 // Held once as a package value rather than constructed per call: it

@@ -10,6 +10,7 @@ import (
 
 	"go.thesmos.sh/eidos/lang/golang"
 	sdkgo "go.thesmos.sh/eidos/lang/golang/sdk"
+	"go.thesmos.sh/eidos/sdk"
 )
 
 // TestDialectNamesReexported pins the façade against the dialect it
@@ -70,4 +71,68 @@ func missing(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// resolverTable answers from a fixed table, standing in for the
+// store-backed reader a plugin is handed.
+type resolverTable map[string]sdk.Node
+
+func (r resolverTable) Resolve(t *sdk.TypeRef) (sdk.Node, bool) {
+	n, ok := r[golang.QName(t)]
+	return n, ok
+}
+
+// TestMemberLookupForwards pins the façade against the language
+// package for the two calls a generator aiming emitted code at a
+// struct's members makes.
+//
+// A forwarder that answered from its own walk would drift from Go's
+// promotion rules the moment the language package's changed, and the
+// drift is invisible: both spellings compile and both return a type.
+func TestMemberLookupForwards(t *testing.T) {
+	t.Parallel()
+
+	base := &sdk.Struct{
+		Name: "Base", Package: "x",
+		Fields: []*sdk.Field{{Name: "Version", Type: &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Name: "int"}}},
+	}
+	user := &sdk.Struct{
+		Name: "User", Package: "x",
+		Embeds: []*sdk.Embed{{Type: &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Package: "x", Name: "Base"}}},
+	}
+	ref := &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Package: "x", Name: "Base"}
+	r := resolverTable{"x.Base": base}
+
+	t.Run("StructOf answers what the language package does", func(t *testing.T) {
+		t.Parallel()
+		got, ok := sdkgo.StructOf(ref, r)
+		want, wantOK := golang.StructOf(ref, r)
+		if got != want || ok != wantOK {
+			t.Fatalf("StructOf = %v, %v; want %v, %v", got, ok, want, wantOK)
+		}
+		if !ok {
+			t.Fatal("StructOf resolved nothing, so the comparison proved nothing")
+		}
+	})
+
+	t.Run("MemberField reaches a promoted member", func(t *testing.T) {
+		t.Parallel()
+		// Through the embed, which is the half a forwarder reading
+		// s.Fields would silently lose.
+		got, ok := sdkgo.MemberField(user, "Version", r)
+		if !ok || got.Name != "int" {
+			t.Fatalf("MemberField = %v, %v; want int", got, ok)
+		}
+	})
+
+	t.Run("MemberField answers what the language package does", func(t *testing.T) {
+		t.Parallel()
+		for _, name := range []string{"Version", "Nonesuch"} {
+			got, ok := sdkgo.MemberField(user, name, r)
+			want, wantOK := golang.MemberField(user, name, r)
+			if got != want || ok != wantOK {
+				t.Errorf("MemberField(%q) = %v, %v; want %v, %v", name, got, ok, want, wantOK)
+			}
+		}
+	})
 }

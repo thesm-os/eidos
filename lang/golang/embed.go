@@ -670,6 +670,57 @@ func ExportedFieldSet(s *node.Struct, r Resolver) ([]PromotedField, []Unresolved
 	return out, problems
 }
 
+// StructOf resolves a type reference to the struct declaring it,
+// false for anything else.
+//
+// The step before every member walk, and the two decisions a caller
+// otherwise makes for itself: a reference naming an interface, an
+// alias or a builtin is no struct rather than a wrong one, and a type
+// this run never loaded reports the same — the smaller answer
+// [Resolver] and [UnderlyingOf] both give.
+//
+// A pointer is not followed, because `*T` and `T` differ where the
+// caller is deciding what to emit; compose with [Deref] where they do
+// not. Nil r reports false: resolution is the whole operation, and a
+// caller without the graph would be guessing from the name.
+func StructOf(t *node.TypeRef, r Resolver) (*node.Struct, bool) {
+	if t == nil || r == nil {
+		return nil, false
+	}
+	decl, found := r.Resolve(t)
+	if !found {
+		return nil, false
+	}
+	s, ok := decl.(*node.Struct)
+	return s, ok
+}
+
+// MemberField finds an exported member by name and answers its
+// declared type.
+//
+// Over [ExportedFieldSet] rather than s.Fields, because promotion is
+// what makes the selector a generator emits legal: `v.Name` compiles
+// for a field of an embedded type, so a lookup reading only what the
+// source typed would refuse to aim at a member the source can reach.
+// Unexported members are excluded on the same terms — a generated
+// file in another package cannot name one.
+//
+// False when nothing carries the name, and false again when an embed
+// the walk could not follow might have declared it. The two are not
+// told apart here, on the terms [EmbedsType] sets: this answers one
+// question, and a caller that must distinguish "no such member" from
+// "could not see" runs [ExportedFieldSet] itself and reads the
+// unresolved embeds beside the set.
+func MemberField(s *node.Struct, name string, r Resolver) (*node.TypeRef, bool) {
+	fields, _ := ExportedFieldSet(s, r)
+	for _, f := range fields {
+		if f.Field.Name == name {
+			return f.Field.Type, true
+		}
+	}
+	return nil, false
+}
+
 // shallowestUnique applies Go's promotion rules to one name's
 // candidates.
 //
