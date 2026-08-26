@@ -151,3 +151,37 @@ func mustOverloads(t *testing.T, fn *node.Function) []typescript.Overload {
 	}
 	return got
 }
+
+func TestOverloadEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an alternative identical to the declaration is not listed", func(t *testing.T) {
+		t.Parallel()
+		// The implementation's own spelling is not one of the ways it
+		// may be called, so a set whose only alternative repeats it
+		// records nothing rather than an empty list.
+		decls, _ := convert(t, `
+			function f(a: string): void;
+			function f(a: string): void {}
+		`)
+		fn, ok := decls[0].(*node.Function)
+		if !ok {
+			t.Fatalf("got %T", decls[0])
+		}
+		if typescript.MetaOverloads.Has(fn.Meta()) {
+			got, _ := typescript.MetaOverloads.Get(fn.Meta())
+			t.Fatalf("overloads = %+v, want none", got)
+		}
+	})
+
+	t.Run("a method whose only alternative repeats it records nothing", func(t *testing.T) {
+		t.Parallel()
+		s := onlyStruct(t, `class C {
+			m(a: string): void;
+			m(a: string): void {}
+		}`)
+		if typescript.MetaOverloads.Has(s.Methods[0].Meta()) {
+			t.Fatal("a redundant method alternative was recorded")
+		}
+	})
+}

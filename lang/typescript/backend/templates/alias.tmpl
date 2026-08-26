@@ -1,0 +1,3 @@
+{{- define "emit.alias" -}}
+{{ renderDocs .Docs }}{{ exported . }}type {{ ident .Name }}{{ renderTypeParams .TypeParams }} = {{ renderType .Target }};
+{{ end -}}

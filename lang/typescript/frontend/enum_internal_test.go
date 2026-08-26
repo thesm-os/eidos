@@ -95,3 +95,76 @@ func TestEnumDecl(t *testing.T) {
 		}
 	})
 }
+
+func TestEnumEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	onlyEnum := func(t *testing.T, src string) *node.Enum {
+		t.Helper()
+		e, ok := onlyDecl(t, src).(*node.Enum)
+		if !ok {
+			t.Fatalf("expected *node.Enum, got %T", onlyDecl(t, src))
+		}
+		return e
+	}
+
+	t.Run("an empty enum declares the type with no variants", func(t *testing.T) {
+		t.Parallel()
+		e := onlyEnum(t, `enum E {}`)
+		if len(e.Variants) != 0 {
+			t.Fatalf("Variants = %d, want 0", len(e.Variants))
+		}
+		if e.Underlying == nil {
+			t.Fatal("an empty enum lost its underlying type")
+		}
+	})
+
+	t.Run("a quoted member name is kept as written", func(t *testing.T) {
+		t.Parallel()
+		e := onlyEnum(t, `enum E { 'quoted-name' = 1 }`)
+		if len(e.Variants) != 1 || e.Variants[0].Name != "quoted-name" {
+			t.Fatalf("Variants = %+v, want one named quoted-name", e.Variants)
+		}
+	})
+
+	t.Run("a computed member is skipped rather than named after its expression", func(t *testing.T) {
+		t.Parallel()
+		e := onlyEnum(t, `enum E { A = 1, B = A << 1 }`)
+		for _, v := range e.Variants {
+			if v.Name == "" {
+				t.Fatal("an unnamed variant reached the graph")
+			}
+		}
+	})
+
+	t.Run("a trailing comma does not add a variant", func(t *testing.T) {
+		t.Parallel()
+		e := onlyEnum(t, `enum E { A, B, }`)
+		if len(e.Variants) != 2 {
+			t.Fatalf("Variants = %d, want 2", len(e.Variants))
+		}
+	})
+
+	t.Run("docs attach to a variant", func(t *testing.T) {
+		t.Parallel()
+		e := onlyEnum(t, "enum E {\n  /** The first. */\n  A,\n}")
+		if len(e.Variants[0].Docs()) == 0 {
+			t.Fatal("a documented variant carried no doc lines")
+		}
+	})
+
+	t.Run("a const enum in a namespace keeps both facts", func(t *testing.T) {
+		t.Parallel()
+		decls, _ := convert(t, `namespace N { export const enum E { A } }`)
+		e, ok := decls[0].(*node.Enum)
+		if !ok {
+			t.Fatalf("got %T", decls[0])
+		}
+		if ce, _ := typescript.MetaConstEnum.Get(e.Meta()); !ce {
+			t.Error("const enum not marked")
+		}
+		if ns, _ := typescript.MetaNamespace.Get(e.Meta()); ns != "N" {
+			t.Errorf("namespace = %q, want N", ns)
+		}
+	})
+}

@@ -1,0 +1,3 @@
+{{- define "emit.constant" -}}
+{{ renderDocs .Docs }}{{ exported . }}declare const {{ ident .Name }}: {{ renderType .Type }};
+{{ end -}}

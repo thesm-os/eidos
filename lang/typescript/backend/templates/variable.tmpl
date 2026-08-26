@@ -1,0 +1,3 @@
+{{- define "emit.variable" -}}
+{{ renderDocs .Docs }}{{ exported . }}declare let {{ ident .Name }}: {{ renderType .Type }};
+{{ end -}}

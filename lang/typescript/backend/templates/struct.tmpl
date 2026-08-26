@@ -1,0 +1,10 @@
+{{- define "emit.struct" -}}
+{{ renderDocs .Docs }}{{ exported . }}class {{ ident .Name }}{{ renderTypeParams .TypeParams }}{{ renderHeritage . }} {
+{{- $members := renderMembers . }}{{ if $members }}
+{{ indent $members }}
+{{- end }}
+{{- $methods := renderMethods . }}{{ if $methods }}
+{{ indent $methods }}
+{{- end }}
+}
+{{ end -}}

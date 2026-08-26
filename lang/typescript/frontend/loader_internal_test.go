@@ -181,3 +181,35 @@ func TestReadSource(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadUsesTheProcessDirectory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an unset Dir falls back to the working directory", func(t *testing.T) {
+		t.Parallel()
+		// Tests run in their package directory, which holds the
+		// golden and project fixtures — so resolving relative to the
+		// process working directory finds them, and a fallback that
+		// failed to resolve would find nothing.
+		got, err := expandPattern("./...", Options{})
+		if err != nil {
+			t.Fatalf("expandPattern with no Dir: %v", err)
+		}
+		if len(got) == 0 {
+			t.Fatal("the working-directory fallback resolved to nothing")
+		}
+		for _, p := range got {
+			if !filepath.IsAbs(p) {
+				t.Fatalf("resolved path %q is not absolute", p)
+			}
+		}
+	})
+
+	t.Run("an unresolvable pattern under the fallback still reports no match", func(t *testing.T) {
+		t.Parallel()
+		_, err := expandPattern("./no-such-dir/...", Options{})
+		if !errors.Is(err, ErrNoMatch) {
+			t.Fatalf("expandPattern = %v, want ErrNoMatch", err)
+		}
+	})
+}

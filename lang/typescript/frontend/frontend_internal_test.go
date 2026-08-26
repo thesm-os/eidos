@@ -4,7 +4,6 @@
 package frontend
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,7 +11,6 @@ import (
 	"go.thesmos.sh/eidos/cache"
 	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/core/directive"
-	"go.thesmos.sh/eidos/lang/typescript"
 	"go.thesmos.sh/eidos/node"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/store"
@@ -96,72 +94,6 @@ func TestConvertFileFailures(t *testing.T) {
 		st.Nodes().Packages().Range(func(*node.Package) bool { count++; return true })
 		if count != 0 {
 			t.Fatalf("packages = %d, want 0", count)
-		}
-	})
-}
-
-func TestLoadUsesTheProcessDirectory(t *testing.T) {
-	t.Parallel()
-
-	t.Run("an unset Dir falls back to the working directory", func(t *testing.T) {
-		t.Parallel()
-		// Tests run in their package directory, which holds the
-		// golden and project fixtures — so resolving relative to the
-		// process working directory finds them, and a fallback that
-		// failed to resolve would find nothing.
-		got, err := expandPattern("./...", Options{})
-		if err != nil {
-			t.Fatalf("expandPattern with no Dir: %v", err)
-		}
-		if len(got) == 0 {
-			t.Fatal("the working-directory fallback resolved to nothing")
-		}
-		for _, p := range got {
-			if !filepath.IsAbs(p) {
-				t.Fatalf("resolved path %q is not absolute", p)
-			}
-		}
-	})
-
-	t.Run("an unresolvable pattern under the fallback still reports no match", func(t *testing.T) {
-		t.Parallel()
-		_, err := expandPattern("./no-such-dir/...", Options{})
-		if !errors.Is(err, ErrNoMatch) {
-			t.Fatalf("expandPattern = %v, want ErrNoMatch", err)
-		}
-	})
-}
-
-func TestOverloadEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	t.Run("an alternative identical to the declaration is not listed", func(t *testing.T) {
-		t.Parallel()
-		// The implementation's own spelling is not one of the ways it
-		// may be called, so a set whose only alternative repeats it
-		// records nothing rather than an empty list.
-		decls, _ := convert(t, `
-			function f(a: string): void;
-			function f(a: string): void {}
-		`)
-		fn, ok := decls[0].(*node.Function)
-		if !ok {
-			t.Fatalf("got %T", decls[0])
-		}
-		if typescript.MetaOverloads.Has(fn.Meta()) {
-			got, _ := typescript.MetaOverloads.Get(fn.Meta())
-			t.Fatalf("overloads = %+v, want none", got)
-		}
-	})
-
-	t.Run("a method whose only alternative repeats it records nothing", func(t *testing.T) {
-		t.Parallel()
-		s := onlyStruct(t, `class C {
-			m(a: string): void;
-			m(a: string): void {}
-		}`)
-		if typescript.MetaOverloads.Has(s.Methods[0].Meta()) {
-			t.Fatal("a redundant method alternative was recorded")
 		}
 	})
 }

@@ -1,0 +1,7 @@
+{{- define "emit.enum" -}}
+{{ renderDocs .Docs }}{{ exported . }}enum {{ ident .Name }} {
+{{- $variants := renderVariants . }}{{ if $variants }}
+{{ indent $variants }}
+{{- end }}
+}
+{{ end -}}

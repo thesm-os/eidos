@@ -6,6 +6,7 @@ package typescript_test
 import (
 	"testing"
 
+	"go.thesmos.sh/eidos/core/position"
 	"go.thesmos.sh/eidos/lang/typescript"
 	"go.thesmos.sh/eidos/node"
 )
@@ -176,4 +177,19 @@ func TestMembers(t *testing.T) {
 			t.Fatalf("Members(nil) = %+v, want nil", got)
 		}
 	})
+}
+
+// pos builds a source position naming a file.
+func pos(file string) position.Pos { return position.Pos{File: file} }
+
+// nullLiteral builds the `null` literal type.
+func nullLiteral() *node.TypeRef {
+	t := named("null")
+	typescript.MetaLiteralType.Set(t.EnsureMeta(), "null", "test")
+	return t
+}
+
+// nullable builds a `T | null` union.
+func nullable(inner *node.TypeRef) *node.TypeRef {
+	return marker(typescript.RefUnion, inner, nullLiteral())
 }

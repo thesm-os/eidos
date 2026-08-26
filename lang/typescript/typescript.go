@@ -52,3 +52,43 @@ const (
 	// AccessorSet is a `set` accessor.
 	AccessorSet = "set"
 )
+
+// The TypeScript type names this adapter spells by name rather than
+// deriving, so a backend and a plugin cannot disagree about them.
+const (
+	// TypeVoid is the return type of a callable that returns nothing.
+	TypeVoid = "void"
+
+	// TypeNever is the type with no members — what an empty union
+	// spells. Rendering the empty string instead would produce
+	// `type Empty = ;`, which does not parse.
+	TypeNever = "never"
+
+	// TypeUnknown is the safe top type. `any` disables checking;
+	// `unknown` admits every value and forces the consumer to narrow,
+	// which is what a generated type should demand of a value it
+	// cannot describe.
+	TypeUnknown = "unknown"
+
+	// LiteralTrue and LiteralFalse are the boolean literals, named
+	// because they are spelled in several places — a literal
+	// renderer, a zero value, a directive value's parse — and a typo
+	// in any of them produces an identifier rather than a boolean.
+	LiteralTrue  = "true"
+	LiteralFalse = "false"
+
+	// The scalar type names a literal is rendered against. Prefixed
+	// Scalar rather than Type because [TypeString] is already the
+	// function that spells a type, and a constant of that name would
+	// shadow it.
+	ScalarString  = "string"
+	ScalarNumber  = "number"
+	ScalarBigInt  = "bigint"
+	ScalarBoolean = "boolean"
+
+	// TypeNull and TypeUndefined are the two absent values.
+	// TypeScript distinguishes them and `strictNullChecks` makes the
+	// distinction load-bearing.
+	TypeNull      = "null"
+	TypeUndefined = "undefined"
+)
