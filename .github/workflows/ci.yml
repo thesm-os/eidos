@@ -71,6 +71,9 @@ jobs:
           node --version
           tsc --version
 
+      - name: Install ergon
+        run: go install go.thesmos.sh/ergon/cmd/ergon@${{ env.ERGON_VERSION }}
+
       - name: Install development tools
         run: make bootstrap
 
