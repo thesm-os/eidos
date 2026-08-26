@@ -89,6 +89,13 @@ func TestRoundTripAcceptance(t *testing.T) {
 
 	t.Run("the output type-checks under strict tsc", func(t *testing.T) {
 		t.Parallel()
+		// The assertion the CI gate holds to. It skips where no
+		// compiler answers, which is right on a machine that never
+		// installed one — so the `check` job sets
+		// EIDOS_TYPESCRIPT_TOOLCHAIN, and a skip there is a failure
+		// instead. Without that a broken Node step turns the only
+		// check on the rendered output into a green no-op, and the
+		// regression it was watching for lands unnoticed.
 		typescripttest.Rendered(t, run).AssertTypeChecks(t)
 	})
 

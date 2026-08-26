@@ -15,13 +15,29 @@ concurrency:
 
 # ergon drives every Makefile target (`make check`, `make test-race`,
 # …). Pin the version so the gate is reproducible; bump intentionally.
+#
+# The TypeScript compiler is pinned for the same reason and read the
+# same way: typescripttest checks generated output against it, so the
+# version decides what the gate accepts. Both lines were verified
+# against 5.9.3 and 7.0.2; 5 is what consumers run today.
 env:
   ERGON_VERSION: v1.10.1
+  NODE_VERSION: "24"
+  TYPESCRIPT_VERSION: 5.9.3
 
 jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    env:
+      # typescripttest skips its tsc and node assertions when neither
+      # answers. Right on a contributor's machine — tree-sitter is
+      # linked in, so the parse assertions still run — and wrong here,
+      # because this job installs both: a skip means the install broke
+      # and the only check on the rendered TypeScript quietly stopped
+      # running. Set, every one of those skips is a failure naming
+      # this variable.
+      EIDOS_TYPESCRIPT_TOOLCHAIN: required
     steps:
       - uses: actions/checkout@v6
         with:
@@ -34,8 +50,26 @@ jobs:
           check-latest: true
           cache: true
 
-      - name: Install ergon
-        run: go install go.thesmos.sh/ergon/cmd/ergon@${{ env.ERGON_VERSION }}
+      # Node runs the suites AssertTestsPass executes, and tsc checks
+      # what the TypeScript backend rendered. Neither is needed to
+      # build eidos; both are needed to prove its TypeScript output is
+      # more than well-formed text.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install the TypeScript compiler
+        run: npm install --global typescript@${{ env.TYPESCRIPT_VERSION }}
+
+      # Fails the job before the suite runs when either tool is
+      # missing or shadowed. The variable above already turns that
+      # into a test failure, but one reported here names the setup
+      # step rather than an assertion three modules away.
+      - name: Verify the TypeScript toolchain answers
+        run: |
+          node --version
+          tsc --version
 
       - name: Install development tools
         run: make bootstrap

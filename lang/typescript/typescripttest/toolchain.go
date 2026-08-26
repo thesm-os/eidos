@@ -24,6 +24,23 @@ import (
 // dump rather than the command that stopped responding.
 const toolTimeout = 2 * time.Minute
 
+// toolchainEnv names the variable that turns an absent toolchain from
+// a skip into a failure.
+//
+// Any non-empty value demands one; the CI workflow sets `required`.
+// Non-empty rather than that one spelling because a typo'd value
+// reverting to a skip would reopen the hole this closes, and nobody
+// sets the variable meaning anything else.
+//
+// Both readings are right, in different places. A contributor without
+// Node should still get the parse assertions rather than a red suite
+// for a tool the repository does not require. A job that installed
+// Node on purpose needs the opposite: there a skip means the install
+// broke and the type check quietly stopped running, which is the one
+// failure a green build cannot show. Nothing inside the process tells
+// the two apart, so the job that installed the toolchain says so.
+const toolchainEnv = "EIDOS_TYPESCRIPT_TOOLCHAIN"
+
 // AssertParses fails when any generated file contains a syntax error.
 //
 // The floor every other assertion stands on, and the one that always
@@ -48,9 +65,10 @@ func (g *Generated) AssertParses(tb testing.TB) *Generated {
 // or a missing import — all three produce output that parses
 // perfectly and fails in the consumer's build.
 //
-// Skips with a message when no TypeScript compiler answers. See the
-// package doc for why that is a deliberate asymmetry rather than a
-// soft assertion.
+// Skips with a message when no TypeScript compiler answers, unless
+// EIDOS_TYPESCRIPT_TOOLCHAIN is set, which turns that into a failure.
+// See the package doc for why the default is a deliberate asymmetry
+// rather than a soft assertion.
 //
 // # Cost
 //
@@ -223,7 +241,8 @@ func (g *Generated) AssertDoesNotSatisfy(tb testing.TB, typeName, iface string) 
 // output needs one.
 //
 // Skips when no Node answers, on the same terms as
-// [Generated.AssertTypeChecks].
+// [Generated.AssertTypeChecks] — and fails instead under
+// EIDOS_TYPESCRIPT_TOOLCHAIN.
 func (g *Generated) AssertTestsPass(tb testing.TB) *Generated {
 	tb.Helper()
 	if !g.hasTests() {
@@ -514,9 +533,9 @@ func (g *Generated) testRunner(tb testing.TB) ([]string, bool) {
 	}
 	node, err := exec.LookPath("node")
 	if err != nil {
-		tb.Skip("typescripttest: no Node found, so the generated suite cannot be run — " +
-			"install Node or declare a runner with WithTestRunner. The structural " +
-			"assertions still ran.")
+		reportMissing(tb, os.Getenv(toolchainEnv),
+			"no Node answered, so the generated suite cannot be run",
+			"install Node, or declare a runner with WithTestRunner")
 		return nil, false
 	}
 	return []string{node, "--test"}, true
@@ -586,9 +605,9 @@ func findTSC(tb testing.TB) ([]string, bool) {
 		return []string{path, "--no-install", "tsc"}, true
 	}
 
-	tb.Skip("typescripttest: no TypeScript compiler found — install one with " +
-		"`npm i -D typescript` or put tsc on PATH. The parse assertions still ran; " +
-		"only the type check is skipped.")
+	reportMissing(tb, os.Getenv(toolchainEnv),
+		"no TypeScript compiler answered",
+		"install one with `npm i -D typescript`, or put tsc on PATH")
 	return nil, false
 }
 
@@ -599,10 +618,43 @@ func findTSC(tb testing.TB) ([]string, bool) {
 // downloads the compiler on first use, which turns a skipped
 // assertion into a test that hangs on a cold cache and fails with no
 // network.
+//
+// The output is read as well as the exit status, because `npx tsc`
+// resolves the npm package named `tsc` — a 2016 stub, not the
+// compiler, which ships as `typescript`. A cache holding one would
+// otherwise satisfy the probe and every type check would run against
+// it. Real tsc answers `--version` with `Version 5.9.3`.
 func npxHasTSC(npx string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, npx, "--no-install", "tsc", "--version") //nolint:gosec // a resolved npx path
-	return cmd.Run() == nil
+	out, err := cmd.Output()
+	return err == nil && isVersionLine(string(out))
+}
+
+// isVersionLine reports whether out is what `tsc --version` prints.
+func isVersionLine(out string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(out), "Version ")
+	if !ok || rest == "" {
+		return false
+	}
+	return rest[0] >= '0' && rest[0] <= '9'
+}
+
+// reportMissing states that a tool did not answer — as a skip, or as
+// a failure when the environment demands one.
+//
+// The setting is passed in rather than read here so both branches are
+// reachable from a test: these assertions run in parallel, and
+// [testing.T.Setenv] refuses to run beside [testing.T.Parallel].
+func reportMissing(tb testing.TB, setting, what, fix string) {
+	tb.Helper()
+	if setting != "" {
+		tb.Fatalf("typescripttest: %s, and %s=%s demands one. The job setting that variable "+
+			"installs the toolchain, so this is a broken install rather than an absent "+
+			"one — %s", what, toolchainEnv, setting, fix)
+		return
+	}
+	tb.Skip("typescripttest: " + what + " — " + fix + ". The parse assertions still ran.")
 }

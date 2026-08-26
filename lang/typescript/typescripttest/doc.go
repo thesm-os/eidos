@@ -50,6 +50,14 @@
 // that wants it installs Node; one that does not still gets the
 // parse.
 //
+// A job that installed the toolchain needs the opposite reading,
+// because there a skip means the install broke and the type check
+// silently stopped running. Set EIDOS_TYPESCRIPT_TOOLCHAIN to any
+// non-empty value and every skip above becomes a failure naming the
+// variable. eidos' own CI sets it in the job that installs Node and
+// tsc; the race and vuln jobs, which install neither, leave it unset
+// and skip.
+//
 // # Cost, and how to spend it
 //
 // [Generated.AssertTypeChecks] shells out: roughly one to three
