@@ -49,6 +49,20 @@
 // a plugin embedding it still writes the whole of what makes it
 // that plugin.
 //
+// # The Go questions beside it
+//
+// queries.go forwards the facts about Go that no neutral interface
+// answers — [QName], [IsContext], [ComparableDeep], [SequenceOf] and
+// their neighbours — together with the vocabularies needed to read
+// their answers. [StructOf] and [MemberField] are the member-lookup
+// pair, and [ReportMethodSet] the diagnostic.
+//
+// They are here for one reason: a plugin's language-neutral half
+// sometimes has a single Go fact to read, and without them it imports
+// `lang/golang` to read it. A plugin's Go *binding* — a file named
+// for the language it speaks — imports that package directly and
+// should, which is what the split is for.
+//
 // # The cost of a shared base
 //
 // A plugin that wrote its own [sdk.CapabilityProvider] methods
