@@ -99,7 +99,7 @@ string[]` yields `Variadic` with `Type` of `string`.
 
 The node model has no variant for these shapes, so they ride on
 metadata keys — the treatment `go.isChannel` and `go.constraintTerms`
-already get on the Go side. `docs/lang/typescript/frontend.md` is the
+already get on the Go side. [frontend.md](frontend.md) is the
 catalogue; the summary is that unions, intersections, tuples,
 optionality, readonly-ness, visibility, index signatures, decorators
 and accessor kind all live on keys rather than on fields.

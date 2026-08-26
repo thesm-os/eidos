@@ -38,9 +38,13 @@ reasoning lives in the docblock of whatever the line names.
 - **`lang/typescript/typescripttest` and `tsfixture`** are the TypeScript counterparts to `golangtest` / `gofixture`: a store fixture with a `TSSource` projection, structural assertions over generated output, `tsc`-backed type-check and satisfaction assertions, and a `node --test` gate for generated suites.
 - **`node.Interface` and `emit.Interface` carry a field list** (ADR-0008): a TypeScript interface declares properties alongside methods, with `FieldByName` / `FieldsWith` on both sides and a `FieldsSlot` on emit. Go frontends never populate it.
 - **`emit/builder.InterfaceBuilder.Field`** declares a property on an emit interface — the model, walk and slots carried fields while the fluent builder could not spell one.
+- **The TypeScript backend renders the declaration-level `ts.*` vocabulary**: visibility, `static`, `abstract`, accessors, optional methods, overload signatures (in place of the derived one), index and construct signatures, `const enum`, type-parameter defaults, and initialisers on variables and constants — an initialised binding drops `declare`.
+- **The reference binary reads TypeScript**: the frontend joined `defaultPlugins`; a TypeScript-targeting binary swaps the backend for the TypeScript one, which `TestTypeScriptTargetE2E` demonstrates.
 
 ### Changed
 
+- **TypeScript classes render as `export declare class`** — the backend renders no bodies, and a bodiless method in a plain class is TS2391; `async` is no longer spelled on methods, since it is illegal on a declaration and the Promise return type is the contract.
+- **A TypeScript frontend registered beside other frontends treats a tree with no TypeScript as silence** rather than an error, matching the protobuf frontend; `ErrNoMatch` still reaches direct loader callers.
 - **Generated code no longer carries the generator's reasoning.** It moved into the templates; four comments stay in the sentinel checks, each explaining a check that is deliberately absent.
 - **Exported generated API carries docblocks that say what the signature does not** — what a second `Build` returns, what a replacing setter discards, what an entry setter does with a key already present.
 - **`SourceRules` no longer answers `WitnessArgs`.** It rendered the instantiation as text, which registered no import for a witness naming another package; compose from `Witnesses` instead.
