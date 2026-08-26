@@ -33,6 +33,11 @@ reasoning lives in the docblock of whatever the line names.
 - **`needsDiffHelper`** lets a replaced dialect drop the generated file's comparison helper and the imports it alone needed.
 - **`assertDeepEqual` joins the Go assertion dialect** — the structural counterpart to `assertEqual`, taking its comparison callee as an argument so the import registers.
 - **`shape/detectors.All` is checked against the directory tree**, like its `contracts` and `mixins` siblings; a detector package missing from the list shipped and never ran.
+- **`lang/typescript`** is the TypeScript language adapter: the conventions package with the `ts.*` metadata vocabulary, a tree-sitter frontend, a canonical-template backend, and a plugin sdk whose `Support` / `Builtin` / `Reads` mirror Go's.
+- **`typescript.Source` answers the optional rule sets** — `EnumRules`, `SigRules` and `ErrorRules` — so a generator that asks by assertion works over TypeScript declarations rather than generating its degraded form.
+- **`lang/typescript/typescripttest` and `tsfixture`** are the TypeScript counterparts to `golangtest` / `gofixture`: a store fixture with a `TSSource` projection, structural assertions over generated output, `tsc`-backed type-check and satisfaction assertions, and a `node --test` gate for generated suites.
+- **`node.Interface` and `emit.Interface` carry a field list** (ADR-0008): a TypeScript interface declares properties alongside methods, with `FieldByName` / `FieldsWith` on both sides and a `FieldsSlot` on emit. Go frontends never populate it.
+- **`emit/builder.InterfaceBuilder.Field`** declares a property on an emit interface — the model, walk and slots carried fields while the fluent builder could not spell one.
 
 ### Changed
 
