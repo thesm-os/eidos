@@ -9,6 +9,7 @@ require (
 	go.thesmos.sh/eidos/eidostest v1.15.1
 	go.thesmos.sh/eidos/lang/golang v1.15.1
 	go.thesmos.sh/eidos/lang/protobuf v1.15.1
+	go.thesmos.sh/eidos/lang/typescript v0.0.0
 	go.thesmos.sh/eidos/plugins v1.15.1
 	go.thesmos.sh/eidos/reference v1.15.1
 )
@@ -16,6 +17,9 @@ require (
 require (
 	github.com/bufbuild/protocompile v0.14.1 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
+	github.com/mattn/go-pointer v0.0.1 // indirect
+	github.com/tree-sitter/go-tree-sitter v0.25.0 // indirect
+	github.com/tree-sitter/tree-sitter-typescript v0.23.2 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
@@ -29,6 +33,7 @@ replace (
 	go.thesmos.sh/eidos/eidostest => ../../eidostest
 	go.thesmos.sh/eidos/lang/golang => ../../lang/golang
 	go.thesmos.sh/eidos/lang/protobuf => ../../lang/protobuf
+	go.thesmos.sh/eidos/lang/typescript => ../../lang/typescript
 	go.thesmos.sh/eidos/plugins => ../../plugins
 	go.thesmos.sh/eidos/reference => ../../reference
 )

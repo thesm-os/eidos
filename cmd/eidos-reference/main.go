@@ -42,6 +42,7 @@ import (
 	"go.thesmos.sh/eidos/lang/golang/backend"
 	frontendgolang "go.thesmos.sh/eidos/lang/golang/frontend"
 	"go.thesmos.sh/eidos/lang/protobuf/frontend"
+	frontendts "go.thesmos.sh/eidos/lang/typescript/frontend"
 	"go.thesmos.sh/eidos/plugin"
 	"go.thesmos.sh/eidos/plugins/annotator/defaults"
 	"go.thesmos.sh/eidos/plugins/annotator/sample"
@@ -151,15 +152,27 @@ func run(ctx context.Context, env *cli.Env, plugins []plugin.Plugin, args []stri
 }
 
 // defaultPlugins returns the static plugin universe this binary
-// embeds: both in-tree frontends, the Go backend, the proto-to-Go
+// embeds: every in-tree frontend, the Go backend, the proto-to-Go
 // bridge annotator, plus every reference plugin shipped in the
 // repository. Downstream binaries replace this set with their own
 // — copy this slice as the canonical starting shape.
+//
+// The TypeScript frontend carries tree-sitter, so this binary needs
+// cgo; a downstream binary that reads no TypeScript drops the
+// frontend and the requirement with it.
+//
+// The TypeScript backend is deliberately not here. A pipeline takes
+// exactly one backend ([pipeline.ErrMultipleBackends] — multi-language
+// output is several runs), and this binary's reference plugins are
+// Go generators, so Go is its output language. A TypeScript-targeting
+// binary swaps `backend.New()` for the TypeScript backend's — the
+// swap TestTypeScriptTargetE2E performs.
 func defaultPlugins() []plugin.Plugin {
 	return []plugin.Plugin{
 		// Frontends — parse input into the source-side store.
 		frontendgolang.New(),
 		frontend.New(),
+		frontendts.New(),
 
 		// Cross-frontend bridge — stamps Go-shape metadata on
 		// proto-loaded packages so downstream Go-flavoured
