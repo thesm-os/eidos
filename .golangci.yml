@@ -128,14 +128,28 @@ linters:
         # plugins/ consume meta keys (set by frontends) and ship their
         # own templates (rendered by the backend). They must not depend
         # on a specific frontend or backend.
+        #
+        # Spelled per language, like the frontends / backends rules
+        # below and for the same reason: the old `eidos/frontend` and
+        # `eidos/backend` paths stopped existing at ADR-0007, so this
+        # rule denied nothing for as long as they were what it named.
+        # `lang/` alone would deny the conventions packages a plugin
+        # legitimately reads — which is the whole of lang/golang and
+        # lang/typescript minus these six.
         plugins:
           list-mode: lax
           files:
             - "**/plugins/**"
           deny:
-            - pkg: go.thesmos.sh/eidos/frontend
+            - pkg: go.thesmos.sh/eidos/lang/golang/frontend
               desc: "plugins must not depend on a specific frontend; read facts via meta keys"
-            - pkg: go.thesmos.sh/eidos/backend
+            - pkg: go.thesmos.sh/eidos/lang/typescript/frontend
+              desc: "plugins must not depend on a specific frontend; read facts via meta keys"
+            - pkg: go.thesmos.sh/eidos/lang/protobuf/frontend
+              desc: "plugins must not depend on a specific frontend; read facts via meta keys"
+            - pkg: go.thesmos.sh/eidos/lang/golang/backend
+              desc: "plugins must not depend on a specific backend; ship templates instead"
+            - pkg: go.thesmos.sh/eidos/lang/typescript/backend
               desc: "plugins must not depend on a specific backend; ship templates instead"
 
         # The language-neutral infrastructure: the pipeline and the
