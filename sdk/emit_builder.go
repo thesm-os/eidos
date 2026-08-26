@@ -49,7 +49,9 @@ type (
 
 	// InterfaceBuilder builds an [EmitInterface]. Its Method
 	// callback receives the same [MethodBuilder] a struct's does;
-	// the body it sets is simply dropped.
+	// the body it sets is simply dropped. Its Field callback is for
+	// a language whose interface declares data alongside behaviour —
+	// TypeScript's is the case, and a Go generator never calls it.
 	InterfaceBuilder = emitbuilder.InterfaceBuilder
 
 	// FunctionBuilder builds a package-level [EmitFunction].

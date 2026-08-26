@@ -81,6 +81,24 @@ func (b *InterfaceBuilder) Directive(d *directive.Directive) *InterfaceBuilder {
 	return b
 }
 
+// Field appends a property to the interface and runs fn against its
+// [FieldBuilder]. The field's Owner is wired to the interface
+// automatically.
+//
+// For a language whose interface declares data alongside behaviour —
+// TypeScript's is the case, see ADR-0008. A generator targeting Go
+// never calls this, and the Go backend renders an interface's field
+// list nowhere, so a graph that carried one would emit nothing rather
+// than something wrong.
+func (b *InterfaceBuilder) Field(name string, t emit.Ref, fn func(*FieldBuilder)) *InterfaceBuilder {
+	f := &emit.Field{Name: name, Type: t, Owner: b.i}
+	if fn != nil {
+		fn(&FieldBuilder{ctx: b.ctx, f: f})
+	}
+	b.i.Fields = append(b.i.Fields, f)
+	return b
+}
+
 // Method appends a method to the interface (no body — interface
 // methods are signatures only). The method's Owner is wired to the
 // interface automatically.
