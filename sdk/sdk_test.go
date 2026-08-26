@@ -57,6 +57,31 @@ func TestTypeAliasesPreserveIdentity(t *testing.T) {
 		_ = b2
 	})
 
+	t.Run("the rules interfaces alias to plugin package", func(t *testing.T) {
+		t.Parallel()
+		// The three halves included: a helper taking only the type
+		// questions states the narrower contract, and it can only do
+		// that if naming that half needs no import past this package.
+		var sr1 sdk.SourceRules
+		var sr2 plugin.SourceRules = sr1
+		_ = sr2
+		var dr1 sdk.DeclarationRules
+		var dr2 plugin.DeclarationRules = dr1
+		_ = dr2
+		var tr1 sdk.TypeRules
+		var tr2 plugin.TypeRules = tr1
+		_ = tr2
+		var nr1 sdk.NamingRules
+		var nr2 plugin.NamingRules = nr1
+		_ = nr2
+		// And the composition holds across the boundary: SourceRules
+		// satisfying all three is what lets a caller pass the whole
+		// where a half is asked for.
+		var whole sdk.SourceRules
+		var part sdk.TypeRules = whole
+		_ = part
+	})
+
 	t.Run("contexts alias to plugin package", func(t *testing.T) {
 		t.Parallel()
 		var fc1 sdk.FrontendContext

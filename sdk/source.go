@@ -38,6 +38,31 @@ type ErrorRules = plugin.ErrorRules
 // Optional and found by assertion, like [EnumRules] and [ErrorRules].
 type SigRules = plugin.SigRules
 
+// The three halves [SourceRules] is composed from.
+//
+// Re-exported because a helper does not always want the whole of it: a
+// function that only projects types takes [TypeRules] and states in
+// its signature that it reads nothing else, which is the narrower
+// contract and the more useful one to a reader. Naming that half was
+// the one thing left that sent a caller past this package into
+// [plugin] — everything else there is already aliased here.
+//
+// [SourceRules] stays the name a plugin declares and reads back
+// through [Base.SourceOf]; these are for the functions it hands the
+// result to.
+type (
+	// DeclarationRules is what a language answers about a declaration
+	// and the file it was written in.
+	DeclarationRules = plugin.DeclarationRules
+
+	// TypeRules is what a language answers about a type: its shape, a
+	// sample value of it, and how a type parameter is spelled.
+	TypeRules = plugin.TypeRules
+
+	// NamingRules is how a language spells a derived name.
+	NamingRules = plugin.NamingRules
+)
+
 // SigInfo re-exports [emit.SigInfo], the projection [SigRules.SigOf]
 // answers with.
 //
