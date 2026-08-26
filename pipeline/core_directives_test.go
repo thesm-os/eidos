@@ -87,6 +87,48 @@ func (g *restrictiveGen) Directives() []directive.Schema {
 	}
 }
 
+// lookupFor builds a pipeline around gen and returns the schema its
+// directive was registered with — what the validator reads, after
+// whatever registration did to what the plugin declared.
+func lookupFor(t *testing.T, gen plugin.Generator, name directive.Name) directive.Schema {
+	t.Helper()
+	p, err := pipeline.New().
+		WithFrontend(&stubFE{name: "fe"}).
+		WithGenerator(gen).
+		WithBackend(&stubBE{name: "be"}).
+		WithSink(sink.NewMemory()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	schema, ok := p.DirectiveRegistry().Lookup(name)
+	if !ok {
+		t.Fatalf("plugin directive %q not registered", name)
+	}
+	return schema
+}
+
+// denyingGen is a generator whose directive takes no arguments of
+// its own — [directive.SchemaBuilder.DenyKeys], the strongest
+// restriction a schema can state, and the one the widening has to
+// reach through for the router and the validator to agree.
+type denyingGen struct{ name string }
+
+// Name returns the configured plugin identifier.
+func (g *denyingGen) Name() string { return g.name }
+
+// Generate emits nothing; the schema is what this fixture is for.
+func (*denyingGen) Generate(*plugin.GeneratorContext) error { return nil }
+
+// Directives declares one argument-free directive.
+func (g *denyingGen) Directives() []directive.Schema {
+	return []directive.Schema{
+		directive.NewSchema(directive.Name(g.name)).
+			DenyKeys().
+			Build(),
+	}
+}
+
 // TestCoreDirectives_RoutingKeysAlwaysAllowed pins that a plugin
 // restricting its own key surface does not thereby disable the
 // framework's routing overrides.
@@ -103,20 +145,7 @@ func TestCoreDirectives_RoutingKeysAlwaysAllowed(t *testing.T) {
 
 	lookup := func(t *testing.T) directive.Schema {
 		t.Helper()
-		p, err := pipeline.New().
-			WithFrontend(&stubFE{name: "fe"}).
-			WithGenerator(&restrictiveGen{name: "restrictive"}).
-			WithBackend(&stubBE{name: "be"}).
-			WithSink(sink.NewMemory()).
-			Build()
-		if err != nil {
-			t.Fatalf("Build: %v", err)
-		}
-		schema, ok := p.DirectiveRegistry().Lookup("restrictive")
-		if !ok {
-			t.Fatalf("plugin directive not registered")
-		}
-		return schema
+		return lookupFor(t, &restrictiveGen{name: "restrictive"}, "restrictive")
 	}
 
 	for _, key := range pipeline.RoutingKeys {
@@ -143,6 +172,36 @@ func TestCoreDirectives_RoutingKeysAlwaysAllowed(t *testing.T) {
 		// that turns every restricted schema into an open one.
 		if got := lookup(t).AllowedKeys; slices.Contains(got, "nonesuch") {
 			t.Fatalf("AllowedKeys = %v, want it to stay closed", got)
+		}
+	})
+
+	t.Run("a schema denying keys outright still routes", func(t *testing.T) {
+		t.Parallel()
+		// The case the AllowedKeys widening did not reach. A generator
+		// declaring no options of its own — testkit's stub is one —
+		// still has out= / pkg= / tag= read off its directive by the
+		// Layout phase, so a schema left denying them reports "accepts
+		// no keys" and the file lands where the key said anyway.
+		schema := lookupFor(t, &denyingGen{name: "denying"}, "denying")
+		if schema.DenyKeys {
+			t.Fatalf("DenyKeys survived the widening, so %v are still rejected", pipeline.RoutingKeys)
+		}
+		for _, key := range pipeline.RoutingKeys {
+			if !slices.Contains(schema.AllowedKeys, key) {
+				t.Errorf("AllowedKeys = %v, want it to include %q", schema.AllowedKeys, key)
+			}
+		}
+	})
+
+	t.Run("a denying schema takes the routing keys and nothing else", func(t *testing.T) {
+		t.Parallel()
+		// The declaration is preserved rather than dropped: the author
+		// said their directive takes no options, and trading the deny
+		// for an allow-list of exactly the framework's keys is the
+		// same claim.
+		schema := lookupFor(t, &denyingGen{name: "denying"}, "denying")
+		if len(schema.AllowedKeys) != len(pipeline.RoutingKeys) {
+			t.Fatalf("AllowedKeys = %v, want exactly %v", schema.AllowedKeys, pipeline.RoutingKeys)
 		}
 	})
 

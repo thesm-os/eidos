@@ -125,10 +125,24 @@ var RoutingKeys = []string{"out", "pkg", "tag"}
 // anything" into "accepts exactly the routing keys", which is the
 // opposite of the intent.
 //
+// [directive.Schema.DenyKeys] is the same gap in its strongest form,
+// and is traded for the allow-list rather than honoured: a directive
+// that takes no arguments of its own still takes the framework's, and
+// the Layout phase reads them off it whatever the schema said. What
+// the author declared survives the trade, because the routing keys
+// are then the only ones the validator lets through — and a stray key
+// now reports what it could have been rather than that the directive
+// accepts none.
+//
 // Applied only to plugin-owned directives. The standalone `+gen:out`
 // directive spells its own scope with `plugin=` and takes the path
 // positionally, so it neither needs nor accepts these.
 func widenRoutingKeys(s directive.Schema) directive.Schema {
+	if s.DenyKeys {
+		s.DenyKeys = false
+		s.AllowedKeys = slices.Clone(RoutingKeys)
+		return s
+	}
 	if len(s.AllowedKeys) == 0 {
 		return s
 	}
