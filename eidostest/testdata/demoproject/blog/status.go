@@ -15,7 +15,7 @@ package blog
 // is the rule for a numeric enum, and a set that has none exercises
 // the case where the rule finds nothing to strip.
 //
-//+gen:enum
+// +gen:enum
 type Status int
 
 const (
