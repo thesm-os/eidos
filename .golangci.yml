@@ -182,12 +182,20 @@ linters:
               desc: "infrastructure must not depend on a specific backend"
 
         # Frontends never import other frontends or any backend.
+        # Spelled per language because depguard's deny is a prefix
+        # match: `lang/` alone would deny the conventions package both
+        # sides legitimately share. A new language adds its two lines
+        # here — the cost of the rule staying true rather than reading
+        # as protection it stopped giving when the packages moved under
+        # lang/<lang>/ (ADR-0007).
         frontends:
           list-mode: lax
           files:
             - "**/frontend/**"
           deny:
-            - pkg: go.thesmos.sh/eidos/backend
+            - pkg: go.thesmos.sh/eidos/lang/golang/backend
+              desc: "frontends and backends must not import each other"
+            - pkg: go.thesmos.sh/eidos/lang/typescript/backend
               desc: "frontends and backends must not import each other"
 
         # Backends never import other backends or any frontend.
@@ -196,7 +204,11 @@ linters:
           files:
             - "**/backend/**"
           deny:
-            - pkg: go.thesmos.sh/eidos/frontend
+            - pkg: go.thesmos.sh/eidos/lang/golang/frontend
+              desc: "frontends and backends must not import each other"
+            - pkg: go.thesmos.sh/eidos/lang/typescript/frontend
+              desc: "frontends and backends must not import each other"
+            - pkg: go.thesmos.sh/eidos/lang/protobuf/frontend
               desc: "frontends and backends must not import each other"
 
     forbidigo:
