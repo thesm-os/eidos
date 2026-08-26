@@ -23,6 +23,8 @@ reasoning lives in the docblock of whatever the line names.
 ### Added
 
 - **`sdk.SigRules`** is an optional rules interface answering `SigOf` and `IsConstraint`, so a generator that doubles a contract asks its declared rules for a signature rather than wrapping its own Source. Found by assertion, like `EnumRules` and `ErrorRules` ([#62](https://github.com/thesm-os/eidos/issues/62)).
+- **`sdk.DeclarationRules`, `sdk.TypeRules` and `sdk.NamingRules`** are the three halves `SourceRules` is composed from, so a helper reading only one states that in its signature without importing `plugin`.
+- **`lang/golang/sdk` forwards the Go questions no neutral interface answers** — `QName`, `LocalName`, `Deref`, `ElemType`, `FromNode`, `FuncSignature`, `IsContext` / `IsString` / `IsInteger` / `IsFloat` / `Nilable`, `ComparableDeep`, `SequenceOf`, `SentinelSubject`, `NamedReturnsUsable`, with the `ResolveProblem` and `Iterator` vocabularies their answers are read through.
 - **`golang.StructOf` and `golang.MemberField`** ([#64](https://github.com/thesm-os/eidos/issues/64)) resolve a type reference to the struct declaring it and find an exported member by name with promotion honoured — the two steps a generator aiming emitted code at a member re-derived for itself. Both re-exported from `lang/golang/sdk`.
 - **`golang.ReportMethodSet` and `golang.Consequence`** report every embed that contributed nothing to a resolved method set and say whether the result is usable, through a narrow `Reporter` port `ctx.Diag` already satisfies.
 - **`golang.UnexportedName`** lowers an identifier's leading rune, completing the pair `ExportedName` opened. Rune-aware, and distinct from `naming.Camel`, which converts the whole identifier and so does not round-trip.
@@ -53,6 +55,7 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Fixed
 
+- **The `plugins` depguard rule denies a frontend or backend again.** It named `eidos/frontend` and `eidos/backend`, paths that stopped existing at ADR-0007, so the rule barring a plugin from importing a backend matched nothing; now spelled per language like its `frontends` / `backends` siblings.
 - **A directive denying keys still takes `out=` / `pkg=` / `tag=`.** The routing widening reached `AllowedKeys` and not `DenyKeys`, so a generator declaring no options of its own had the framework's overrides reported as "accepts no keys" and honoured by the router anyway.
 - **A string default declared in a struct tag renders as a string** ([#59](https://github.com/thesm-os/eidos/issues/59)). Go's tag grammar eats one layer of quoting, so `default:"localhost"` was stamped verbatim and named an identifier nobody declared.
 - **A tag default may still name a symbol** ([#60](https://github.com/thesm-os/eidos/issues/60)). `LiteralFor` takes the declaring file: a qualifier the import block binds stays a reference, as does a full import path whose symbol is exported, and everything else on a textual member is quoted.
