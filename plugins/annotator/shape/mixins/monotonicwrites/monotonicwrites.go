@@ -17,12 +17,13 @@ const Name = "monotonicwrites"
 // which member that is, and two candidates of the same type are
 // ordinary.
 //
-// Opaque, like the cas contract's version=: the value names a field of
-// the value type rather than a callable in scope or a package-level
-// var, and neither resolver scope reaches a member of a type.
-// Validating it would need a scope resolved against another
-// declaration's type, which is the same mechanism deferred for a
-// watcher's handle methods.
+// [shape.KindValueField], the scope this key sat opaque waiting for:
+// the resolver checks the name against the value type's fields — the
+// answered value, or the written one for a host answering nothing —
+// and rewrites a hit into the qualified form every resolved kind
+// takes, so a consumer reads it back through [golang.LocalName]. A
+// typo is reported where the author is; a value type the run never
+// loaded stamps unvalidated.
 //
 // A field, never a method. The projections built from this stamp read
 // it as a selector and the cas stamp assigns it — `v.Version =
@@ -35,7 +36,7 @@ const ParamVersion = "version"
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []shape.Param{
-	{Key: ParamVersion, Kind: shape.KindOpaque},
+	{Key: ParamVersion, Kind: shape.KindValueField},
 }
 
 // Mixin returns the [shape.Mixin] this package contributes.

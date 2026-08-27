@@ -47,16 +47,17 @@ func TestMixin(t *testing.T) {
 		mixintest.AssertIdentity(t, partition.Mixin(), partition.Name, partition.Params)
 	})
 
-	t.Run("the axis is not a sibling param", func(t *testing.T) {
+	t.Run("the axis is a param, not a sibling", func(t *testing.T) {
 		t.Parallel()
-		// A parameter has no qualified name, so asking the resolver to
-		// look one up in scope would report every correct axis as not
-		// found.
+		// A parameter has no qualified name, so the sibling scope would
+		// report every correct axis as not found — the reason this key
+		// sat opaque until [shape.KindParam] existed. The param scope
+		// checks the host's own signature and leaves the stamp as
+		// written, which is the check the Validate hook used to carry.
 		for _, p := range partition.Params {
-			if p.Key == partition.ParamAxis && p.Kind != shape.KindOpaque {
-				t.Errorf("%q resolves as %s; a parameter of the callable has no"+
-					" qualified name and every correct axis would report missing",
-					partition.ParamAxis, p.Kind)
+			if p.Key == partition.ParamAxis && p.Kind != shape.KindParam {
+				t.Errorf("%q declared as %s, want the param kind that validates"+
+					" against the host's signature", partition.ParamAxis, p.Kind)
 			}
 		}
 	})
@@ -250,7 +251,7 @@ func TestMixin_UnresolvableRead(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("diagnostics = %+v, want only the resolver's", got)
 	}
-	if !strings.Contains(got[0].Message, "not found in scope") {
-		t.Errorf("message = %q, want the resolver's sibling diagnostic", got[0].Message)
+	if !strings.Contains(got[0].Message, "names no callable in scope") {
+		t.Errorf("message = %q, want the resolver's diagnostic naming what the kind wants", got[0].Message)
 	}
 }

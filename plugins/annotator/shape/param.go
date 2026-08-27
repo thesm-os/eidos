@@ -18,7 +18,10 @@ type ParamKind uint8
 const (
 	// KindOpaque leaves the value verbatim. The right kind for
 	// anything with no declaration to resolve against — a literal, a
-	// quantity, a field name, an encoded graph.
+	// quantity, an encoded graph. A field of the host's value type is
+	// [KindValueField] and a parameter of the host is [KindParam];
+	// both were opaque before those kinds existed, which is why a
+	// key here named a member the resolver never checked.
 	KindOpaque ParamKind = iota
 
 	// KindCallable names a sibling callable, resolved through the
@@ -37,6 +40,50 @@ const (
 	// through that type's own declaration, which the resolver can
 	// only see when the run loaded it.
 	KindMember
+
+	// KindValueField names a field of the host's value type — the
+	// ordering stamp a session guarantee reads, the field a
+	// compare-and-swap guards.
+	//
+	// # The scope rule, stated
+	//
+	// Stated rather than left to the implementation, because at
+	// least one consumer has to reproduce it to use the stamp at
+	// all, and a rule that is only implemented gets re-derived by
+	// hand until the two disagree:
+	//
+	//   - The value type is the host's first non-error result.
+	//   - A host answering nothing resolves against each
+	//     non-context parameter's type in declaration order, taking
+	//     the first that declares the field — the written value.
+	//   - Both positions are pointer-stripped before lookup.
+	//
+	// The field must be exported, since every consumer reaches it
+	// from outside the declaring package, and promoted fields count:
+	// an embedded base carrying the version stamp is exactly the
+	// shape this kind names, and a flat match would report a correct
+	// directive as wrong.
+	//
+	// A field, never a method — the distinction from [KindMember],
+	// and the reason this is its own constant: a stamp is assigned
+	// as well as read, and no method form can sit on the left of
+	// that assignment. When the run did not load the value type's
+	// declaration the param stamps unvalidated, the same rule
+	// KindMember documents.
+	KindValueField
+
+	// KindParam names a parameter of the host callable itself — the
+	// axis a partition check varies, the key that pins a sticky
+	// instance.
+	//
+	// Validated against the host's own signature rather than
+	// resolved into a qualified name: a parameter has no
+	// package-level spelling, so the stamp stays as the author wrote
+	// it and the check is that the name is genuinely in the
+	// signature. Before this kind existed the same check lived in
+	// per-mixin Validate hooks, where forgetting it was
+	// indistinguishable from the param being free-form.
+	KindParam
 )
 
 // String renders the kind for diagnostics.
@@ -50,6 +97,10 @@ func (k ParamKind) String() string {
 		return "var"
 	case KindMember:
 		return "member"
+	case KindValueField:
+		return "value-field"
+	case KindParam:
+		return "param"
 	default:
 		return "unknown"
 	}
@@ -67,6 +118,10 @@ func (k ParamKind) scopeNoun() string {
 		return "package-level var in scope"
 	case KindMember:
 		return "member of the type it answers"
+	case KindValueField:
+		return "field of its value type"
+	case KindParam:
+		return "parameter of the annotated callable"
 	case KindOpaque:
 		return "resolvable declaration"
 	default:

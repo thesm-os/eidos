@@ -20,8 +20,11 @@ const ParamMismatch = "mismatch"
 // ParamVersion is the KV key naming the field a compare-and-swap
 // compares before it writes.
 //
-// Opaque: the value names a field on the caller's own type, which
-// this package never resolves.
+// [shape.KindValueField]: the resolver checks the name against the
+// written value's fields — the precedent the five session mixins
+// cited while all six sat opaque — and rewrites a hit into the
+// qualified form. A typo is reported where the author is; a value
+// type the run never loaded stamps unvalidated.
 const ParamVersion = "version"
 
 // Roles enumerates the contract's role vocabulary.
@@ -29,11 +32,11 @@ const ParamVersion = "version"
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Roles = []string{"writer"}
 
-// Params enumerates the directive's opaque KV keys.
+// Params enumerates the directive's KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
-	{Key: ParamVersion, Kind: shape.KindOpaque},
+	{Key: ParamVersion, Kind: shape.KindValueField},
 	{Key: ParamMismatch, Kind: shape.KindVar},
 }
 

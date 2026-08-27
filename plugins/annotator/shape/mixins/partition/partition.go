@@ -35,8 +35,11 @@ const ParamRead = "read"
 // That check cannot fail, which is worse than the one this names.
 //
 // Unlike [ParamRead] the value is a parameter of the annotated
-// callable rather than a callable in scope, so it is not resolved into
-// a qualified name. It is validated instead: see [Mixin].
+// callable rather than a callable in scope — [shape.KindParam], so
+// the resolver checks the name against the host's signature and the
+// stamp stays as written. What stays in the Validate hook is the
+// half the kind cannot say: that the read partner declares the same
+// parameter, so a check can carry one partition across the pair.
 const ParamAxis = "axis"
 
 // Params enumerates the KV parameter names this mixin accepts.
@@ -44,7 +47,7 @@ const ParamAxis = "axis"
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []shape.Param{
 	{Key: ParamRead, Kind: shape.KindCallable},
-	{Key: ParamAxis, Kind: shape.KindOpaque},
+	{Key: ParamAxis, Kind: shape.KindParam},
 }
 
 // Mixin returns the [shape.Mixin] this package contributes.
@@ -88,14 +91,13 @@ func validateAxis(attachments []shape.MixinAttachment) []shape.MixinViolation {
 		if !given || axis == "" {
 			continue
 		}
+		// The axis naming a parameter of the host is [shape.KindParam]'s
+		// to report now — the guard stays and the report moved. Without
+		// it a misspelled axis reports twice: once from the resolver,
+		// and once here as a pair mismatch, which presupposes the very
+		// thing that already failed.
 		hostParams, _ := golang.Callable(attached.Host)
 		if !hasParam(hostParams, axis) {
-			out = append(out, shape.MixinViolation{
-				Host: attached.Host,
-				Message: fmt.Sprintf(
-					"%s=%q names no parameter of the annotated callable", ParamAxis, axis,
-				),
-			})
 			continue
 		}
 		read := attached.Params[ParamRead]

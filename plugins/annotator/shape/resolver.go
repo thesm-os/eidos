@@ -45,6 +45,14 @@ type Resolver struct {
 	funcPkg     map[*sdk.Function]*sdk.Package
 	hostPkg     map[sdk.Node]*sdk.Package
 	typeMethods map[string][]*sdk.Method
+	typeStructs map[string]*sdk.Struct
+
+	// reader is the run's declaration index, captured per Annotate
+	// for the promoted-field lookup a [KindValueField] resolution
+	// makes: a version stamp on an embedded base is exactly the
+	// shape the kind names, and a flat match would report a correct
+	// directive as wrong.
+	reader golang.Resolver
 }
 
 // methodOwner is the per-method index entry: the owning struct or
@@ -110,10 +118,13 @@ func (r *Resolver) BeforeNodes(ctx *sdk.AnnotatorContext) {
 	r.funcPkg = make(map[*sdk.Function]*sdk.Package)
 	r.hostPkg = make(map[sdk.Node]*sdk.Package)
 	r.typeMethods = make(map[string][]*sdk.Method)
+	r.typeStructs = make(map[string]*sdk.Struct)
+	r.reader = ctx.Reader
 	ctx.Reader.Packages().Each(func(pkg *sdk.Package) {
 		for _, s := range pkg.Structs {
 			owner := methodOwner{qname: s.QName(), methods: s.Methods}
 			r.typeMethods[owner.qname] = s.Methods
+			r.typeStructs[owner.qname] = s
 			for _, m := range s.Methods {
 				r.methodOwner[m] = owner
 				r.hostPkg[m] = pkg
@@ -218,6 +229,10 @@ func (r *Resolver) scopeFor(kind ParamKind, host sdk.Node, callable resolveScope
 		return varScope(r.hostPkg[host])
 	case KindMember:
 		return r.memberScope(host)
+	case KindValueField:
+		return r.valueFieldScope(host)
+	case KindParam:
+		return paramScope(host)
 	case KindOpaque:
 		return nil
 	default:
@@ -282,6 +297,91 @@ func (r *Resolver) memberScope(host sdk.Node) resolveScope {
 		for _, m := range methods {
 			if m != nil && m.Name == name {
 				return methodQName(owner, m.Name)
+			}
+		}
+		return ""
+	}
+}
+
+// valueFieldScope returns a [resolveScope] searching the fields of
+// the host's value type, per the rule [KindValueField] states: the
+// first non-error result, or — for a host answering nothing — each
+// non-context parameter's type in declaration order, taking the
+// first that declares the field. Pointer-stripped in both positions.
+//
+// The lookup is [golang.MemberField], so the field must be exported
+// and promotion is honoured. A hit rewrites the stamp into
+// `<type-qname>.<Field>`, the composed form every other resolved
+// kind uses; a consumer takes the trailing identifier back off with
+// [golang.LocalName], as it already does for a sibling callable.
+//
+// Nil when any candidate names a declaration the run did not load —
+// the param stamps unvalidated rather than reported, since the field
+// may live on exactly the type the resolver cannot see, and a false
+// error on a correct directive is worse than the silence
+// [KindMember] already accepts for an unloaded handle. A builtin is
+// not that case: it has no declaration to load and can declare no
+// field, so it stays in the candidate list and misses honestly.
+func (r *Resolver) valueFieldScope(host sdk.Node) resolveScope {
+	params, returns := golang.Callable(host)
+	candidates := golang.StripErrorTypes(returns)
+	if len(candidates) > 0 {
+		candidates = candidates[:1]
+	} else {
+		for _, p := range golang.StripContext(params) {
+			if p != nil && p.Type != nil {
+				candidates = append(candidates, p.Type)
+			}
+		}
+	}
+	type valueType struct {
+		qname string
+		decl  *sdk.Struct
+	}
+	var loaded []valueType
+	for _, t := range candidates {
+		if elem := golang.PointerElem(t); elem != nil {
+			t = elem
+		}
+		qname := golang.QName(t)
+		decl, ok := r.typeStructs[qname]
+		if !ok && !t.IsBuiltin() {
+			return nil
+		}
+		loaded = append(loaded, valueType{qname: qname, decl: decl})
+	}
+	if len(loaded) == 0 {
+		return nil
+	}
+	reader := r.reader
+	return func(name string) string {
+		for _, vt := range loaded {
+			if vt.decl == nil {
+				continue
+			}
+			if _, found := golang.MemberField(vt.decl, name, reader); found {
+				return vt.qname + "." + name
+			}
+		}
+		return ""
+	}
+}
+
+// paramScope returns a [resolveScope] matching the host's own
+// parameter names.
+//
+// A hit answers the raw name back rather than a qualified form,
+// because a parameter has no package-level spelling — the stamp
+// stays as the author wrote it, and what the resolution buys is the
+// check that the name is genuinely in the signature. The miss is the
+// diagnostic [partition]'s and [scope]'s Validate hooks used to
+// raise by hand.
+func paramScope(host sdk.Node) resolveScope {
+	params, _ := golang.Callable(host)
+	return func(name string) string {
+		for _, p := range params {
+			if p != nil && p.Name == name {
+				return name
 			}
 		}
 		return ""
@@ -569,22 +669,28 @@ func (r *Resolver) resolveMixins(ctx *sdk.AnnotatorContext, host sdk.Node, bag *
 			if resolveIn == nil {
 				continue
 			}
-			r.resolveMixinSibling(host, bag, spec.Name, p.Key, resolveIn, sink)
+			r.resolveMixinSibling(host, bag, spec.Name, p, resolveIn, sink)
 		}
 	}
 }
 
-// resolveMixinSibling rewrites a single mixin sibling-param value
-// from raw name to qname. Idempotent: skips already-qualified
-// stamps and skips when the param is absent.
+// resolveMixinSibling rewrites a single mixin param value from raw
+// name to qname. Idempotent: skips already-qualified stamps and
+// skips when the param is absent.
+//
+// The miss names what the kind's value must be — the contract path's
+// wording, adopted here so a [KindParam] miss says "names no
+// parameter of the annotated callable" rather than calling a
+// parameter a sibling.
 func (*Resolver) resolveMixinSibling(
 	host sdk.Node,
 	bag *sdk.Bag,
-	mixinName, param string,
+	mixinName string,
+	p Param,
 	scope resolveScope,
 	sink *sdk.PluginSink,
 ) {
-	key := MixinParamKey(mixinName, param)
+	key := MixinParamKey(mixinName, p.Key)
 	raw, present := key.Get(bag)
 	if !present || raw == "" || isQualified(raw) {
 		return
@@ -592,8 +698,8 @@ func (*Resolver) resolveMixinSibling(
 	qname := scope(raw)
 	if qname == "" {
 		sink.Errorf(host.Pos(),
-			"shape.mixin %q: sibling param %q=%q not found in scope",
-			mixinName, param, raw)
+			"shape.mixin %q: %s=%q names no %s",
+			mixinName, p.Key, raw, p.Kind.scopeNoun())
 		return
 	}
 	key.Set(bag, qname, ResolverName)

@@ -600,6 +600,205 @@ func TestResolverConformance(t *testing.T) {
 // before the right entry rescues the stamp. That the stamp still lands
 // is why the bug would be a diagnostic-only failure — loud to a
 // consumer, invisible to a test that only checks the stamp.
+// TestResolver_ValueFieldScope covers [shape.KindValueField] against
+// the rule its docblock states: the answered value first, the written
+// value for a host answering nothing, pointer-stripped, promotion
+// honoured, and unvalidated — not wrong — for a type the run never
+// loaded.
+func TestResolver_ValueFieldScope(t *testing.T) {
+	t.Parallel()
+
+	const key = "version"
+	versioned := shape.Contract{
+		Name:   "versioned",
+		Roles:  []string{"writer"},
+		Params: []shape.Param{{Key: key, Kind: shape.KindValueField}},
+	}
+	valueStruct := func() *sdk.Struct {
+		return &sdk.Struct{
+			Name: "Value", Package: "x",
+			Fields: []*sdk.Field{{Name: "Rev", Type: &sdk.TypeRef{Name: "int"}}},
+		}
+	}
+	host := func(name string, params []*sdk.Param, returns []*sdk.Return, field string) *sdk.Method {
+		return &sdk.Method{
+			Name: name, Params: params, Returns: returns,
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
+					contractDirective("versioned", "writer", map[string]string{key: field}),
+				},
+			},
+		}
+	}
+	pkgWith := func(m *sdk.Method, extra ...*sdk.Struct) *sdk.Package {
+		owner := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{m}}
+		m.Owner = owner
+		return &sdk.Package{
+			Name: "x", Path: "x",
+			Structs: append([]*sdk.Struct{owner}, extra...),
+		}
+	}
+	stamped := func(m *sdk.Method) string {
+		got, _ := shape.ContractParamKey("versioned", key).Get(m.Meta())
+		return got
+	}
+
+	t.Run("the answered value resolves the field", func(t *testing.T) {
+		t.Parallel()
+		m := host("Get", nil,
+			sdk.AnonReturns(&sdk.TypeRef{Name: "Value", Package: "x"}), "Rev")
+		runWithResolver(t, versioned, pkgWith(m, valueStruct()))
+		if got := stamped(m); got != "x.Value.Rev" {
+			t.Fatalf("stamp = %q, want the qualified field", got)
+		}
+	})
+
+	t.Run("a pointer result is stripped", func(t *testing.T) {
+		t.Parallel()
+		m := host("Get", nil, sdk.AnonReturns(&sdk.TypeRef{
+			TypeKind: sdk.TypeRefPointer,
+			Elem:     &sdk.TypeRef{Name: "Value", Package: "x"},
+		}), "Rev")
+		runWithResolver(t, versioned, pkgWith(m, valueStruct()))
+		if got := stamped(m); got != "x.Value.Rev" {
+			t.Fatalf("stamp = %q, want the pointee's field", got)
+		}
+	})
+
+	t.Run("a host answering nothing resolves against the written value", func(t *testing.T) {
+		t.Parallel()
+		// The monotonicwrites case, and the one a widened KindMember
+		// would have failed: a write answers nothing, so the answered
+		// type is not where the field lives.
+		m := host("Put",
+			[]*sdk.Param{{Name: "v", Type: &sdk.TypeRef{Name: "Value", Package: "x"}}},
+			nil, "Rev")
+		runWithResolver(t, versioned, pkgWith(m, valueStruct()))
+		if got := stamped(m); got != "x.Value.Rev" {
+			t.Fatalf("stamp = %q, want the written value's field", got)
+		}
+	})
+
+	t.Run("parameters are searched in order, first declaring wins", func(t *testing.T) {
+		t.Parallel()
+		keyStruct := &sdk.Struct{
+			Name: "Key", Package: "x",
+			Fields: []*sdk.Field{{Name: "ID", Type: &sdk.TypeRef{Name: "string"}}},
+		}
+		m := host("Put", []*sdk.Param{
+			{Name: "k", Type: &sdk.TypeRef{Name: "Key", Package: "x"}},
+			{Name: "v", Type: &sdk.TypeRef{Name: "Value", Package: "x"}},
+		}, nil, "Rev")
+		runWithResolver(t, versioned, pkgWith(m, keyStruct, valueStruct()))
+		if got := stamped(m); got != "x.Value.Rev" {
+			t.Fatalf("stamp = %q, want the field found on the value, not the key", got)
+		}
+	})
+
+	t.Run("a promoted field counts", func(t *testing.T) {
+		t.Parallel()
+		// An embedded base carrying the stamp is exactly the shape
+		// version= names, and a flat match would report a correct
+		// directive as wrong.
+		base := &sdk.Struct{
+			Name: "Base", Package: "x",
+			Fields: []*sdk.Field{{Name: "Rev", Type: &sdk.TypeRef{Name: "int"}}},
+		}
+		embedding := &sdk.Struct{
+			Name: "Value", Package: "x",
+			Embeds: []*sdk.Embed{{Type: &sdk.TypeRef{Name: "Base", Package: "x"}}},
+		}
+		m := host("Get", nil,
+			sdk.AnonReturns(&sdk.TypeRef{Name: "Value", Package: "x"}), "Rev")
+		runWithResolver(t, versioned, pkgWith(m, embedding, base))
+		if got := stamped(m); got != "x.Value.Rev" {
+			t.Fatalf("stamp = %q, want the promoted field resolved", got)
+		}
+	})
+
+	t.Run("a field the value does not declare is reported", func(t *testing.T) {
+		t.Parallel()
+		m := host("Get", nil,
+			sdk.AnonReturns(&sdk.TypeRef{Name: "Value", Package: "x"}), "Missing")
+		diags := runWithResolverDiags(t, versioned, pkgWith(m, valueStruct()))
+		if len(diags) != 1 || !strings.Contains(diags[0].Message, "names no field of its value type") {
+			t.Fatalf("diagnostics = %+v, want the typo reported where the author is", diags)
+		}
+	})
+
+	t.Run("an unloaded value type stamps unvalidated", func(t *testing.T) {
+		t.Parallel()
+		// The field may live on exactly the type the resolver cannot
+		// see, and a false error on a correct directive is worse than
+		// the silence KindMember already accepts.
+		m := host("Get", nil,
+			sdk.AnonReturns(&sdk.TypeRef{Name: "Elsewhere", Package: "other.example/pkg"}), "Rev")
+		diags := runWithResolverDiags(t, versioned, pkgWith(m))
+		for _, d := range diags {
+			if d.Severity == sdk.SeverityError {
+				t.Fatalf("unexpected diagnostic over an unloaded value type: %s", d.Message)
+			}
+		}
+		if got := stamped(m); got != "Rev" {
+			t.Fatalf("stamp = %q, want the raw name kept", got)
+		}
+	})
+}
+
+// TestResolver_ParamScope covers [shape.KindParam]: validated against
+// the host's own signature, never rewritten, because a parameter has
+// no package-level spelling.
+func TestResolver_ParamScope(t *testing.T) {
+	t.Parallel()
+
+	const key = "axis"
+	pinned := shape.Contract{
+		Name:   "pinned",
+		Roles:  []string{"writer"},
+		Params: []shape.Param{{Key: key, Kind: shape.KindParam}},
+	}
+	build := func(axis string) (*sdk.Method, *sdk.Package) {
+		m := &sdk.Method{
+			Name: "Put",
+			Params: []*sdk.Param{
+				{Name: "shard", Type: &sdk.TypeRef{Name: "string"}},
+				{Name: "v", Type: &sdk.TypeRef{Name: "string"}},
+			},
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
+					contractDirective("pinned", "writer", map[string]string{key: axis}),
+				},
+			},
+		}
+		owner := &sdk.Struct{Name: "Repo", Package: "x", Methods: []*sdk.Method{m}}
+		m.Owner = owner
+		return m, &sdk.Package{Name: "x", Path: "x", Structs: []*sdk.Struct{owner}}
+	}
+
+	t.Run("a declared parameter validates and stays as written", func(t *testing.T) {
+		t.Parallel()
+		m, pkg := build("shard")
+		diags := runWithResolverDiags(t, pinned, pkg)
+		for _, d := range diags {
+			if d.Severity == sdk.SeverityError {
+				t.Fatalf("unexpected diagnostic: %s", d.Message)
+			}
+		}
+		if got, _ := shape.ContractParamKey("pinned", key).Get(m.Meta()); got != "shard" {
+			t.Fatalf("stamp = %q, want the raw name — a parameter has no qualified form", got)
+		}
+	})
+
+	t.Run("a name the signature does not declare is reported", func(t *testing.T) {
+		t.Parallel()
+		_, pkg := build("tenant")
+		diags := runWithResolverDiags(t, pinned, pkg)
+		if len(diags) != 1 || !strings.Contains(diags[0].Message, "names no parameter of the annotated callable") {
+			t.Fatalf("diagnostics = %+v, want the hand-rolled hooks' wording, framework-side", diags)
+		}
+	})
+}
+
 func TestResolver_RoleScopedParams(t *testing.T) {
 	t.Parallel()
 

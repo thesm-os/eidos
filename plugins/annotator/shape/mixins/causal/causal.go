@@ -16,10 +16,12 @@ const Name = "causal"
 // store-assigned stamp — a logical clock, a row version, the global
 // write order — and nothing in a signature says which member holds it.
 //
-// Opaque, like theirs: the value names a field of the value type
-// rather than a callable in scope or a package-level var, and reaching
-// a member of a *value* type is not what [shape.KindMember] resolves —
-// that answers a role's returned handle.
+// [shape.KindValueField], like theirs: the resolver checks the name
+// against the value type's fields — the answered value, or the
+// written one for a host answering nothing — and rewrites a hit into
+// the qualified form every resolved kind takes. A typo is reported
+// where the author is; a value type the run never loaded stamps
+// unvalidated.
 //
 // A field, never a method, for the reason the session mixins give: the
 // cas stamp assigns the member, and no method form can sit on the left
@@ -30,7 +32,7 @@ const ParamVersion = "version"
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []shape.Param{
-	{Key: ParamVersion, Kind: shape.KindOpaque},
+	{Key: ParamVersion, Kind: shape.KindValueField},
 }
 
 // Mixin returns the [shape.Mixin] this package contributes.
