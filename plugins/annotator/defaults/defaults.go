@@ -197,7 +197,7 @@ func directives() []sdk.DirectiveSchema {
 // unexamined and emerge as a syntax error in generated code,
 // attributed to the generator rather than to the line that caused it.
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
-	unhandled := map[string]bool{}
+	var unhandled sdk.LanguageReporter
 	for _, pkg := range ctx.Reader.Packages().Slice() {
 		// SourceOf rather than a lookup on the marked language, for the
 		// reason the sample annotator gives: a package nothing marked is
@@ -208,7 +208,8 @@ func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 		// to make distinguishable.
 		rules, lang, ok := p.SourceOf(pkg)
 		if !ok {
-			p.reportUnhandled(ctx, pkg, lang, unhandled)
+			unhandled.Report(ctx.Diag, pkg, Name, lang,
+				"are not read, so defaults declared in its packages are not stamped", p.Languages())
 			continue
 		}
 		p.annotatePackage(ctx, pkg, rules)
@@ -376,34 +377,6 @@ func stamp(
 	if pkg != "" {
 		MetaDefaultPackage.Set(bag, pkg, Name)
 	}
-}
-
-// reportUnhandled warns once per language this plugin cannot read.
-//
-// Skipping in silence is the failure this exists to prevent: every
-// default in those packages would go unstamped, every constructor
-// would seed nothing, and the generated output would be a plausible
-// file that ignored the source. Once per language rather than per
-// package, because one missing declaration is one thing to fix.
-//
-// An *unmarked* package is not that failure and is passed over
-// quietly. The marker names the language a package was written in, so
-// its absence means nothing claimed it — a fixture, a bridge, a
-// synthesised graph. Those carry no declared defaults to miss, and
-// warning about them would put a diagnostic on every unit test that
-// builds a store by hand, which is where the real warning would then
-// go unread.
-func (p *Plugin) reportUnhandled(
-	ctx *sdk.AnnotatorContext, pkg *sdk.Package, lang string, seen map[string]bool,
-) {
-	if lang == "" || seen[lang] {
-		return
-	}
-	seen[lang] = true
-	ctx.Diag.Warnf(pkg.Pos(),
-		"%s: declarations written in %q are not read, so defaults declared in its "+
-			"packages are not stamped; this plugin reads: %v",
-		Name, lang, p.Languages())
 }
 
 // tagKey returns the configured tag key, or [DefaultTagKey] when the

@@ -185,6 +185,53 @@ func TestIDs_Lookups(t *testing.T) {
 	})
 }
 
+// TestIDs_Documentary covers the answer a coverage report needs: a
+// classification that owes no check, told apart from one nothing has
+// written a rule for yet.
+func TestIDs_Documentary(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the marked classifications answer true", func(t *testing.T) {
+		t.Parallel()
+		for _, name := range []ids.Name{ids.MixinErrors, ids.MixinScope, ids.MixinDeprecated} {
+			if !ids.Documentary(name) {
+				t.Errorf("%s is documentary in the catalog and answered false", name)
+			}
+		}
+	})
+
+	t.Run("a checkable classification answers false", func(t *testing.T) {
+		t.Parallel()
+		// The distinction the flag exists for: idempotent has no rule
+		// in some consumer somewhere, and that is a gap a rule could
+		// close — not a silence that is owed.
+		for _, name := range []ids.Name{ids.MixinIdempotent, ids.ContractCursor, ids.DetectorReader} {
+			if ids.Documentary(name) {
+				t.Errorf("%s licenses an assertion and answered documentary", name)
+			}
+		}
+	})
+
+	t.Run("an unregistered name answers false", func(t *testing.T) {
+		t.Parallel()
+		// The safe direction: an unknown name reported as a gap is
+		// visible, one silently excused is not.
+		if ids.Documentary("no-such-classification") {
+			t.Error("a name the catalog does not declare was excused")
+		}
+	})
+
+	t.Run("the answer comes from the registration", func(t *testing.T) {
+		t.Parallel()
+		// Not from a list here — the whole point, since a table in
+		// this package would go stale exactly as a consumer's does.
+		m, ok := ids.MixinOf(ids.MixinErrors)
+		if !ok || !m.Documentary {
+			t.Fatalf("MixinOf(errors) = (%+v, %v), want the registered flag", m, ok)
+		}
+	})
+}
+
 // pair is one (owner, key) spelling, for the constants pin below.
 type pair struct {
 	owner ids.Name

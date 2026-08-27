@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 	"text/template"
 
+	"go.thesmos.sh/eidos/core/diag"
 	"go.thesmos.sh/eidos/sdk"
 )
 
@@ -361,4 +362,93 @@ func keys(m template.FuncMap) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// TestLanguageReporter covers the warn-once helper eight plugins had
+// each written for themselves.
+//
+// The failure it exists to prevent is invisible in the output: a run
+// over a language nothing reads emits nothing for it and ends green,
+// so the file is short rather than wrong and a reader has no line to
+// notice.
+func TestLanguageReporter(t *testing.T) {
+	t.Parallel()
+
+	pkg := func() *sdk.Package { return &sdk.Package{Name: "x", Path: "x"} }
+	langs := []string{"golang"}
+
+	t.Run("warns once per language across packages", func(t *testing.T) {
+		t.Parallel()
+		// Once per language rather than per package: one missing
+		// registration is one thing to fix, and a warning per package
+		// buries it in a corpus.
+		var r sdk.LanguageReporter
+		sink := diag.New()
+		for range 3 {
+			r.Report(sink, pkg(), "gen", "rust", "are not read", langs)
+		}
+		if got := sink.Diagnostics(); len(got) != 1 {
+			t.Fatalf("diagnostics = %d, want 1: %+v", len(got), got)
+		}
+	})
+
+	t.Run("a second language warns again", func(t *testing.T) {
+		t.Parallel()
+		var r sdk.LanguageReporter
+		sink := diag.New()
+		r.Report(sink, pkg(), "gen", "rust", "are not read", langs)
+		r.Report(sink, pkg(), "gen", "python", "are not read", langs)
+		if got := sink.Diagnostics(); len(got) != 2 {
+			t.Fatalf("diagnostics = %d, want one per language", len(got))
+		}
+	})
+
+	t.Run("an unmarked package is passed over in silence", func(t *testing.T) {
+		t.Parallel()
+		// The marker names the language a package was written in, so
+		// its absence means nothing claimed it. Warning about those
+		// would put a diagnostic on every unit test that builds a
+		// store by hand, which is where the real warning would then
+		// go unread.
+		var r sdk.LanguageReporter
+		sink := diag.New()
+		r.Report(sink, pkg(), "gen", "", "are not read", langs)
+		if got := sink.Diagnostics(); len(got) != 0 {
+			t.Fatalf("reported %+v over an unmarked package", got)
+		}
+	})
+
+	t.Run("the message carries the caller's clause and the plugin's languages", func(t *testing.T) {
+		t.Parallel()
+		// What a generator does not produce is its own to say; a
+		// shared sentence would name no output, or one generator's.
+		var r sdk.LanguageReporter
+		sink := diag.New()
+		r.Report(sink, pkg(), "builder", "rust",
+			"are not read, so no builder is generated for them", langs)
+		got := sink.Diagnostics()[0].Message
+		for _, want := range []string{"builder", `"rust"`, "no builder is generated", "golang"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("message %q does not carry %q", got, want)
+			}
+		}
+	})
+
+	t.Run("the zero value is usable", func(t *testing.T) {
+		t.Parallel()
+		// Declared as a local var by every caller, so a nil map has to
+		// allocate on first use rather than panic.
+		var r sdk.LanguageReporter
+		sink := diag.New()
+		r.Report(sink, pkg(), "gen", "rust", "are not read", langs)
+		if len(sink.Diagnostics()) != 1 {
+			t.Fatal("the zero value did not report")
+		}
+	})
+
+	t.Run("a nil sink is survived", func(t *testing.T) {
+		t.Parallel()
+		var r sdk.LanguageReporter
+		r.Report(nil, pkg(), "gen", "rust", "are not read", langs)
+	})
 }

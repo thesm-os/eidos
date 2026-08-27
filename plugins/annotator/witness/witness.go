@@ -137,7 +137,7 @@ func directives() []sdk.DirectiveSchema {
 // nil for exactly the constraints an authored witness exists to serve.
 // The author's line is discarded and the run stays green.
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
-	unread := map[string]bool{}
+	var unread sdk.LanguageReporter
 	for _, pkg := range ctx.Reader.Packages().Slice() {
 		// SourceOf rather than a lookup on the marked language, for the
 		// reason the sample annotator gives: a package nothing marked
@@ -147,7 +147,9 @@ func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 		// named no witness.
 		rules, lang, ok := p.SourceOf(pkg)
 		if !ok {
-			p.reportUnread(ctx, pkg, lang, unread)
+			unread.Report(ctx.Diag, pkg, Name, lang,
+				"are not read, so a witness named on one is not stamped and the "+
+					"declaration keeps whatever the language derives", p.Languages())
 			continue
 		}
 		for _, s := range pkg.Structs {
@@ -249,25 +251,4 @@ func paramNames(params []*sdk.TypeParam) string {
 		}
 	}
 	return strings.Join(out, ", ")
-}
-
-// reportUnread warns once per language this plugin cannot read.
-//
-// An unmarked package is passed over quietly, for the reason the
-// sample annotator gives: the marker names the language a package was
-// written in, so its absence means nothing claimed it, and warning
-// about those would put a diagnostic on every unit test that builds a
-// store by hand.
-func (p *Plugin) reportUnread(
-	ctx *sdk.AnnotatorContext, pkg *sdk.Package, lang string, seen map[string]bool,
-) {
-	if lang == "" || seen[lang] {
-		return
-	}
-	seen[lang] = true
-	ctx.Diag.Warnf(pkg.Pos(),
-		"%s: declarations written in %q are not read, so a witness named on one "+
-			"is not stamped and the declaration keeps whatever the language derives; "+
-			"this plugin reads: %v",
-		Name, lang, p.Languages())
 }

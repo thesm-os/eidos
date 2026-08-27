@@ -32,6 +32,18 @@ type Contract struct {
 	// resolver rejects directives that name an undeclared role.
 	Roles []string
 
+	// Documentary marks a classification that carries information
+	// rather than an invariant: it decorates a declaration for a
+	// reader or a downstream generator and licenses no assertion.
+	//
+	// See [Mixin.Documentary] for why the flag exists and what it
+	// separates itself from — the same field on the mixin axis, so
+	// a consumer reporting coverage across all three asks one
+	// question rather than three.
+	//
+	// The zero value keeps every classification claimable.
+	Documentary bool
+
 	// Params enumerates the KV keys the directive accepts, each with
 	// how its value resolves — see [ParamKind]. A key with no
 	// declaration to resolve against is [KindOpaque], which is the zero

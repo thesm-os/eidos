@@ -603,6 +603,35 @@ func DetectorOf(name Name) (shape.Detector, bool) {
 	return shape.Detector{}, false
 }
 
+// Documentary reports whether the catalog marks name as carrying
+// information rather than an invariant — a classification that
+// decorates a declaration for a reader or a downstream generator and
+// licenses no assertion.
+//
+// The question a coverage report asks. Without it a consumer listing
+// the classifications no rule reached cannot separate a gap it could
+// close from a silence that is owed, so it either overstates the
+// gaps or transcribes the catalog's judgement into a local table that
+// goes stale the day a classification is marked here.
+//
+// Asked across all three families at once, because a consumer holding
+// a stamped name holds one string and should not have to know which
+// family declared it. `pure` names a detector and a mixin, and
+// neither is documentary, so the shared name costs nothing here; a
+// name the catalog does not declare answers false, which reads the
+// same as "claimable" and is the safe direction — an unknown name
+// reported as a gap is visible, one silently excused is not.
+func Documentary(name Name) bool {
+	if m, ok := MixinOf(name); ok && m.Documentary {
+		return true
+	}
+	if c, ok := ContractOf(name); ok && c.Documentary {
+		return true
+	}
+	d, ok := DetectorOf(name)
+	return ok && d.Documentary
+}
+
 // ContractParam returns the declaration for one contract key, or
 // false when the owner does not declare it. The one-key form of
 // [ContractParams], for a consumer that holds the pair and wants its

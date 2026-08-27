@@ -120,6 +120,18 @@ type Detector struct {
 	// detection function for that language. Declarations in any
 	// language not in this map are skipped without stamping.
 	Detect map[string]DetectFunc
+
+	// Documentary marks a classification that carries information
+	// rather than an invariant: it decorates a declaration for a
+	// reader or a downstream generator and licenses no assertion.
+	//
+	// See [Mixin.Documentary] for why the flag exists and what it
+	// separates itself from — the same field on the mixin axis, so
+	// a consumer reporting coverage across all three asks one
+	// question rather than three.
+	//
+	// The zero value keeps every classification claimable.
+	Documentary bool
 }
 
 // Match is the stamp a detector returns on a positive hit. KeyType

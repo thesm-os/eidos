@@ -145,7 +145,7 @@ func directives() []sdk.DirectiveSchema {
 // Per package, because the language a declaration is read with is a
 // fact about the package that produced it — see [sdk.LanguageOf].
 func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
-	unread := map[string]bool{}
+	var unread sdk.LanguageReporter
 	for _, pkg := range ctx.Reader.Packages().Slice() {
 		// SourceOf rather than a lookup on the marked language. The
 		// marker names the language a frontend parsed, and a package
@@ -155,7 +155,9 @@ func (p *Plugin) Annotate(ctx *sdk.AnnotatorContext) error {
 		// declaration that named no value.
 		rules, lang, ok := p.SourceOf(pkg)
 		if !ok {
-			p.reportUnread(ctx, pkg, lang, unread)
+			unread.Report(ctx.Diag, pkg, Name, lang,
+				"are not read, so a value named on one is not stamped and the derived "+
+					"value stands", p.Languages())
 			continue
 		}
 		annotatePackage(ctx, pkg, rules)
@@ -243,24 +245,4 @@ func stamp(
 	}
 	symbolKey.Set(bag, symbol, Name)
 	pkgKey.Set(bag, pkg, Name)
-}
-
-// reportUnread warns once per language this plugin cannot read.
-//
-// An unmarked package is passed over quietly: the marker names the
-// language a package was written in, so its absence means nothing
-// claimed it — a fixture, a bridge, a synthesised graph. Warning about
-// those would put a diagnostic on every unit test that builds a store
-// by hand, which is where the real warning would then go unread.
-func (p *Plugin) reportUnread(
-	ctx *sdk.AnnotatorContext, pkg *sdk.Package, lang string, seen map[string]bool,
-) {
-	if lang == "" || seen[lang] {
-		return
-	}
-	seen[lang] = true
-	ctx.Diag.Warnf(pkg.Pos(),
-		"%s: declarations written in %q are not read, so a value named on one "+
-			"is not stamped and the derived value stands; this plugin reads: %v",
-		Name, lang, p.Languages())
 }

@@ -350,17 +350,21 @@ var (
 // been checked.
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name)
-	unread := map[string]bool{}
+	var unread sdk.LanguageReporter
 	scanned := map[string][]Sentinel{}
 	for _, pkg := range ctx.Reader.Packages().Slice() {
 		rules, lang, ok := p.SourceOf(pkg)
 		if !ok {
-			p.report(ctx, pkg, sdk.LanguageOf(pkg), unread, "are not read")
+			unread.Report(ctx.Diag, pkg, Name, sdk.LanguageOf(pkg),
+				"are not read, so no error-contract checks are generated for them",
+				p.Languages())
 			continue
 		}
 		er, ok := rules.(sdk.ErrorRules)
 		if !ok {
-			p.report(ctx, pkg, lang, unread, "describe no error protocol")
+			unread.Report(ctx.Diag, pkg, Name, lang,
+				"describe no error protocol, so no error-contract checks are "+
+					"generated for them", p.Languages())
 			continue
 		}
 		scanned[pkg.Path] = sentinelsOf(er, pkg)
@@ -646,25 +650,4 @@ func neighbourName(
 			"compares against nothing",
 		Name, NoOverlapName, path)
 	return path
-}
-
-// report warns once per language this plugin cannot read.
-//
-// An unmarked package is passed over quietly: the marker names the
-// language a package was written in, so its absence means nothing
-// claimed it — a fixture, a bridge, a synthesised graph. Warning about
-// those would put a diagnostic on every unit test that builds a store
-// by hand, which is where the real warning would then go unread.
-func (p *Plugin) report(
-	ctx *sdk.GeneratorContext, pkg *sdk.Package, lang string,
-	seen map[string]bool, because string,
-) {
-	if lang == "" || seen[lang] {
-		return
-	}
-	seen[lang] = true
-	ctx.Diag.Warnf(pkg.Pos(),
-		"%s: declarations written in %q %s, so no error-contract checks are "+
-			"generated for them; this plugin reads: %v",
-		Name, lang, because, p.Languages())
 }

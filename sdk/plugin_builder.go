@@ -9,6 +9,8 @@ import (
 	"maps"
 	"slices"
 	"text/template"
+
+	"go.thesmos.sh/eidos/core/diag"
 )
 
 // TemplateDirFor is where a plugin keeps a language's templates,
@@ -414,4 +416,56 @@ func (b *Base) SourceOf(pkg *Package) (rules SourceRules, lang string, ok bool) 
 	}
 	r, found := b.Source(langs[0])
 	return r, langs[0], found
+}
+
+// LanguageReporter warns once per language a plugin cannot read.
+//
+// The counterpart to [Base.SourceOf]'s false: that result is a
+// caller's signal to report rather than skip, and this is the
+// reporting. Every generator wrote it — three in this repository and
+// two downstream, each a `seen[lang]` guard and one Warnf naming
+// [Base.Languages] — and the copies had already begun to differ in
+// what they said while agreeing on what they meant.
+//
+// The failure it prevents is the invisible one. A run over a language
+// nothing reads emits nothing for it and ends green; the output is
+// short rather than wrong, and a reader has no line to notice. That
+// is the same shape as the sixteen hand-written language dispatches
+// [Base] absorbed, where two compared against a local constant and
+// silently matched nothing.
+//
+// The zero value is usable: a nil map is allocated on first use, so a
+// caller declaring one as a local `var seen sdk.LanguageReporter`
+// need not make it.
+type LanguageReporter map[string]bool
+
+// Report warns once that declarations in lang go unread, ending the
+// sentence on because — "are not read, so no builder is generated for
+// them".
+//
+// The clause is the caller's because it is the only part that differs:
+// what a generator does not produce is its own to say, and a shared
+// sentence would either name no output or name one generator's.
+//
+// An unmarked package is passed over in silence. The marker names the
+// language a package was written in, so its absence means nothing
+// claimed it — a fixture, a bridge, a synthesised graph — and warning
+// about those would put a diagnostic on every unit test that builds a
+// store by hand, which is where the real warning would then go unread.
+func (r *LanguageReporter) Report(
+	sink *diag.Sink, pkg *Package, plugin, lang, because string, langs []string,
+) {
+	if lang == "" || sink == nil || pkg == nil {
+		return
+	}
+	if *r == nil {
+		*r = make(LanguageReporter, 1)
+	}
+	if (*r)[lang] {
+		return
+	}
+	(*r)[lang] = true
+	sink.Warnf(pkg.Pos(),
+		"%s: declarations written in %q %s; this plugin reads: %v",
+		plugin, lang, because, langs)
 }

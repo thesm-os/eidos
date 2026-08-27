@@ -480,18 +480,19 @@ var (
 func (p *Plugin) Generate(ctx *sdk.GeneratorContext) error {
 	c := sdk.NewProvenance(Name)
 	constants := ctx.Reader.Constants().Slice()
-	unread := map[string]bool{}
+	var unread sdk.LanguageReporter
 	for _, pkg := range ctx.Reader.Packages().Slice() {
 		rules, lang, ok := p.SourceOf(pkg)
 		if !ok {
-			p.report(ctx, pkg, sdk.LanguageOf(pkg), unread,
-				"are not read, so no enum surface is generated for them")
+			unread.Report(ctx.Diag, pkg, Name, sdk.LanguageOf(pkg),
+				"are not read, so no enum surface is generated for them", p.Languages())
 			continue
 		}
 		er, ok := rules.(sdk.EnumRules)
 		if !ok {
-			p.report(ctx, pkg, lang, unread,
-				"describe no enumerations, so no enum surface is generated for them")
+			unread.Report(ctx.Diag, pkg, Name, lang,
+				"describe no enumerations, so no enum surface is generated for them",
+				p.Languages())
 			continue
 		}
 		if err := p.generatePackage(ctx, c, pkg, rules, er, lang, constants); err != nil {
@@ -765,24 +766,4 @@ func declaresParse(ctx *sdk.GeneratorContext, e *sdk.Enum, name string) bool {
 func suppressed(e *sdk.Enum) bool {
 	dir := sdk.Last(e.Directives(), DirectiveName)
 	return dir != nil && dir.KV[MethodsKey] == MethodsOff
-}
-
-// report warns once per language this plugin cannot generate for.
-//
-// An unmarked package is passed over quietly: the marker names the
-// language a package was written in, so its absence means nothing
-// claimed it — a fixture, a bridge, a synthesised graph. Warning about
-// those would put a diagnostic on every unit test that builds a store
-// by hand, which is where the real warning would then go unread.
-func (p *Plugin) report(
-	ctx *sdk.GeneratorContext, pkg *sdk.Package, lang string,
-	seen map[string]bool, because string,
-) {
-	if lang == "" || seen[lang] {
-		return
-	}
-	seen[lang] = true
-	ctx.Diag.Warnf(pkg.Pos(),
-		"%s: declarations written in %q %s; this plugin reads: %v",
-		Name, lang, because, p.Languages())
 }

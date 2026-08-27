@@ -40,6 +40,31 @@ type Mixin struct {
 	// value.
 	Params []Param
 
+	// Documentary marks a classification that carries information
+	// rather than an invariant: it decorates a declaration for a
+	// reader or a downstream generator and licenses no assertion.
+	//
+	// The field exists because the judgement was already being made
+	// and could only travel as prose. `errors` says outright that a
+	// consumer "should not report this mixin as an underivable gap;
+	// it derives nothing by design", and `scope` that it "owes
+	// documentation, not a check" — so a consumer listing the
+	// classifications no rule reached had to transcribe those
+	// sentences into a local table, and a classification marked here
+	// later became a reported gap downstream that no rule could ever
+	// close.
+	//
+	// It is not "no rule exists yet". That is the state this
+	// separates itself from: an unmarked classification nothing
+	// checks is a gap a rule could close, and a marked one is a
+	// silence that is owed. A consumer reporting coverage needs both
+	// answers and can derive neither.
+	//
+	// The zero value keeps every classification claimable, so this
+	// is additive: a catalog entry is marked when its own package
+	// decides it states no invariant.
+	Documentary bool
+
 	// Validate, when non-nil, runs in the validation-bucket
 	// annotator pass after sibling resolution completes. Receives
 	// every callable the mixin is attached to (across the store)

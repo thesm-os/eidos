@@ -40,6 +40,13 @@ var Params = []shape.Param{
 // No Validate hook: the one thing it checked — the axis naming a
 // parameter of the host — is what [shape.KindParam] declares, where
 // forgetting the check is impossible rather than invisible.
+//
+// Documentary, which this package's documentation has said in prose
+// since it shipped: the checkable form of the boundary claim is
+// partition's, and this one names the axis for a reader. The axis is
+// still validated — documentary is a statement about what the
+// classification licenses, not permission for its params to be
+// wrong.
 func Mixin() shape.Mixin {
-	return shape.Mixin{Name: Name, Params: Params}
+	return shape.Mixin{Name: Name, Params: Params, Documentary: true}
 }
