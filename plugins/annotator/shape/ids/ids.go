@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"go.thesmos.sh/eidos/plugins/annotator/shape"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/contracts"
 	conAppender "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/appender"
 	conBatchWriter "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/batchwriter"
 	conCAS "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/cas"
@@ -33,6 +35,7 @@ import (
 	conWatcher "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/watcher"
 	conWorkflow "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/workflow"
 	conCache "go.thesmos.sh/eidos/plugins/annotator/shape/contracts/writethroughcache"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/detectors"
 	detAggregator "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/aggregator"
 	detAnsweringWriter "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/answeringwriter"
 	detBatchReader "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/batchreader"
@@ -56,6 +59,7 @@ import (
 	detStreamReader "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/streamreader"
 	detVoidLifecycle "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/voidlifecycle"
 	detWriter "go.thesmos.sh/eidos/plugins/annotator/shape/detectors/writer"
+	"go.thesmos.sh/eidos/plugins/annotator/shape/mixins"
 	mixAccumulates "go.thesmos.sh/eidos/plugins/annotator/shape/mixins/accumulates"
 	mixAssociative "go.thesmos.sh/eidos/plugins/annotator/shape/mixins/associative"
 	mixAtomic "go.thesmos.sh/eidos/plugins/annotator/shape/mixins/atomic"
@@ -489,52 +493,57 @@ func Mixins() []Name {
 	}
 }
 
-// Param is one catalog parameter key together with the contract or
-// mixin that accepts it.
+// Param is one catalog parameter together with the contract or mixin
+// that accepts it.
 //
-// The pair rather than the key alone, because a key is only meaningful
-// under its owner: `read` means one thing on `partition` and another
-// on `ttl`, and [shape.MixinParamKey] takes both to build the stamp.
+// The owner rather than the key alone, because a key is only
+// meaningful under it: `read` means one thing on `partition` and
+// another on `ttl`, and [shape.MixinParamKey] takes both to build the
+// stamp.
+//
+// The declaration is embedded whole rather than mirrored field by
+// field, so what the catalog says about a key — its [shape.ParamKind],
+// its role scope, whether a directive must carry it — is answered here
+// without a copy that goes stale when [shape.Param] grows a field, as
+// it did when Required landed.
 type Param struct {
 	// Owner is the contract or mixin name the key belongs to.
 	Owner Name
 
-	// Key is the word written to the left of the `=` in a directive.
-	Key string
+	// Param is the declaration as the owner registered it: Key, Kind,
+	// Role and Required promote.
+	shape.Param
 }
 
-// ContractParams returns every contract parameter key the catalog
-// declares, sorted by owner then key. The returned slice is freshly
-// allocated; callers may mutate it.
+// ContractParams returns every contract parameter the catalog
+// declares, with its full declaration, sorted by owner then key. The
+// returned slice is freshly allocated; callers may mutate it.
 //
-// Sorted at call time rather than by the order written below, because
-// the order that matters is the values' — and a constant's Go
-// identifier is not its value: `ContractCAS` spells `cas` while
-// `ContractBatchWriter` spells `batch-writer`, so a list kept in
-// identifier order is not in the order this promises.
+// Read off the registered catalog rather than restated, so the
+// answer cannot drift from what the validator enforces. What is
+// hand-maintained is the per-key constants above, and the test pins
+// that every parameter here has one.
 func ContractParams() []Param {
-	return sortParams([]Param{
-		{ContractBatchWriter, ContractBatchWriterParamMode},
-		{ContractCAS, ContractCASParamMismatch},
-		{ContractCAS, ContractCASParamVersion},
-		{ContractCodec, ContractCodecParamFidelity},
-		{ContractCursor, ContractCursorParamClose},
-		{ContractCursor, ContractCursorParamNext},
-		{ContractCursor, ContractCursorParamSentinel},
-		{ContractIfAbsent, ContractIfAbsentParamConflict},
-		{ContractIfMatch, ContractIfMatchParamPred},
-		{ContractLease, ContractLeaseParamHeld},
-		{ContractLease, ContractLeaseParamTimeout},
-		{ContractPagination, ContractPaginationParamCursor},
-		{ContractPublisher, ContractPublisherParamMode},
-		{ContractRateLimit, ContractRateLimitParamBurst},
-		{ContractRateLimit, ContractRateLimitParamRate},
-		{ContractTransaction, ContractTransactionParamNotFound},
-		{ContractTx, ContractTxParamClosed},
-		{ContractWatcher, ContractWatcherParamNext},
-		{ContractWatcher, ContractWatcherParamStop},
-		{ContractWorkflow, ContractWorkflowParamTransitions},
-	})
+	var out []Param
+	for _, c := range contracts.All() {
+		for _, p := range c.Params {
+			out = append(out, Param{Owner: Name(c.Name), Param: p})
+		}
+	}
+	return sortParams(out)
+}
+
+// MixinParams returns every mixin parameter the catalog declares,
+// with its full declaration, sorted by owner then key. The returned
+// slice is freshly allocated; callers may mutate it.
+func MixinParams() []Param {
+	var out []Param
+	for _, m := range mixins.All() {
+		for _, p := range m.Params {
+			out = append(out, Param{Owner: Name(m.Name), Param: p})
+		}
+	}
+	return sortParams(out)
 }
 
 // sortParams orders a param list by owner then key.
@@ -551,64 +560,77 @@ func sortParams(ps []Param) []Param {
 	return ps
 }
 
-// MixinParams returns every mixin parameter key the catalog declares,
-// sorted by owner then key. The returned slice is freshly allocated;
-// callers may mutate it.
-func MixinParams() []Param {
-	return sortParams([]Param{
-		{MixinAtomic, MixinAtomicParamRead},
-		{MixinBounded, MixinBoundedParamLimit},
-		{MixinBounded, MixinBoundedParamMin},
-		{MixinCRDTMerge, MixinCRDTMergeParamRead},
-		{MixinCRDTMerge, MixinCRDTMergeParamWrite},
-		{MixinCausal, MixinCausalParamVersion},
-		{MixinConservative, MixinConservativeParamField},
-		{MixinDeleteRemoves, MixinDeleteRemovesParamRead},
-		{MixinDeleteRemoves, MixinDeleteRemovesParamSentinel},
-		{MixinEventually, MixinEventuallyParamSettle},
-		{MixinEventually, MixinEventuallyParamSync},
-		{MixinHooks, MixinHooksParamRegister},
-		{MixinIndexed, MixinIndexedParamBy},
-		{MixinInjectionSafe, MixinInjectionSafeParamRead},
-		{MixinLeakFree, MixinLeakFreeParamClose},
-		{MixinLeakFree, MixinLeakFreeParamOpen},
-		{MixinLifecycleAfterClose, MixinLifecycleAfterCloseParamClose},
-		{MixinLifecycleAfterClose, MixinLifecycleAfterCloseParamSentinel},
-		{MixinMonotonicReads, MixinMonotonicReadsParamVersion},
-		{MixinMonotonicWrites, MixinMonotonicWritesParamVersion},
-		{MixinNotFound, MixinNotFoundParamSentinel},
-		{MixinOrderAfter, MixinOrderAfterParamFn},
-		{MixinOrderAfter, MixinOrderAfterParamUnready},
-		{MixinPartition, MixinPartitionParamAxis},
-		{MixinPartition, MixinPartitionParamRead},
-		{MixinPoisonable, MixinPoisonableParamInduce},
-		{MixinReadAfterWrite, MixinReadAfterWriteParamWrite},
-		{MixinReadYourWrites, MixinReadYourWritesParamVersion},
-		{MixinRetrySucceeds, MixinRetrySucceedsParamAttempts},
-		{MixinSample, MixinSampleParamBuilder},
-		{MixinScheduled, MixinScheduledParamFired},
-		{MixinScheduled, MixinScheduledParamSchedule},
-		{MixinScope, MixinScopeParamAxis},
-		{MixinScope, MixinScopeParamName},
-		{MixinSerializable, MixinSerializableParamRead},
-		{MixinSideEffect, MixinSideEffectParamObserve},
-		{MixinSnapshotIsolation, MixinSnapshotIsolationParamRead},
-		{MixinSticky, MixinStickyParamKey},
-		{MixinStreamReflectsMutations, MixinStreamReflectsMutationsParamDelete},
-		{MixinStreamReflectsMutations, MixinStreamReflectsMutationsParamMutate},
-		{MixinTTL, MixinTTLParamDuration},
-		{MixinTTL, MixinTTLParamNotFound},
-		{MixinTTL, MixinTTLParamPut},
-		{MixinTTL, MixinTTLParamRead},
-		{MixinTamperEvident, MixinTamperEvidentParamTamper},
-		{MixinTamperEvident, MixinTamperEvidentParamVerify},
-		{MixinTimeout, MixinTimeoutParamDuration},
-		{MixinTotal, MixinTotalParamDomain},
-		{MixinValidates, MixinValidatesParamFn},
-		{MixinWindowed, MixinWindowedParamCount},
-		{MixinWindowed, MixinWindowedParamIncr},
-		{MixinWindowed, MixinWindowedParamWindow},
-		{MixinWrappedVia, MixinWrappedViaParamFn},
-		{MixinWritesFollowReads, MixinWritesFollowReadsParamVersion},
-	})
+// ContractOf returns the registered [shape.Contract] under name —
+// its roles, params and required partners — or false for a name the
+// catalog does not declare.
+//
+// The spec by name, for a consumer that holds an id and wants what
+// it licenses without importing the declaring package: a corpus gate
+// counting coverage, a generator asking which keys a classification
+// takes before deriving from it.
+func ContractOf(name Name) (shape.Contract, bool) {
+	for _, c := range contracts.All() {
+		if c.Name == string(name) {
+			return c, true
+		}
+	}
+	return shape.Contract{}, false
+}
+
+// MixinOf returns the registered [shape.Mixin] under name, or false
+// for a name the catalog does not declare.
+func MixinOf(name Name) (shape.Mixin, bool) {
+	for _, m := range mixins.All() {
+		if m.Name == string(name) {
+			return m, true
+		}
+	}
+	return shape.Mixin{}, false
+}
+
+// DetectorOf returns the registered [shape.Detector] under name, or
+// false for a name the catalog does not declare.
+//
+// Note `pure` names both a detector and a mixin — the namespace
+// collision the prefixed constants exist for — so a caller holding a
+// bare string asks the family it means.
+func DetectorOf(name Name) (shape.Detector, bool) {
+	for _, d := range detectors.All() {
+		if d.Name == string(name) {
+			return d, true
+		}
+	}
+	return shape.Detector{}, false
+}
+
+// ContractParam returns the declaration for one contract key, or
+// false when the owner does not declare it. The one-key form of
+// [ContractParams], for a consumer that holds the pair and wants its
+// kind or required-ness without scanning the catalog.
+func ContractParam(owner Name, key string) (shape.Param, bool) {
+	c, ok := ContractOf(owner)
+	if !ok {
+		return shape.Param{}, false
+	}
+	return paramByKey(c.Params, key)
+}
+
+// MixinParam returns the declaration for one mixin key, or false
+// when the owner does not declare it.
+func MixinParam(owner Name, key string) (shape.Param, bool) {
+	m, ok := MixinOf(owner)
+	if !ok {
+		return shape.Param{}, false
+	}
+	return paramByKey(m.Params, key)
+}
+
+// paramByKey finds one declaration in a registered param list.
+func paramByKey(ps []shape.Param, key string) (shape.Param, bool) {
+	for _, p := range ps {
+		if p.Key == key {
+			return p, true
+		}
+	}
+	return shape.Param{}, false
 }

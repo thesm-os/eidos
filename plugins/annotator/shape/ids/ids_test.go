@@ -5,7 +5,6 @@ package ids_test
 
 import (
 	"slices"
-	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
@@ -120,66 +119,193 @@ func missing(want, got []ids.Name) []ids.Name {
 	return out
 }
 
-// params lifts a registered catalog's declared parameter keys into
-// the exported pair form, sorted the way the accessors return them.
-func params[T any](items []T, owner func(T) string, keys func(T) []shape.Param) []ids.Param {
-	var out []ids.Param
-	for _, item := range items {
-		for _, p := range keys(item) {
-			out = append(out, ids.Param{Owner: ids.Name(owner(item)), Key: p.Key})
+// TestIDs_Lookups covers the by-name half: a consumer holding an id
+// gets the registered declaration back, with everything the catalog
+// says about it.
+func TestIDs_Lookups(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a param answers its declaration, not just its spelling", func(t *testing.T) {
+		t.Parallel()
+		// The reason the accessors derive from the catalog: Kind, Role
+		// and Required are what a consumer gates on, and a pair list
+		// could not answer them.
+		p, ok := ids.MixinParam(ids.MixinOrderAfter, ids.MixinOrderAfterParamFn)
+		if !ok {
+			t.Fatal("orderafter declares fn= and the lookup missed it")
 		}
-	}
-	slices.SortFunc(out, func(a, b ids.Param) int {
-		if a.Owner != b.Owner {
-			return strings.Compare(string(a.Owner), string(b.Owner))
+		if p.Kind != shape.KindCallable || !p.Required {
+			t.Errorf("got %+v, want the callable kind and required, as orderafter declares", p)
 		}
-		return strings.Compare(a.Key, b.Key)
 	})
-	return out
+
+	t.Run("a contract param carries its role scope", func(t *testing.T) {
+		t.Parallel()
+		p, ok := ids.ContractParam(ids.ContractCursor, ids.ContractCursorParamNext)
+		if !ok {
+			t.Fatal("cursor declares next= and the lookup missed it")
+		}
+		if p.Role != "open" || !p.Required {
+			t.Errorf("got %+v, want required on the open arm, as cursor declares", p)
+		}
+	})
+
+	t.Run("a spec lookup answers the whole registration", func(t *testing.T) {
+		t.Parallel()
+		c, ok := ids.ContractOf(ids.ContractCursor)
+		if !ok || len(c.Roles) == 0 || len(c.Params) == 0 {
+			t.Fatalf("ContractOf(cursor) = (%+v, %v), want the registered spec", c, ok)
+		}
+	})
+
+	t.Run("the shared name resolves per family", func(t *testing.T) {
+		t.Parallel()
+		// `pure` is both a detector and a mixin — the collision the
+		// prefixed constants exist for — so each family answers its
+		// own and neither answers for the other.
+		if _, ok := ids.DetectorOf(ids.DetectorPure); !ok {
+			t.Error("the detector family does not answer pure")
+		}
+		if _, ok := ids.MixinOf(ids.MixinPure); !ok {
+			t.Error("the mixin family does not answer pure")
+		}
+		if _, ok := ids.ContractOf("pure"); ok {
+			t.Error("no contract is named pure, and one answered")
+		}
+	})
+
+	t.Run("a name the catalog does not declare answers false", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := ids.MixinOf("no-such-mixin"); ok {
+			t.Error("an unregistered name answered a spec")
+		}
+		if _, ok := ids.MixinParam(ids.MixinOrderAfter, "no-such-key"); ok {
+			t.Error("an undeclared key answered a param")
+		}
+	})
 }
 
-// The parameter constants cover exactly what the catalog accepts.
+// pair is one (owner, key) spelling, for the constants pin below.
+type pair struct {
+	owner ids.Name
+	key   string
+}
+
+// TestIDs_ParamsMatchTheRegisteredCatalog is [TestIDs_MatchTheRegisteredCatalog]
+// for parameters.
 //
-// The guard the name constants already have, for the other half of a
-// directive. A param key reaches a stamp through
-// [shape.ContractParamKey] or [shape.MixinParamKey], neither of which
-// can tell a key the owner declares from one it has never heard of —
-// so a constant missing here sends a caller back to a literal, and a
-// constant left behind after a key is renamed compiles forever while
-// matching nothing.
+// The accessors derive from the registered catalog, so they cannot
+// drift from it — what can fall behind is the per-key constants,
+// which the compiler only checks exist, not that every registered
+// parameter has one. The hand list here is built from those
+// constants, and a parameter added to a contract or mixin without
+// its constant is the diff this test prints.
 func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 	t.Parallel()
 
-	t.Run("every contract parameter has an id", func(t *testing.T) {
+	t.Run("every contract parameter has a spelled constant", func(t *testing.T) {
 		t.Parallel()
-		want := params(contracts.All(),
-			func(c shape.Contract) string { return c.Name },
-			func(c shape.Contract) []shape.Param { return c.Params })
-		if got := ids.ContractParams(); !slices.Equal(got, want) {
-			t.Errorf("ContractParams() has drifted from contracts.All();\n  missing: %v\n  extra: %v",
-				missingParams(want, got), missingParams(got, want))
-		}
+		assertPairsMatch(t, ids.ContractParams(), []pair{
+			{ids.ContractBatchWriter, ids.ContractBatchWriterParamMode},
+			{ids.ContractCAS, ids.ContractCASParamMismatch},
+			{ids.ContractCAS, ids.ContractCASParamVersion},
+			{ids.ContractCodec, ids.ContractCodecParamFidelity},
+			{ids.ContractCursor, ids.ContractCursorParamClose},
+			{ids.ContractCursor, ids.ContractCursorParamNext},
+			{ids.ContractCursor, ids.ContractCursorParamSentinel},
+			{ids.ContractIfAbsent, ids.ContractIfAbsentParamConflict},
+			{ids.ContractIfMatch, ids.ContractIfMatchParamPred},
+			{ids.ContractLease, ids.ContractLeaseParamHeld},
+			{ids.ContractLease, ids.ContractLeaseParamTimeout},
+			{ids.ContractPagination, ids.ContractPaginationParamCursor},
+			{ids.ContractPublisher, ids.ContractPublisherParamMode},
+			{ids.ContractRateLimit, ids.ContractRateLimitParamBurst},
+			{ids.ContractRateLimit, ids.ContractRateLimitParamRate},
+			{ids.ContractTransaction, ids.ContractTransactionParamNotFound},
+			{ids.ContractTx, ids.ContractTxParamClosed},
+			{ids.ContractWatcher, ids.ContractWatcherParamNext},
+			{ids.ContractWatcher, ids.ContractWatcherParamStop},
+			{ids.ContractWorkflow, ids.ContractWorkflowParamTransitions},
+		})
 	})
 
-	t.Run("every mixin parameter has an id", func(t *testing.T) {
+	t.Run("every mixin parameter has a spelled constant", func(t *testing.T) {
 		t.Parallel()
-		want := params(mixins.All(),
-			func(m shape.Mixin) string { return m.Name },
-			func(m shape.Mixin) []shape.Param { return m.Params })
-		if got := ids.MixinParams(); !slices.Equal(got, want) {
-			t.Errorf("MixinParams() has drifted from mixins.All();\n  missing: %v\n  extra: %v",
-				missingParams(want, got), missingParams(got, want))
-		}
+		assertPairsMatch(t, ids.MixinParams(), []pair{
+			{ids.MixinAtomic, ids.MixinAtomicParamRead},
+			{ids.MixinBounded, ids.MixinBoundedParamLimit},
+			{ids.MixinBounded, ids.MixinBoundedParamMin},
+			{ids.MixinCRDTMerge, ids.MixinCRDTMergeParamRead},
+			{ids.MixinCRDTMerge, ids.MixinCRDTMergeParamWrite},
+			{ids.MixinCausal, ids.MixinCausalParamVersion},
+			{ids.MixinConservative, ids.MixinConservativeParamField},
+			{ids.MixinDeleteRemoves, ids.MixinDeleteRemovesParamRead},
+			{ids.MixinDeleteRemoves, ids.MixinDeleteRemovesParamSentinel},
+			{ids.MixinEventually, ids.MixinEventuallyParamSettle},
+			{ids.MixinEventually, ids.MixinEventuallyParamSync},
+			{ids.MixinHooks, ids.MixinHooksParamRegister},
+			{ids.MixinIndexed, ids.MixinIndexedParamBy},
+			{ids.MixinInjectionSafe, ids.MixinInjectionSafeParamRead},
+			{ids.MixinLeakFree, ids.MixinLeakFreeParamClose},
+			{ids.MixinLeakFree, ids.MixinLeakFreeParamOpen},
+			{ids.MixinLifecycleAfterClose, ids.MixinLifecycleAfterCloseParamClose},
+			{ids.MixinLifecycleAfterClose, ids.MixinLifecycleAfterCloseParamSentinel},
+			{ids.MixinMonotonicReads, ids.MixinMonotonicReadsParamVersion},
+			{ids.MixinMonotonicWrites, ids.MixinMonotonicWritesParamVersion},
+			{ids.MixinNotFound, ids.MixinNotFoundParamSentinel},
+			{ids.MixinOrderAfter, ids.MixinOrderAfterParamFn},
+			{ids.MixinOrderAfter, ids.MixinOrderAfterParamUnready},
+			{ids.MixinPartition, ids.MixinPartitionParamAxis},
+			{ids.MixinPartition, ids.MixinPartitionParamRead},
+			{ids.MixinPoisonable, ids.MixinPoisonableParamInduce},
+			{ids.MixinReadAfterWrite, ids.MixinReadAfterWriteParamWrite},
+			{ids.MixinReadYourWrites, ids.MixinReadYourWritesParamVersion},
+			{ids.MixinRetrySucceeds, ids.MixinRetrySucceedsParamAttempts},
+			{ids.MixinSample, ids.MixinSampleParamBuilder},
+			{ids.MixinScheduled, ids.MixinScheduledParamFired},
+			{ids.MixinScheduled, ids.MixinScheduledParamSchedule},
+			{ids.MixinScope, ids.MixinScopeParamAxis},
+			{ids.MixinScope, ids.MixinScopeParamName},
+			{ids.MixinSerializable, ids.MixinSerializableParamRead},
+			{ids.MixinSideEffect, ids.MixinSideEffectParamObserve},
+			{ids.MixinSnapshotIsolation, ids.MixinSnapshotIsolationParamRead},
+			{ids.MixinSticky, ids.MixinStickyParamKey},
+			{ids.MixinStreamReflectsMutations, ids.MixinStreamReflectsMutationsParamDelete},
+			{ids.MixinStreamReflectsMutations, ids.MixinStreamReflectsMutationsParamMutate},
+			{ids.MixinTTL, ids.MixinTTLParamDuration},
+			{ids.MixinTTL, ids.MixinTTLParamNotFound},
+			{ids.MixinTTL, ids.MixinTTLParamPut},
+			{ids.MixinTTL, ids.MixinTTLParamRead},
+			{ids.MixinTamperEvident, ids.MixinTamperEvidentParamTamper},
+			{ids.MixinTamperEvident, ids.MixinTamperEvidentParamVerify},
+			{ids.MixinTimeout, ids.MixinTimeoutParamDuration},
+			{ids.MixinTotal, ids.MixinTotalParamDomain},
+			{ids.MixinValidates, ids.MixinValidatesParamFn},
+			{ids.MixinWindowed, ids.MixinWindowedParamCount},
+			{ids.MixinWindowed, ids.MixinWindowedParamIncr},
+			{ids.MixinWindowed, ids.MixinWindowedParamWindow},
+			{ids.MixinWrappedVia, ids.MixinWrappedViaParamFn},
+			{ids.MixinWritesFollowReads, ids.MixinWritesFollowReadsParamVersion},
+		})
 	})
 }
 
-// missingParams returns the entries of want that are absent from got.
-func missingParams(want, got []ids.Param) []ids.Param {
-	var out []ids.Param
+// assertPairsMatch fails unless the catalog's (owner, key) set is
+// exactly the spelled set.
+func assertPairsMatch(t *testing.T, got []ids.Param, want []pair) {
+	t.Helper()
+	catalog := make([]pair, 0, len(got))
+	for _, p := range got {
+		catalog = append(catalog, pair{p.Owner, p.Key})
+	}
 	for _, w := range want {
-		if !slices.Contains(got, w) {
-			out = append(out, w)
+		if !slices.Contains(catalog, w) {
+			t.Errorf("constant pair %v names no registered parameter", w)
 		}
 	}
-	return out
+	for _, c := range catalog {
+		if !slices.Contains(want, c) {
+			t.Errorf("registered parameter %v has no spelled constant", c)
+		}
+	}
 }

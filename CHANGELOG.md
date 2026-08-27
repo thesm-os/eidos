@@ -20,8 +20,13 @@ reasoning lives in the docblock of whatever the line names.
 - **The signature projection moved to `emit` as `SigInfo`, `SigParam` and `SigReturn`.** `golang.Sig`, `Param` and `Return` are aliases, so callers are unaffected — except `Sig.ReceiverIdent()`, which is now the field beside `Name` and `Params` rather than the type's one guarded accessor.
 - **`golang.SubstituteSig` takes the type parameters to bind against.** Go has no syntax for a method-level type parameter, so binding against the signature's own list was a guaranteed no-op for every interface method — the one case a generated double needs. Pass `s.TypeParams` for the old behaviour; pass the owner's to rewrite a method at its interface's witnesses.
 
+### Breaking
+
+- **`ids.Param` embeds `shape.Param`.** A positional `ids.Param{owner, key}` literal no longer compiles; `Key`, `Kind`, `Role` and `Required` promote, so the accessors answer a key's whole declaration rather than its spelling.
+
 ### Added
 
+- **`shape/ids` answers the catalog by name** — `ContractOf`, `MixinOf`, `DetectorOf` return the registered spec, and `ContractParam` / `MixinParam` one key's declaration; `ContractParams` and `MixinParams` now derive from the registered catalog rather than restating it, so what the package answers is what the validator enforces.
 - **`sdk.SigRules`** is an optional rules interface answering `SigOf` and `IsConstraint`, so a generator that doubles a contract asks its declared rules for a signature rather than wrapping its own Source. Found by assertion, like `EnumRules` and `ErrorRules` ([#62](https://github.com/thesm-os/eidos/issues/62)).
 - **`sdk.DeclarationRules`, `sdk.TypeRules` and `sdk.NamingRules`** are the three halves `SourceRules` is composed from, so a helper reading only one states that in its signature without importing `plugin`.
 - **`lang/golang/sdk` forwards the Go questions no neutral interface answers** — `QName`, `LocalName`, `Deref`, `ElemType`, `FromNode`, `FuncSignature`, `IsContext` / `IsString` / `IsInteger` / `IsFloat` / `Nilable`, `ComparableDeep`, `SequenceOf`, `SentinelSubject`, `NamedReturnsUsable`, with the `ResolveProblem` and `Iterator` vocabularies their answers are read through.
