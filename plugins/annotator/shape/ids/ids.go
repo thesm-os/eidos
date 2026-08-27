@@ -417,6 +417,7 @@ const (
 	MixinTimeoutParamDuration               = mixTimeout.ParamDuration
 	MixinTotalParamDomain                   = mixTotal.ParamDomain
 	MixinTTLParamDuration                   = mixTTL.ParamDuration
+	MixinTTLParamLifetime                   = mixTTL.ParamLifetime
 	MixinTTLParamNotFound                   = mixTTL.ParamNotFound
 	MixinTTLParamPut                        = mixTTL.ParamPut
 	MixinTTLParamRead                       = mixTTL.ParamRead

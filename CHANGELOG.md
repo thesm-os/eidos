@@ -26,6 +26,7 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Added
 
+- **`ttl` accepts `lifetime=`, naming the member of the stored value that carries its own expiry** ([#72](https://github.com/thesm-os/eidos/issues/72)). `shape.KindValueField`, mutually exclusive with `duration=` — a lifetime is fixed by the directive or carried by the value, and a store with per-entry expiry could previously only misdescribe itself or classify nothing.
 - **Every contract role is a named constant, re-exported as `ids.Contract<Name>Role<Role>`** — 23 of the 26 contract packages spelled their role vocabulary as bare strings, and two of those named part of it, which is worse: a consumer finding `cursor.RoleOpen` has every reason to expect `RoleNext`. `ids.ContractRoles` enumerates them and a test pins that every registered role has one.
 - **`shape/ids` answers the catalog by name** — `ContractOf`, `MixinOf`, `DetectorOf` return the registered spec, and `ContractParam` / `MixinParam` one key's declaration; `ContractParams` and `MixinParams` now derive from the registered catalog rather than restating it, so what the package answers is what the validator enforces.
 - **`sdk.SigRules`** is an optional rules interface answering `SigOf` and `IsConstraint`, so a generator that doubles a contract asks its declared rules for a signature rather than wrapping its own Source. Found by assertion, like `EnumRules` and `ErrorRules` ([#62](https://github.com/thesm-os/eidos/issues/62)).
@@ -68,6 +69,7 @@ reasoning lives in the docblock of whatever the line names.
 ### Fixed
 
 - **The `plugins` depguard rule denies a frontend or backend again.** It named `eidos/frontend` and `eidos/backend`, paths that stopped existing at ADR-0007, so the rule barring a plugin from importing a backend matched nothing; now spelled per language like its `frontends` / `backends` siblings.
+- **`golang.ComparableDeep` answers for curated standard-library types** ([#71](https://github.com/thesm-os/eidos/issues/71)). The resolver never holds the standard library, so a struct with a `time.Duration` field came back undetermined and every comparison it was party to was refused; `time.Duration`, `time.Time`, `strings.Builder` and `bytes.Buffer` now answer, on the same curated terms `stdlibSamples` already uses.
 - **A directive denying keys still takes `out=` / `pkg=` / `tag=`.** The routing widening reached `AllowedKeys` and not `DenyKeys`, so a generator declaring no options of its own had the framework's overrides reported as "accepts no keys" and honoured by the router anyway.
 - **A string default declared in a struct tag renders as a string** ([#59](https://github.com/thesm-os/eidos/issues/59)). Go's tag grammar eats one layer of quoting, so `default:"localhost"` was stamped verbatim and named an identifier nobody declared.
 - **A tag default may still name a symbol** ([#60](https://github.com/thesm-os/eidos/issues/60)). `LiteralFor` takes the declaring file: a qualifier the import block binds stays a reference, as does a full import path whose symbol is exported, and everything else on a textual member is quoted.

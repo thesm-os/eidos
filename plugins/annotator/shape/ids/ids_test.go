@@ -320,6 +320,7 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 			{ids.MixinStreamReflectsMutations, ids.MixinStreamReflectsMutationsParamDelete},
 			{ids.MixinStreamReflectsMutations, ids.MixinStreamReflectsMutationsParamMutate},
 			{ids.MixinTTL, ids.MixinTTLParamDuration},
+			{ids.MixinTTL, ids.MixinTTLParamLifetime},
 			{ids.MixinTTL, ids.MixinTTLParamNotFound},
 			{ids.MixinTTL, ids.MixinTTLParamPut},
 			{ids.MixinTTL, ids.MixinTTLParamRead},

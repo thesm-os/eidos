@@ -4,6 +4,7 @@
 package ttl_test
 
 import (
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
@@ -88,6 +89,104 @@ func TestMixin(t *testing.T) {
 		got, _ := shape.MixinParamKey(ttl.Name, ttl.ParamDuration).Get(host.Meta())
 		if got != "5m" {
 			t.Fatalf("duration = %q, want it untouched", got)
+		}
+	})
+}
+
+// TestMixin_Lifetime covers the key that lets a store whose entries
+// each carry their own expiry say so.
+//
+// The gap it closes: every param the mixin had described a lifetime
+// the directive fixes, so a cache giving each entry its own could
+// only misdescribe itself with `duration=` or classify nothing.
+func TestMixin_Lifetime(t *testing.T) {
+	t.Parallel()
+
+	// build returns a reader answering an Entry whose Lifetime field
+	// is the one a `lifetime=` names — the shape the issue reported.
+	build := func(kv map[string]string) (*sdk.Method, *sdk.Package) {
+		entry := &sdk.Struct{
+			Name: "Entry", Package: "x",
+			Fields: []*sdk.Field{
+				{Name: "Body", Type: &sdk.TypeRef{Name: "string"}},
+				{Name: "Lifetime", Type: &sdk.TypeRef{Name: "Duration", Package: "time"}},
+			},
+		}
+		read := &sdk.Method{
+			Name: "Read",
+			Params: []*sdk.Param{
+				{Name: "ctx", Type: &sdk.TypeRef{Name: "Context", Package: "context"}},
+				{Name: "key", Type: &sdk.TypeRef{Name: "string"}},
+			},
+			Returns: sdk.AnonReturns(
+				&sdk.TypeRef{Name: "Entry", Package: "x"},
+				&sdk.TypeRef{Name: "error"},
+			),
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{mixintest.HostDirective(ttl.Name, kv)},
+			},
+		}
+		store := &sdk.Interface{Name: "Store", Package: "x", Methods: []*sdk.Method{read}}
+		read.Owner = store
+		return read, &sdk.Package{
+			Name: "x", Path: "x",
+			Interfaces: []*sdk.Interface{store},
+			Structs:    []*sdk.Struct{entry},
+			Variables:  []*sdk.Variable{{Name: "ErrExpired", Package: "x"}},
+		}
+	}
+
+	t.Run("the lifetime resolves against the answered value's fields", func(t *testing.T) {
+		t.Parallel()
+		// KindValueField, so the stamp lands qualified — which is what
+		// lets a consumer read the member without re-deriving which
+		// type it belongs to.
+		read, pkg := build(map[string]string{
+			ttl.ParamRead:     "Read",
+			ttl.ParamLifetime: "Lifetime",
+			ttl.ParamNotFound: "ErrExpired",
+		})
+		mixintest.RunWithResolver(t, ttl.Mixin(), pkg)
+
+		got, _ := shape.MixinParamKey(ttl.Name, ttl.ParamLifetime).Get(read.Meta())
+		if got != "x.Entry.Lifetime" {
+			t.Fatalf("lifetime = %q, want x.Entry.Lifetime", got)
+		}
+	})
+
+	t.Run("a lifetime and a duration together are refused", func(t *testing.T) {
+		t.Parallel()
+		// They answer the same question differently, so a directive
+		// carrying both leaves a consumer to pick and makes the loser
+		// a line the author wrote that does nothing.
+		_, pkg := build(map[string]string{
+			ttl.ParamRead:     "Read",
+			ttl.ParamDuration: "1m",
+			ttl.ParamLifetime: "Lifetime",
+		})
+		diags := mixintest.RunWithValidator(t, ttl.Mixin(), pkg)
+
+		var found bool
+		for _, d := range diags {
+			if d.Severity == sdk.SeverityError && strings.Contains(d.Message, "not both") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("both keys were accepted; diagnostics = %+v", diags)
+		}
+	})
+
+	t.Run("neither key is required", func(t *testing.T) {
+		t.Parallel()
+		// A bare ttl still classifies the pair as expiring, which is a
+		// fact a reader wants even where no check can hold a call to a
+		// clock.
+		_, pkg := build(map[string]string{ttl.ParamRead: "Read"})
+		for _, d := range mixintest.RunWithValidator(t, ttl.Mixin(), pkg) {
+			if d.Severity == sdk.SeverityError {
+				t.Fatalf("bare ttl was refused: %s", d.Message)
+			}
 		}
 	})
 }
