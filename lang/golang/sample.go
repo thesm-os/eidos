@@ -481,29 +481,31 @@ func ZeroRefFor(t *node.TypeRef, r Resolver) (Sample, bool) {
 	}
 }
 
-// sliceSample derives a one-element literal per half, so the pair
-// differs in the element rather than in the length.
+// SamplePart renders one successful sample as an expression part for
+// a composite literal the caller builds itself.
 //
-// A length-only difference — `{x}` against `{x, x}` — is invisible to
-// a subject that reads the contents and only shows up in one that
-// counts them, which is the rarer shape. Differing in the element
-// distinguishes both.
+// The element-position counterpart to the whole-expression rule the
+// Go backend's `renderSample` applies, and a different rule — which
+// is why one cannot stand in for the other. In element position a
+// Ref-and-Text sample drops its type, because the literal's field
+// already declares it: `42` is right where `time.Duration(42)` is
+// noise. A composite inner is rebuilt around its own Ref, because the
+// position that routes one here is the position Go denies type
+// elision to. An expression-form sample is already the part.
 //
-// An element deriving nothing yields nothing for the slice. `[]T{}`
-// and `[]T{x}` are different claims and only the second is a sample:
-// a check built from an empty literal passes against an
-// implementation that reads no element at all.
-// partExpr renders one successful inner sample as an expression part
-// for a composite built through [emit].
-//
-// A bare text inner becomes verbatim text, matching what the
+// A bare text sample becomes verbatim text, matching what the
 // text-composing path does with it today: inside a composite literal
 // an untyped constant needs no conversion and no import, which is why
-// text composition worked at all. An expression-form inner is already
-// the part. A composite inner is rebuilt around its own Ref, because
-// the position that routes one here is the position Go denies type
-// elision to — see the callers.
-func partExpr(s Sample) *emit.Expr {
+// text composition worked at all.
+//
+// Exported for the consumer composing a literal this package does
+// not derive — one that fills several members, or aims a member at a
+// value of its own. Which members to fill is that consumer's choice;
+// how one [Sample] sits inside the literal is a property of Sample
+// and of Go, and a hand copy of it breaks silently when a composing
+// arm changes shape. The caller owes each Sample an OK() gate first,
+// as [SampleRefFor]'s contract requires everywhere else.
+func SamplePart(s Sample) *emit.Expr {
 	if s.Expr != nil {
 		return s.Expr
 	}
@@ -557,6 +559,18 @@ func typeExpr(t *node.TypeRef) *emit.Expr {
 	}
 }
 
+// sliceSample derives a one-element literal per half, so the pair
+// differs in the element rather than in the length.
+//
+// A length-only difference — `{x}` against `{x, x}` — is invisible to
+// a subject that reads the contents and only shows up in one that
+// counts them, which is the rarer shape. Differing in the element
+// distinguishes both.
+//
+// An element deriving nothing yields nothing for the slice. `[]T{}`
+// and `[]T{x}` are different claims and only the second is a sample:
+// a check built from an empty literal passes against an
+// implementation that reads no element at all.
 func sliceSample(
 	t *node.TypeRef, fieldName string, r Resolver, depth int,
 ) (sample, alternate Sample) {
@@ -577,7 +591,7 @@ func sliceSample(
 // time.Unix(42, 0)}`. The whole sample rides [Sample.Expr], because a
 // text with an expression-shaped hole in it is how #48 happened.
 func elemComposite(ref emit.Ref, elem Sample) *emit.Expr {
-	return &emit.Expr{ExprKind: emit.ExprComposite, AsType: ref, Args: []*emit.Expr{partExpr(elem)}}
+	return &emit.Expr{ExprKind: emit.ExprComposite, AsType: ref, Args: []*emit.Expr{SamplePart(elem)}}
 }
 
 // mapSample derives a one-entry literal per half, differing in the
@@ -629,7 +643,7 @@ func keyedComposite(ref emit.Ref, key string, val Sample) *emit.Expr {
 		ExprKind: emit.ExprCompositeKeyed,
 		AsType:   ref,
 		Keys:     []string{key},
-		Args:     []*emit.Expr{partExpr(val)},
+		Args:     []*emit.Expr{SamplePart(val)},
 	}
 }
 

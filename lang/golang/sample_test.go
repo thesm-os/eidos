@@ -923,3 +923,59 @@ func TestSampleRefFor_StructFormInners(t *testing.T) {
 		}
 	})
 }
+
+// TestSamplePart pins the element-position rule per arm.
+//
+// Exported for the consumer composing its own literal, which is a
+// consumer that had a hand copy of exactly this — including the
+// brace-trimming, which depends on every composing arm building
+// "{...}" and breaks silently if one stops.
+func TestSamplePart(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an expression sample is already the part", func(t *testing.T) {
+		t.Parallel()
+		want := &emit.Expr{ExprKind: emit.ExprCall}
+		if got := golang.SamplePart(golang.Sample{Expr: want}); got != want {
+			t.Fatalf("SamplePart returned %+v, want the sample's own expression", got)
+		}
+	})
+
+	t.Run("a typed text sample drops its type", func(t *testing.T) {
+		t.Parallel()
+		// The rule that makes this a different position from the whole
+		// expression: the literal's field already declares the type, so
+		// `42` is right where `time.Duration(42)` is noise.
+		got := golang.SamplePart(golang.Sample{
+			Ref:  emit.Builtin("int64"),
+			Text: "42",
+		})
+		if got.ExprKind != emit.ExprRaw || got.RawText != "42" {
+			t.Fatalf("SamplePart = %+v, want raw text 42 with no conversion", got)
+		}
+	})
+
+	t.Run("a composite sample is rebuilt around its own type", func(t *testing.T) {
+		t.Parallel()
+		// Go denies elision in this position, so the braces come off
+		// the text and the type rides the expression instead.
+		ref := emit.Builtin("Point")
+		got := golang.SamplePart(golang.Sample{
+			Ref: ref, Text: "{X: 42}", Composite: true,
+		})
+		if got.ExprKind != emit.ExprComposite || got.AsType != ref {
+			t.Fatalf("SamplePart = %+v, want a composite carrying the sample's Ref", got)
+		}
+		if len(got.Args) != 1 || got.Args[0].RawText != "X: 42" {
+			t.Fatalf("Args = %+v, want the braces trimmed to `X: 42`", got.Args)
+		}
+	})
+
+	t.Run("a bare text sample passes through verbatim", func(t *testing.T) {
+		t.Parallel()
+		got := golang.SamplePart(golang.Sample{Text: `"reader"`})
+		if got.ExprKind != emit.ExprRaw || got.RawText != `"reader"` {
+			t.Fatalf("SamplePart = %+v, want the text untouched", got)
+		}
+	})
+}
