@@ -6,6 +6,7 @@ package gofixture
 import (
 	"go.thesmos.sh/eidos/core/directive"
 	"go.thesmos.sh/eidos/core/position"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/node"
 )
 
@@ -61,8 +62,46 @@ func (b *InterfaceBuilder) TypeParam(name string, constraint *node.Constraint) *
 }
 
 // Embed records an embedded interface or type on the interface.
+//
+// For the method-set form — `interface{ io.Reader }`. A type-set term
+// goes through [InterfaceBuilder.TypeSet] instead, because the model
+// records both as embeds and only the frontend's type information
+// separates them; declaring a union through this leaves the fact
+// unstated and every consumer reading the interface as a method-set
+// contract.
 func (b *InterfaceBuilder) Embed(t *node.TypeRef) *InterfaceBuilder {
 	b.i.Embeds = append(b.i.Embeds, &node.Embed{Type: t, Owner: b.i})
+	return b
+}
+
+// TypeSet declares the interface as a generic constraint over the
+// given terms — `interface{ int | float64 }` — recording each term as
+// an embed and stamping the fact the way the Go frontend stamps it.
+//
+// The stamp is the point, and the reason this is not a loop over
+// [InterfaceBuilder.Embed]: an embed of `int` is a Named ref the model
+// cannot tell from an unloaded interface, so the frontend marks a
+// declaration carrying at least one union or `~T` term with
+// [golang.MetaIsConstraintInterface], and everything downstream — a
+// generator declining to double it, [golang.IsConstraintInterface],
+// `SigRules.IsConstraint` — reads the mark rather than guessing from
+// shape. A fixture spelling the terms without it builds an interface
+// no frontend would produce, and every test over it exercises the
+// wrong branch.
+//
+// Terms are recorded as written; the model does not carry the `~`
+// approximation, so `~int` and `int` are one fixture. A constraint
+// with no terms is fixture misuse — Go's grammar has no empty union —
+// and panics like the channel builder does, rather than stamping a
+// fact the declaration visibly lacks.
+func (b *InterfaceBuilder) TypeSet(terms ...*node.TypeRef) *InterfaceBuilder {
+	if len(terms) == 0 {
+		panic("gofixture: a type set needs at least one term") //nolint:forbidigo
+	}
+	for _, t := range terms {
+		b.i.Embeds = append(b.i.Embeds, &node.Embed{Type: t, Owner: b.i})
+	}
+	golang.MetaIsConstraintInterface.Set(b.i.EnsureMeta(), true, fixtureAuthority)
 	return b
 }
 

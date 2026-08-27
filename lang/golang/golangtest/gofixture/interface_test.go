@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.thesmos.sh/eidos/core/position"
+	"go.thesmos.sh/eidos/lang/golang"
 	"go.thesmos.sh/eidos/lang/golang/golangtest/gofixture"
 	"go.thesmos.sh/eidos/node"
 )
@@ -135,6 +136,75 @@ func TestInterfaceBuilder_Embed(t *testing.T) {
 		if len(captured.Embeds) != 1 || captured.Embeds[0].Type != typ || captured.Embeds[0].Owner != captured {
 			t.Fatalf("Embed wiring wrong: %+v", captured.Embeds)
 		}
+	})
+}
+
+// TestInterfaceBuilder_TypeSet pins the half a fixture could not
+// spell: the marker separating a constraint from a method-set
+// contract. The model records both as embeds, so without the stamp
+// every reader takes the type set for embedded interfaces the run
+// failed to load — and a test over such a fixture exercises the wrong
+// branch of whatever it drives.
+func TestInterfaceBuilder_TypeSet(t *testing.T) {
+	t.Parallel()
+
+	t.Run("records the terms and stamps the constraint marker", func(t *testing.T) {
+		t.Parallel()
+		var captured *node.Interface
+		gofixture.New().Interface("Numeric", func(b *gofixture.InterfaceBuilder) {
+			b.TypeSet(gofixture.Named("int"), gofixture.Named("float64"))
+			captured = b.Node()
+		})
+		if len(captured.Embeds) != 2 {
+			t.Fatalf("recorded %d embeds, want the two terms", len(captured.Embeds))
+		}
+		// Read through the accessor every consumer reads through, so
+		// the fixture and the readers cannot agree on a wrong key.
+		if !golang.IsConstraintInterface(captured) {
+			t.Fatal("a type set was declared and the constraint marker was not stamped")
+		}
+	})
+
+	t.Run("terms carry the owner like any embed", func(t *testing.T) {
+		t.Parallel()
+		var captured *node.Interface
+		gofixture.New().Interface("Numeric", func(b *gofixture.InterfaceBuilder) {
+			b.TypeSet(gofixture.Named("int"))
+			captured = b.Node()
+		})
+		if captured.Embeds[0].Owner != captured {
+			t.Fatal("a term's Owner must point back at the interface")
+		}
+	})
+
+	t.Run("a plain embed stamps nothing", func(t *testing.T) {
+		t.Parallel()
+		// The distinction is the method's whole reason to exist:
+		// `interface{ io.Reader }` embeds and is not a constraint, and
+		// only the author knows which of the two shapes they meant.
+		var captured *node.Interface
+		gofixture.New().Interface("I", func(b *gofixture.InterfaceBuilder) {
+			b.Embed(gofixture.PkgNamed("io", "Reader"))
+			captured = b.Node()
+		})
+		if golang.IsConstraintInterface(captured) {
+			t.Fatal("an ordinary embed must not read as a type-set term")
+		}
+	})
+
+	t.Run("an empty type set panics", func(t *testing.T) {
+		t.Parallel()
+		// Go's grammar has no empty union, so this is fixture misuse —
+		// and stamping the marker over no terms would build a
+		// declaration that visibly lacks the fact it claims.
+		defer func() {
+			if recover() == nil {
+				t.Fatal("TypeSet() with no terms must panic")
+			}
+		}()
+		gofixture.New().Interface("I", func(b *gofixture.InterfaceBuilder) {
+			b.TypeSet()
+		})
 	})
 }
 
