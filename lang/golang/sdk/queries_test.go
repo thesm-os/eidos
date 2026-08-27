@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"testing"
 
-	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/lang/golang"
 	sdkgo "go.thesmos.sh/eidos/lang/golang/sdk"
 	"go.thesmos.sh/eidos/sdk"
@@ -143,11 +142,11 @@ func TestSamplePartForwards(t *testing.T) {
 	// cannot pass as forwarding.
 	for name, tc := range map[string]struct {
 		s    sdk.Sample
-		kind emit.ExprKind
+		kind sdk.ExprKind
 	}{
-		"typed text": {sdk.Sample{Ref: sdk.Builtin("int64"), Text: "42"}, emit.ExprRaw},
-		"composite":  {sdk.Sample{Ref: sdk.Builtin("Point"), Text: "{X: 42}", Composite: true}, emit.ExprComposite},
-		"bare text":  {sdk.Sample{Text: `"reader"`}, emit.ExprRaw},
+		"typed text": {sdk.Sample{Ref: sdk.Builtin("int64"), Text: "42"}, sdk.ExprRaw},
+		"composite":  {sdk.Sample{Ref: sdk.Builtin("Point"), Text: "{X: 42}", Composite: true}, sdk.ExprComposite},
+		"bare text":  {sdk.Sample{Text: `"reader"`}, sdk.ExprRaw},
 	} {
 		got := sdkgo.SamplePart(tc.s)
 		if want := golang.SamplePart(tc.s); !reflect.DeepEqual(got, want) {
@@ -157,4 +156,76 @@ func TestSamplePartForwards(t *testing.T) {
 			t.Errorf("SamplePart(%s).ExprKind = %v, want %v", name, got.ExprKind, tc.kind)
 		}
 	}
+}
+
+// TestMemberWalkForwards pins the forwarders that complete the walk
+// a generator makes from a struct to a composed literal: pick the
+// members a generated file can name, bind a generic field at this
+// reference's arguments, sample it. StructOf and SamplePart — the
+// steps either side — are pinned above, and the gap this closes is
+// that three of the five steps were reachable through the façade and
+// two were not.
+func TestMemberWalkForwards(t *testing.T) {
+	t.Parallel()
+
+	t.Run("IsExported answers per identifier", func(t *testing.T) {
+		t.Parallel()
+		for name, want := range map[string]bool{"Lifetime": true, "secret": false} {
+			if got := sdkgo.IsExported(name); got != want || got != golang.IsExported(name) {
+				t.Errorf("IsExported(%q) = %v, want %v and agreement", name, got, want)
+			}
+		}
+	})
+
+	t.Run("BindTypeArgs binds a reference's arguments", func(t *testing.T) {
+		t.Parallel()
+		// Filter[string] naming `type Filter[T any] func(T) bool`:
+		// the body's T becomes string, which is what a walk into a
+		// generic declaration reads instead of a parameter that only
+		// exists inside it.
+		param := &sdk.TypeParam{Name: "T"}
+		body := &sdk.TypeRef{
+			TypeKind:    sdk.TypeRefFunc,
+			FuncParams:  []*sdk.TypeRef{{TypeKind: sdk.TypeRefTypeParam, Name: "T"}},
+			FuncReturns: []*sdk.TypeRef{{TypeKind: sdk.TypeRefNamed, Name: "bool"}},
+		}
+		args := []*sdk.TypeRef{{TypeKind: sdk.TypeRefNamed, Name: "string"}}
+
+		got := sdkgo.BindTypeArgs(body, []*sdk.TypeParam{param}, args)
+		want := golang.BindTypeArgs(body, []*sdk.TypeParam{param}, args)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("BindTypeArgs = %+v, want %+v", got, want)
+		}
+		if len(got.FuncParams) != 1 || got.FuncParams[0].Name != "string" {
+			t.Fatalf("bound body = %+v, want the T parameter bound to string", got)
+		}
+	})
+
+	t.Run("SampleRefFor answers the pair SamplePart consumes", func(t *testing.T) {
+		t.Parallel()
+		s, a := sdkgo.SampleRefFor(named("", "int64"), "Lifetime", resolverTable{})
+		ws, wa := golang.SampleRefFor(named("", "int64"), "Lifetime", resolverTable{})
+		if !reflect.DeepEqual(s, ws) || !reflect.DeepEqual(a, wa) {
+			t.Fatalf("SampleRefFor = %+v/%+v, want %+v/%+v", s, a, ws, wa)
+		}
+		if !s.OK() || !a.OK() || s.Text == a.Text {
+			t.Fatalf("pair = %q/%q, want two distinct usable samples", s.Text, a.Text)
+		}
+		// And the composition the issue named: the façade now carries
+		// both halves, producer to part.
+		if part := sdkgo.SamplePart(s); part.ExprKind != sdk.ExprRaw {
+			t.Fatalf("SamplePart(sample) = %+v, want the raw element form", part)
+		}
+	})
+
+	t.Run("Source is the language's rules value", func(t *testing.T) {
+		t.Parallel()
+		// The alias makes `Source{}` the whole spelling; what matters
+		// is that the value satisfies the neutral contract a test
+		// passes it as.
+		var rules sdk.SourceRules = sdkgo.Source{}
+		if _, ok := rules.(golang.Source); !ok {
+			t.Fatal("Source{} is not the language package's rules value")
+		}
+	})
 }

@@ -46,6 +46,43 @@ func ElemType(t *sdk.TypeRef) sdk.Ref { return golang.ElemType(t) }
 // FromNode lifts a source type reference into its emit counterpart.
 func FromNode(t *sdk.TypeRef) sdk.Ref { return golang.FromNode(t) }
 
+// SampleRefFor returns two distinct sample values for a member's
+// type, resolving named types through r.
+//
+// The producer of what [SamplePart] consumes — forwarding one without
+// the other left a consumer able to compose a sample into a literal
+// through this façade but not to obtain the sample through it. Ask
+// each result [sdk.Sample.OK] before use; a type the resolver cannot
+// reach yields a refusal, not a zero value to compare against.
+func SampleRefFor(t *sdk.TypeRef, fieldName string, r sdk.Resolver) (sample, alternate sdk.Sample) {
+	return golang.SampleRefFor(t, fieldName, r)
+}
+
+// BindTypeArgs returns body with a declaration's own type parameters
+// replaced by the arguments a reference to it supplied —
+// `Filter[string]` naming `type Filter[T any] func(T) bool` gives
+// `func(string) bool`.
+//
+// The step before sampling a generic struct's field: the field is
+// written in terms of the parameters, so a walk that does not bind
+// them samples a `T` that exists only inside the declaration.
+func BindTypeArgs(body *sdk.TypeRef, params []*sdk.TypeParam, args []*sdk.TypeRef) *sdk.TypeRef {
+	return golang.BindTypeArgs(body, params, args)
+}
+
+// IsExported reports whether name is an exported Go identifier —
+// which members a literal generated into another package can set.
+func IsExported(name string) bool { return golang.IsExported(name) }
+
+// Source is the Go read-side rules value, for a test that passes
+// rules directly rather than reading them back through
+// [sdk.Base.SourceOf].
+//
+// An alias rather than a constructor: the type is stateless and its
+// zero value is the value, so `Source{}` is the whole spelling — the
+// same one every plugin's Go binding already writes.
+type Source = golang.Source
+
 // SamplePart renders one successful sample as an expression part for
 // a composite literal the caller builds itself.
 //

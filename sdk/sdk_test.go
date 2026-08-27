@@ -522,3 +522,77 @@ func TestNewOptionsBuildsASetSetOptionsAccepts(t *testing.T) {
 		}
 	})
 }
+
+// TestExprKindsMatchUnderlying pins the ExprKind re-export as
+// complete: every variant emit declares has an alias here, at the
+// same value.
+//
+// The count is read from emit/expr.go the way the kind-coverage
+// checks read kind.go, so a variant added there fails this test
+// rather than sending the next consumer past the façade for the
+// missing name.
+func TestExprKindsMatchUnderlying(t *testing.T) {
+	t.Parallel()
+
+	aliased := map[emit.ExprKind]string{
+		sdk.ExprLiteral: "ExprLiteral", sdk.ExprIdent: "ExprIdent",
+		sdk.ExprField: "ExprField", sdk.ExprIndex: "ExprIndex",
+		sdk.ExprIndexList: "ExprIndexList", sdk.ExprSlice: "ExprSlice",
+		sdk.ExprCall: "ExprCall", sdk.ExprMethodCall: "ExprMethodCall",
+		sdk.ExprAddr: "ExprAddr", sdk.ExprDeref: "ExprDeref",
+		sdk.ExprParen: "ExprParen", sdk.ExprUnary: "ExprUnary",
+		sdk.ExprBinary: "ExprBinary", sdk.ExprTypeAssert: "ExprTypeAssert",
+		sdk.ExprComposite: "ExprComposite", sdk.ExprCompositeKeyed: "ExprCompositeKeyed",
+		sdk.ExprFuncLit: "ExprFuncLit", sdk.ExprMake: "ExprMake",
+		sdk.ExprNew: "ExprNew", sdk.ExprRaw: "ExprRaw",
+		sdk.ExprExternal: "ExprExternal",
+	}
+
+	t.Run("every declared variant has an alias", func(t *testing.T) {
+		t.Parallel()
+		// The map above collapses on a value collision, so its length
+		// equalling the declared count also proves each alias is bound
+		// to a distinct underlying constant — a copy-paste alias bound
+		// to its neighbour shrinks the map.
+		if want := declaredExprKindsIn(t); len(aliased) != want {
+			t.Fatalf("sdk aliases %d ExprKind variants, emit declares %d", len(aliased), want)
+		}
+	})
+
+	t.Run("the alias preserves identity", func(t *testing.T) {
+		t.Parallel()
+		//nolint:staticcheck // intentional redundant typing — the identity is the test
+		var k emit.ExprKind = sdk.ExprComposite
+		_ = k
+	})
+}
+
+// declaredExprKindsIn counts the ExprKind variants emit/expr.go
+// declares, on the terms [declaredKindsIn] reads kind.go.
+func declaredExprKindsIn(t *testing.T) int {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filepath.Join("..", "emit", "expr.go"), nil, 0)
+	if err != nil {
+		t.Fatalf("parse emit/expr.go: %v", err)
+	}
+	n := 0
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, name := range vs.Names {
+				if strings.HasPrefix(name.Name, "Expr") {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}

@@ -97,6 +97,43 @@ type Ref = emit.Ref
 // to render through `renderExpr`.
 type Expr = emit.Expr
 
+// ExprKind discriminates the variant forms an [Expr] takes.
+//
+// Re-exported with its constants on the terms [TypeRefKind] and its
+// variants already are: this package hands out `Expr` and every
+// constructor, so a consumer could build an expression and not say
+// what it built — a test asserting a member rides as a composite
+// rather than raw text had to import [emit] to name the kind. The
+// whole set rather than the kinds one caller asked for, because a
+// partial vocabulary sends the next consumer past the façade for the
+// missing half.
+type ExprKind = emit.ExprKind
+
+// The [ExprKind] variants.
+const (
+	ExprLiteral        = emit.ExprLiteral
+	ExprIdent          = emit.ExprIdent
+	ExprField          = emit.ExprField
+	ExprIndex          = emit.ExprIndex
+	ExprIndexList      = emit.ExprIndexList
+	ExprSlice          = emit.ExprSlice
+	ExprCall           = emit.ExprCall
+	ExprMethodCall     = emit.ExprMethodCall
+	ExprAddr           = emit.ExprAddr
+	ExprDeref          = emit.ExprDeref
+	ExprParen          = emit.ExprParen
+	ExprUnary          = emit.ExprUnary
+	ExprBinary         = emit.ExprBinary
+	ExprTypeAssert     = emit.ExprTypeAssert
+	ExprComposite      = emit.ExprComposite
+	ExprCompositeKeyed = emit.ExprCompositeKeyed
+	ExprFuncLit        = emit.ExprFuncLit
+	ExprMake           = emit.ExprMake
+	ExprNew            = emit.ExprNew
+	ExprRaw            = emit.ExprRaw
+	ExprExternal       = emit.ExprExternal
+)
+
 // NewExternal re-exports [emit.NewExternal] — the factory
 // for fully-qualified package + name expressions the Go
 // backend's `renderExpr` registers the import for
