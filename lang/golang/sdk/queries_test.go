@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"go.thesmos.sh/eidos/emit"
 	"go.thesmos.sh/eidos/lang/golang"
 	sdkgo "go.thesmos.sh/eidos/lang/golang/sdk"
 	"go.thesmos.sh/eidos/sdk"
@@ -129,4 +130,31 @@ func TestQueriesForward(t *testing.T) {
 			t.Errorf("NamedReturnsUsable = %v, want %v", got, want)
 		}
 	})
+}
+
+// TestSamplePartForwards pins the façade against the language package
+// for the element-position sample rule.
+func TestSamplePartForwards(t *testing.T) {
+	t.Parallel()
+
+	// One sample per arm, each pinned to the kind its arm produces —
+	// so a forwarder wired to something that happens to agree on one
+	// shape still fails on another, and agreement on a wrong answer
+	// cannot pass as forwarding.
+	for name, tc := range map[string]struct {
+		s    sdk.Sample
+		kind emit.ExprKind
+	}{
+		"typed text": {sdk.Sample{Ref: sdk.Builtin("int64"), Text: "42"}, emit.ExprRaw},
+		"composite":  {sdk.Sample{Ref: sdk.Builtin("Point"), Text: "{X: 42}", Composite: true}, emit.ExprComposite},
+		"bare text":  {sdk.Sample{Text: `"reader"`}, emit.ExprRaw},
+	} {
+		got := sdkgo.SamplePart(tc.s)
+		if want := golang.SamplePart(tc.s); !reflect.DeepEqual(got, want) {
+			t.Errorf("SamplePart(%s) = %+v, want %+v", name, got, want)
+		}
+		if got.ExprKind != tc.kind {
+			t.Errorf("SamplePart(%s).ExprKind = %v, want %v", name, got.ExprKind, tc.kind)
+		}
+	}
 }

@@ -46,6 +46,19 @@ func ElemType(t *sdk.TypeRef) sdk.Ref { return golang.ElemType(t) }
 // FromNode lifts a source type reference into its emit counterpart.
 func FromNode(t *sdk.TypeRef) sdk.Ref { return golang.FromNode(t) }
 
+// SamplePart renders one successful sample as an expression part for
+// a composite literal the caller builds itself.
+//
+// Here as well as on the language package because the [sdk.Sample] it
+// takes arrives through the neutral half: [sdk.TypeRules.SamplesOf]
+// answers one without the caller naming a language, and composing it
+// into a literal is then the single Go fact left to read. The rule is
+// Go's — this is the position that denies type elision — so it cannot
+// live on the neutral interface, and without the forwarder the core
+// imports `lang/golang` for one call. The caller owes the sample an
+// OK() gate first, as everywhere else.
+func SamplePart(s sdk.Sample) *sdk.Expr { return golang.SamplePart(s) }
+
 // FuncSignature splits a func type into its parameter and result
 // references.
 func FuncSignature(t *sdk.TypeRef) (params, returns []*sdk.TypeRef) {
