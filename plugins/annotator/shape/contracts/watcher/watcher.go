@@ -30,10 +30,16 @@ var Params = []shape.Param{
 	{Key: ParamStop, Kind: shape.KindMember},
 }
 
+// RoleWatch is the callable delivering change notifications.
+const RoleWatch = "watch"
+
+// RoleTrigger is the callable whose effect a [RoleWatch] observes.
+const RoleTrigger = "trigger"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"watch", "trigger"}
+var Roles = []string{RoleWatch, RoleTrigger}
 
 // Contract returns the [shape.Contract] this package contributes.
 func Contract() shape.Contract {

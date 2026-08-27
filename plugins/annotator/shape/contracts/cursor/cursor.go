@@ -60,6 +60,17 @@ var Params = []shape.Param{
 	{Key: ParamClose, Kind: shape.KindMember, Role: RoleOpen},
 }
 
+// RoleNext is the callable advancing the cursor.
+//
+// Distinct from [ParamNext], which carries the same word: under an
+// `open` callable the key names the reader on the handle, and here
+// the role names the reader itself.
+const RoleNext = "next"
+
+// RoleClose is the callable releasing the cursor, paired with
+// [RoleNext] the way [ParamClose] pairs with [ParamNext].
+const RoleClose = "close"
+
 // Roles enumerates the contract's role vocabulary.
 //
 // `open` joins the two method roles rather than forming its own
@@ -68,7 +79,7 @@ var Params = []shape.Param{
 // make a law selecting "cursor" miss half its corpus.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"next", "close", RoleOpen}
+var Roles = []string{RoleNext, RoleClose, RoleOpen}
 
 // Contract returns the [shape.Contract] this package contributes.
 // No Validate hook: the one thing it checked — an `open` host naming

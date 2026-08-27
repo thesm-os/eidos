@@ -24,11 +24,14 @@ var Params = []shape.Param{
 	{Key: ParamNotFound, Kind: shape.KindVar},
 }
 
+// RoleFn is the callable that runs inside the transaction.
+const RoleFn = "fn"
+
 // Roles enumerates the contract's role vocabulary — a single
 // "fn" role since the contract is a per-callable marker.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"fn"}
+var Roles = []string{RoleFn}
 
 // Contract returns the [shape.Contract] this package contributes.
 func Contract() shape.Contract {

@@ -24,10 +24,19 @@ var Params = []shape.Param{
 	{Key: ParamClosed, Kind: shape.KindVar},
 }
 
+// RoleBegin is the callable opening the transaction.
+const RoleBegin = "begin"
+
+// RoleCommit is the callable making its writes durable.
+const RoleCommit = "commit"
+
+// RoleRollback is the callable discarding them.
+const RoleRollback = "rollback"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"begin", "commit", "rollback"}
+var Roles = []string{RoleBegin, RoleCommit, RoleRollback}
 
 // Contract returns the [shape.Contract] this package contributes.
 // Begin requires both Commit and Rollback partners — the
@@ -37,6 +46,6 @@ func Contract() shape.Contract {
 		Name:     Name,
 		Roles:    Roles,
 		Params:   Params,
-		Required: map[string][]string{"begin": {"commit", "rollback"}},
+		Required: map[string][]string{RoleBegin: {RoleCommit, RoleRollback}},
 	}
 }

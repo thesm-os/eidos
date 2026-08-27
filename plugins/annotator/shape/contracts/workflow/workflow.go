@@ -8,10 +8,13 @@ import "go.thesmos.sh/eidos/plugins/annotator/shape"
 // Name is the canonical contract name this package stamps.
 const Name = "workflow"
 
+// RoleFn is the callable the workflow advances.
+const RoleFn = "fn"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"fn"}
+var Roles = []string{RoleFn}
 
 // ParamTransitions is the KV key naming the state moves the workflow
 // permits.

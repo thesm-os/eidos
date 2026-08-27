@@ -27,10 +27,14 @@ const ParamMismatch = "mismatch"
 // type the run never loaded stamps unvalidated.
 const ParamVersion = "version"
 
+// RoleWriter is the compare-and-swap callable — the one that reads
+// [ParamVersion] before it writes.
+const RoleWriter = "writer"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"writer"}
+var Roles = []string{RoleWriter}
 
 // Params enumerates the directive's KV keys.
 //

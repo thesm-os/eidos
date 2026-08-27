@@ -12,6 +12,16 @@ import (
 // Name is the canonical contract name this package stamps.
 const Name = "pool"
 
+// RoleGet is the callable taking a resource out of the pool.
+const RoleGet = "get"
+
+// RolePut is the callable returning it.
+const RolePut = "put"
+
+// RoleStats is the accounting observation beside the cycle it accounts
+// for. Optional — see [Roles] for why.
+const RoleStats = "stats"
+
 // Roles enumerates the contract's role vocabulary.
 //
 // `stats` names the accounting observation beside the cycle it
@@ -22,7 +32,7 @@ const Name = "pool"
 // a reader of the numbers with no way to choose.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"get", "put", "stats"}
+var Roles = []string{RoleGet, RolePut, RoleStats}
 
 // Contract returns the [shape.Contract] this package contributes.
 // The contract requires both `get` and `put` partners on the
@@ -33,7 +43,7 @@ func Contract() shape.Contract {
 	return shape.Contract{
 		Name:     Name,
 		Roles:    Roles,
-		Required: map[string][]string{"get": {"put"}},
+		Required: map[string][]string{RoleGet: {RolePut}},
 		Validate: validate,
 	}
 }

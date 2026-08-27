@@ -35,10 +35,16 @@ var Params = []shape.Param{
 	{Key: ParamTimeout, Kind: shape.KindOpaque},
 }
 
+// RoleAcquire is the callable taking the lease.
+const RoleAcquire = "acquire"
+
+// RoleRelease is the callable giving it back.
+const RoleRelease = "release"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"acquire", "release"}
+var Roles = []string{RoleAcquire, RoleRelease}
 
 // Contract returns the [shape.Contract] this package contributes.
 // The acquire side requires a release partner.
@@ -47,6 +53,6 @@ func Contract() shape.Contract {
 		Name:     Name,
 		Roles:    Roles,
 		Params:   Params,
-		Required: map[string][]string{"acquire": {"release"}},
+		Required: map[string][]string{RoleAcquire: {RoleRelease}},
 	}
 }

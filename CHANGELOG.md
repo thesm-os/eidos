@@ -26,6 +26,7 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Added
 
+- **Every contract role is a named constant, re-exported as `ids.Contract<Name>Role<Role>`** — 23 of the 26 contract packages spelled their role vocabulary as bare strings, and two of those named part of it, which is worse: a consumer finding `cursor.RoleOpen` has every reason to expect `RoleNext`. `ids.ContractRoles` enumerates them and a test pins that every registered role has one.
 - **`shape/ids` answers the catalog by name** — `ContractOf`, `MixinOf`, `DetectorOf` return the registered spec, and `ContractParam` / `MixinParam` one key's declaration; `ContractParams` and `MixinParams` now derive from the registered catalog rather than restating it, so what the package answers is what the validator enforces.
 - **`sdk.SigRules`** is an optional rules interface answering `SigOf` and `IsConstraint`, so a generator that doubles a contract asks its declared rules for a signature rather than wrapping its own Source. Found by assertion, like `EnumRules` and `ErrorRules` ([#62](https://github.com/thesm-os/eidos/issues/62)).
 - **`sdk.DeclarationRules`, `sdk.TypeRules` and `sdk.NamingRules`** are the three halves `SourceRules` is composed from, so a helper reading only one states that in its signature without importing `plugin`.

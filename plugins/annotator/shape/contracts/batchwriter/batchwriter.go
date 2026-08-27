@@ -8,6 +8,13 @@ import "go.thesmos.sh/eidos/plugins/annotator/shape"
 // Name is the canonical contract name this package stamps.
 const Name = "batch-writer"
 
+// RoleWriter is the callable writing a batch.
+const RoleWriter = "writer"
+
+// RoleReader is the observation partner confirming what a batch
+// left behind. Optional — see [Roles] for why.
+const RoleReader = "reader"
+
 // Roles enumerates the contract's role vocabulary.
 //
 // `reader` names the observation partner that confirms what a batch
@@ -25,7 +32,7 @@ const Name = "batch-writer"
 // a param records the pairing on the writer alone.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"writer", "reader"}
+var Roles = []string{RoleWriter, RoleReader}
 
 // ParamMode is the KV key naming how a partial batch behaves — the
 // word a consumer reads to decide whether a failed entry aborts the

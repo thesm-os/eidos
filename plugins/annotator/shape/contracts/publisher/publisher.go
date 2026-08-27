@@ -8,10 +8,16 @@ import "go.thesmos.sh/eidos/plugins/annotator/shape"
 // Name is the canonical contract name this package stamps.
 const Name = "publisher"
 
+// RolePublish is the callable emitting a message.
+const RolePublish = "publish"
+
+// RoleSubscribe is the callable receiving one.
+const RoleSubscribe = "subscribe"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"publish", "subscribe", RoleRedeliver}
+var Roles = []string{RolePublish, RoleSubscribe, RoleRedeliver}
 
 // ParamMode declares the delivery guarantee the publisher makes.
 //

@@ -13,13 +13,20 @@ import (
 // compile errors.
 const Name = "persister"
 
+// RoleWriter is the callable storing a value.
+const RoleWriter = "writer"
+
+// RoleReader is the callable reading it back — the partner that makes
+// the writer's effect observable.
+const RoleReader = "reader"
+
 // Roles enumerates the contract's role vocabulary. Exported so
 // refinement-bucket resolvers and validators can read the
 // canonical role list without importing the [shape.Contract]
 // value.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"writer", "reader"}
+var Roles = []string{RoleWriter, RoleReader}
 
 // Contract returns the [shape.Contract] this package contributes
 // to the umbrella shape plugin. Register one instance per

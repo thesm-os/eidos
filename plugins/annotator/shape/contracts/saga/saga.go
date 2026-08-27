@@ -11,10 +11,17 @@ import (
 // Name is the canonical contract name this package stamps.
 const Name = "saga"
 
+// RoleStep is a forward stage of the saga.
+const RoleStep = "step"
+
+// RoleCompensate is the stage that undoes a [RoleStep] when a later one
+// fails.
+const RoleCompensate = "compensate"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"step", "compensate"}
+var Roles = []string{RoleStep, RoleCompensate}
 
 // Contract returns the [shape.Contract] this package contributes.
 // Every step requires a compensate partner; the [Validate] hook
@@ -25,7 +32,7 @@ func Contract() shape.Contract {
 	return shape.Contract{
 		Name:     Name,
 		Roles:    Roles,
-		Required: map[string][]string{"step": {"compensate"}},
+		Required: map[string][]string{RoleStep: {RoleCompensate}},
 		Validate: validate,
 	}
 }
@@ -37,8 +44,8 @@ func Contract() shape.Contract {
 func validate(members map[string][]shape.ContractMember) []shape.ContractViolation {
 	var out []shape.ContractViolation
 	seen := make(map[string]string)
-	for _, step := range members["step"] {
-		comp := step.Partners["compensate"]
+	for _, step := range members[RoleStep] {
+		comp := step.Partners[RoleCompensate]
 		if comp == "" {
 			continue
 		}

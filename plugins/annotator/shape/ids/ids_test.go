@@ -339,6 +339,92 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 
 // assertPairsMatch fails unless the catalog's (owner, key) set is
 // exactly the spelled set.
+// TestIDs_RolesMatchTheRegisteredCatalog pins the role constants
+// against the catalog in both directions.
+//
+// A role nobody named is one a consumer spells as a literal, which is
+// the failure this package exists to remove; a constant naming no
+// registered role is a name that compiles and matches nothing. Both
+// are silent, so both are checked.
+func TestIDs_RolesMatchTheRegisteredCatalog(t *testing.T) {
+	t.Parallel()
+
+	t.Run("every contract role has a spelled constant", func(t *testing.T) {
+		t.Parallel()
+		assertRolesMatch(t, ids.ContractRoles(), []pair{
+			{ids.ContractAppender, ids.ContractAppenderRoleFn},
+			{ids.ContractBatchWriter, ids.ContractBatchWriterRoleWriter},
+			{ids.ContractBatchWriter, ids.ContractBatchWriterRoleReader},
+			{ids.ContractCAS, ids.ContractCASRoleWriter},
+			{ids.ContractCache, ids.ContractCacheRoleCache},
+			{ids.ContractCache, ids.ContractCacheRoleBacking},
+			{ids.ContractChain, ids.ContractChainRoleAppend},
+			{ids.ContractChain, ids.ContractChainRoleReplay},
+			{ids.ContractChain, ids.ContractChainRoleVerify},
+			{ids.ContractCircuitBreaker, ids.ContractCircuitBreakerRoleFn},
+			{ids.ContractCodec, ids.ContractCodecRoleForward},
+			{ids.ContractCodec, ids.ContractCodecRoleInverse},
+			{ids.ContractCursor, ids.ContractCursorRoleNext},
+			{ids.ContractCursor, ids.ContractCursorRoleClose},
+			{ids.ContractCursor, ids.ContractCursorRoleOpen},
+			{ids.ContractIfAbsent, ids.ContractIfAbsentRoleWriter},
+			{ids.ContractIfMatch, ids.ContractIfMatchRoleWriter},
+			{ids.ContractIfMatch, ids.ContractIfMatchRoleMatch},
+			{ids.ContractLeaderElection, ids.ContractLeaderElectionRoleCampaign},
+			{ids.ContractLeaderElection, ids.ContractLeaderElectionRoleResign},
+			{ids.ContractLeaderElection, ids.ContractLeaderElectionRoleIsLeader},
+			{ids.ContractLease, ids.ContractLeaseRoleAcquire},
+			{ids.ContractLease, ids.ContractLeaseRoleRelease},
+			{ids.ContractOutbox, ids.ContractOutboxRoleAppend},
+			{ids.ContractOutbox, ids.ContractOutboxRoleSubscribe},
+			{ids.ContractPagination, ids.ContractPaginationRoleReader},
+			{ids.ContractPersister, ids.ContractPersisterRoleWriter},
+			{ids.ContractPersister, ids.ContractPersisterRoleReader},
+			{ids.ContractPool, ids.ContractPoolRoleGet},
+			{ids.ContractPool, ids.ContractPoolRolePut},
+			{ids.ContractPool, ids.ContractPoolRoleStats},
+			{ids.ContractPublisher, ids.ContractPublisherRolePublish},
+			{ids.ContractPublisher, ids.ContractPublisherRoleSubscribe},
+			{ids.ContractPublisher, ids.ContractPublisherRoleRedeliver},
+			{ids.ContractRateLimit, ids.ContractRateLimitRoleFn},
+			{ids.ContractSaga, ids.ContractSagaRoleStep},
+			{ids.ContractSaga, ids.ContractSagaRoleCompensate},
+			{ids.ContractSingleFlight, ids.ContractSingleFlightRoleFn},
+			{ids.ContractTransaction, ids.ContractTransactionRoleFn},
+			{ids.ContractTx, ids.ContractTxRoleBegin},
+			{ids.ContractTx, ids.ContractTxRoleCommit},
+			{ids.ContractTx, ids.ContractTxRoleRollback},
+			{ids.ContractUpdater, ids.ContractUpdaterRoleWriter},
+			{ids.ContractUpdater, ids.ContractUpdaterRoleReader},
+			{ids.ContractUpserter, ids.ContractUpserterRoleWriter},
+			{ids.ContractUpserter, ids.ContractUpserterRoleReader},
+			{ids.ContractWatcher, ids.ContractWatcherRoleWatch},
+			{ids.ContractWatcher, ids.ContractWatcherRoleTrigger},
+			{ids.ContractWorkflow, ids.ContractWorkflowRoleFn},
+		})
+	})
+}
+
+// assertRolesMatch requires the constants and the catalog to name the
+// same set of roles.
+func assertRolesMatch(t *testing.T, got []ids.Role, want []pair) {
+	t.Helper()
+	catalog := make([]pair, 0, len(got))
+	for _, r := range got {
+		catalog = append(catalog, pair{r.Owner, r.Role})
+	}
+	for _, w := range want {
+		if !slices.Contains(catalog, w) {
+			t.Errorf("constant pair %v names no registered role", w)
+		}
+	}
+	for _, c := range catalog {
+		if !slices.Contains(want, c) {
+			t.Errorf("registered role %v has no spelled constant", c)
+		}
+	}
+}
+
 func assertPairsMatch(t *testing.T, got []ids.Param, want []pair) {
 	t.Helper()
 	catalog := make([]pair, 0, len(got))

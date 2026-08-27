@@ -193,6 +193,72 @@ const (
 	ContractWorkflow       = conWorkflow.Name
 )
 
+// The role each contract recognises, named `Contract<Name>Role<Role>`.
+//
+// A contract's directive names a role, and a consumer selecting on one
+// — a suite generator asking which method plays the writer, a gate
+// counting whether every role is covered — would otherwise spell it as
+// a literal. That is the half-a-link problem [ContractBatchWriterParamMode]
+// and its neighbours already close for keys: hold the name constant and
+// a literal role, and a rename in the catalog leaves the caller
+// compiling and matching nothing.
+//
+// Each is its own package's constant rather than a copy, so the
+// compile error lands here. Every contract has a full set: the two that
+// named only part of their vocabulary were the worst case, since a
+// reader finding one constant reasonably assumes the rest exist.
+const (
+	ContractAppenderRoleFn             = conAppender.RoleFn
+	ContractBatchWriterRoleWriter      = conBatchWriter.RoleWriter
+	ContractBatchWriterRoleReader      = conBatchWriter.RoleReader
+	ContractCASRoleWriter              = conCAS.RoleWriter
+	ContractCacheRoleCache             = conCache.RoleCache
+	ContractCacheRoleBacking           = conCache.RoleBacking
+	ContractChainRoleAppend            = conChain.RoleAppend
+	ContractChainRoleReplay            = conChain.RoleReplay
+	ContractChainRoleVerify            = conChain.RoleVerify
+	ContractCircuitBreakerRoleFn       = conCircuitBreaker.RoleFn
+	ContractCodecRoleForward           = conCodec.RoleForward
+	ContractCodecRoleInverse           = conCodec.RoleInverse
+	ContractCursorRoleNext             = conCursor.RoleNext
+	ContractCursorRoleClose            = conCursor.RoleClose
+	ContractCursorRoleOpen             = conCursor.RoleOpen
+	ContractIfAbsentRoleWriter         = conIfAbsent.RoleWriter
+	ContractIfMatchRoleWriter          = conIfMatch.RoleWriter
+	ContractIfMatchRoleMatch           = conIfMatch.RoleMatch
+	ContractLeaderElectionRoleCampaign = conLeaderElection.RoleCampaign
+	ContractLeaderElectionRoleResign   = conLeaderElection.RoleResign
+	ContractLeaderElectionRoleIsLeader = conLeaderElection.RoleIsLeader
+	ContractLeaseRoleAcquire           = conLease.RoleAcquire
+	ContractLeaseRoleRelease           = conLease.RoleRelease
+	ContractOutboxRoleAppend           = conOutbox.RoleAppend
+	ContractOutboxRoleSubscribe        = conOutbox.RoleSubscribe
+	ContractPaginationRoleReader       = conPagination.RoleReader
+	ContractPersisterRoleWriter        = conPersister.RoleWriter
+	ContractPersisterRoleReader        = conPersister.RoleReader
+	ContractPoolRoleGet                = conPool.RoleGet
+	ContractPoolRolePut                = conPool.RolePut
+	ContractPoolRoleStats              = conPool.RoleStats
+	ContractPublisherRolePublish       = conPublisher.RolePublish
+	ContractPublisherRoleSubscribe     = conPublisher.RoleSubscribe
+	ContractPublisherRoleRedeliver     = conPublisher.RoleRedeliver
+	ContractRateLimitRoleFn            = conRateLimit.RoleFn
+	ContractSagaRoleStep               = conSaga.RoleStep
+	ContractSagaRoleCompensate         = conSaga.RoleCompensate
+	ContractSingleFlightRoleFn         = conSingleFlight.RoleFn
+	ContractTransactionRoleFn          = conTransaction.RoleFn
+	ContractTxRoleBegin                = conTx.RoleBegin
+	ContractTxRoleCommit               = conTx.RoleCommit
+	ContractTxRoleRollback             = conTx.RoleRollback
+	ContractUpdaterRoleWriter          = conUpdater.RoleWriter
+	ContractUpdaterRoleReader          = conUpdater.RoleReader
+	ContractUpserterRoleWriter         = conUpserter.RoleWriter
+	ContractUpserterRoleReader         = conUpserter.RoleReader
+	ContractWatcherRoleWatch           = conWatcher.RoleWatch
+	ContractWatcherRoleTrigger         = conWatcher.RoleTrigger
+	ContractWorkflowRoleFn             = conWorkflow.RoleFn
+)
+
 // The mixin names the catalog registers.
 //
 // Each is its own package's Name, so a rename there is a compile
@@ -513,6 +579,39 @@ type Param struct {
 	// Param is the declaration as the owner registered it: Key, Kind,
 	// Role and Required promote.
 	shape.Param
+}
+
+// Role is one role a contract declares, with the contract that owns
+// it.
+type Role struct {
+	// Owner is the contract name the role belongs to.
+	Owner Name
+
+	// Role is the role as the contract registered it.
+	Role string
+}
+
+// ContractRoles returns every contract role the catalog declares,
+// sorted by owner then role. The returned slice is freshly allocated;
+// callers may mutate it.
+//
+// Read off the registered catalog rather than restated, on the same
+// terms as [ContractParams]: what is hand-maintained is the per-role
+// constants above, and the test pins that every role here has one.
+func ContractRoles() []Role {
+	var out []Role
+	for _, c := range contracts.All() {
+		for _, r := range c.Roles {
+			out = append(out, Role{Owner: Name(c.Name), Role: r})
+		}
+	}
+	slices.SortFunc(out, func(a, b Role) int {
+		if a.Owner != b.Owner {
+			return strings.Compare(string(a.Owner), string(b.Owner))
+		}
+		return strings.Compare(a.Role, b.Role)
+	})
+	return out
 }
 
 // ContractParams returns every contract parameter the catalog

@@ -8,10 +8,13 @@ import "go.thesmos.sh/eidos/plugins/annotator/shape"
 // Name is the canonical contract name this package stamps.
 const Name = "rate-limit"
 
+// RoleFn is the callable the limiter admits or refuses.
+const RoleFn = "fn"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"fn"}
+var Roles = []string{RoleFn}
 
 // ParamRate is the KV key naming the sustained rate the limiter
 // admits, and ParamBurst the allowance above it a caller may spend at

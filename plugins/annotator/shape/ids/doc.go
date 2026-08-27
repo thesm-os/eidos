@@ -26,15 +26,22 @@
 // consumer learns that without grepping the catalog.
 //
 // Beside the names sit the catalog's answers about them. The set
-// functions ([Detectors], [Contracts], [Mixins], [ContractParams],
-// [MixinParams]) enumerate what is registered; the lookups
-// ([ContractOf], [MixinOf], [DetectorOf], [ContractParam],
+// functions ([Detectors], [Contracts], [Mixins], [ContractRoles],
+// [ContractParams], [MixinParams]) enumerate what is registered; the
+// lookups ([ContractOf], [MixinOf], [DetectorOf], [ContractParam],
 // [MixinParam]) answer for one name — the roles a contract declares,
 // a key's [shape.ParamKind], its role scope, whether a directive must
 // carry it. All of it is read off the registered specs rather than
 // restated, so what this package answers is what the validator
 // enforces; the hand-maintained part is the constants alone, and the
-// tests pin that every registered name and key has one.
+// tests pin that every registered name, role and key has one.
+//
+// Roles are spelled `Contract<Name>Role<Role>`, the shape the
+// parameter constants already used. A contract's directive names a
+// role and a consumer selects on one, so a role left as a literal is
+// the same half-a-link a literal key is: hold [ContractPersister]
+// beside `"writer"` and a rename in the catalog leaves the caller
+// compiling and matching nothing.
 //
 // What stays with each shape's own package is the prose: a key's
 // docblock there explains what its value must name and how it

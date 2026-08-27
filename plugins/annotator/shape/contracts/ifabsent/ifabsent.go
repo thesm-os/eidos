@@ -29,10 +29,13 @@ var Params = []shape.Param{
 	{Key: ParamConflict, Kind: shape.KindVar},
 }
 
+// RoleWriter is the insert-if-absent callable.
+const RoleWriter = "writer"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
-var Roles = []string{"writer"}
+var Roles = []string{RoleWriter}
 
 // Contract returns the [shape.Contract] this package contributes.
 func Contract() shape.Contract {
