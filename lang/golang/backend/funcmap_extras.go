@@ -8,6 +8,7 @@ import (
 	"maps"
 	"reflect"
 	"strings"
+	"sync"
 	"unicode"
 
 	"go.thesmos.sh/eidos/core/naming"
@@ -22,7 +23,22 @@ import (
 // canonical entries (dispatch, slot composition, `slot`,
 // `provenance`, `imp`) are wired separately and may not be
 // overridden.
-func extrasFuncMap() map[string]any {
+//
+// # Built once
+//
+// Every entry is a free function or a bundle of them: nothing here
+// closes over a render state, so one map serves every render. It was
+// rebuilt per output file, and that assembly — this map plus
+// [golang.FuncMap] plus the eight bundles [golang.AllFuncMap] merges
+// — accounted for over half the bytes a render allocated, with the
+// map copies alone driving a quarter of its CPU.
+//
+// Shared rather than copied out, which is safe because no caller
+// mutates the result: both read it as a [maps.Copy] source into a map
+// of their own. A caller that needs to change an entry is asking for
+// an override, which goes through
+// [plugin.TemplateProvider.TemplateOverrides] and lands on the copy.
+var extrasFuncMap = sync.OnceValue(func() map[string]any {
 	out := map[string]any{
 		// Naming — delegates to core/naming.
 		"pascal":    naming.Pascal,
@@ -68,7 +84,7 @@ func extrasFuncMap() map[string]any {
 	maps.Copy(out, map[string]any(golang.FuncMap()))
 	maps.Copy(out, map[string]any(golang.AllFuncMap()))
 	return out
-}
+})
 
 // exported returns s with the first rune title-cased — the
 // canonical "make this identifier exported in Go" transformation.

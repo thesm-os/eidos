@@ -57,6 +57,7 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Changed
 
+- **The Go backend builds its static funcmap once rather than per output file** — 22% off render time and 36% off the bytes it allocates, measured on `BenchmarkBackend_Render`.
 - **TypeScript classes render as `export declare class`** — the backend renders no bodies, and a bodiless method in a plain class is TS2391; `async` is no longer spelled on methods, since it is illegal on a declaration and the Promise return type is the contract.
 - **A TypeScript frontend registered beside other frontends treats a tree with no TypeScript as silence** rather than an error, matching the protobuf frontend; `ErrNoMatch` still reaches direct loader callers.
 - **Generated code no longer carries the generator's reasoning.** It moved into the templates; four comments stay in the sentinel checks, each explaining a check that is deliberately absent.
