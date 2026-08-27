@@ -10,7 +10,14 @@
 // Presence is the whole signal: nothing in a signature reveals it, so
 // it is declared rather than detected.
 //
-// The recognised directive is:
+// Witnessing it takes the write the two reads straddle, which `write=`
+// names. The key is optional — a read answering a consistent snapshot
+// is what this classifies either way — but a law that reads the
+// partner does not bind without it, so a subject declaring only the
+// bare form states the property and derives no check from it.
+//
+// The recognised directives are:
 //
 //	//+gen:mixin pointintime
+//	//+gen:mixin pointintime write=Store
 package pointintime

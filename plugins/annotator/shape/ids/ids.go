@@ -381,7 +381,9 @@ const (
 	MixinCRDTMergeParamWrite                = mixCRDTMerge.ParamWrite
 	MixinDeleteRemovesParamRead             = mixDeleteRemoves.ParamRead
 	MixinDeleteRemovesParamSentinel         = mixDeleteRemoves.ParamSentinel
+	MixinEventuallyParamObserve             = mixEventually.ParamObserve
 	MixinEventuallyParamSettle              = mixEventually.ParamSettle
+	MixinPointInTimeParamWrite              = mixPointInTime.ParamWrite
 	MixinEventuallyParamSync                = mixEventually.ParamSync
 	MixinHooksParamRegister                 = mixHooks.ParamRegister
 	MixinIndexedParamBy                     = mixIndexed.ParamBy
