@@ -213,6 +213,48 @@ func unresolvedType(t *node.TypeRef, reason ResolveProblem) UnresolvedType {
 	return UnresolvedType{Type: t, Written: Display(t), Reason: reason}
 }
 
+// stdlibComparables answers comparability for named standard-library
+// types, keyed by import path and name.
+//
+// The resolver answers declarations the run loaded and the standard
+// library is never among them, so a struct holding a `time.Duration`
+// came back undetermined — and a caller honouring the problems slice
+// then refuses every comparison the struct is party to, which is a
+// verdict about the author's code that is simply wrong. The same gap
+// [stdlibSamples] closes for values, on the same terms: the answer
+// lives in a declaration the resolver cannot reach, so nothing
+// derived can supply it.
+//
+// Curated rather than swept. Each entry is a fact someone checked
+// against the type's definition, and it is extended when a corpus
+// asks for one rather than filled in from a list of plausible names.
+//
+// The `sync` types are deliberately absent although they compare.
+// `sync.Mutex` is a struct of two integers and `==` on one is legal
+// Go, but a generated comparison over a value holding a lock is
+// exactly what `go vet`'s copylocks exists to catch — so answering
+// true here would hand a consumer output that builds and fails their
+// vet step. Undetermined is the better answer for those: it refuses
+// the check rather than emitting a bad one.
+//
+//nolint:gochecknoglobals // package-curated comparability table
+var stdlibComparables = map[[2]string]bool{
+	// Comparable: an int64, and a struct of two integers and a
+	// pointer.
+	{pkgTime, "Duration"}: true,
+	{pkgTime, "Time"}:     true,
+
+	// Not comparable: both hold a []byte.
+	{"strings", "Builder"}: false,
+	{"bytes", "Buffer"}:    false,
+}
+
+// stdlibComparable answers for a named type in [stdlibComparables].
+func stdlibComparable(t *node.TypeRef) (equalable, ok bool) {
+	equalable, found := stdlibComparables[[2]string{t.Package, t.Name}]
+	return equalable, found
+}
+
 // comparableDeep is [ComparableDeep] with the recursion budget and
 // the cycle guard threaded through.
 func comparableDeep(
@@ -251,6 +293,14 @@ func comparableDeep(
 		return true, true, nil
 	}
 	seen[key] = struct{}{}
+
+	// Consulted before the resolver gate, on the terms [stdlibSample]
+	// is: a nil-resolver caller gets the answer too, and nothing can
+	// shadow a standard-library import path, so the order is
+	// unobservable beyond that.
+	if eq, ok := stdlibComparable(t); ok {
+		return eq, true, nil
+	}
 
 	if r == nil {
 		return false, false, []UnresolvedType{unresolvedType(t, NoResolver)}

@@ -490,6 +490,71 @@ func TestSatisfiesEdges(t *testing.T) {
 	})
 }
 
+// TestComparableDeepAnswersForCuratedStdlibTypes pins the table that
+// closes the gap the resolver cannot: the standard library is never
+// among the declarations a run loaded, so a struct holding one of
+// these came back undetermined and every comparison it was party to
+// was refused.
+func TestComparableDeepAnswersForCuratedStdlibTypes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a struct holding a stdlib scalar is comparable", func(t *testing.T) {
+		t.Parallel()
+		// The reported case. Entry is comparable in Go — both fields
+		// are — and the walk used to stop at time.Duration and report
+		// the whole struct undetermined.
+		entry := &node.Struct{
+			Name: "Entry", Package: "kv",
+			Fields: []*node.Field{
+				field("Key", builtinRef("string")),
+				field("Lifetime", namedTypeRef("time", "Duration")),
+			},
+		}
+		r := mapResolver{"kv.Entry": entry}
+		ok, problems := golang.ComparableDeep(namedTypeRef("kv", "Entry"), r)
+		if !ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep(kv.Entry) = %v, %d problems; want true and none", ok, len(problems))
+		}
+	})
+
+	t.Run("a curated non-comparable is a verdict, not a gap", func(t *testing.T) {
+		t.Parallel()
+		// The direction that matters as much: bytes.Buffer holds a
+		// []byte, so the answer is a definite no. Reporting it as
+		// undetermined would leave a caller unable to tell a type it
+		// must not compare from one it could not see.
+		buf := &node.Struct{
+			Name: "Buf", Package: "kv",
+			Fields: []*node.Field{field("B", namedTypeRef("bytes", "Buffer"))},
+		}
+		r := mapResolver{"kv.Buf": buf}
+		ok, problems := golang.ComparableDeep(namedTypeRef("kv", "Buf"), r)
+		if ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep(kv.Buf) = %v, %d problems; want false and none", ok, len(problems))
+		}
+	})
+
+	t.Run("the table answers without a resolver", func(t *testing.T) {
+		t.Parallel()
+		// Consulted before the resolver gate, so a caller holding no
+		// graph still gets the answer rather than NoResolver.
+		if ok, problems := golang.ComparableDeep(namedTypeRef("time", "Time"), nil); !ok || len(problems) != 0 {
+			t.Fatalf("ComparableDeep(time.Time, nil) = %v, %d problems", ok, len(problems))
+		}
+	})
+
+	t.Run("an uncurated stdlib type is still undetermined", func(t *testing.T) {
+		t.Parallel()
+		// The table is curated, not a claim about the whole standard
+		// library: a name nobody checked reports NotLoaded rather than
+		// guessing, which is what keeps each entry an assertion.
+		ok, problems := golang.ComparableDeep(namedTypeRef("net/url", "URL"), mapResolver{})
+		if ok || len(problems) != 1 || problems[0].Reason != golang.NotLoaded {
+			t.Fatalf("ComparableDeep(url.URL) = %v, %v; want undetermined", ok, problems)
+		}
+	})
+}
+
 func TestComparableDeepReportsWhatItCouldNotReach(t *testing.T) {
 	t.Parallel()
 
@@ -498,9 +563,14 @@ func TestComparableDeepReportsWhatItCouldNotReach(t *testing.T) {
 		// A caller that can only say "comparability is undetermined"
 		// leaves the author to find which of a struct's fields was the
 		// problem.
-		_, problems := golang.ComparableDeep(namedTypeRef("time", "Time"), mapResolver{})
-		if len(problems) != 1 || problems[0].Written != "time.Time" {
-			t.Fatalf("problems = %+v, want one naming time.Time", problems)
+		//
+		// Named against a package no run loads rather than a
+		// standard-library one: the curated table answers for those,
+		// and pinning this on an entry it does not carry yet would
+		// break the day someone adds it.
+		_, problems := golang.ComparableDeep(namedTypeRef("elsewhere", "Opaque"), mapResolver{})
+		if len(problems) != 1 || problems[0].Written != "elsewhere.Opaque" {
+			t.Fatalf("problems = %+v, want one naming elsewhere.Opaque", problems)
 		}
 		if problems[0].Reason != golang.NotLoaded {
 			t.Fatalf("reason = %q, want not-loaded", problems[0].Reason)
@@ -524,8 +594,8 @@ func TestComparableDeepReportsWhatItCouldNotReach(t *testing.T) {
 		s := &node.Struct{
 			Name: "Mixed", Package: "x",
 			Fields: []*node.Field{
-				{Name: "At", Type: namedTypeRef("time", "Time")},
-				{Name: "D", Type: namedTypeRef("time", "Duration")},
+				{Name: "At", Type: namedTypeRef("elsewhere", "Opaque")},
+				{Name: "D", Type: namedTypeRef("faraway", "Other")},
 			},
 		}
 		r := mapResolver{"x.Mixed": s}
