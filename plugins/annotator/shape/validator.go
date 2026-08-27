@@ -181,6 +181,7 @@ func (v *Validator) visit(ctx *sdk.AnnotatorContext, host sdk.Node, bag *sdk.Bag
 		}
 		role, _ := ContractRoleKey(spec.Name).Get(bag)
 		v.checkRequired(host, bag, role, spec, sink)
+		checkRequiredContractParams(host, bag, role, spec, sink)
 		v.accumulate(spec, role, host, bag)
 	}
 	for _, mixinName := range Mixins(bag) {
@@ -188,6 +189,7 @@ func (v *Validator) visit(ctx *sdk.AnnotatorContext, host sdk.Node, bag *sdk.Bag
 		if !ok {
 			continue
 		}
+		checkRequiredMixinParams(host, bag, spec, sink)
 		v.accumulateMixin(spec, host, bag)
 	}
 }
@@ -214,6 +216,55 @@ func (*Validator) checkRequired(
 		sink.Errorf(host.Pos(),
 			"shape.contract %q: role %q requires partner %q, none stamped",
 			spec.Name, role, partnerRole)
+	}
+}
+
+// checkRequiredContractParams emits a diagnostic for each param
+// declared [Param.Required] within the host's role whose key the
+// folded stamps hold no value for.
+//
+// The framework's check rather than each contract's, because the
+// hand-rolled alternative is indistinguishable from an optional
+// param when it is forgotten — the shape `cursor` carried before
+// this existed. Scoped through [ParamsForRole], the single home for
+// which params apply to a directive hosted by role, so a key the
+// producer arm must carry binds nowhere else.
+//
+// Read off the bag rather than any one directive: by the time this
+// runs, every line on the host has been folded into the stamps, so
+// a declaration assembled across lines is judged whole.
+func checkRequiredContractParams(
+	host sdk.Node, bag *sdk.Bag, role string, spec Contract, sink *sdk.PluginSink,
+) {
+	for _, p := range ParamsForRole(spec.Params, role) {
+		if !p.Required {
+			continue
+		}
+		if got, _ := ContractParamKey(spec.Name, p.Key).Get(bag); got != "" {
+			continue
+		}
+		sink.Errorf(host.Pos(),
+			"shape.contract %q: role %q requires %s=, none stamped",
+			spec.Name, role, p.Key)
+	}
+}
+
+// checkRequiredMixinParams is [checkRequiredContractParams] for a
+// mixin attachment, which has no role to scope by: every required
+// key binds on every host the mixin is attached to.
+func checkRequiredMixinParams(
+	host sdk.Node, bag *sdk.Bag, spec Mixin, sink *sdk.PluginSink,
+) {
+	for _, p := range spec.Params {
+		if !p.Required {
+			continue
+		}
+		if got, _ := MixinParamKey(spec.Name, p.Key).Get(bag); got != "" {
+			continue
+		}
+		sink.Errorf(host.Pos(),
+			"shape.mixin %q: requires %s=, none stamped",
+			spec.Name, p.Key)
 	}
 }
 

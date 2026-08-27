@@ -109,6 +109,30 @@ type Param struct {
 	// ignoring it, because a scope that silently never applies is
 	// the failure mode this field was added to remove.
 	Role string
+
+	// Required marks a key the directive must carry for the
+	// classification to state its own sentence — the validator
+	// reports a host whose folded stamps hold no value for it.
+	//
+	// A property of the key, declared beside the key, on the same
+	// argument [ParamKind] makes above: a parallel required-list
+	// would be the two-slices shape that has to be kept in
+	// agreement by hand. It is not a value check — a key present
+	// with a malformed value is [Mixin.Validate]'s to judge, as
+	// `retrysucceeds` does — and an empty value counts as absent,
+	// matching the stamping pass, which never stamps one.
+	//
+	// Enforced over the host's folded stamps rather than per
+	// directive line, so a declaration split across lines — one
+	// naming `fn=`, the next `unready=` — assembles one complete
+	// attachment rather than two incomplete ones.
+	//
+	// Where [Param.Role] is set, required binds only on directives
+	// that role hosts: a key the producer arm must carry says
+	// nothing about the reader arm. The zero value keeps today's
+	// behaviour — absence is legal, and whether a check is worth
+	// emitting without the key belongs to the consumer.
+	Required bool
 }
 
 // ParamsForRole returns the params that apply to a directive hosted

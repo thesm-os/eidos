@@ -29,10 +29,19 @@ const ParamUnready = "unready"
 
 // Params enumerates the KV parameter names this mixin accepts.
 //
+// Both are required, because each is half of the mixin's one
+// sentence. Without `fn=`, "only after the named sibling has run" is
+// not a statement about anything; without `unready=`, an early call
+// is asserted with a bare non-nil check, which an implementation
+// failing early for an unrelated reason passes as ordering
+// enforcement. A directive carrying either half alone used to stamp
+// clean, and the weakening surfaced only in whatever a consumer
+// managed to derive from the half it got.
+//
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []shape.Param{
-	{Key: ParamFn, Kind: shape.KindCallable},
-	{Key: ParamUnready, Kind: shape.KindVar},
+	{Key: ParamFn, Kind: shape.KindCallable, Required: true},
+	{Key: ParamUnready, Kind: shape.KindVar, Required: true},
 }
 
 // Mixin returns the [shape.Mixin] this package contributes.

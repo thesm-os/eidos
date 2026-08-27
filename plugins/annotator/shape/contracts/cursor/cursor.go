@@ -4,8 +4,6 @@
 package cursor
 
 import (
-	"fmt"
-
 	"go.thesmos.sh/eidos/plugins/annotator/shape"
 )
 
@@ -44,10 +42,21 @@ const RoleOpen = "open"
 // absent from the host's scope, because they live on the handle it
 // returns rather than beside it.
 //
+// `next` is required on the producer arm and `close` is not, and the
+// asymmetry is the contract's own. On `role=next` the reader is the
+// host itself, so the contract cannot be stamped without one; on
+// `role=open` the host is the factory, and `next=` is the only thing
+// identifying what to read from the cursor it answers — omit it and
+// the callable still classifies as a producer while every law
+// selecting the contract has nothing to call. A caller releasing the
+// handle by other means — a deferred close at the call site, a
+// cancelled context — has a cursor whose contract is honestly stated
+// without `close=`.
+//
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
 	{Key: ParamSentinel, Kind: shape.KindVar},
-	{Key: ParamNext, Kind: shape.KindMember, Role: RoleOpen},
+	{Key: ParamNext, Kind: shape.KindMember, Role: RoleOpen, Required: true},
 	{Key: ParamClose, Kind: shape.KindMember, Role: RoleOpen},
 }
 
@@ -62,41 +71,13 @@ var Params = []shape.Param{
 var Roles = []string{"next", "close", RoleOpen}
 
 // Contract returns the [shape.Contract] this package contributes.
+// No Validate hook: the one thing it checked — an `open` host naming
+// the handle's reader — is declared on [Params] now, where forgetting
+// it is impossible rather than invisible.
 func Contract() shape.Contract {
 	return shape.Contract{
-		Name:     Name,
-		Roles:    Roles,
-		Params:   Params,
-		Validate: validate,
+		Name:   Name,
+		Roles:  Roles,
+		Params: Params,
 	}
-}
-
-// validate requires an `open` host to name the handle's reader.
-//
-// The producer arm needs it where the method arms do not: on `role=next`
-// the reader is the host itself, so the contract cannot be stamped
-// without one. On `role=open` the host is the factory, and `next=` is
-// the only thing identifying what to read from the cursor it answers —
-// omit it and the callable still classifies as a cursor producer while
-// every law selecting the contract has nothing to call.
-//
-// `close` stays optional in both directions. It is optional on the
-// method arms already, and a caller releasing the handle by other
-// means — a deferred close at the call site, a cancelled context —
-// has a cursor whose contract is honestly stated without one.
-func validate(members map[string][]shape.ContractMember) []shape.ContractViolation {
-	var out []shape.ContractViolation
-	for _, m := range members[RoleOpen] {
-		if m.Params[ParamNext] != "" {
-			continue
-		}
-		out = append(out, shape.ContractViolation{
-			Host: m.Host,
-			Message: fmt.Sprintf(
-				"cursor role %q requires %s=, naming the reader on the handle it answers",
-				RoleOpen, ParamNext,
-			),
-		})
-	}
-	return out
 }

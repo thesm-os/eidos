@@ -152,7 +152,7 @@ func TestContract_ProducerArm(t *testing.T) {
 		_, pkg := buildProducer(false)
 		diags := contracttest.RunPipeline(t, cursor.Contract(), pkg)
 		contracttest.AssertContainsDiag(t, diags, sdk.SeverityError,
-			`cursor role "open" requires next=`)
+			`shape.contract "cursor": role "open" requires next=`)
 	})
 }
 

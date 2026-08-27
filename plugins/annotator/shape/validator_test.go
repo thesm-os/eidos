@@ -5,6 +5,7 @@ package shape_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"go.thesmos.sh/eidos/core/diag"
@@ -382,6 +383,147 @@ func TestValidator_MixinValidate(t *testing.T) {
 			t.Fatalf("attachments[0].Params[tag] = %q, want %q", got, "important")
 		}
 	})
+}
+
+// TestValidator_RequiredParams covers the declarative half of what
+// [shape.Mixin.Validate] could only enforce by hand: a directive that
+// omits a key its classification's own sentence needs is reported,
+// and a complete declaration is not — however it was assembled.
+func TestValidator_RequiredParams(t *testing.T) {
+	t.Parallel()
+
+	// ordered stands in for orderafter: two required keys, one
+	// resolvable kind each is irrelevant here since nothing resolves.
+	ordered := shape.Mixin{
+		Name: "ordered",
+		Params: []shape.Param{
+			{Key: "fn", Required: true},
+			{Key: "unready", Required: true},
+		},
+	}
+
+	t.Run("a directive omitting a required key is reported", func(t *testing.T) {
+		t.Parallel()
+		fn := contractFn("X", &sdk.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"ordered"},
+			KV:   map[string]string{"fn": "Initialise"},
+		})
+		diags := runMixinPipeline(t, ordered, &sdk.Package{
+			Name: "x", Path: "x", Functions: []*sdk.Function{fn},
+		})
+		assertHasError(t, diags, `shape.mixin "ordered": requires unready=`)
+	})
+
+	t.Run("a declaration split across lines is judged whole", func(t *testing.T) {
+		t.Parallel()
+		// The reason the check reads folded stamps rather than any one
+		// directive: each line alone is incomplete, and the pair is one
+		// legitimate attachment.
+		fn := contractFn("X",
+			&sdk.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"ordered"},
+				KV:   map[string]string{"fn": "Initialise"},
+			},
+			&sdk.Directive{
+				Name: shape.MixinDirectiveName,
+				Args: []string{"ordered"},
+				KV:   map[string]string{"unready": "ErrNotReady"},
+			},
+		)
+		diags := runMixinPipeline(t, ordered, &sdk.Package{
+			Name: "x", Path: "x", Functions: []*sdk.Function{fn},
+		})
+		assertNoError(t, diags, "requires")
+	})
+
+	t.Run("an empty value counts as absent", func(t *testing.T) {
+		t.Parallel()
+		// The stamping pass never stamps one, so `unready=` with no
+		// value and no `unready=` at all are one folded state — and
+		// reporting only the second would let the first state the
+		// classification without its sentence.
+		fn := contractFn("X", &sdk.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"ordered"},
+			KV:   map[string]string{"fn": "Initialise", "unready": ""},
+		})
+		diags := runMixinPipeline(t, ordered, &sdk.Package{
+			Name: "x", Path: "x", Functions: []*sdk.Function{fn},
+		})
+		assertHasError(t, diags, `shape.mixin "ordered": requires unready=`)
+	})
+
+	t.Run("a required contract param binds only on its role", func(t *testing.T) {
+		t.Parallel()
+		// The producer arm must name the handle's reader; the reader
+		// arm IS the reader, and a required key leaking across roles
+		// would report every correct method-arm directive.
+		spec := shape.Contract{
+			Name:  "walker",
+			Roles: []string{"step", "open"},
+			Params: []shape.Param{
+				{Key: "step", Role: "open", Required: true},
+			},
+		}
+		hostedBy := func(role string) *sdk.Function {
+			return contractFn("On"+role, &sdk.Directive{
+				Name: shape.ContractDirectiveName,
+				Args: []string{"walker"},
+				KV:   map[string]string{"role": role},
+			})
+		}
+
+		diags := runFullPipeline(t, &sdk.Package{
+			Name: "x", Path: "x",
+			Functions: []*sdk.Function{hostedBy("open")},
+		}, spec)
+		assertHasError(t, diags, `shape.contract "walker": role "open" requires step=`)
+
+		diags = runFullPipeline(t, &sdk.Package{
+			Name: "x", Path: "x",
+			Functions: []*sdk.Function{hostedBy("step")},
+		}, spec)
+		assertNoError(t, diags, "requires step=")
+	})
+
+	t.Run("an unrequired key stays optional", func(t *testing.T) {
+		t.Parallel()
+		relaxed := shape.Mixin{
+			Name:   "relaxed",
+			Params: []shape.Param{{Key: "hint"}},
+		}
+		fn := contractFn("X", &sdk.Directive{
+			Name: shape.MixinDirectiveName,
+			Args: []string{"relaxed"},
+		})
+		diags := runMixinPipeline(t, relaxed, &sdk.Package{
+			Name: "x", Path: "x", Functions: []*sdk.Function{fn},
+		})
+		assertNoError(t, diags, "requires")
+	})
+}
+
+// assertHasError fails unless an error diagnostic contains want.
+func assertHasError(t *testing.T, diags []sdk.Diag, want string) {
+	t.Helper()
+	for _, d := range diags {
+		if d.Severity == sdk.SeverityError && strings.Contains(d.Message, want) {
+			return
+		}
+	}
+	t.Fatalf("no error diagnostic containing %q; got %+v", want, diags)
+}
+
+// assertNoError fails when any error diagnostic contains fragment.
+func assertNoError(t *testing.T, diags []sdk.Diag, fragment string) {
+	t.Helper()
+	for _, d := range diags {
+		if d.Severity == sdk.SeverityError && strings.Contains(d.Message, fragment) {
+			t.Fatalf("unexpected diagnostic %q", d.Message)
+		}
+	}
 }
 
 // runMixinPipeline runs the umbrella → resolver → validator

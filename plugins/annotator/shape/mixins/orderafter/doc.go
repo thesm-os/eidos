@@ -8,5 +8,5 @@
 //
 // The recognised directive is:
 //
-//	//+gen:mixin orderafter fn=Initialise
+//	//+gen:mixin orderafter fn=Initialise unready=ErrNotReady
 package orderafter
