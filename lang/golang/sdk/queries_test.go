@@ -41,6 +41,19 @@ func TestQueriesForward(t *testing.T) {
 		if got, want := sdkgo.LocalName("time.Time"), golang.LocalName("time.Time"); got != want {
 			t.Errorf("LocalName = %q, want %q", got, want)
 		}
+		// Display drops the path where QName keeps it — the pair a
+		// diagnostic and a comparison want respectively, and the
+		// reason forwarding one alone was a gap.
+		qualified := named("example.com/store", "User")
+		if got, want := sdkgo.Display(qualified), golang.Display(qualified); got != want {
+			t.Errorf("Display = %q, want %q", got, want)
+		}
+		if got := sdkgo.Display(qualified); got != "store.User" {
+			t.Errorf("Display = %q, want the author's spelling store.User", got)
+		}
+		if sdkgo.QName(qualified) == sdkgo.Display(qualified) {
+			t.Error("Display and QName agree, so the forwarded pair proves nothing")
+		}
 		if got, want := sdkgo.Deref(ptr), golang.Deref(ptr); got != want || got == ptr {
 			t.Errorf("Deref = %v, want %v (and not the pointer itself)", got, want)
 		}

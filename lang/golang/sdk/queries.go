@@ -36,6 +36,17 @@ func QName(t *sdk.TypeRef) string { return golang.QName(t) }
 // identifier a generated file in that package would write.
 func LocalName(qualified string) string { return golang.LocalName(qualified) }
 
+// Display returns the spelling a source author would recognise —
+// `store.User` rather than `example.com/store.User`.
+//
+// For diagnostics, never for generated source: it drops the import
+// path, so nothing can resolve or import what it names. [QName] is
+// the other half of the pair and was forwarded alone, which left a
+// plugin's every type-naming refusal printing the path at an author
+// who wrote the base — in the message they read to decide whether a
+// claim they lost is worth recovering. Compare on QName; print this.
+func Display(t *sdk.TypeRef) string { return golang.Display(t) }
+
 // Deref strips one pointer, answering t unchanged when it is not one.
 func Deref(t *sdk.TypeRef) *sdk.TypeRef { return golang.Deref(t) }
 
