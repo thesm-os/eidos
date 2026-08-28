@@ -709,20 +709,27 @@ func TestExplainCommand_EveryEmitKind(t *testing.T) {
 			t.Fatalf("seed file init slot: %v", err)
 		}
 
-		return &node.Package{
-				Name: pkg, Path: pkg,
-				Structs: []*node.Struct{order},
-			}, &emit.Package{
-				Name: pkg, Path: pkg,
-				Files:      []*emit.File{file},
-				Structs:    []*emit.Struct{{BaseEmit: base(), Name: "OrderMock", Package: pkg, Target: target}},
-				Interfaces: []*emit.Interface{{BaseEmit: base(), Name: "OrderPort", Package: pkg, Target: target}},
-				Functions:  []*emit.Function{{BaseEmit: base(), Name: "NewOrder", Package: pkg, Target: target}},
-				Variables:  []*emit.Variable{{BaseEmit: base(), Name: "DefaultOrder", Package: pkg, Target: target}},
-				Constants:  []*emit.Constant{{BaseEmit: base(), Name: "MaxOrders", Package: pkg, Target: target}},
-				Enums:      []*emit.Enum{{BaseEmit: base(), Name: "OrderState", Package: pkg, Target: target}},
-				Aliases:    []*emit.Alias{{BaseEmit: base(), Name: "OrderID", Package: pkg, File: target}},
-			}
+		// Bound rather than returned inline. A multi-value return of
+		// two composite literals is the one construct gci and gofumpt
+		// disagree about — gci dedents the continuation, gofumpt
+		// indents it back — so a file carrying one can never satisfy
+		// both and `ergon fmt` alternates between them forever.
+		src := &node.Package{
+			Name: pkg, Path: pkg,
+			Structs: []*node.Struct{order},
+		}
+		out := &emit.Package{
+			Name: pkg, Path: pkg,
+			Files:      []*emit.File{file},
+			Structs:    []*emit.Struct{{BaseEmit: base(), Name: "OrderMock", Package: pkg, Target: target}},
+			Interfaces: []*emit.Interface{{BaseEmit: base(), Name: "OrderPort", Package: pkg, Target: target}},
+			Functions:  []*emit.Function{{BaseEmit: base(), Name: "NewOrder", Package: pkg, Target: target}},
+			Variables:  []*emit.Variable{{BaseEmit: base(), Name: "DefaultOrder", Package: pkg, Target: target}},
+			Constants:  []*emit.Constant{{BaseEmit: base(), Name: "MaxOrders", Package: pkg, Target: target}},
+			Enums:      []*emit.Enum{{BaseEmit: base(), Name: "OrderState", Package: pkg, Target: target}},
+			Aliases:    []*emit.Alias{{BaseEmit: base(), Name: "OrderID", Package: pkg, File: target}},
+		}
+		return src, out
 	}
 
 	run := func(t *testing.T, selector string) (int, string, string) {
