@@ -425,6 +425,7 @@ const (
 	MixinTTLParamPut                        = mixTTL.ParamPut
 	MixinTTLParamRead                       = mixTTL.ParamRead
 	MixinValidatesParamFn                   = mixValidates.ParamFn
+	MixinValidatesParamInvalid              = mixValidates.ParamInvalid
 	MixinWindowedParamCount                 = mixWindowed.ParamCount
 	MixinWindowedParamIncr                  = mixWindowed.ParamIncr
 	MixinWindowedParamWindow                = mixWindowed.ParamWindow

@@ -332,6 +332,7 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 			{ids.MixinTimeout, ids.MixinTimeoutParamDuration},
 			{ids.MixinTotal, ids.MixinTotalParamDomain},
 			{ids.MixinValidates, ids.MixinValidatesParamFn},
+			{ids.MixinValidates, ids.MixinValidatesParamInvalid},
 			{ids.MixinWindowed, ids.MixinWindowedParamCount},
 			{ids.MixinWindowed, ids.MixinWindowedParamIncr},
 			{ids.MixinWindowed, ids.MixinWindowedParamWindow},
