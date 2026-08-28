@@ -277,6 +277,7 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 			{ids.ContractTx, ids.ContractTxParamClosed},
 			{ids.ContractWatcher, ids.ContractWatcherParamNext},
 			{ids.ContractWatcher, ids.ContractWatcherParamStop},
+			{ids.ContractWorkflow, ids.ContractWorkflowParamObserve},
 			{ids.ContractWorkflow, ids.ContractWorkflowParamTransitions},
 		})
 	})

@@ -363,6 +363,7 @@ const (
 	ContractTxParamClosed            = conTx.ParamClosed
 	ContractWatcherParamNext         = conWatcher.ParamNext
 	ContractWatcherParamStop         = conWatcher.ParamStop
+	ContractWorkflowParamObserve     = conWorkflow.ParamObserve
 	ContractWorkflowParamTransitions = conWorkflow.ParamTransitions
 )
 

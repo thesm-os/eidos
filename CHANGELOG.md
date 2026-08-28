@@ -22,11 +22,13 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Breaking
 
+- **`workflow`'s `transitions=` names the declaration holding the graph, not an encoding of it** ([#87](https://github.com/thesm-os/eidos/issues/87)). `shape.KindVar`: `transitions=Transitions` beside `var Transitions = map[State][]State{…}`, so the author's model stays theirs and a consumer indexes it rather than parsing it. **The encoded form no longer resolves** — it had already drifted into two notations across the two repositories using it, with nothing parsing either.
 - **`ids.Param` embeds `shape.Param`.** A positional `ids.Param{owner, key}` literal no longer compiles; `Key`, `Kind`, `Role` and `Required` promote, so the accessors answer a key's whole declaration rather than its spelling.
 
 ### Added
 
 - **`lang/golang/sdk` forwards `SampleRefFor`, `BindTypeArgs` and `IsExported`, aliases `Source`, and `sdk` re-exports `ExprKind` with every variant** ([#75](https://github.com/thesm-os/eidos/issues/75)): the façade carried three of the five steps from a struct to a composed literal and produced the consumer of a `Sample` but not its producer, and a test asserting what a generator built had to import `emit` to name the kind.
+- **`workflow` accepts `observe=`, naming the read a check compares the state across a call through** ([#87](https://github.com/thesm-os/eidos/issues/87)). `shape.KindCallable`, optional: the graph says which moves are permitted and nothing said how to see one happen.
 - **`lang/golang/sdk` forwards `Display`** ([#86](https://github.com/thesm-os/eidos/issues/86)), so a plugin's diagnostics spell a type as its author wrote it — `store.User`, not `example.com/store.User`. `QName` was forwarded alone, and it is the comparison form.
 - **`accumulates` accepts `observe=`, naming the read the effect is counted through** ([#85](https://github.com/thesm-os/eidos/issues/85)). `shape.KindCallable`, optional: inverting the idempotence probe asserts the second call is *refused*, which is a different claim — a callable whose effect is out of band answers the same error twice whether it compounded or coalesced. **The package doc said the check needed nothing more; it was wrong and is corrected.**
 - **`rate-limit` accepts `limited=`, naming the sentinel a refused call reports** ([#84](https://github.com/thesm-os/eidos/issues/84)). `shape.KindVar`, optional: with `burst=N` a check counts to N+1 and requires a refusal, and until the refusal has a name any error satisfies it — including one from a limiter never implemented.
