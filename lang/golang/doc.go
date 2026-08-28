@@ -43,9 +43,11 @@
 //     double treats [NotLoaded] as an error, and one filling a
 //     documentation table treats it as a footnote. [ResolveProblem]
 //     is shared with the type walks, so one switch covers both.
-//     [EmbedsType], [StructOf] and [MemberField] ask one question of
-//     the same walks and answer a bool, for a caller aiming emitted
-//     code at a member rather than enumerating what is there.
+//     [EmbedsType], [StructOf], [MemberField], [InterfaceOf] and
+//     [MemberMethod] ask one question of the same walks and answer a
+//     bool, for a caller aiming emitted code at a member rather than
+//     enumerating what is there — on a struct's fields for the first
+//     pair, on a returned handle's method set for the second.
 //   - Satisfaction (satisfies.go): [Satisfies], [SameSignature],
 //     [UnderlyingOf], [ComparableDeep], [RecommendedReceiver].
 //     [ComparableDeep] reports []UnresolvedType on the same

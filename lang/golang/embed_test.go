@@ -946,3 +946,131 @@ func TestMemberField(t *testing.T) {
 		}
 	})
 }
+
+func TestInterfaceOf(t *testing.T) {
+	t.Parallel()
+
+	cursor := &node.Interface{Name: "Cursor", Package: "x"}
+	str := &node.Struct{Name: "Row", Package: "x"}
+	r := mapResolver{"x.Cursor": cursor, "x.Row": str}
+
+	t.Run("resolves a named reference to its interface", func(t *testing.T) {
+		t.Parallel()
+		got, ok := golang.InterfaceOf(namedTypeRef("x", "Cursor"), r)
+		if !ok || got != cursor {
+			t.Fatalf("InterfaceOf = %v, %v; want the Cursor declaration", got, ok)
+		}
+	})
+
+	t.Run("a declaration that is not an interface is no interface", func(t *testing.T) {
+		t.Parallel()
+		// The mirror of StructOf's arm: false rather than a wrong
+		// answer, since a struct has no method-set contract to read.
+		if got, ok := golang.InterfaceOf(namedTypeRef("x", "Row"), r); ok {
+			t.Fatalf("InterfaceOf(struct) = %v, true", got)
+		}
+	})
+
+	t.Run("a type the run never loaded is no interface", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.InterfaceOf(namedTypeRef("elsewhere", "Cursor"), r); ok {
+			t.Fatal("InterfaceOf resolved a type nothing loaded")
+		}
+	})
+
+	t.Run("a pointer is not followed", func(t *testing.T) {
+		t.Parallel()
+		ptr := &node.TypeRef{TypeKind: node.TypeRefPointer, Elem: namedTypeRef("x", "Cursor")}
+		if _, ok := golang.InterfaceOf(ptr, r); ok {
+			t.Fatal("InterfaceOf followed a pointer")
+		}
+		if got, ok := golang.InterfaceOf(golang.Deref(ptr), r); !ok || got != cursor {
+			t.Fatalf("InterfaceOf(Deref(ptr)) = %v, %v", got, ok)
+		}
+	})
+
+	t.Run("no reference and no resolver report nothing", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.InterfaceOf(nil, r); ok {
+			t.Error("InterfaceOf(nil) resolved something")
+		}
+		if _, ok := golang.InterfaceOf(namedTypeRef("x", "Cursor"), nil); ok {
+			t.Error("InterfaceOf with no resolver resolved something")
+		}
+	})
+}
+
+func TestMemberMethod(t *testing.T) {
+	t.Parallel()
+
+	base := &node.Interface{
+		Name: "Closer", Package: "x",
+		Methods: []*node.Method{{Name: "Close"}, {Name: "internal"}},
+	}
+	cursor := &node.Interface{
+		Name: "Cursor", Package: "x",
+		Methods: []*node.Method{{Name: "Next"}},
+		Embeds:  []*node.Embed{{Type: namedTypeRef("x", "Closer")}},
+	}
+	r := mapResolver{"x.Closer": base, "x.Cursor": cursor}
+
+	t.Run("answers a declared method", func(t *testing.T) {
+		t.Parallel()
+		got, ok := golang.MemberMethod(cursor, "Next", r)
+		if !ok || got.Name != "Next" {
+			t.Fatalf("MemberMethod = %v, %v; want Next", got, ok)
+		}
+	})
+
+	t.Run("reaches a method through an embed", func(t *testing.T) {
+		t.Parallel()
+		// Embedding is what makes the member reachable: a lookup
+		// reading only what the source typed would refuse a partner
+		// the contract legitimately names.
+		got, ok := golang.MemberMethod(cursor, "Close", r)
+		if !ok || got.Name != "Close" {
+			t.Fatalf("MemberMethod = %v, %v; want the embedded Close", got, ok)
+		}
+	})
+
+	t.Run("a declared method shadows an embedded one", func(t *testing.T) {
+		t.Parallel()
+		own := &node.Method{Name: "Close"}
+		shadowing := &node.Interface{
+			Name: "Guard", Package: "x",
+			Methods: []*node.Method{own},
+			Embeds:  []*node.Embed{{Type: namedTypeRef("x", "Closer")}},
+		}
+		got, ok := golang.MemberMethod(shadowing, "Close",
+			mapResolver{"x.Closer": base, "x.Guard": shadowing})
+		if !ok || got != own {
+			t.Fatalf("MemberMethod answered the embedded Close over the declared one")
+		}
+	})
+
+	t.Run("an unexported method is not reachable", func(t *testing.T) {
+		t.Parallel()
+		// A generated file in another package cannot call one —
+		// MemberField's terms, held on both sides of the pair.
+		if _, ok := golang.MemberMethod(cursor, "internal", r); ok {
+			t.Error("MemberMethod answered an unexported method")
+		}
+	})
+
+	t.Run("a member behind an unresolvable embed is false", func(t *testing.T) {
+		t.Parallel()
+		// The limit MemberField documents, settled the same way: the
+		// set itself reports what the lookup cannot, pinned together
+		// so the pair does not drift.
+		if _, ok := golang.MemberMethod(cursor, "Close", mapResolver{}); ok {
+			t.Fatal("MemberMethod reached through an embed nothing resolved")
+		}
+	})
+
+	t.Run("no interface is no method", func(t *testing.T) {
+		t.Parallel()
+		if _, ok := golang.MemberMethod(nil, "Next", r); ok {
+			t.Error("MemberMethod(nil) answered")
+		}
+	})
+}

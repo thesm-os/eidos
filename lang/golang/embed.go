@@ -721,6 +721,63 @@ func MemberField(s *node.Struct, name string, r Resolver) (*node.TypeRef, bool) 
 	return nil, false
 }
 
+// InterfaceOf resolves a type reference to the interface declaring
+// it, false for anything else.
+//
+// The mirror of [StructOf], for the handle a producer answers: a
+// `cursor` or `watcher` contract names its partners as members of
+// the interface an `Open` or `Watch` returns, and resolving that
+// return is the step before every method lookup. The same two
+// decisions ride along — a reference naming a struct, an alias or a
+// builtin is no interface rather than a wrong one, and a type this
+// run never loaded reports the same smaller answer.
+//
+// A pointer is not followed; compose with [Deref] where `*T` and `T`
+// do not differ for the caller. Nil r reports false: resolution is
+// the whole operation.
+func InterfaceOf(t *node.TypeRef, r Resolver) (*node.Interface, bool) {
+	if t == nil || r == nil {
+		return nil, false
+	}
+	decl, found := r.Resolve(t)
+	if !found {
+		return nil, false
+	}
+	i, ok := decl.(*node.Interface)
+	return i, ok && i != nil
+}
+
+// MemberMethod finds an exported method by name on an interface's
+// full method set and answers its declaration.
+//
+// Over [node.MethodSet] rather than i.Methods, because embedding is
+// what makes the member reachable: an interface embedding another
+// has its methods too, and a lookup reading only what the source
+// typed would refuse a partner the contract legitimately names.
+// Shadowing is the set's own rule — a declared method wins over an
+// embedded one of the same name. Unexported methods are excluded on
+// [MemberField]'s terms: a generated file in another package cannot
+// call one.
+//
+// False when nothing carries the name, and false again when an embed
+// the walk could not follow might have declared it — the limit
+// [MemberField] documents, settled the same way: a caller that must
+// tell the two apart runs [node.MethodSet] itself and reads the
+// unresolved embeds beside the set, or hands them to
+// [ReportMethodSet].
+func MemberMethod(i *node.Interface, name string, r Resolver) (*node.Method, bool) {
+	if i == nil || !IsExported(name) {
+		return nil, false
+	}
+	set := node.MethodSet(i, interfaceResolver(r))
+	for _, m := range set.Methods {
+		if m != nil && m.Name == name {
+			return m, true
+		}
+	}
+	return nil, false
+}
+
 // shallowestUnique applies Go's promotion rules to one name's
 // candidates.
 //

@@ -139,6 +139,25 @@ func MemberField(s *sdk.Struct, name string, r sdk.Resolver) (*sdk.TypeRef, bool
 	return golang.MemberField(s, name, r)
 }
 
+// InterfaceOf resolves a type reference to the interface declaring
+// it, false for anything else — the handle a `cursor` or `watcher`
+// producer answers, resolved before its members are looked up.
+func InterfaceOf(t *sdk.TypeRef, r sdk.Resolver) (*sdk.Interface, bool) {
+	return golang.InterfaceOf(t, r)
+}
+
+// MemberMethod finds an exported method by name on an interface's
+// full method set, embedding walked and shadowing honoured.
+//
+// The mirror of [MemberField], forwarded on the same terms — and
+// forwarded here from the start rather than a release later, which
+// is the sequence the field pair went through: a plugin whose rule
+// is "the sdk and nothing else" could compose a KindMember partner's
+// declaration no other way.
+func MemberMethod(i *sdk.Interface, name string, r sdk.Resolver) (*sdk.Method, bool) {
+	return golang.MemberMethod(i, name, r)
+}
+
 // source is the Go read-side rules every declaration above carries.
 //
 // Held once as a package value rather than constructed per call: it

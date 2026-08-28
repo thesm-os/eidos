@@ -136,3 +136,54 @@ func TestMemberLookupForwards(t *testing.T) {
 		}
 	})
 }
+
+// TestHandleLookupForwards pins the interface pair the way
+// [TestMemberLookupForwards] pins the struct pair: forwarding, the
+// embed walk, and agreement with the language package.
+func TestHandleLookupForwards(t *testing.T) {
+	t.Parallel()
+
+	closer := &sdk.Interface{
+		Name: "Closer", Package: "x",
+		Methods: []*sdk.Method{{Name: "Close"}},
+	}
+	cursor := &sdk.Interface{
+		Name: "Cursor", Package: "x",
+		Methods: []*sdk.Method{{Name: "Next"}},
+		Embeds:  []*sdk.Embed{{Type: &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Package: "x", Name: "Closer"}}},
+	}
+	ref := &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Package: "x", Name: "Cursor"}
+	r := resolverTable{"x.Cursor": cursor, "x.Closer": closer}
+
+	t.Run("InterfaceOf answers what the language package does", func(t *testing.T) {
+		t.Parallel()
+		got, ok := sdkgo.InterfaceOf(ref, r)
+		want, wantOK := golang.InterfaceOf(ref, r)
+		if got != want || ok != wantOK {
+			t.Fatalf("InterfaceOf = %v, %v; want %v, %v", got, ok, want, wantOK)
+		}
+		if !ok {
+			t.Fatal("InterfaceOf resolved nothing, so the comparison proved nothing")
+		}
+	})
+
+	t.Run("MemberMethod reaches a method through an embed", func(t *testing.T) {
+		t.Parallel()
+		// The half a forwarder reading i.Methods would silently lose.
+		got, ok := sdkgo.MemberMethod(cursor, "Close", r)
+		if !ok || got.Name != "Close" {
+			t.Fatalf("MemberMethod = %v, %v; want the embedded Close", got, ok)
+		}
+	})
+
+	t.Run("MemberMethod answers what the language package does", func(t *testing.T) {
+		t.Parallel()
+		for _, name := range []string{"Next", "Close", "Nonesuch"} {
+			got, ok := sdkgo.MemberMethod(cursor, name, r)
+			want, wantOK := golang.MemberMethod(cursor, name, r)
+			if got != want || ok != wantOK {
+				t.Errorf("MemberMethod(%q) = %v, %v; want %v, %v", name, got, ok, want, wantOK)
+			}
+		}
+	})
+}
