@@ -451,3 +451,46 @@ func assertPairsMatch(t *testing.T, got []ids.Param, want []pair) {
 		}
 	}
 }
+
+// TestIDs_Counterexamples pins the marked set in both directions, the
+// way the role and param tests do: a key that should be marked and is
+// not vanishes from every coverage gate reading the marker, and a
+// mark on a key that is not a counterexample dilutes the question the
+// marker exists to ask.
+func TestIDs_Counterexamples(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the marked set is exactly the declared inputs", func(t *testing.T) {
+		t.Parallel()
+		want := []pair{
+			{ids.ContractBatchWriter, ids.ContractBatchWriterParamRefused},
+			{ids.MixinInjectionSafe, ids.MixinInjectionSafeParamUnsafe},
+			{ids.MixinTotal, ids.MixinTotalParamEdge},
+			{ids.MixinValidates, ids.MixinValidatesParamInvalid},
+			{ids.MixinXSSSafe, ids.MixinXSSSafeParamUnsafe},
+		}
+		got := make([]pair, 0, len(want))
+		for _, p := range ids.Counterexamples() {
+			got = append(got, pair{p.Owner, p.Key})
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("Counterexamples = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("the declaration promotes onto the enumerated param", func(t *testing.T) {
+		t.Parallel()
+		// ids.Param embeds shape.Param, so a consumer holding an entry
+		// reads Kind, Role and Required off it without a second lookup
+		// — pinned on the one entry that carries a role scope.
+		for _, p := range ids.Counterexamples() {
+			if p.Owner == ids.ContractBatchWriter {
+				if p.Role != "writer" || !p.Counterexample {
+					t.Fatalf("batch-writer refused= = %+v, want writer-scoped and marked", p)
+				}
+				return
+			}
+		}
+		t.Fatal("batch-writer's refused= is not enumerated")
+	})
+}

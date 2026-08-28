@@ -31,7 +31,7 @@ const ParamUnsafe = "unsafe"
 //
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []shape.Param{
-	{Key: ParamUnsafe, Kind: shape.KindVar},
+	{Key: ParamUnsafe, Kind: shape.KindVar, Counterexample: true},
 }
 
 // Mixin returns the [shape.Mixin] this package contributes.

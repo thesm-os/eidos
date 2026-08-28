@@ -66,7 +66,7 @@ const ParamRefused = "refused"
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
 	{Key: ParamMode, Kind: shape.KindOpaque},
-	{Key: ParamRefused, Kind: shape.KindVar, Role: RoleWriter},
+	{Key: ParamRefused, Kind: shape.KindVar, Role: RoleWriter, Counterexample: true},
 }
 
 // Contract returns the [shape.Contract] this package contributes.

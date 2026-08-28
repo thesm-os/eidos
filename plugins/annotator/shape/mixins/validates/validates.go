@@ -45,7 +45,7 @@ const ParamInvalid = "invalid"
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []shape.Param{
 	{Key: ParamFn, Kind: shape.KindCallable},
-	{Key: ParamInvalid, Kind: shape.KindVar},
+	{Key: ParamInvalid, Kind: shape.KindVar, Counterexample: true},
 }
 
 // Mixin returns the [shape.Mixin] this package contributes.

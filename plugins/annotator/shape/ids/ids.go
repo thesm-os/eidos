@@ -740,6 +740,26 @@ func Documentary(name Name) bool {
 	return ok && d.Documentary
 }
 
+// Counterexamples returns every parameter the catalog marks
+// [shape.Param.Counterexample], with its full declaration, sorted by
+// owner then key — across mixins and contracts at once, since a
+// coverage gate asking "does every refusal-shaped law have its
+// counterexample declared?" should not have to know which family
+// declared the key.
+//
+// Read off the registered catalog rather than restated, on the terms
+// [ContractParams] is: the marks live on the declarations, and the
+// test pins that what this enumerates is what the packages declare.
+func Counterexamples() []Param {
+	var out []Param
+	for _, p := range append(ContractParams(), MixinParams()...) {
+		if p.Counterexample {
+			out = append(out, p)
+		}
+	}
+	return sortParams(out)
+}
+
 // ContractParam returns the declaration for one contract key, or
 // false when the owner does not declare it. The one-key form of
 // [ContractParams], for a consumer that holds the pair and wants its

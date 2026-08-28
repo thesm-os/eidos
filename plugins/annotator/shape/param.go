@@ -188,6 +188,28 @@ type Param struct {
 	// behaviour — absence is legal, and whether a check is worth
 	// emitting without the key belongs to the consumer.
 	Required bool
+
+	// Counterexample marks a key naming an input the law needs and
+	// no derivation can invent — the value a validator refuses, the
+	// payload that would be syntax downstream, the input at a
+	// domain's edge, the entry a writer turns down.
+	//
+	// The keys it marks share one story, learned one issue at a
+	// time: a law about how a subject handles adversarial input
+	// binds against derived samples, and derived samples are built
+	// to be accepted, so the check engages, stays green with the
+	// handling deleted from the subject, and tests nothing. Each
+	// key closes that by letting the author declare the input only
+	// they can know. The marker is what lets a consumer ask the
+	// question across the catalog — "does every refusal-shaped law
+	// have its counterexample declared?" — instead of remembering
+	// five spellings.
+	//
+	// Declarative, not enforced: resolution is [Param.Kind]'s job
+	// (every marked key so far is [KindVar]) and presence is
+	// [Param.Required]'s. A coverage gate reads it; the validator
+	// does not.
+	Counterexample bool
 }
 
 // ParamsForRole returns the params that apply to a directive hosted

@@ -35,7 +35,7 @@ const ParamEdge = "edge"
 //nolint:gochecknoglobals // intentionally exported as a per-mixin constant set
 var Params = []shape.Param{
 	{Key: ParamDomain, Kind: shape.KindOpaque},
-	{Key: ParamEdge, Kind: shape.KindVar},
+	{Key: ParamEdge, Kind: shape.KindVar, Counterexample: true},
 }
 
 // Mixin returns the [shape.Mixin] this package contributes.
