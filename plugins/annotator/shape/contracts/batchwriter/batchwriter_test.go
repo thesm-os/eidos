@@ -99,3 +99,47 @@ func TestContract_ReaderRole(t *testing.T) {
 		}
 	})
 }
+
+// TestContract_Refused covers the key that gives mode=atomic its
+// first step: a value the writer turns down, which a derived draw —
+// built to be accepted — can never be.
+func TestContract_Refused(t *testing.T) {
+	t.Parallel()
+
+	build := func(role string, kv map[string]string) (*sdk.Function, *sdk.Package) {
+		host := &sdk.Function{
+			Name: "PutAll", Package: "x",
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
+					contracttest.HostDirective(batchwriter.Name, role, kv),
+				},
+			},
+		}
+		return host, &sdk.Package{
+			Name: "x", Path: "x",
+			Functions: []*sdk.Function{host},
+			Variables: []*sdk.Variable{{Name: "BadEntry", Package: "x"}},
+		}
+	}
+
+	t.Run("the refused value resolves through the package's vars", func(t *testing.T) {
+		t.Parallel()
+		host, pkg := build(batchwriter.RoleWriter,
+			map[string]string{batchwriter.ParamRefused: "BadEntry"})
+		diags := contracttest.RunPipeline(t, batchwriter.Contract(), pkg)
+		contracttest.AssertNoErrorDiag(t, diags)
+
+		got, _ := shape.ContractParamKey(batchwriter.Name, batchwriter.ParamRefused).Get(host.Meta())
+		if got != "x.BadEntry" {
+			t.Fatalf("refused = %q, want x.BadEntry", got)
+		}
+	})
+
+	t.Run("the bare form still classifies", func(t *testing.T) {
+		t.Parallel()
+		// Optional: a consumer that cannot state the law without it
+		// declines to state it, recorded rather than assumed.
+		_, pkg := build(batchwriter.RoleWriter, map[string]string{})
+		contracttest.AssertNoErrorDiag(t, contracttest.RunPipeline(t, batchwriter.Contract(), pkg))
+	})
+}

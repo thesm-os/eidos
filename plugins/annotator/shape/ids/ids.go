@@ -340,6 +340,7 @@ const (
 // never see used.
 const (
 	ContractBatchWriterParamMode     = conBatchWriter.ParamMode
+	ContractBatchWriterParamRefused  = conBatchWriter.ParamRefused
 	ContractCASParamMismatch         = conCAS.ParamMismatch
 	ContractCASParamVersion          = conCAS.ParamVersion
 	ContractCodecParamFidelity       = conCodec.ParamFidelity

@@ -254,6 +254,7 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 		t.Parallel()
 		assertPairsMatch(t, ids.ContractParams(), []pair{
 			{ids.ContractBatchWriter, ids.ContractBatchWriterParamMode},
+			{ids.ContractBatchWriter, ids.ContractBatchWriterParamRefused},
 			{ids.ContractCAS, ids.ContractCASParamMismatch},
 			{ids.ContractCAS, ids.ContractCASParamVersion},
 			{ids.ContractCodec, ids.ContractCodecParamFidelity},

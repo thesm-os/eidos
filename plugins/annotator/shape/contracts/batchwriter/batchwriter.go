@@ -41,11 +41,32 @@ var Roles = []string{RoleWriter, RoleReader}
 // Opaque: the vocabulary belongs to whoever generates against it.
 const ParamMode = "mode"
 
-// Params enumerates the directive's opaque KV keys.
+// ParamRefused is the KV key naming a declared value the writer
+// turns down.
+//
+// The other half of what the `reader` role supplies. `mode=atomic`
+// says a refused write leaves nothing behind, and checking that
+// takes three steps: write a value the subject refuses, read the key
+// back, require it absent. The role gave the check its second and
+// third steps; nothing gave it the first, because a derived draw is
+// built to be accepted — it is what every other claim writes — so a
+// check using one never reaches the failure the mode is about and
+// asserts only that a good write succeeds.
+//
+// A package-level var of [shape.KindVar], on the terms the validates
+// mixin's `invalid=` is, and scoped to the writer: the reader
+// refuses nothing. Only the author knows what their writer turns
+// down; the directive contributes the name. Optional — the bare form
+// still classifies, and a consumer that cannot state the law without
+// it declines to state it, recorded as such rather than assumed.
+const ParamRefused = "refused"
+
+// Params enumerates the directive's KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
 	{Key: ParamMode, Kind: shape.KindOpaque},
+	{Key: ParamRefused, Kind: shape.KindVar, Role: RoleWriter},
 }
 
 // Contract returns the [shape.Contract] this package contributes.
