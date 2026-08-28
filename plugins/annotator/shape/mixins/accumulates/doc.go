@@ -15,13 +15,24 @@
 // claimed", and the directive denies negation for exactly that
 // reason.
 //
-// The check this licenses is the idempotence probe with the
-// assertion inverted — call twice, observe the effect twice — and
-// needs nothing that probe does not already have.
+// The check this licenses reads the effect, adds twice, and reads
+// again: N calls, N effects. That is not the idempotence probe with
+// its assertion inverted, though it was described that way here
+// until someone tried to write it — inverting that probe gives "the
+// second call is refused", which is a different claim. A callable
+// whose effect is out of band answers the same error twice whether
+// it compounded or coalesced, so a check that only calls twice binds
+// and cannot fail.
 //
-// The recognised directive is:
+// `observe=` names the read the effect is counted through. Optional,
+// and without it the law does not bind — which is the honest
+// outcome, since the observation is a sibling only the author can
+// pick out.
+//
+// The recognised directives are:
 //
 //	//+gen:mixin accumulates
+//	//+gen:mixin accumulates observe=Total
 //
 // [idempotent]: go.thesmos.sh/eidos/plugins/annotator/shape/mixins/idempotent
 package accumulates

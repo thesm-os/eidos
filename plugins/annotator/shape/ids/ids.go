@@ -355,6 +355,7 @@ const (
 	ContractPaginationParamCursor    = conPagination.ParamCursor
 	ContractPublisherParamMode       = conPublisher.ParamMode
 	ContractRateLimitParamBurst      = conRateLimit.ParamBurst
+	ContractRateLimitParamLimited    = conRateLimit.ParamLimited
 	ContractRateLimitParamRate       = conRateLimit.ParamRate
 	ContractTransactionParamNotFound = conTransaction.ParamNotFound
 	ContractTransactionParamRead     = conTransaction.ParamRead
@@ -376,6 +377,7 @@ const (
 // Mixins declaring no parameters have no entry — most of the catalog,
 // since a mixin is usually a bare assertion.
 const (
+	MixinAccumulatesParamObserve            = mixAccumulates.ParamObserve
 	MixinAtomicParamRead                    = mixAtomic.ParamRead
 	MixinBoundedParamLimit                  = mixBounded.ParamLimit
 	MixinBoundedParamMin                    = mixBounded.ParamMin

@@ -269,6 +269,7 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 			{ids.ContractPagination, ids.ContractPaginationParamCursor},
 			{ids.ContractPublisher, ids.ContractPublisherParamMode},
 			{ids.ContractRateLimit, ids.ContractRateLimitParamBurst},
+			{ids.ContractRateLimit, ids.ContractRateLimitParamLimited},
 			{ids.ContractRateLimit, ids.ContractRateLimitParamRate},
 			{ids.ContractTransaction, ids.ContractTransactionParamNotFound},
 			{ids.ContractTransaction, ids.ContractTransactionParamRead},
@@ -283,6 +284,7 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 	t.Run("every mixin parameter has a spelled constant", func(t *testing.T) {
 		t.Parallel()
 		assertPairsMatch(t, ids.MixinParams(), []pair{
+			{ids.MixinAccumulates, ids.MixinAccumulatesParamObserve},
 			{ids.MixinAtomic, ids.MixinAtomicParamRead},
 			{ids.MixinBounded, ids.MixinBoundedParamLimit},
 			{ids.MixinBounded, ids.MixinBoundedParamMin},
