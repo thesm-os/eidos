@@ -27,15 +27,40 @@ const RoleMatch = "match"
 // report a correct directive as unresolved.
 const ParamPred = "pred"
 
+// ParamField is the KV key naming the member of the written value the
+// predicate judges — the one a second write may differ in.
+//
+// The law is that a write is refused where the predicate turns its
+// value down, and witnessing that takes two values that differ: one
+// value written twice succeeds both times, because a store holding
+// what it was given matches it. Which member the two may differ in is
+// the author's knowledge alone — a keyed record's `Key` and `Body`
+// are two strings, and varying the key writes a different record
+// rather than a rejected one, so a derivation that guesses wrong goes
+// quietly vacuous instead of failing.
+//
+// [shape.KindValueField], the mirror of `cas`'s `version=`: that one
+// names the member the write's expectation rides, this one the member
+// the predicate is about. The resolver checks the name against the
+// written value's fields — pointer-stripped, promotion honoured — and
+// rewrites a hit into the qualified form, so a typo is reported where
+// the author is.
+//
+// Optional, on the terms `pool`'s `stats` role is: a conditional
+// writer without one is still what this contract names, and a law
+// varying the member simply does not bind.
+const ParamField = "field"
+
 // Roles enumerates the contract's role vocabulary.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Roles = []string{RoleWriter, RoleMatch}
 
-// Params enumerates the directive's opaque KV keys.
+// Params enumerates the directive's KV keys.
 //
 //nolint:gochecknoglobals // intentionally exported as a per-contract constant set
 var Params = []shape.Param{
+	{Key: ParamField, Kind: shape.KindValueField},
 	{Key: ParamPred, Kind: shape.KindOpaque},
 }
 

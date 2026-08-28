@@ -261,6 +261,7 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 			{ids.ContractCursor, ids.ContractCursorParamNext},
 			{ids.ContractCursor, ids.ContractCursorParamSentinel},
 			{ids.ContractIfAbsent, ids.ContractIfAbsentParamConflict},
+			{ids.ContractIfMatch, ids.ContractIfMatchParamField},
 			{ids.ContractIfMatch, ids.ContractIfMatchParamPred},
 			{ids.ContractLease, ids.ContractLeaseParamHeld},
 			{ids.ContractLease, ids.ContractLeaseParamTimeout},

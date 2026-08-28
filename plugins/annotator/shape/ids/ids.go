@@ -347,6 +347,7 @@ const (
 	ContractCursorParamNext          = conCursor.ParamNext
 	ContractCursorParamSentinel      = conCursor.ParamSentinel
 	ContractIfAbsentParamConflict    = conIfAbsent.ParamConflict
+	ContractIfMatchParamField        = conIfMatch.ParamField
 	ContractIfMatchParamPred         = conIfMatch.ParamPred
 	ContractLeaseParamHeld           = conLease.ParamHeld
 	ContractLeaseParamTimeout        = conLease.ParamTimeout

@@ -19,8 +19,17 @@
 // happens to be one identifier long, and guessing is what the role
 // vocabulary exists to remove.
 //
+// `field=` names the member of the written value the predicate
+// judges — the one a second write may differ in. The law's witness
+// is two values that differ, and on a keyed record only the author
+// knows which member rejection rides on: varying the key writes a
+// different record rather than a rejected one, so a check that
+// guesses wrong goes quietly vacuous. Optional — a writer without it
+// is still what the contract names, and a law varying the member
+// simply does not bind.
+//
 // The recognised directives are:
 //
 //	//+gen:contract if-match role=writer pred=Version==Expected
-//	//+gen:contract if-match role=writer match=Match
+//	//+gen:contract if-match role=writer match=Match field=Body
 package ifmatch

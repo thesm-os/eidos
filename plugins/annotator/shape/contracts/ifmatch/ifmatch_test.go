@@ -119,3 +119,76 @@ func TestContract_MatchRole(t *testing.T) {
 		}
 	})
 }
+
+// TestContract_Field covers the key that makes the law witnessable.
+//
+// Two values that differ are the witness — one value written twice
+// succeeds both times — and which member they may differ in is the
+// author's knowledge alone. A derivation varying the wrong string
+// writes a different record instead of a rejected one and goes
+// quietly vacuous, which is the outcome the key rules out.
+func TestContract_Field(t *testing.T) {
+	t.Parallel()
+
+	build := func(kv map[string]string) (*sdk.Method, *sdk.Package) {
+		value := &sdk.Struct{
+			Name: "Value", Package: "x",
+			Fields: []*sdk.Field{
+				{Name: "Key", Type: &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Name: "string"}},
+				{Name: "Body", Type: &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Name: "string"}},
+			},
+		}
+		put := &sdk.Method{
+			Name: "Put",
+			Params: []*sdk.Param{
+				{Name: "ctx", Type: &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Name: "Context", Package: "context"}},
+				{Name: "v", Type: &sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Name: "Value", Package: "x"}},
+			},
+			Returns: sdk.AnonReturns(&sdk.TypeRef{TypeKind: sdk.TypeRefNamed, Name: "error"}),
+			BaseNode: sdk.BaseNode{
+				DirectiveList: []*sdk.Directive{
+					contracttest.HostDirective(ifmatch.Name, ifmatch.RoleWriter, kv),
+				},
+			},
+		}
+		store := &sdk.Interface{Name: "Store", Package: "x", Methods: []*sdk.Method{put}}
+		put.Owner = store
+		return put, &sdk.Package{
+			Name: "x", Path: "x",
+			Interfaces: []*sdk.Interface{store},
+			Structs:    []*sdk.Struct{value},
+		}
+	}
+
+	t.Run("the field resolves against the written value", func(t *testing.T) {
+		t.Parallel()
+		// KindValueField: the writer answers only an error, so the
+		// name checks against the parameter's type — the written
+		// value — and stamps qualified.
+		put, pkg := build(map[string]string{ifmatch.ParamField: "Body"})
+		diags := contracttest.RunPipeline(t, ifmatch.Contract(), pkg)
+		contracttest.AssertNoErrorDiag(t, diags)
+
+		got, _ := shape.ContractParamKey(ifmatch.Name, ifmatch.ParamField).Get(put.Meta())
+		if got != "x.Value.Body" {
+			t.Fatalf("field = %q, want x.Value.Body", got)
+		}
+	})
+
+	t.Run("a member nothing declares is reported", func(t *testing.T) {
+		t.Parallel()
+		// The typo caught where the author is, instead of a check
+		// varying a member that does not exist.
+		_, pkg := build(map[string]string{ifmatch.ParamField: "Nonesuch"})
+		diags := contracttest.RunPipeline(t, ifmatch.Contract(), pkg)
+		contracttest.AssertContainsDiag(t, diags, sdk.SeverityError, "Nonesuch")
+	})
+
+	t.Run("the bare form still classifies", func(t *testing.T) {
+		t.Parallel()
+		// Optional on the terms pool's stats role is: a conditional
+		// writer without the key is still what the contract names.
+		_, pkg := build(map[string]string{})
+		contracttest.AssertNoErrorDiag(t, contracttest.RunPipeline(t, ifmatch.Contract(), pkg))
+	})
+}
