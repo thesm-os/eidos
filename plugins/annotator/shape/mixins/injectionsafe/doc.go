@@ -15,4 +15,11 @@
 // about what an interpreter downstream does with the input, and the
 // only signature-level evidence is the round trip: a payload that
 // would be syntax comes back as the data it was written as.
+//
+// `unsafe=` names that payload — the value the round trip is made
+// of, which no derivation can produce: which separator or quote is
+// syntax depends on an interpreter only the author knows, and a
+// drawn sample carries nothing dangerous, so a subject sanitising
+// nothing passes on it. Optional; declare it as
+// `unsafe=HostilePayload` beside `read=`.
 package injectionsafe

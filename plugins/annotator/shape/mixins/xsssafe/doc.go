@@ -7,7 +7,13 @@
 // Presence is the whole signal: nothing in a signature reveals it, so
 // it is declared rather than detected.
 //
-// The recognised directive is:
+// `unsafe=` names a declared value carrying markup that must not
+// survive — the witness a derivation cannot produce, since drawn
+// samples carry nothing dangerous and a subject that escapes
+// nothing passes on them. Optional.
+//
+// The recognised directives are:
 //
 //	//+gen:mixin xsssafe
+//	//+gen:mixin xsssafe unsafe=HostileMarkup
 package xsssafe

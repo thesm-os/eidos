@@ -426,6 +426,9 @@ const (
 	MixinTTLParamRead                       = mixTTL.ParamRead
 	MixinValidatesParamFn                   = mixValidates.ParamFn
 	MixinValidatesParamInvalid              = mixValidates.ParamInvalid
+	MixinXSSSafeParamUnsafe                 = mixXSSSafe.ParamUnsafe
+	MixinInjectionSafeParamUnsafe           = mixInjectionSafe.ParamUnsafe
+	MixinTotalParamEdge                     = mixTotal.ParamEdge
 	MixinWindowedParamCount                 = mixWindowed.ParamCount
 	MixinWindowedParamIncr                  = mixWindowed.ParamIncr
 	MixinWindowedParamWindow                = mixWindowed.ParamWindow
