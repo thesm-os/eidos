@@ -336,6 +336,61 @@ func TestShadowedImports(t *testing.T) {
 		}
 	})
 
+	t.Run("a qualifier in a type position is proof, not a shadow", func(t *testing.T) {
+		t.Parallel()
+		// The reported shape: a package whose name is also its
+		// natural parameter name. The parameter binds `tx` and its
+		// type uses the package, in the one grammatical position the
+		// two cannot be confused — so the import is proven live and
+		// the warning would call working code broken.
+		refs := refsOf(t, `package p
+
+type Call struct {
+	Result tx.Tx
+}
+
+func (s *Stub) Commit(ctx context.Context, tx tx.Tx) error { return nil }
+`)
+		kept := pruneImports([]writer.Import{{Path: "example.com/tx", Alias: "tx"}}, refs)
+		if len(kept) != 1 {
+			t.Fatalf("the used import was pruned: %+v", kept)
+		}
+		if got := shadowedImports(kept, refs); len(got) != 0 {
+			t.Fatalf("a type-position use was reported as shadowed: %+v", got)
+		}
+	})
+
+	t.Run("each type slot proves on its own", func(t *testing.T) {
+		t.Parallel()
+		// One file per slot rather than one file with all five, so a
+		// slot that stops proving names itself.
+		for slot, src := range map[string]string{
+			"struct field": "package p\n\ntype S struct{ F tx.Tx }\nfunc f() { tx := 1; _ = tx }\n",
+			"result":       "package p\n\nfunc f() tx.Tx { tx := g(); return tx }\n",
+			"var decl":     "package p\n\nfunc f() { var tx tx.Tx; _ = tx }\n",
+			"composite":    "package p\n\nfunc f() { tx := tx.Tx{}; _ = tx }\n",
+			"type assert":  "package p\n\nfunc f(v any) { tx, _ := v.(tx.Tx); _ = tx }\n",
+		} {
+			refs := refsOf(t, src)
+			kept := []writer.Import{{Path: "example.com/tx", Alias: "tx"}}
+			if got := shadowedImports(kept, refs); len(got) != 0 {
+				t.Errorf("%s: reported as shadowed", slot)
+			}
+		}
+	})
+
+	t.Run("an expression-only use beside a local is still reported", func(t *testing.T) {
+		t.Parallel()
+		// The ambiguity the report exists for is untouched: every
+		// selector could be the local's own, so the rule still cannot
+		// judge and still says so.
+		refs := refsOf(t, "package p\n\nfunc f() { strings := newThing(); _ = strings.Field }\n")
+		kept := pruneImports([]writer.Import{{Path: "strings", Alias: "strings"}}, refs)
+		if got := shadowedImports(kept, refs); len(got) != 1 {
+			t.Fatalf("the undecidable case stopped being reported: %+v", got)
+		}
+	})
+
 	t.Run("blank and dot imports are never reported", func(t *testing.T) {
 		t.Parallel()
 		// `_` is excluded from declared, and `.` binds no name, so

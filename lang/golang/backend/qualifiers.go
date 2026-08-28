@@ -14,9 +14,9 @@ import (
 )
 
 // fileRefs is everything one AST traversal of a rendered body
-// yields. The three sets answer three different questions and are
-// collected together because the traversal — not the bookkeeping —
-// is the cost.
+// yields. The sets answer different questions and are collected
+// together because the traversal — not the bookkeeping — is the
+// cost.
 type fileRefs struct {
 	// parsed reports whether the traversal ran. The zero value is
 	// false, which is what makes the sets safe to consult without a
@@ -33,6 +33,16 @@ type fileRefs struct {
 	// declared holds every name the file binds, anywhere, at any
 	// scope. Deliberately scope-blind — see [collectRefs].
 	declared map[string]struct{}
+
+	// typeQualifiers holds the qualifiers that appear inside a type
+	// position — a struct field's type, a parameter's, a result's, a
+	// declared variable's, a composite literal's. No local can stand
+	// in X position there, so an alias in this set is proof its
+	// import is used, whatever declared holds. This is what keeps
+	// the scope-blind caution from calling `tx tx.Tx` a shadow: the
+	// parameter's name binds `tx` and its type uses the package, in
+	// the one grammatical position the two cannot be confused.
+	typeQualifiers map[string]struct{}
 
 	// topLevel holds the package-scope names this file declares. A
 	// sibling file rendered into the same package can select on
@@ -69,7 +79,7 @@ type fileRefs struct {
 // a report. Only the second silently changes what the generated
 // code does.
 //
-// Allocation: four maps plus the parsed AST, all released when the
+// Allocation: five maps plus the parsed AST, all released when the
 // caller returns. Cost is dominated by the parse — roughly 3 µs at
 // one declaration and 3 ms at a thousand — not by the walk, which
 // is under 15% of that.
@@ -81,10 +91,11 @@ func collectRefs(src []byte, filename string) fileRefs {
 	}
 
 	refs := fileRefs{
-		parsed:     true,
-		qualifiers: map[string]struct{}{},
-		declared:   map[string]struct{}{},
-		topLevel:   map[string]struct{}{},
+		parsed:         true,
+		qualifiers:     map[string]struct{}{},
+		declared:       map[string]struct{}{},
+		typeQualifiers: map[string]struct{}{},
+		topLevel:       map[string]struct{}{},
 	}
 	collectTopLevel(f, refs.topLevel, refs.declared)
 
@@ -98,6 +109,18 @@ func collectRefs(src []byte, filename string) fileRefs {
 			if id, ok := x.X.(*ast.Ident); ok {
 				refs.qualifiers[id.Name] = struct{}{}
 			}
+		case *ast.Field:
+			// One case covers every signature and struct slot: a
+			// struct's fields, a func's receiver, params, results and
+			// type parameters, and an interface's methods and embeds
+			// all arrive as fields.
+			addTypeQualifiers(x.Type, refs.typeQualifiers)
+		case *ast.CompositeLit:
+			addTypeQualifiers(x.Type, refs.typeQualifiers)
+		case *ast.TypeAssertExpr:
+			// Nil for `.(type)` in a type switch, which asserts no
+			// type; addTypeQualifiers tolerates it.
+			addTypeQualifiers(x.Type, refs.typeQualifiers)
 		case *ast.FuncDecl:
 			addFieldNames(x.Recv, refs.declared)
 			refs.declared[x.Name.Name] = struct{}{}
@@ -107,9 +130,11 @@ func collectRefs(src []byte, filename string) fileRefs {
 			addFieldNames(x.Results, refs.declared)
 		case *ast.ValueSpec:
 			addIdents(x.Names, refs.declared)
+			addTypeQualifiers(x.Type, refs.typeQualifiers)
 		case *ast.TypeSpec:
 			refs.declared[x.Name.Name] = struct{}{}
 			addFieldNames(x.TypeParams, refs.declared)
+			addTypeQualifiers(x.Type, refs.typeQualifiers)
 		case *ast.AssignStmt:
 			if x.Tok == token.DEFINE {
 				addExprIdents(x.Lhs, refs.declared)
@@ -155,6 +180,29 @@ func collectTopLevel(f *ast.File, topLevel, declared map[string]struct{}) {
 			}
 		}
 	}
+}
+
+// addTypeQualifiers records every qualifier inside one type
+// expression — the `tx` of a `tx.Tx` field, parameter, result,
+// element or embedded type, however deeply the type composes it.
+//
+// The whole subtree is walked rather than the top level matched,
+// because a qualifier nests inside every composite type form:
+// `[]tx.Tx`, `map[string]tx.Tx`, `func(tx.Tx) error`, `List[tx.Tx]`.
+// A nil expr — an unconstrained type assertion's `.(type)` —
+// contributes nothing.
+func addTypeQualifiers(expr ast.Expr, into map[string]struct{}) {
+	if expr == nil {
+		return
+	}
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			if id, ok := sel.X.(*ast.Ident); ok {
+				into[id.Name] = struct{}{}
+			}
+		}
+		return true
+	})
 }
 
 // addFieldNames records the names bound by a field list — receiver,
@@ -238,6 +286,14 @@ func pruneImports(tracked []writer.Import, refs fileRefs) []writer.Import {
 // and the file then fails to build with "imported and not used",
 // with nothing in the run pointing at why.
 //
+// A qualifier in a type position settles the question the other way
+// and is checked first: no local can stand in X position inside a
+// struct field's type, a parameter's or a result's, so an alias used
+// there is proven live and reporting it would call working code
+// broken. `func Commit(ctx context.Context, tx tx.Tx)` is the shape
+// — a package whose name is also its natural parameter name — and it
+// warned on every run until the positions were told apart.
+//
 // goimports resolved this correctly and deleted the import, so
 // naming it is what keeps the finalise-chain replacement from
 // trading a repair for a silent breakage. It is reported rather than
@@ -250,6 +306,9 @@ func shadowedImports(kept []writer.Import, refs fileRefs) []writer.Import {
 	var out []writer.Import
 	for _, imp := range kept {
 		if imp.Alias == writer.BlankAlias || imp.Alias == writer.DotAlias {
+			continue
+		}
+		if _, proven := refs.typeQualifiers[imp.Alias]; proven {
 			continue
 		}
 		if _, shadowed := refs.declared[imp.Alias]; shadowed {

@@ -71,6 +71,7 @@ reasoning lives in the docblock of whatever the line names.
 
 ### Fixed
 
+- **The Go backend no longer reports a used import as unused when a declaration shares the package name** ([#76](https://github.com/thesm-os/eidos/issues/76)). A qualifier in a type position — a struct field's type, a parameter's, a result's — is proof the import is live, since no local can stand there; `func Commit(ctx context.Context, tx tx.Tx)` warned on every run.
 - **The `plugins` depguard rule denies a frontend or backend again.** It named `eidos/frontend` and `eidos/backend`, paths that stopped existing at ADR-0007, so the rule barring a plugin from importing a backend matched nothing; now spelled per language like its `frontends` / `backends` siblings.
 - **`golang.ComparableDeep` answers for curated standard-library types** ([#71](https://github.com/thesm-os/eidos/issues/71)). The resolver never holds the standard library, so a struct with a `time.Duration` field came back undetermined and every comparison it was party to was refused; `time.Duration`, `time.Time`, `strings.Builder` and `bytes.Buffer` now answer, on the same curated terms `stdlibSamples` already uses.
 - **A directive denying keys still takes `out=` / `pkg=` / `tag=`.** The routing widening reached `AllowedKeys` and not `DenyKeys`, so a generator declaring no options of its own had the framework's overrides reported as "accepts no keys" and honoured by the router anyway.
