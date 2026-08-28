@@ -271,6 +271,8 @@ func TestIDs_ParamsMatchTheRegisteredCatalog(t *testing.T) {
 			{ids.ContractRateLimit, ids.ContractRateLimitParamBurst},
 			{ids.ContractRateLimit, ids.ContractRateLimitParamRate},
 			{ids.ContractTransaction, ids.ContractTransactionParamNotFound},
+			{ids.ContractTransaction, ids.ContractTransactionParamRead},
+			{ids.ContractTransaction, ids.ContractTransactionParamWrite},
 			{ids.ContractTx, ids.ContractTxParamClosed},
 			{ids.ContractWatcher, ids.ContractWatcherParamNext},
 			{ids.ContractWatcher, ids.ContractWatcherParamStop},

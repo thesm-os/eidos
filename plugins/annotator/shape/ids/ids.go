@@ -357,6 +357,8 @@ const (
 	ContractRateLimitParamBurst      = conRateLimit.ParamBurst
 	ContractRateLimitParamRate       = conRateLimit.ParamRate
 	ContractTransactionParamNotFound = conTransaction.ParamNotFound
+	ContractTransactionParamRead     = conTransaction.ParamRead
+	ContractTransactionParamWrite    = conTransaction.ParamWrite
 	ContractTxParamClosed            = conTx.ParamClosed
 	ContractWatcherParamNext         = conWatcher.ParamNext
 	ContractWatcherParamStop         = conWatcher.ParamStop
